@@ -83,6 +83,8 @@ ACTIONS = (
 # in an ordinary field Enter can submit the form, which would skip check_submit.
 AGENT_KEYS = frozenset({"ArrowDown", "ArrowUp", "Tab", "Escape", "Enter"})
 MAX_ELEMENTS = 150
+# The answer's key carrying the action's replayable steps (refill.note): server-side only, never shown.
+STEPS_KEY = "_fill_steps"
 MAX_TEXT = 6000
 # The page sets these: its title, its address and the element list are each bounded.
 MAX_TITLE = 200
@@ -227,6 +229,10 @@ class Session:
     # The hosts (cookie domains, storage origins) of the saved sign-ins this browser loaded or was handed.
     # None = not known: every page counts as signed in.
     signed_in: Optional[set[str]] = None
+    # Refill (owner 2026-10-26): while an action for a named job runs, its successful form steps (refill.note);
+    # the route stores them as that job's replayable fill script and drops them from the answer.
+    record: bool = False
+    steps: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _held(s: Session, now: float) -> bool:
@@ -1357,6 +1363,7 @@ async def run(
     limit_s = FILL_TIMEOUT_S if action == "fill" else ACT_TIMEOUT_S
     async with s.lock:
         s.last_used = time.monotonic()
+        s.record, s.steps = application_id is not None, []
         try:
             result = await asyncio.wait_for(
                 _act(
@@ -1384,6 +1391,9 @@ async def run(
             first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
+        if s.steps:  # the route stores them (fill_script) and pops the key before answering
+            result[STEPS_KEY] = s.steps
+        s.record, s.steps = False, []
         if action not in ("click", "look"):
             # The form changed (an answer typed, a box ticked, a new page): a control that did nothing
             # before may work now, so it gets its tries back.
@@ -1469,6 +1479,10 @@ async def _act(
     _refuse_captcha_frame(frame)
     kind = await _kind(loc, s)
     page = _live_page(s)
+    from src.services.browser_agent import refill  # noqa: PLC0415 - refill imports this module
+
+    # Read before the action: a picked option or a re-drawn field may be gone after it.
+    where = await refill.describe(s, frame, loc) if action in refill.STEP_ACTIONS and kind != "submit" else None
 
     # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it, and never
     # click it (a click ticks a trap checkbox or radio).
@@ -1548,6 +1562,16 @@ async def _act(
             s.dead_clicks.clear()
         else:
             s.dead_clicks[ref] = s.dead_clicks.get(ref, 0) + 1
+        step = refill.click_step(facts) if not submitted else ""
+        if step == "tick":  # a box replays as its state, never as a second click that would untick it
+            try:
+                state = str(await loc.evaluate(READ_BACK_JS, timeout=1000))
+            except Exception:  # noqa: BLE001 - re-drawn: not replayable
+                state = ""
+            if state in ("yes", "no"):
+                refill.note(s, "tick", where, state, kind=kind)
+        elif step == "click":
+            refill.note(s, "click", where, kind=kind)
         try:
             # The proxy's refusal is never read as the page (a submit that went still says so below).
             out = refusal.as_dict() if (refusal := _refusal(s, s.page)) else await look(s, after_action=True)
@@ -1596,6 +1620,7 @@ async def _act(
     if action == "type":
         text = _plain_text(text)
         typed = await _type_checked(loc, kind, text)
+        refill.note(s, "type", where, text, kind=kind)
         out = await look(s, after_action=True)
         out["typed_matches"] = typed == text
         return out
@@ -1610,10 +1635,12 @@ async def _act(
     if action == "choose":
         _refuse_password(kind)
         await _choose(s, loc, text)
+        refill.note(s, "choose", where, text, kind=kind)
         return await look(s, after_action=True)
 
     if action == "tick":
         await _tick(loc, on)
+        refill.note(s, "tick", where, "yes" if on else "no", kind=kind)
         return await look(s, after_action=True)
 
     # action == "upload"
@@ -1663,6 +1690,8 @@ async def _act(
     out["upload_confirmed"] = not error and not shown_before and (name in page_after or name in near_after)
     if error:
         out["upload_error"] = _wrap_untrusted(error[:200])
+    else:
+        refill.note(s, "upload", where, doc_kind, kind=kind)
     return out
 
 
@@ -1766,15 +1795,23 @@ async def _fill_one(s: Session, ref: str, text: str) -> tuple[bool, str]:
         raise BrowserError("refused", "bad_tick_text", 'For a box use text "yes" or "no".')
     if _is_trap(facts.get("name"), facts.get("hints")) and (on if how == "tick" else bool(text)):
         raise BrowserError("refused", "leave_blank", "That field says to leave it blank (a trap for bots).")
+    from src.services.browser_agent import refill  # noqa: PLC0415 - refill imports this module
+
+    where = await refill.describe(s, frame, loc)
     if how == "type":
         text = _plain_text(text)
         shown = await _type_checked(loc, kind, text)
+        if shown == text:
+            refill.note(s, "type", where, text, kind=kind)
         return shown == text, shown
     if how == "tick":
         await _tick(loc, bool(on))
         shown = str(await loc.evaluate(READ_BACK_JS))
+        if shown == ("yes" if on else "no"):
+            refill.note(s, "tick", where, shown, kind=kind)
         return shown == ("yes" if on else "no"), shown
     await _choose(s, loc, text)  # raises unless the field shows the option
+    refill.note(s, "choose", where, text, kind=kind)
     return True, str(await loc.evaluate(READ_BACK_JS))
 
 

@@ -2402,6 +2402,11 @@
               }
             ]
           },
+          "can_refill": {
+            "default": false,
+            "title": "Can Refill",
+            "type": "boolean"
+          },
           "confirmed_at": {
             "anyOf": [
               {
@@ -3980,6 +3985,178 @@
         "title": "ClientLogRequest",
         "type": "object"
       },
+      "CommonQuestionOut": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "group": {
+            "enum": [
+              "you",
+              "experience",
+              "work",
+              "pay",
+              "form",
+              "equality"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kit_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kit Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "enum": [
+                  "memory",
+                  "guessed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "seen": {
+            "default": 0,
+            "title": "Seen",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "state": {
+            "enum": [
+              "confirmed",
+              "relayed",
+              "inferred",
+              "sensitive",
+              "guessed",
+              "missing"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "group",
+          "question",
+          "state",
+          "verified"
+        ],
+        "title": "CommonQuestionOut",
+        "type": "object"
+      },
+      "CommonQuestionsOut": {
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/CommonQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/CommonQuestionsSummary"
+          }
+        },
+        "required": [
+          "questions",
+          "summary"
+        ],
+        "title": "CommonQuestionsOut",
+        "type": "object"
+      },
+      "CommonQuestionsSummary": {
+        "properties": {
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "to_verify": {
+            "title": "To Verify",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "verified",
+          "to_verify",
+          "missing"
+        ],
+        "title": "CommonQuestionsSummary",
+        "type": "object"
+      },
       "ConfirmAnswerRequest": {
         "properties": {
           "answer": {
@@ -4474,6 +4651,11 @@
             "title": "By",
             "type": "string"
           },
+          "can_refill": {
+            "default": false,
+            "title": "Can Refill",
+            "type": "boolean"
+          },
           "detail": {
             "title": "Detail",
             "type": "string"
@@ -4629,6 +4811,11 @@
                 "type": "null"
               }
             ]
+          },
+          "can_refill": {
+            "default": false,
+            "title": "Can Refill",
+            "type": "boolean"
           },
           "confirmed_at": {
             "anyOf": [
@@ -11064,6 +11251,17 @@
             ],
             "title": "Check",
             "type": "string"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
           },
           "key": {
             "anyOf": [
@@ -19663,6 +19861,83 @@
         ]
       }
     },
+    "/api/applications/{application_id}/browser/refill": {
+      "post": {
+        "description": "\"Refill the form\": Job360's own browser opens this job's form again and replays exactly what the user's\nassistant did there last time (the same answers, the same CV upload, the same option clicks), never\nanything new, never a submit, never a CAPTCHA; then keeps it open 30 minutes for Finish it here. Records\n``form_filled`` {by: refill}: identical answers keep the user's yes. 404 when the job is not the\ncaller's. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``.",
+        "operationId": "refill_form_api_applications__application_id__browser_refill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Refill Form Api Applications  Application Id  Browser Refill Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refill Form",
+        "tags": [
+          "browser"
+        ]
+      }
+    },
     "/api/applications/{application_id}/calendar.ics": {
       "get": {
         "description": "One application's interview and follow-up, as a download (Add to calendar).",
@@ -27205,6 +27480,71 @@
           }
         },
         "summary": "Clear Profile Section",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/common-questions": {
+      "get": {
+        "operationId": "list_common_questions_api_profile_common_questions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonQuestionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Common Questions",
         "tags": [
           "profile"
         ]

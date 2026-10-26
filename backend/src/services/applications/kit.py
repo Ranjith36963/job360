@@ -855,6 +855,7 @@ async def gate_facts(
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),
+        blank_unasked=await _blank_unasked(db, user_id, app_row),
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
@@ -872,6 +873,13 @@ async def _written_unapproved(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unapproved_written(db, user_id, app_row)
+
+
+async def _blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> tuple[str, ...]:
+    """The newest form's blank fields nobody asked the user about (``ready`` reads them)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return tuple(await ready.blank_unasked(db, user_id, app_row))
 
 
 async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -1032,7 +1040,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False,
+            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False, blank_unasked=(),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -1182,20 +1190,8 @@ def answer_problems(raw: Any) -> list[str]:
     return problems
 
 
-# ── G023: a sensitive answer the user did not agree to remember is hashed, never copied ──
-# Events and receipts are append-only (M3): a raw value written once could never be removed.
-
-
-def redacted_answer(item: dict[str, Any]) -> dict[str, Any]:
-    """What is stored for such an answer: the question and its non-value metadata (``source``,
-    ``key``), the sha256 of the value's UTF-8 text, and ``redacted: true``. Never the value."""
-    out: dict[str, Any] = {"question": str(item.get("question") or "")}
-    for extra in ("source", "key"):
-        if isinstance(item.get(extra), str) and item[extra]:
-            out[extra] = item[extra]
-    out["value_sha256"] = sha256_text(str(item.get("answer") or ""))
-    out["redacted"] = True
-    return out
+# ── G023 (retired 2026-10-26): sensitive answers were hashed, never copied. The owner chose to keep every
+# typed answer as typed so the card can show it; rows hashed before stay hashed (M3: append-only).
 
 
 def _sensitive_value(item: Any) -> bool:
@@ -1210,30 +1206,11 @@ def _sensitive_value(item: Any) -> bool:
 async def redact_unremembered(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], answers: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], int]:
-    """``(answers to store, how many were hashed)``. A sensitive answer is KEPT as typed only when
-    Job360 already holds it with the user's OK: its ``key`` is an item of this application's kit
-    (:func:`compute_answers` leaves out a sensitive value saved without remember consent) or the
-    question is one of the user's approved answers. Every other sensitive answer - said for this
-    form only - is stored as :func:`redacted_answer`. Loads the profile only when one is sensitive."""
-    if not any(_sensitive_value(a) for a in answers):
-        return answers, 0
-    from src.services.applications import ready  # noqa: PLC0415 - ready imports kit
-
-    profile, _country, blocks, _missing = await _answers_for(db, user_id, app_row)
-    have = {str(i["key"]) for block in blocks.values() for i in block}
-    company_key = ready._company_key(str(app_row.get("job_company") or ""))
-    out: list[dict[str, Any]] = []
-    hashed = 0
-    for a in answers:
-        if _sensitive_value(a) and not (
-            (isinstance(a.get("key"), str) and a["key"] in have)
-            or ready._approved_for(profile, str(a.get("question")), company_key) is not None
-        ):
-            out.append(redacted_answer(a))
-            hashed += 1
-        else:
-            out.append(a)
-    return out, hashed
+    """``(answers to store, how many were hashed)``. Owner decision 2026-10-26 ("yes, keep them"): every
+    answer typed into a form is kept as typed - salary, equality and consent included - so the card shows
+    it and the user can edit it; nothing is hashed any more. Rows hashed before stay hashed (question,
+    ``value_sha256``, ``redacted: true``); the ready card offers the user's own saved answer as a draft."""
+    return answers, 0
 
 
 async def _stored_answers(

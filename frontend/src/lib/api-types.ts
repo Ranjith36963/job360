@@ -481,6 +481,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/browser/refill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refill Form
+         * @description "Refill the form": Job360's own browser opens this job's form again and replays exactly what the user's
+         *     assistant did there last time (the same answers, the same CV upload, the same option clicks), never
+         *     anything new, never a submit, never a CAPTCHA; then keeps it open 30 minutes for Finish it here. Records
+         *     ``form_filled`` {by: refill}: identical answers keep the user's yes. 404 when the job is not the
+         *     caller's. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``.
+         */
+        post: operations["refill_form_api_applications__application_id__browser_refill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/calendar.ics": {
         parameters: {
             query?: never;
@@ -2763,6 +2787,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/common-questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Common Questions */
+        get: operations["list_common_questions_api_profile_common_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/cv": {
         parameters: {
             query?: never;
@@ -4421,6 +4462,11 @@ export interface components {
             /** Asked By */
             asked_by: string;
             browser?: components["schemas"]["BrowserLabelOut"] | null;
+            /**
+             * Can Refill
+             * @default false
+             */
+            can_refill: boolean;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -5060,6 +5106,59 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /** CommonQuestionOut */
+        CommonQuestionOut: {
+            /** Answer */
+            answer?: string | null;
+            /** Country */
+            country?: string | null;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "you" | "experience" | "work" | "pay" | "form" | "equality";
+            /** Id */
+            id: string;
+            /** Kit Key */
+            kit_key?: string | null;
+            /** Label */
+            label?: ("memory" | "guessed") | null;
+            /** Question */
+            question: string;
+            /**
+             * Seen
+             * @default 0
+             */
+            seen: number;
+            /** Source */
+            source?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "confirmed" | "relayed" | "inferred" | "sensitive" | "guessed" | "missing";
+            /** Topic */
+            topic?: string | null;
+            /** Verified */
+            verified: boolean;
+        };
+        /** CommonQuestionsOut */
+        CommonQuestionsOut: {
+            /** Questions */
+            questions: components["schemas"]["CommonQuestionOut"][];
+            summary: components["schemas"]["CommonQuestionsSummary"];
+        };
+        /** CommonQuestionsSummary */
+        CommonQuestionsSummary: {
+            /** Missing */
+            missing: number;
+            /** To Verify */
+            to_verify: number;
+            /** Total */
+            total: number;
+            /** Verified */
+            verified: number;
+        };
         /** ConfirmAnswerRequest */
         ConfirmAnswerRequest: {
             /** Answer */
@@ -5221,6 +5320,11 @@ export interface components {
             at: string;
             /** By */
             by: string;
+            /**
+             * Can Refill
+             * @default false
+             */
+            can_refill: boolean;
             /** Detail */
             detail: string;
             /** Page Host */
@@ -5269,6 +5373,11 @@ export interface components {
             /** Asked By */
             asked_by: string;
             browser?: components["schemas"]["BrowserLabelOut"] | null;
+            /**
+             * Can Refill
+             * @default false
+             */
+            can_refill: boolean;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -7966,6 +8075,8 @@ export interface components {
              * @enum {string}
              */
             check: "verify" | "confirm";
+            /** Draft */
+            draft?: string | null;
             /** Key */
             key?: string | null;
             /** Question */
@@ -11013,6 +11124,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BlockedSubmittedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refill_form_api_applications__application_id__browser_refill_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -14808,6 +14956,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_common_questions_api_profile_common_questions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommonQuestionsOut"];
                 };
             };
             /** @description Validation Error */

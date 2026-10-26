@@ -58,6 +58,10 @@ ASKS_QUESTIONS_MAX = 20
 ASK_ITEM_QUESTION_MAX_CHARS = 500
 ASK_ITEM_ANSWER_MAX_CHARS = 2000
 ASK_CHOICES_MAX = 6
+# Owner rule 2026-10-26 ("ask ALL the blank questions"): every blank form field goes in the job's ask, and
+# the user may answer any row "Leave blank" (choices or not). That answer is saved as their approved answer
+# for this employer, so check_submit's ``blank_unasked`` and later forms read it as the user's word.
+LEAVE_BLANK = "Leave blank"
 ASK_CHOICE_MAX_CHARS = 100
 _KEY_RE = re.compile(r"^[a-z0-9_.]{1,60}$")
 # Owner 2026-10-25: ONE open ask per job and kind. Hourly runs filed the same form questions again under new
@@ -385,9 +389,71 @@ def _validate_answers(questions: list[dict[str, Any]], raw: Optional[dict[str, A
     out: dict[str, str] = {}
     for q in questions:
         text = _item_text(f"answers.{q['key']}", raw[q["key"]], ASK_ITEM_ANSWER_MAX_CHARS)
-        if q.get("choices") and text not in q["choices"]:
+        if is_leave_blank(text):
+            text = LEAVE_BLANK
+        elif q.get("choices") and text not in q["choices"]:
             raise SpineError(422, f"answers.{q['key']} must be one of its choices")
         out[q["key"]] = text
+    return out
+
+
+def is_leave_blank(text: Any) -> bool:
+    """The user's "Leave blank" (case and spacing do not matter)."""
+    return " ".join(str(text or "").split()).casefold() == LEAVE_BLANK.casefold()
+
+
+def _remember_leave_blank(user_id: str, ask: dict[str, Any], answers: dict[str, str], actor: str) -> None:
+    """Save every "Leave blank" answer of ``ask`` as the user's approved answer to that form wording, for
+    this employer only (the approved list ``ready`` writes on a card Edit). All-or-nothing."""
+    from src.services.applications import kit, ready  # noqa: PLC0415 - ready imports kit, which imports spine
+    from src.services.profile import edits as profile_edits  # noqa: PLC0415
+    from src.services.profile import user_info  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
+
+    rows = [q for q in ask["questions"] if is_leave_blank(answers.get(q["key"]))]
+    company = str(ask.get("job_company") or "").strip()
+    if not rows or not company:
+        return
+    loaded, _ = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    company_key = ready._company_key(company)
+    before = profile.user_info.answers
+    for q in rows:
+        # One saved answer per wording (user_info): never let a blank for ONE employer replace the user's
+        # unscoped answer every other employer's form uses (reviewer-bugs P1 on #1273). The answered ask
+        # still covers this job's blank (``ready.blank_unasked``).
+        wording = ready._norm(str(q["question"]))
+        if any(ready._norm(r.get("question") or "") == wording and not str(r.get("company") or "").strip()
+               for r in kit._records(profile.user_info.answers)):
+            continue
+        profile.user_info.answers = ready._with_approved(
+            profile, str(q["question"]), LEAVE_BLANK, company_key, "", company
+        )
+    value = profile.user_info.answers
+    if value is before:
+        return
+    profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, value)
+    if load_profile(user_id, with_overlay=False) is None:
+        save_profile(UserProfile(), user_id, source_action="agent_edit")
+    profile_edits.record_edits(
+        user_id, actor, [(user_info.USER_INFO_ANSWERS_PATH, value)],
+        enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
+    )
+
+
+async def asked_questions(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:
+    """The ``questions`` rows of every open or answered (not withdrawn) ask on one of the caller's
+    applications: what the user was asked about this job (check_submit's ``blank_unasked`` reads it)."""
+    cur = await db._db.execute(
+        "SELECT questions FROM application_asks WHERE user_id = ? AND application_id = ? AND withdrawn_at IS NULL",
+        (user_id, application_id),
+    )
+    out: list[dict[str, Any]] = []
+    for r in await cur.fetchall():
+        rows = _json_or(r["questions"], [])
+        if isinstance(rows, list):
+            out += [q for q in rows if isinstance(q, dict)]
     return out
 
 
@@ -663,6 +729,8 @@ async def answer_ask(
     # asymmetry is the point, not an oversight. ``safe_log_value`` returns a
     # str, so the audit ``ask_id`` lands in ``audit_log.detail`` as a JSON
     # string rather than a number; nothing reads that field (grepped).
+    if existing["application_id"] is not None and any(is_leave_blank(v) for v in clean_answers.values()):
+        _remember_leave_blank(user_id, existing, clean_answers, answered_by)
     get_audit_logger().info(
         "ask_answered", extra={"event": "ask_answered", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
     )
@@ -692,7 +760,9 @@ async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: 
     saved = dict(existing["answers"] or {})
     for key, raw in answers.items():
         text = _item_text(f"answers.{key}", raw, ASK_ITEM_ANSWER_MAX_CHARS)
-        if by_key[key].get("choices") and text not in by_key[key]["choices"]:
+        if is_leave_blank(text):
+            text = LEAVE_BLANK
+        elif by_key[key].get("choices") and text not in by_key[key]["choices"]:
             raise SpineError(422, f"answers.{key} must be one of its choices")
         saved[key] = text
     cur = await db._db.execute(

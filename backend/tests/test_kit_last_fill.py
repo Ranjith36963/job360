@@ -94,7 +94,7 @@ async def test_the_kit_hands_back_the_newest_fills_answers_as_last_fill(authenti
         newest = [
             {"question": "Full name", "answer": "Ada King", "source": "profile", "key": "contact.name"},
             {"question": "Why Northwind?", "answer": "I build pipelines.\nEvery day.", "source": "written"},
-            # Sensitive and not remembered: stored as a hash (G023), so there is no value to hand back.
+            # Sensitive: kept as typed since 2026-10-26 (owner: "yes, keep them"; G023 retired), so it is handed back.
             {"question": "Do you need visa sponsorship?", "answer": "No", "source": "guessed"},
         ]
         assert (await _event(client, app_id, "form_filled", {
@@ -107,7 +107,7 @@ async def test_the_kit_hands_back_the_newest_fills_answers_as_last_fill(authenti
             "question": "Why Northwind?", "answer": "I build pipelines.\nEvery day.", "source": "written",
             "key": None, "redacted": False,
         }
-        assert rows[2]["answer"] == "" and rows[2]["redacted"] is True
+        assert rows[2]["answer"] == "No" and rows[2]["redacted"] is False
 
 
 def test_the_recipes_say_how_to_retype_last_fill_and_show_every_cv_first():

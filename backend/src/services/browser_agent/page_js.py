@@ -691,3 +691,58 @@ CHOSEN_NEARBY_JS = r"""
   return false;
 }
 """
+
+# Refill (owner 2026-10-26): one control's stable locator, so Job360's browser finds the same control on a
+# fresh copy of the form (refs die with the page). The key is the tag, type, role, label (labelOf, folded),
+# a radio's or checkbox's question (choiceGroup) and `nth` among the controls with the same key, in page
+# order (open shadow roots included). `secret`: a password or one-time-code box, never recorded.
+_LOCATOR_KEY_JS = _LABEL_OF_JS + r"""
+  const locSel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
+    + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=""], '
+    + '[contenteditable=true], [contenteditable=plaintext-only]';
+  const fold = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const keyOf = (el) => {
+    const type = (el.type || el.getAttribute('type') || '').toLowerCase();
+    const choice = el.tagName === 'INPUT' && ['radio', 'checkbox'].includes(type);
+    return { tag: el.tagName.toLowerCase(), type, role: (el.getAttribute('role') || '').toLowerCase(),
+      name: fold(labelOf(el)), group: choice ? fold(choiceGroup(el)) : '' };
+  };
+  const same = (a, b) => a.tag === b.tag && a.type === b.type && a.role === b.role && a.name === b.name
+    && a.group === b.group;
+  const allControls = () => {
+    const out = [];
+    const walk = (root, depth) => {
+      for (const el of root.querySelectorAll(locSel)) out.push(el);
+      if (depth > 6) return;
+      for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
+    };
+    walk(document, 0);
+    return out;
+  };
+"""
+LOCATOR_OF_JS = "(el) => {" + _LOCATOR_KEY_JS + r"""
+  const me = keyOf(el);
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const said = [me.name, ...hintsOf(el)].join(' ');
+  const secret = me.type === 'password' || ac.includes('password') || ac.includes('one-time-code')
+    || /password|passcode|one[- ]?time|\botp\b|verification code|security code/i.test(said);
+  let nth = 0;
+  for (const c of allControls()) {
+    if (c === el) return { ...me, nth, secret };
+    if (same(keyOf(c), me)) nth++;
+  }
+  return null;
+}
+"""
+# Puts `want.ref` on the control `want` locates (LOCATOR_OF_JS's key + nth); false when none matches.
+STAMP_LOCATOR_JS = "(want) => {" + _LOCATOR_KEY_JS + r"""
+  const controls = allControls();
+  for (const el of controls) if (el.getAttribute('data-j360-ref') === want.ref) el.removeAttribute('data-j360-ref');
+  let nth = 0;
+  for (const c of controls) {
+    if (!same(keyOf(c), want)) continue;
+    if (nth++ === want.nth) { c.setAttribute('data-j360-ref', want.ref); return true; }
+  }
+  return false;
+}
+"""
