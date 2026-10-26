@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from src.services.profile import job_priority
 from src.services.profile.answer_match import resolve_answer
+from src.services.profile.regions import is_region, place_name
 from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES, USER_INFO_ANSWERS_PATH
 
 RIGHT_TO_WORK_PATH = "user_info.right_to_work"
@@ -46,7 +47,10 @@ def _needs_sponsorship(rec: dict[str, Any]) -> Optional[bool]:
 
 
 def _name(country: str) -> str:
-    return "any other country" if country == ANY_COUNTRY else country
+    if country == ANY_COUNTRY:
+        return "any other country"
+    # A region line (owner decision 2026-10-26) covers its countries without their own line.
+    return f"{place_name(country)} (any country there without its own line)" if is_region(country) else country
 
 
 def _remote_line(country: str, work_from: list[str]) -> str:
@@ -116,8 +120,12 @@ def build_search_brief(
     """
     records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
     records = [r for r in (records or []) if isinstance(r, dict) and isinstance(r.get("country"), str)]
-    records.sort(key=lambda r: r["country"] == ANY_COUNTRY)
-    work_from = [r["country"] for r in records if r["country"] != ANY_COUNTRY and _needs_sponsorship(r) is False]
+    # Countries first, then regions, then ANY: the more specific line is read first.
+    records.sort(key=lambda r: (r["country"] == ANY_COUNTRY, is_region(r["country"])))
+    work_from = [
+        r["country"] for r in records
+        if r["country"] != ANY_COUNTRY and not is_region(r["country"]) and _needs_sponsorship(r) is False
+    ]
 
     residence = residence_country.strip().upper() if isinstance(residence_country, str) else ""
 
@@ -172,6 +180,13 @@ def build_search_brief(
                 counts_if.append(line)
                 priorities[job_priority.ONSITE] = lvl
                 plan.append({"country": country, "kind": job_priority.ONSITE, "counts_if": line, "priority": lvl})
+        if rec.get("contract_ok") is True:
+            # Contract roles in this place, ranked on their own (owner decision 2026-10-26).
+            lvl = job_priority.level_of(rec, job_priority.CONTRACT)
+            if lvl != job_priority.OFF and counts_if:
+                line = f"contract roles in {_name(country)}, remote or on-site as above"
+                priorities[job_priority.CONTRACT] = lvl
+                plan.append({"country": country, "kind": job_priority.CONTRACT, "counts_if": line, "priority": lvl})
         if onsite not in ONSITE_VALUES:
             gaps.append({
                 "path": RIGHT_TO_WORK_PATH, "country": country,

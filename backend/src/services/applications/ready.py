@@ -18,6 +18,7 @@ from src.services.applications.kit import _json
 from src.services.profile import edits as profile_edits
 from src.services.profile import user_info
 from src.services.profile.edits import is_assistant_actor
+from src.services.profile.regions import region_of
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -129,9 +130,11 @@ def _flag(code: str, text: str, key: Optional[str] = None, country: Optional[str
 
 
 def _salary_saved(profile: Any, country: str) -> bool:
-    """Any salary record with a value for ``country`` counts (one amount or a min / max)."""
+    """Any salary record with a value for ``country`` - or for its region (owner decision
+    2026-10-26) - counts (one amount or a min / max)."""
+    places = {country.upper(), region_of(country) or country.upper()}
     return any(
-        str(r.get("country") or "").upper() == country
+        str(r.get("country") or "").upper() in places
         and any(kit._present(r.get(k)) for k in ("amount", "min", "max"))
         for r in kit._records(profile.preferences.salary_by_country)
     )
@@ -320,6 +323,17 @@ def answer_check(answer: dict[str, Any]) -> str:
     return "confirm" if answer.get("source") == "written" else "verify"
 
 
+def _hashed_row(a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]],
+                company_key: Optional[str]) -> dict[str, Any]:
+    """A row stored as a hash (G023, before 2026-10-26). The user's own saved answer is offered as their
+    ``draft`` (owner: "a drafted answer to edit, not a placeholder"); when its hash matches what was
+    typed, it IS the typed value, so the row reads as typed again."""
+    draft = _users_word(profile, saved, a, company_key) if profile is not None else None
+    if draft and kit.sha256_text(str(draft)) == a.get("value_sha256"):
+        return {k: v for k, v in a.items() if k not in ("redacted", "value_sha256")} | {"answer": str(draft)}
+    return {**a, "answer": "", "redacted": True, "draft": str(draft) if draft else None}
+
+
 def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
     profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
@@ -330,7 +344,7 @@ def _answer_rows(
     flags: list[dict[str, Any]] = []
     for a in typed:
         if a.get("redacted"):
-            a = {**a, "answer": "", "redacted": True}  # G023: no value kept, only its hash
+            a = _hashed_row(a, profile, saved, company_key)
         key, src = a.get("key"), a["source"]
         by = at = None
         if src in ("memory", "approved", "profile") and key in have:
@@ -419,6 +433,51 @@ async def has_unconfirmed_sensitive(db: JobDatabase, user_id: str, app_row: dict
         db, user_id, app_row, lambda a: kit._question_is_sensitive(str(a["question"]), str(a.get("key") or "") or None)
     )
     return any(f["code"] == "sensitive" for f in flags)
+
+
+def _wordings(row: dict[str, Any], *names: str) -> set[str]:
+    """The normalized wordings a row answers to: its question text and its key (whole and last part)."""
+    out = {kit._norm_question(row.get(n)) for n in names}
+    key = str(row.get("key") or "")
+    out |= {kit._norm_question(key), kit._norm_question(key.rsplit(".", 1)[-1])}
+    return out - {""}
+
+
+async def blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[str]:
+    """Owner rule 2026-10-26 ("ask ALL the blank questions"): the fields the NEWEST ``form_filled`` left blank
+    (``fields_skipped``; optional, consent and file fields included) that nobody asked the user about. A
+    field is covered when that fill answered it, an open or answered ask on this application holds it in
+    its ``questions`` (by key or wording), or the user saved an approved answer to that wording for this
+    employer or any (a "Leave blank" counts). Exact normalized matching only. Scoped by ``user_id`` (#12)."""
+    from src.services.applications import asks as asks_service  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    app_id = int(app_row["id"])
+    fills = await kit._events(db, user_id, app_id, ("form_filled",))
+    skipped = fills[0]["payload"].get("fields_skipped") if fills else None
+    if not isinstance(skipped, list) or not skipped:
+        return []
+    typed = fills[0]["payload"].get("answers")
+    covered: set[str] = set()
+    for a in typed if isinstance(typed, list) else []:
+        if isinstance(a, dict) and (str(a.get("answer") or "").strip() or a.get("redacted")):
+            covered |= _wordings(a, "question")
+    for q in await asks_service.asked_questions(db, user_id, app_id):
+        covered |= _wordings(q, "question")
+    loaded, _overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    company_key = _company_key(str(app_row.get("job_company") or ""))
+    out: list[str] = []
+    seen: set[str] = set()
+    for label in (str(s) for s in skipped):
+        norm = kit._norm_question(label)
+        if not norm or norm in covered or norm in seen:
+            continue
+        seen.add(norm)
+        if _approved_record(profile, label, company_key) is None:
+            out.append(label)
+    return out
 
 
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:

@@ -66,6 +66,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Worker briefs forbid `pytest.importorskip` and any skip or quarantine: the test-integrity check goes red (#1107, #1135).
 - Run `npm ci` before `npm run lint` in a long-lived checkout; a stale node_modules lacks new rules (#1134, 2026-10-23).
 - Name `model:` on every Agent call (model-delegation); an unnamed worker inherits the lead's model (2026-10-24).
+- A machine never adds `assistant-merge` to a hand-merge PR, nor removes it: that switch is the owner's yes (owner, 2026-10-26).
 - A watcher checks its grep found a commit before it loops; an empty `merge=` never finishes (2026-10-23).
 
 ## Probing job sites

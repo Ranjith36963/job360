@@ -112,4 +112,28 @@ describe("AssistantInstructions (Connect your assistant > Assistant configure)",
       ]),
     );
   });
+
+  it("shows only the general instructions: Memory step facts stay in their step and ride along unchanged on every save", async () => {
+    api.getProfile.mockResolvedValue({
+      preferences: { assistant_notes: ["Never apply to agencies", "About you: I go by Alex.", "Logistics: No travel in August."] },
+      agent_edits: [],
+    });
+    api.getProfileEditHistory.mockResolvedValue([
+      { set_by: "web", set_at: NOW, value: ["Old general line", "Equality: Ask me first."] },
+    ]);
+    api.updateProfileFields.mockResolvedValue({ preferences: { assistant_notes: [] }, agent_edits: [] });
+    render(<AssistantInstructions />);
+    const card = await screen.findByTestId("assistant-notes-card");
+    expect(card).toHaveTextContent("Never apply to agencies");
+    expect(card).not.toHaveTextContent("I go by Alex");
+    expect(card).not.toHaveTextContent("No travel in August");
+
+    fireEvent.change(screen.getByLabelText("New note for your assistant"), { target: { value: "No night shifts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    await waitFor(() => expect(api.updateProfileFields).toHaveBeenCalledTimes(1));
+    expect(api.updateProfileFields).toHaveBeenCalledWith([
+      { path: NOTES, value: ["Never apply to agencies", "No night shifts", "About you: I go by Alex.", "Logistics: No travel in August."] },
+    ]);
+  });
 });
+

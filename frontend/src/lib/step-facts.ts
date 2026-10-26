@@ -9,6 +9,15 @@ export const NOTE_MAX_CHARS = 200;
 
 const prefix = (step: string) => `${step}: `;
 
+/** The step names a fact is filed under (Memory's steps; MemoryTab's `fact`). */
+export const STEP_FACT_NAMES = ["About you", "Job targets", "Right to work", "Logistics", "Equality"] as const;
+
+/** True for a note filed under a Memory step: it is shown in that step, not with the
+ *  general instructions (owner, 2026-10-26: nothing shown twice). */
+export function isStepFact(note: string): boolean {
+  return STEP_FACT_NAMES.some((step) => note.startsWith(prefix(step)));
+}
+
 /** The facts filed under a step, without the step name, in saved order. */
 export function factsFor(notes: string[], step: string): string[] {
   const p = prefix(step);

@@ -13,7 +13,6 @@ import { PreferencesForm } from "@/components/profile/PreferencesForm";
 import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer";
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
-import { LessonsList } from "@/components/profile/LessonsList";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
   getProfile,
@@ -440,9 +439,6 @@ function CvTab() {
                 showFieldHistory={Boolean(profile)}
               />
             </div>
-
-            {/* ── Lessons (slice 9, #516) — full width, below the grid ───── */}
-            <LessonsList />
 
             {/* ── What we extracted (readable content, not just counts) ──
                 The API already returns name/summary/skills/dated work

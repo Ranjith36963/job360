@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
 import { JobPriority } from "@/components/profile/JobPriority";
+import { isRegion } from "@/lib/regions";
 import { MemoryRow } from "@/components/profile/MemoryRow";
 import { StepFacts } from "@/components/profile/StepFacts";
 import { useSetupProgress } from "@/components/profile/SetupProgress";
@@ -201,7 +202,16 @@ export function MemoryTab() {
 
   /** Confirm an inferred fact: Keep writes a web row marked user_said, then re-read. */
   const confirm = useCallback(async (spec: RowSpec): Promise<void> => {
-    const updated = await keepProfileEdit(spec.path);
+    // Keep accepts the assistant's NEWEST write to a block. When the user has written
+    // the block since (an edit to another answer in it), Keep has nothing to accept, yet
+    // answers the assistant wrote earlier still wait: confirm them by saving the block
+    // as it stands, as the user's word (owner, 2026-10-26: "Confirm says no change to keep").
+    const [, fresh] = await loadHistory(spec.path);
+    const newest = fresh?.[0];
+    const userWroteLast = !!newest && (newest.set_by === "web" || newest.source === "user_said");
+    const updated = userWroteLast
+      ? await updateProfileFields([{ path: spec.path, value: blockOf(latest.current, spec.path) }])
+      : await keepProfileEdit(spec.path);
     latest.current = updated;
     setProfile(updated);
     const [, rows] = await loadHistory(spec.path);
@@ -213,7 +223,9 @@ export function MemoryTab() {
     const rtw = blockOf(profile, RTW) as Record<string, unknown> | undefined;
     const log = blockOf(profile, LOGISTICS) as Record<string, unknown> | undefined;
     const auth = Array.isArray(prefs.work_authorization_countries) ? prefs.work_authorization_countries.map(String) : [];
-    return [...new Set([...codesIn(rtw?.countries), ...codesIn(blockOf(profile, SALARY)), ...auth, ...codesIn(log?.countries)])];
+    // Visa cards are per country: a region line (Europe) has no visa status of its own.
+    return [...new Set([...codesIn(rtw?.countries), ...codesIn(blockOf(profile, SALARY)), ...auth, ...codesIn(log?.countries)])]
+      .filter((c) => !isRegion(c));
   }, [profile]);
 
   if (loading) return <div data-testid="memory-loading" className="space-y-3 pt-6"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>;

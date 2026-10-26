@@ -5,9 +5,10 @@ Each ``user_info.right_to_work`` record may carry ``remote_priority`` and
 rule 4): this only restates the user's choice per PLACE, so the assistant knows
 where to spend its hunt, and the user can filter their own applications by it.
 
-A place = (record, kind): ``remote`` or ``onsite`` for one country, or for ``ANY``
-(every other country). A job belongs to the record of its own country, else to
-``ANY``. A level the user never chose is ``None`` - rule #29, never a default.
+A place = (record, kind): ``remote`` or ``onsite`` for one country, one region
+(``regions.REGIONS``, owner decision 2026-10-26) or ``ANY`` (every other
+country). A job belongs to the record of its own country, else its region's,
+else ``ANY``. A level the user never chose is ``None`` - rule #29, never a default.
 
 Pure: no I/O.
 """
@@ -15,10 +16,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from src.services.profile.regions import REGIONS, is_region, record_code_for
 from src.services.profile.user_info import ANY_COUNTRY, PRIORITY_LEVELS
 
-REMOTE, ONSITE = "remote", "onsite"
-PRIORITY_KEYS = {REMOTE: "remote_priority", ONSITE: "onsite_priority"}
+REMOTE, ONSITE, CONTRACT = "remote", "onsite", "contract"
+# CONTRACT (owner decision 2026-10-26) ranks contract roles in a place; a job carries
+# no contract flag, so the applications filter keeps to remote / on-site.
+PRIORITY_KEYS = {REMOTE: "remote_priority", ONSITE: "onsite_priority", CONTRACT: "contract_priority"}
 OFF = "off"
 NOT_SET = "not_set"
 # Effort weights for the hunt split. A place with no level chosen gets the middle
@@ -40,13 +44,10 @@ def level_of(record: dict[str, Any], kind: str) -> Optional[str]:
 
 
 def record_for(right_to_work: Any, country: Optional[str]) -> Optional[dict[str, Any]]:
-    """The record a job in ``country`` belongs to: its own country's, else ``ANY``."""
+    """The record a job in ``country`` belongs to: its own country's, else its region's, else ``ANY``."""
     recs = _records(right_to_work)
-    code = (country or "").strip().upper()
-    for r in recs:
-        if code and r["country"] == code:
-            return r
-    return next((r for r in recs if r["country"] == ANY_COUNTRY), None)
+    code = record_code_for({r["country"] for r in recs}, country, ANY_COUNTRY)
+    return next((r for r in recs if r["country"] == code), None) if code else None
 
 
 def place_priority(right_to_work: Any, job_country: Optional[str], job_remote: Optional[bool]) -> Optional[str]:
@@ -72,16 +73,26 @@ def filter_sql(right_to_work: Any, level: str) -> tuple[str, list[Any]]:
     """A SQL condition over ``applications`` (``job_country``, ``job_remote``) that keeps the
     rows whose place has ``level`` (or no level: ``not_set``). Values go in params only."""
     recs = _records(right_to_work)
-    own = [r["country"] for r in recs if r["country"] != ANY_COUNTRY]
+    own = [r["country"] for r in recs if r["country"] != ANY_COUNTRY and not is_region(r["country"])]
+    # Every country a country or region record already answers for: ANY covers the rest.
+    claimed = sorted({*own, *(cc for r in recs if is_region(r["country"]) for cc in REGIONS[r["country"]])})
 
     def place_cond(rec: dict[str, Any], kind: str) -> tuple[str, list[Any]]:
         remote = "job_remote = TRUE" if kind == REMOTE else "job_remote = FALSE"
-        if rec["country"] != ANY_COUNTRY:
-            return f"({remote} AND UPPER(job_country) = ?)", [rec["country"]]
-        if not own:
+        code = rec["country"]
+        if is_region(code):
+            # The region's countries, less those with their own record.
+            members = sorted(REGIONS[code] - set(own))
+            if not members:
+                return "1 = 0", []
+            marks = ",".join("?" for _ in members)
+            return f"({remote} AND UPPER(job_country) IN ({marks}))", members
+        if code != ANY_COUNTRY:
+            return f"({remote} AND UPPER(job_country) = ?)", [code]
+        if not claimed:
             return f"({remote})", []
-        marks = ",".join("?" for _ in own)
-        return f"({remote} AND (job_country IS NULL OR UPPER(job_country) NOT IN ({marks})))", list(own)
+        marks = ",".join("?" for _ in claimed)
+        return f"({remote} AND (job_country IS NULL OR UPPER(job_country) NOT IN ({marks})))", list(claimed)
 
     parts: list[str] = []
     params: list[Any] = []
@@ -95,14 +106,13 @@ def filter_sql(right_to_work: Any, level: str) -> tuple[str, list[Any]]:
     if level != NOT_SET:
         return ("(" + " OR ".join(parts) + ")", params) if parts else ("1 = 0", [])
     # not_set = a job whose place has no level: remote unknown, no record, or the record has none.
-    covered = [r for r in recs if r["country"] != ANY_COUNTRY]
     any_rec = next((r for r in recs if r["country"] == ANY_COUNTRY), None)
     extra = ["job_remote IS NULL"]
     if any_rec is None:
-        if covered:
-            marks = ",".join("?" for _ in covered)
+        if claimed:
+            marks = ",".join("?" for _ in claimed)
             extra.append(f"(job_country IS NULL OR UPPER(job_country) NOT IN ({marks}))")
-            params.extend(r["country"] for r in covered)
+            params.extend(claimed)
         else:
             extra.append("1 = 1")
     return "(" + " OR ".join([*parts, *extra]) + ")", params

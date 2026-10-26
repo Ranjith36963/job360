@@ -68,6 +68,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -360,8 +361,6 @@ DENY_REASONS: dict[str, str] = {
     "backend/src/services/auth/**": f"authentication — the owner merges it. {_OWNER_MERGES}",
     "backend/src/api/routes/account*.py":
         f"account management — the owner merges it. {_OWNER_MERGES}",
-    "backend/src/core/settings.py":
-        f"settings flags change production behaviour for every user. {_OWNER_MERGES}",
     "backend/migrations/**":
         "schema change — irreversible against live data: a Railway rollback restores "
         "the previous IMAGE, not the previous SCHEMA. Every migration ships with its "
@@ -449,7 +448,7 @@ DENY_REASONS: dict[str, str] = {
 # repo that remembers WHY these paths were ever separated from ordinary product
 # code, and the next person reading `product_owner` would see a lane with the
 # same `auto_merge` as `product` and conclude the split is decoration. It is
-# not: this lane is what wears the `lane:product-owner` label, and moving any one of these
+# not: this lane is what gets the 15-minute watch and rollback, and moving any one of these
 # lines back to `harness_owner` is how the owner takes a path back by hand.
 #
 # AND IT IS ENFORCED, NOT FILED. `check_lists()` refuses any key here that is
@@ -494,6 +493,9 @@ WATCHED_RISKS: dict[str, str] = {
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
     "**/*.env*": f"secrets and configuration. {_WATCHED}",
+    # Moved from the owner's hand 2026-10-26 ("only where hand merge is needed").
+    "backend/src/core/settings.py":
+        f"settings flags change production behaviour for every user. {_WATCHED}",
     # ── dependency manifests ─────────────────────────────────────────────────
     # The cage has no semver awareness, and a manifest runs postinstall scripts
     # on the build host. `dependabot-auto.yml` still owns the bump decision and
@@ -2060,6 +2062,18 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
                 f"could not look is not a cage that approved. FIX: re-run once the GitHub API "
                 f"is reachable."]))
 
+    # THE OWNER'S YES BY LABEL (2026-10-26). Asked only of an owner lane; an
+    # unreadable answer is no yes, and the lane refuses exactly as before.
+    yes = False
+    if lane is not None and not lane.get("auto_merge"):
+        try:
+            yes, why_yes = owner_yes(pr, pr_json)
+        except Exception as exc:  # noqa: BLE001 - any doubt is no yes
+            yes, why_yes = False, f"could not read the label's history ({type(exc).__name__})"
+        meta["owner_yes"] = why_yes if yes else ""
+        if yes:  # the LANE refusal below is then answered by answered_by_owner()
+            verdicts.append(Verdict("OWNER_YES", "pass", [], claim=why_yes))
+
     # THE LANE ITSELF IS A CAGE. Expressed as a verdict rather than a special
     # exit code on purpose: every downstream reader — the printed reasons, the
     # Slack line, --advise, --verdict-json, the exit code — already knows how to
@@ -2104,6 +2118,8 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
             f"{head_now[:7]}), so this verdict may describe a diff I never read. FIX: nothing; "
             f"the new head gets its own run."]))
 
+    if yes:
+        verdicts = answered_by_owner(verdicts)
     return (not any(v.blocks for v in verdicts)), verdicts, meta
 
 
@@ -2131,6 +2147,9 @@ _OWNER_MARKERS = ("so he merges it by hand", "merge it yourself")
 
 def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
     """(state, description) for the `merge-cage` commit status. Pure."""
+    if allowed and any(v.name == "OWNER_YES" and v.status == "pass" for v in verdicts):
+        return "success", ("assistant-merge: the owner switched this hand-merge PR by hand; "
+                           "every other cage passed")
     if allowed:
         return "success", "every cage passed"
     blocks = blocks_of(verdicts) or ["refused, and no reason was recorded"]
@@ -2142,6 +2161,82 @@ def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
     if waiting:
         return "pending", ("waiting: " + waiting[0])[:140]
     return "pending", ("the owner merges this by hand: " + owners[0])[:140]
+
+
+# ── THE OWNER'S YES, BY LABEL (owner, 2026-10-26) ───────────────────────────
+# "Hand merge and assistant merge, 2 labels only." pr-advisor.yml stamps
+# `hand-merge` on an owner-lane PR and `assistant-merge` on every other. When
+# the OWNER switches a hand-merge PR to `assistant-merge`, that is his yes: the
+# owner-lane refusal is answered and the PR merges like a machine lane, but only
+# once every other cage passes. (Approval cannot carry it: he authors these PRs,
+# and GitHub forbids approving your own.) The yes counts only if the newest
+# `labeled assistant-merge` event is the owner's own hand (no GitHub App, not a
+# bot) AND is newer than the push that landed the current head, read from the
+# repo's activity log (`after` == head), never from a commit date the pusher
+# writes. A push after his switch therefore puts it back to the owner's turn.
+HAND_LABEL = "hand-merge"
+ASSISTANT_LABEL = "assistant-merge"
+
+
+def judge_owner_yes(labels: list[str], events: list[dict], pushes: list[dict],
+                    head: str, owner: str) -> tuple[bool, str]:
+    """Is `assistant-merge` on this PR the owner's own yes for THIS head? Pure."""
+    if ASSISTANT_LABEL not in labels:
+        return False, f"no `{ASSISTANT_LABEL}` label"
+    adds = [e for e in events if e.get("event") == "labeled"
+            and (e.get("label") or {}).get("name") == ASSISTANT_LABEL]
+    if not adds:
+        return False, f"no record of who added `{ASSISTANT_LABEL}`"
+    last = max(adds, key=lambda e: str(e.get("created_at") or ""))
+    who = last.get("actor") or {}
+    login = str(who.get("login") or "")
+    via = last.get("performed_via_github_app")
+    app = (via.get("slug") or "an app") if isinstance(via, dict) else via
+    # A `[bot]` login can never equal the owner's, so `login != owner` refuses it too.
+    if app or who.get("type") != "User" or login != owner:
+        return False, (f"`{ASSISTANT_LABEL}` was added by {login or '?'} via "
+                       f"{app or who.get('type') or '?'}, not by the owner's own hand")
+    landed = [str(p.get("timestamp") or "") for p in pushes if p.get("after") == head]
+    if not any(landed):
+        return False, "I could not read when the head commit was pushed, so the label proves nothing"
+    if str(last.get("created_at") or "") <= max(landed):
+        return False, f"`{ASSISTANT_LABEL}` is older than the newest push; switch it again"
+    return True, f"the owner switched this to `{ASSISTANT_LABEL}` by hand at {last.get('created_at')}"
+
+
+def owner_yes(pr: int, pr_json: dict) -> tuple[bool, str]:
+    """Read the label, its events and the head's push from GitHub, then judge. Any doubt is no."""
+    labels = [str(lb.get("name")) for lb in pr_json.get("labels") or [] if isinstance(lb, dict)]
+    if ASSISTANT_LABEL not in labels:
+        return False, f"no `{ASSISTANT_LABEL}` label"
+    events: list[dict] = []
+    for page in range(1, 11):
+        chunk = json.loads(gh(["api", f"repos/{REPO}/issues/{pr}/events?per_page=100&page={page}"]))
+        events += chunk
+        if len(chunk) < 100:
+            break
+    head = pr_json.get("head") or {}
+    ref = urllib.parse.quote(f"refs/heads/{head.get('ref') or ''}", safe="")
+    pushes = json.loads(gh(["api", f"repos/{REPO}/activity?ref={ref}&per_page=100"]))
+    return judge_owner_yes(labels, events, pushes if isinstance(pushes, list) else [],
+                           str(head.get("sha") or ""), REPO.split("/")[0])
+
+
+def answered_by_owner(verdicts: list[Verdict]) -> list[Verdict]:
+    """The owner's yes answers every owner-only reason and nothing else. Pure.
+
+    A reason still waiting, or any real refusal (red CI, size, migrations,
+    reviews, ratchets), is kept exactly as it was.
+    """
+    out: list[Verdict] = []
+    for v in verdicts:
+        keep = [r for r in v.reasons if any(m in r for m in _WAIT_MARKERS)
+                or not any(m in r for m in _OWNER_MARKERS)]
+        if v.status == "fail" and v.reasons and not keep:
+            out.append(Verdict(v.name, "pass", [], claim=f"{v.name}: the owner said yes by label"))
+        else:
+            out.append(Verdict(v.name, v.status, keep, v.claim))
+    return out
 
 
 def requires_context(rules: object, context: str) -> bool:
@@ -2445,6 +2540,8 @@ DECISION_PATH = [
     # ruleset — so nothing else in GitHub or in this file would notice its
     # absence.
     "judge_tags", "check_tags",
+    # THE OWNER'S YES BY LABEL (2026-10-26): it turns a hand-merge PR machine-mergeable.
+    "judge_owner_yes", "owner_yes", "answered_by_owner",
     # THE ARM. On the decision path because `--auto` is the whole reason the arm
     # is allowed to exist — see the drill case that captures its real argv.
     "request_auto_merge",
@@ -3731,6 +3828,41 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
            "refusal he cannot act on is how a gate gets switched off at 7am",
            ["decide"])
 
+        # THE OWNER'S YES, END TO END (2026-10-26): the same owner-lane PR, now
+        # carrying `assistant-merge` the owner added after the head landed.
+        def _yes_gh(when: str):  # a drill stub
+            def _gh(a: list[str]) -> str:
+                j = " ".join(a)
+                if j.endswith("pulls/1"):
+                    return json.dumps({"title": "ci: tidy", "merge_commit_sha": sha_now,
+                                       "base": {"ref": "main"}, "labels": [{"name": ASSISTANT_LABEL}],
+                                       "head": {"ref": "fix/x", "sha": "e" * 40}})
+                if "/files" in j:
+                    return json.dumps([{"filename": ".github/workflows/ci.yml", "status": "modified",
+                                        "additions": 3, "deletions": 1}])
+                if "/events" in j:
+                    return json.dumps([{"event": "labeled", "label": {"name": ASSISTANT_LABEL},
+                                        "created_at": when, "performed_via_github_app": None,
+                                        "actor": {"login": REPO.split("/")[0], "type": "User"}}])
+                if "/activity" in j:
+                    return json.dumps([{"after": "e" * 40, "timestamp": "2026-10-26T10:00:00Z"}])
+                return perfect_gh(a)
+            return _gh
+
+        _hl = {"lane": "harness_owner", "auto_merge": False,
+               "requires": ["review"], "why": ["ci.yml is the harness."]}
+        globals()["gh"] = _yes_gh("2026-10-26T11:00:00Z")
+        allowed_oy, v_oy, meta_oy = decide(1, {"drill": 3}, dict(_hl))
+        globals()["gh"] = _yes_gh("2026-10-26T09:00:00Z")
+        allowed_old, v_old, _ = decide(1, {"drill": 3}, dict(_hl))
+        globals()["gh"] = perfect_gh
+        ok("an owner-lane PR the owner switched to assistant-merge is ALLOWED, saying so",
+           allowed_oy and meta_oy.get("owner_yes") and "assistant-merge" in status_for(True, v_oy)[1],
+           f"allowed={allowed_oy}: {blocks_of(v_oy)}", ["decide", "owner_yes", "answered_by_owner"])
+        ok("...and a switch older than the head's push leaves it the owner's turn (pending)",
+           not allowed_old and status_for(False, v_old)[0] == "pending",
+           f"allowed={allowed_old}: {status_for(False, v_old)}", ["decide", "owner_yes"])
+
         # NEGATIVE CONTROL FOR THE FLIP ITSELF. Without this, the case above is
         # satisfied by a cage that refuses every lane verdict it is handed, and
         # the owner's decision would have been silently undone by a LANE verdict
@@ -4064,6 +4196,59 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        f"got {status_for(False, [_owner, _real])}", ST)
     ok("NEGATIVE CONTROL: the owner's turn is never SUCCESS -- GitHub must not merge it",
        status_for(False, [_owner])[0] != "success", f"got {status_for(False, [_owner])}", ST)
+
+    # ── THE OWNER'S YES BY LABEL (owner, 2026-10-26) ─────────────────────────
+    # Shapes measured on this repo's own issue events: a workflow's GITHUB_TOKEN
+    # labels as github-actions[bot] (type Bot, no app); a Claude session's GitHub
+    # MCP labels as the owner's login with performed_via_github_app = claude.
+    OY = ["judge_owner_yes"]
+    _me, _H, _T = "Ranjith36963", "a" * 40, "2026-10-26T11:00:00Z"
+    _push = [{"after": _H, "timestamp": "2026-10-26T10:00:00Z"},
+             {"after": "b" * 40, "timestamp": "2026-10-26T09:00:00Z"}]
+
+    def _add(at: str = _T, login: str = _me, typ: str = "User", app: object = None) -> dict:
+        return {"event": "labeled", "label": {"name": ASSISTANT_LABEL}, "created_at": at,
+                "actor": {"login": login, "type": typ}, "performed_via_github_app": app}
+
+    def _yes(events: list[dict], labels: tuple = (ASSISTANT_LABEL,), pushes: object = None) -> bool:
+        got = pushes if isinstance(pushes, list) else _push
+        return judge_owner_yes(list(labels), events, got, _H, _me)[0]
+
+    ok("the owner's own switch to assistant-merge after the head landed is his yes",
+       _yes([_add()]), f"got {judge_owner_yes([ASSISTANT_LABEL], [_add()], _push, _H, _me)}", OY)
+    ok("...a switch OLDER than the newest push is not: a push puts it back to his turn",
+       not _yes([_add("2026-10-26T09:30:00Z")]), "a stale switch was read as a yes", OY)
+    ok("...a switch made through a GitHub App (a Claude session's MCP) is not",
+       not _yes([_add(app={"slug": "claude"})]), "an app's label was read as a yes", OY)
+    ok("...a switch whose actor is a Bot is not, even under the owner's login",
+       not _yes([_add(typ="Bot")]) and not _yes([_add(login="github-actions[bot]", typ="Bot")]),
+       "a bot's label was read as a yes", OY)
+    ok("...a switch by anyone but the owner is not",
+       not _yes([_add(login="someone-else")]), "a stranger's label was read as a yes", OY)
+    ok("...the NEWEST add decides: his switch then an app's re-add is not his yes",
+       not _yes([_add(), _add("2026-10-26T12:00:00Z", app={"slug": "claude"})]),
+       "an older human add vouched for a newer app add", OY)
+    ok("...no assistant-merge label on the PR is no yes, whatever the history says",
+       not _yes([_add()], (HAND_LABEL,)), "a removed label still counted", OY)
+    ok("...a label with no labeled event on record is no yes",
+       not _yes([]), "a label nobody can be seen adding counted", OY)
+    ok("...a head whose push I cannot find is no yes",
+       not _yes([_add()], pushes=_push[1:]), "an unknown push time counted", OY)
+    AO = ["answered_by_owner", "status_for"]
+    _yv = Verdict("OWNER_YES", "pass", [], claim="x")
+    _ans = answered_by_owner([_owner]) + [_yv]
+    ok("owner yes + only the owner-lane reason left => SUCCESS that says assistant-merge",
+       status_for(not any(v.blocks for v in _ans), _ans)[0] == "success"
+       and "assistant-merge" in status_for(True, _ans)[1], f"got {status_for(True, _ans)}", AO)
+    _mix = Verdict("PATH", "fail", [_owner.reasons[0], "`x.cfg` — no rule covers this path."])
+    _ans_red = answered_by_owner([_mix, _real]) + [_yv]
+    ok("...owner yes + a real refusal (red CI, size, an unknown path) is still FAILURE",
+       any(v.blocks for v in _ans_red) and status_for(False, _ans_red)[0] == "failure"
+       and _ans_red[0].reasons == ["`x.cfg` — no rule covers this path."],
+       f"got {status_for(False, _ans_red)} / {_ans_red[0].reasons}", AO)
+    _ans_wait = answered_by_owner([_owner, _wait]) + [_yv]
+    ok("...owner yes + checks still running is PENDING, waiting",
+       status_for(False, _ans_wait)[0] == "pending", f"got {status_for(False, _ans_wait)}", AO)
     ok("a cage that did not run is a FAILURE, never a wait",
        status_for(False, [Verdict("RATCHET", "not_checked", [])])[0] == "failure",
        f"got {status_for(False, [Verdict('RATCHET', 'not_checked', [])])}", ST)
@@ -4101,10 +4286,10 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
                                         "merge_cage_required", "slack")}
     _calls: list[str] = []
 
-    def _run_arm(touches_github: bool) -> list[str]:
+    def _run_arm(touches_github: bool, lane: str = "product", yes: str = "") -> list[str]:
         _calls.clear()
         _meta = {"files": 1, "lines": 2, "base": "main", "head_sha": "abc1234", "title": "t",
-                 "touches_github": touches_github}
+                 "touches_github": touches_github, "owner_yes": yes}
         globals()["decide"] = lambda *a, **k: (False, [_wait], dict(_meta))
         globals()["withdraw_auto_merge"] = lambda pr: (_calls.append("withdraw"), (True, "off", QUEUE_QUEUED))[1]
         globals()["request_auto_merge"] = lambda pr: (_calls.append("arm"), (True, "on", QUEUE_QUEUED))[1]
@@ -4113,14 +4298,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         with _tf.TemporaryDirectory() as td, _ctx.redirect_stdout(_io.StringIO()), \
                 _ctx.redirect_stderr(_io.StringIO()):
             lane_f = Path(td) / "lane.json"
-            lane_f.write_text(json.dumps({"lane": "product", "auto_merge": True}), encoding="utf-8")
+            lane_f.write_text(json.dumps({"lane": lane, "auto_merge": lane == "product"}),
+                              encoding="utf-8")
             main(["5", "--queue", "--lane", str(lane_f), "--slack"])
         return list(_calls)
 
     try:
         _held, _wf = _run_arm(False), _run_arm(True)
+        _hand = _run_arm(False, "harness_owner")
+        _hand_yes = _run_arm(False, "harness_owner", "the owner switched this")
     finally:
         globals().update(_saved)
+    ok("a held hand-merge PR is never armed by the machine",
+       _hand == [], f"calls {_hand}", ["status_for"])
+    ok("...but once the owner switched it to assistant-merge it arms like a machine lane",
+       _hand_yes == ["arm"], f"calls {_hand_yes}", ["status_for", "owner_yes"])
     ok("a held PR stays armed and Slack is told nothing (no false 'taken out')",
        _held == ["arm"], f"calls {_held}", ["status_for"])
     ok("a refused PR that changes .github/ is withdrawn, never held",
@@ -4620,6 +4812,10 @@ def main(argv: list[str] | None = None) -> int:
                     f"`python scripts/lane.py --json lane.json <changed files>` first.") from exc
 
         allowed, verdicts, meta = decide(args.pr, base, lane_verdict)
+        if meta.get("owner_yes") and lane_verdict is not None:
+            # The owner switched this PR to `assistant-merge`: it arms like a machine lane.
+            print(f"OWNER YES: {meta['owner_yes']}")
+            lane_verdict = {**lane_verdict, "auto_merge": True}
         blocks = blocks_of(verdicts)
 
         print(f"merge_cage: PR #{args.pr} — {meta.get('files', '?')} files, "

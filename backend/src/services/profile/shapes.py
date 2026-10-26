@@ -64,15 +64,18 @@ SHAPES: dict[str, dict[str, Any]] = {
             "sanctions_country_citizen": [True, False, _ui.PREFER_NOT_TO_SAY],
             "needs_sponsorship": [True, False], "remote_ok": [True, False], "contract_ok": [True, False],
             "remote_priority": list(_ui.PRIORITY_LEVELS), "onsite_priority": list(_ui.PRIORITY_LEVELS),
+            "contract_priority": list(_ui.PRIORITY_LEVELS),
         },
         "note": (
-            "one record per country; country 'ANY' = every other country. citizenship = list of ISO alpha-2 "
+            "one record per country; country 'ANY' = every other country, or a region (NORTH_AMERICA, "
+            "SOUTH_AMERICA, EUROPE, MIDDLE_EAST, ASIA, AFRICA, OCEANIA) = its countries without their own record. "
+            "citizenship = list of ISO alpha-2 "
             f"codes. sanctions_country_citizen = true, false or \"{_ui.PREFER_NOT_TO_SAY}\" (nothing else). "
             "needs_sponsorship, remote_ok and contract_ok (contract roles OK there) = true or false. "
             "visa_expires = YYYY-MM or YYYY-MM-DD. "
             "visa_type and note = one short line. work_authorization citizen / permanent_resident cannot go with "
             "needs_sponsorship true, and needs_sponsorship cannot go with needs_sponsorship false. "
-            "remote_priority / onsite_priority = the user's own job priority for that place "
+            "remote_priority / onsite_priority / contract_priority = the user's own job priority for that place "
             "(off = never search it); set only what the user chose"
         ),
     },

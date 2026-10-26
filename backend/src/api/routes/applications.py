@@ -788,6 +788,8 @@ class AskOut(BaseModel):
     finish_here: bool = False
     # Seconds left on the hold keeping that form's Job360 browser open (None = not held): "kept open N minutes".
     held_seconds: Optional[int] = None
+    # True = an open CAPTCHA ask whose job has a fill script: the web offers "Refill the form".
+    can_refill: bool = False
     # 0087 - "" (an older ask), "question", or a blocker only the user can clear on the form.
     kind: str = ""
     # The form questions this ask carries, each with the answer filled in and where it came from.
@@ -1458,6 +1460,8 @@ class ControlsBlockedOut(BaseModel):
     by: str
     at: str
     ask_id: Optional[int] = None
+    # True = Job360's browser can replay this job's form ("Refill the form", POST .../browser/refill).
+    can_refill: bool = False
 
 
 class ApplicationControlsOut(BaseModel):
@@ -3192,6 +3196,14 @@ async def _controls(db: JobDatabase, user: CurrentUser, application_id: int) -> 
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
     state = await kit_service.controls_state(db, user.id, app_row, datetime.now(timezone.utc))
+    block = state.get("blocked")
+    if block is not None:  # "Refill the form": a CAPTCHA / sign-in block on a job with a fill script
+        from src.services.applications import fill_script  # noqa: PLC0415
+
+        state["blocked"] = {**block, "can_refill": bool(
+            settings.BROWSER_AGENT_ENABLED and block["reason"] in blocked_service.FINISH_HERE_REASONS
+            and await fill_script.apps_with_script(db, user.id, [application_id])
+        )}
     return {"application_id": application_id, **state}
 
 

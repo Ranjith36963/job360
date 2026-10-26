@@ -27,67 +27,57 @@ describe("JobPriority", () => {
     updateProfileFields.mockReset();
   });
 
-  it("renders a row per remote / on-site place, in record order, and none for places that are off", () => {
+  it("a priority box sits right next to each ticked work type, showing the saved level; none for an unticked one", () => {
     render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
-    expect(screen.getByText("Job priority")).toBeInTheDocument();
-    expect(screen.getByText("Remote — United Kingdom")).toBeInTheDocument();
-    expect(screen.getByText("On-site — United Kingdom")).toBeInTheDocument();
-    expect(screen.getByText("Remote — anywhere else")).toBeInTheDocument();
-    expect(screen.getByText("On-site — anywhere else (visa sponsorship)")).toBeInTheDocument();
-    // France is off: no priority row (it still has its line in the grid below)
-    expect(screen.queryByTestId(/^job-priority-row-2-/)).toBeNull();
-    expect(screen.getAllByTestId(/^job-priority-row-/).map((r) => r.textContent)).not.toContain(expect.stringContaining("France"));
-    expect(screen.getByTestId("job-priority-select-0-remote")).toHaveValue("high");
-    expect(screen.getByTestId("job-priority-select-0-onsite")).toHaveValue("");
+    expect(screen.getByTestId("work-grid-priority-remote-GB")).toHaveValue("high"); // an older level is kept as it is
+    expect(screen.getByTestId("work-grid-priority-onsite-GB")).toHaveValue("");
+    expect(screen.queryByTestId("work-grid-priority-contract-GB")).toBeNull(); // Contract not ticked
+    expect(screen.queryByTestId("work-grid-priority-remote-FR")).toBeNull(); // France: nothing ticked
+    expect(screen.queryByTestId("priorities")).toBeNull(); // no separate section any more
   });
 
-  it("changing a select sends the WHOLE right_to_work with only that key changed", async () => {
-    const after = { ...BLOCK, countries: BLOCK.countries.map((c, i) => (i === 1 ? { ...c, onsite_priority: "highest" } : c)) };
-    updateProfileFields.mockResolvedValue(saved(after));
-    const onSaved = vi.fn();
-    render(<JobPriority rightToWork={BLOCK} onSaved={onSaved} />);
-
-    fireEvent.change(screen.getByTestId("job-priority-select-1-onsite"), { target: { value: "highest" } });
-
+  it("choosing a level sends the WHOLE right_to_work with only that key changed", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    fireEvent.change(screen.getByTestId("work-grid-priority-onsite-GB"), { target: { value: "medium" } });
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
-    expect(updateProfileFields).toHaveBeenCalledWith([{ path: "user_info.right_to_work", value: after }]);
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved(after)));
-    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    const block = updateProfileFields.mock.calls[0][0][0].value;
+    expect(block.countries[0]).toEqual({ ...BLOCK.countries[0], onsite_priority: "medium" });
+    expect(block.countries.slice(1)).toEqual(BLOCK.countries.slice(1));
+    expect(block.citizenship).toEqual(["IN"]);
   });
 
-  it("Not set removes the key and keeps everything else on the record", async () => {
-    updateProfileFields.mockResolvedValue(saved(BLOCK));
+  it("Priority… (not chosen) removes the key and keeps everything else on the record", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
     render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
-
-    fireEvent.change(screen.getByTestId("job-priority-select-0-remote"), { target: { value: "" } });
-
+    fireEvent.change(screen.getByTestId("work-grid-priority-remote-GB"), { target: { value: "" } });
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
-    const sent = updateProfileFields.mock.calls[0][0][0].value as typeof BLOCK;
-    expect(sent.countries[0]).toEqual({ country: "GB", remote_ok: true, onsite: "yes", note: "keep me" });
-    expect("remote_priority" in sent.countries[0]).toBe(false);
-    expect(sent.countries[1]).toEqual(BLOCK.countries[1]);
-    expect(sent.citizenship).toEqual(["IN"]);
+    const gb = updateProfileFields.mock.calls[0][0][0].value.countries[0];
+    expect(gb).not.toHaveProperty("remote_priority");
+    expect(gb.note).toBe("keep me");
   });
 
-  it("shows the error and leaves the page usable when a save fails", async () => {
-    updateProfileFields.mockRejectedValue(new Error("boom"));
+  it("shows the error and leaves the page usable when a priority save fails", async () => {
+    updateProfileFields.mockRejectedValueOnce(new Error("nope"));
     render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
-    fireEvent.change(screen.getByTestId("job-priority-select-0-onsite"), { target: { value: "low" } });
+    fireEvent.change(screen.getByTestId("work-grid-priority-onsite-GB"), { target: { value: "low" } });
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByTestId("job-priority-select-0-onsite")).not.toBeDisabled();
+    expect(screen.getByTestId("work-grid-priority-onsite-GB")).not.toBeDisabled();
   });
 
-  it("shows the hint to tick a place below when there are no places to rank", () => {
-    render(<JobPriority rightToWork={{ countries: [{ country: "FR", remote_ok: false, onsite: "no" }] }} onSaved={() => {}} />);
-    const hint = screen.getByTestId("job-priority-empty");
-    expect(hint).toHaveTextContent("Tick Remote or On-site for a place below first.");
-    expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.queryByRole("combobox")).toBeNull();
+  it("offers only Highest, Medium and Low (an older High stays listed until it is changed)", () => {
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    const fresh = within(screen.getByTestId("work-grid-priority-onsite-GB")).getAllByRole("option").map((o) => o.textContent);
+    expect(fresh).toEqual(["Priority…", "Highest", "Medium", "Low"]);
+    const older = within(screen.getByTestId("work-grid-priority-remote-GB")).getAllByRole("option").map((o) => o.textContent);
+    expect(older).toEqual(["Priority…", "Highest", "Medium", "Low", "High"]);
   });
 
-  it("shows the hint when nothing is saved at all", () => {
+  it("with nothing saved, it offers places to add and shows no priority box", () => {
     render(<JobPriority rightToWork={undefined} onSaved={() => {}} />);
-    expect(screen.getByTestId("job-priority-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("work-grid-add")).toBeInTheDocument();
+    expect(screen.getByTestId("work-grid-add-region-EUROPE")).toBeInTheDocument();
+    expect(screen.queryByTestId(/^work-grid-priority-/)).toBeNull();
   });
 
   it("the grid shows every place, all other countries last, with its ticks and visa answer", () => {
@@ -203,6 +193,33 @@ describe("JobPriority", () => {
     expect(within(cells[1]).getAllByRole("button").map((b) => b.textContent)).toEqual(["Need", "No need"]);
     expect(cells[2]).toHaveTextContent("Add salary");
     expect(within(screen.getByTestId("work-grid-row-ANY")).getAllByRole("cell")[2]).toHaveTextContent("Set per country");
+  });
+
+  it("a whole region can be added as one line; it sits after the countries and before all other countries", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    const block = { countries: [{ country: "ANY", remote_ok: true }, { country: "EUROPE", onsite: "only_if_sponsored" }, { country: "IN", remote_ok: true }] };
+    render(<JobPriority rightToWork={block} onSaved={() => {}} />);
+    expect(screen.getAllByTestId(/^work-grid-row-/).map((r) => r.getAttribute("data-testid"))).toEqual([
+      "work-grid-row-IN", "work-grid-row-EUROPE", "work-grid-row-ANY",
+    ]);
+    expect(within(screen.getByTestId("work-grid-row-EUROPE")).getByRole("rowheader")).toHaveTextContent("Europe");
+    // Europe is already a line, so it is not offered again; the Middle East is
+    expect(screen.queryByTestId("work-grid-add-region-EUROPE")).toBeNull();
+    fireEvent.click(screen.getByTestId("work-grid-add-region-MIDDLE_EAST"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "user_info.right_to_work", value: { countries: [...block.countries, { country: "MIDDLE_EAST" }] } },
+    ]));
+  });
+
+  it("contract gets its own priority next to its tick, saved as contract_priority (Europe: remote Highest, contract Low)", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    const block = { countries: [{ country: "EUROPE", remote_ok: true, remote_priority: "highest", contract_ok: true }] };
+    render(<JobPriority rightToWork={block} onSaved={() => {}} />);
+    expect(screen.getByTestId("work-grid-priority-remote-EUROPE")).toHaveValue("highest");
+    fireEvent.change(screen.getByTestId("work-grid-priority-contract-EUROPE"), { target: { value: "low" } });
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "user_info.right_to_work", value: { countries: [{ ...block.countries[0], contract_priority: "low" }] } },
+    ]));
   });
 });
 

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { getProfileEditHistory } from "@/lib/api";
 import type { ProfileEditHistoryRow } from "@/lib/api";
 import { actorName, formatEditedDate } from "@/lib/agent-edits";
+import { isStepFact } from "@/lib/step-facts";
 
 // ── Assistant notes ────────────────────────────────────────
 // "Things your AI assistant should know" — standing instructions, one short line
@@ -46,7 +47,8 @@ function pastLines(rows: ProfileEditHistoryRow[], current: string[]): PastLine[]
     if (!Array.isArray(r.value)) continue;
     for (const v of r.value) {
       if (typeof v !== "string" || !v.trim()) continue;
-      if (current.some((c) => sameLine(c, v)) || seen.some((s) => sameLine(s.text, v))) continue;
+      // A Memory step fact is shown (and taken back) in its step, never here.
+      if (isStepFact(v) || current.some((c) => sameLine(c, v)) || seen.some((s) => sameLine(s.text, v))) continue;
       seen.push({ text: v, by: r.set_by, at: r.set_at });
     }
   }

@@ -46,6 +46,7 @@ from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.answer_match import fits_country
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
+from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -107,6 +108,23 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
 def sha256_text(text: str) -> str:
     """The hash a CV is identified by: sha256 of its TEXT (PDF bytes are not stable)."""
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def answers_sha256(payload: dict[str, Any]) -> Optional[str]:
+    """What a ``form_filled`` put on the form, as one hash: every (question, answer) pair, case and spacing
+    folded, order-free. Never the ``source`` labels, the field count or the event id (owner 2026-10-26: a
+    re-recorded fill with the same answers kept going stale). None when the fill lists no readable answers."""
+    typed = payload.get("answers")
+    if not isinstance(typed, list) or not typed:
+        return None
+    def fold(text: Any) -> str:
+        return " ".join(str(text).split()).casefold()
+
+    pairs = sorted(
+        (fold(a["question"]), fold(a["answer"])) for a in typed if isinstance(a, dict) and "question" in a
+        and "answer" in a
+    )
+    return sha256_text(json.dumps(pairs)) if len(pairs) == len(typed) else None
 
 
 def hash_token(token: str) -> str:
@@ -453,6 +471,7 @@ async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: in
         "cover_letter_id": letter["id"] if letter else None,
         "cover_letter_sha256": sha256_text(letter["text"]) if letter else None,
         "form_filled_event_id": int(fills[0]["id"]) if fills else None,
+        "form_answers_sha256": answers_sha256(fills[0]["payload"]) if fills else None,
         "form_url": await latest_form_url(db, user_id, application_id),
         "profile_edit_id": await _assistant_edit_id(db, user_id),
     }
@@ -486,7 +505,10 @@ async def approval_stale(
         if stamp.get(key) != now_fp[key]:
             return "cover_letter"
     was_fill, fill = stamp.get("form_filled_event_id"), now_fp["form_filled_event_id"]
-    if isinstance(was_fill, int) and fill != was_fill:
+    # The content decides: a newer fill with the very same answers (a re-record, a refill) keeps the yes.
+    was_sum = stamp.get("form_answers_sha256")
+    same_answers = isinstance(was_sum, str) and was_sum == now_fp["form_answers_sha256"]
+    if isinstance(was_fill, int) and fill != was_fill and not same_answers:
         from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
         if fill is None or not await ready.refill_keeps_answers(db, user_id, app_row, was_fill, fill):
@@ -833,6 +855,7 @@ async def gate_facts(
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),
+        blank_unasked=await _blank_unasked(db, user_id, app_row),
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
@@ -850,6 +873,13 @@ async def _written_unapproved(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unapproved_written(db, user_id, app_row)
+
+
+async def _blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> tuple[str, ...]:
+    """The newest form's blank fields nobody asked the user about (``ready`` reads them)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return tuple(await ready.blank_unasked(db, user_id, app_row))
 
 
 async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -1010,7 +1040,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False,
+            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False, blank_unasked=(),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -1160,20 +1190,8 @@ def answer_problems(raw: Any) -> list[str]:
     return problems
 
 
-# ── G023: a sensitive answer the user did not agree to remember is hashed, never copied ──
-# Events and receipts are append-only (M3): a raw value written once could never be removed.
-
-
-def redacted_answer(item: dict[str, Any]) -> dict[str, Any]:
-    """What is stored for such an answer: the question and its non-value metadata (``source``,
-    ``key``), the sha256 of the value's UTF-8 text, and ``redacted: true``. Never the value."""
-    out: dict[str, Any] = {"question": str(item.get("question") or "")}
-    for extra in ("source", "key"):
-        if isinstance(item.get(extra), str) and item[extra]:
-            out[extra] = item[extra]
-    out["value_sha256"] = sha256_text(str(item.get("answer") or ""))
-    out["redacted"] = True
-    return out
+# ── G023 (retired 2026-10-26): sensitive answers were hashed, never copied. The owner chose to keep every
+# typed answer as typed so the card can show it; rows hashed before stay hashed (M3: append-only).
 
 
 def _sensitive_value(item: Any) -> bool:
@@ -1188,30 +1206,11 @@ def _sensitive_value(item: Any) -> bool:
 async def redact_unremembered(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], answers: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], int]:
-    """``(answers to store, how many were hashed)``. A sensitive answer is KEPT as typed only when
-    Job360 already holds it with the user's OK: its ``key`` is an item of this application's kit
-    (:func:`compute_answers` leaves out a sensitive value saved without remember consent) or the
-    question is one of the user's approved answers. Every other sensitive answer - said for this
-    form only - is stored as :func:`redacted_answer`. Loads the profile only when one is sensitive."""
-    if not any(_sensitive_value(a) for a in answers):
-        return answers, 0
-    from src.services.applications import ready  # noqa: PLC0415 - ready imports kit
-
-    profile, _country, blocks, _missing = await _answers_for(db, user_id, app_row)
-    have = {str(i["key"]) for block in blocks.values() for i in block}
-    company_key = ready._company_key(str(app_row.get("job_company") or ""))
-    out: list[dict[str, Any]] = []
-    hashed = 0
-    for a in answers:
-        if _sensitive_value(a) and not (
-            (isinstance(a.get("key"), str) and a["key"] in have)
-            or ready._approved_for(profile, str(a.get("question")), company_key) is not None
-        ):
-            out.append(redacted_answer(a))
-            hashed += 1
-        else:
-            out.append(a)
-    return out, hashed
+    """``(answers to store, how many were hashed)``. Owner decision 2026-10-26 ("yes, keep them"): every
+    answer typed into a form is kept as typed - salary, equality and consent included - so the card shows
+    it and the user can edit it; nothing is hashed any more. Rows hashed before stay hashed (question,
+    ``value_sha256``, ``redacted: true``); the ready card offers the user's own saved answer as a draft."""
+    return answers, 0
 
 
 async def _stored_answers(
@@ -1902,19 +1901,29 @@ def compute_answers(
             dropped.append(path)
     have = {i["key"] for block in out.values() for i in block}
     _mark_sensitive(out)
-    # No record for the job's country: the user's "ANY" record (every other country) answers it, so the
-    # assistant is not asked again. Its facts ride along as right_to_work.<country>.<field> items.
+    # No record for the job's country: its region's record (owner decision 2026-10-26), else the
+    # user's "ANY" record (every other country), answers it, so the assistant is not asked again.
+    # Its facts ride along as right_to_work.<country>.<field> items; a region's salary as salary.<country>.
     if country:
-        any_items = [i for i in out["right_to_work"] if i["key"].startswith("right_to_work.ANY.")]
-        if any_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
-            for item in any_items:
-                field = item["key"].rsplit(".", 1)[1]
-                out["right_to_work"].append(
-                    _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
-                          applies_via="ANY", **({"confirmed": False} if item.get("confirmed") is False else {}))
+        region = region_of(country)
+        for via in ([region] if region else []) + ["ANY"]:
+            via_items = [i for i in out["right_to_work"] if i["key"].startswith(f"right_to_work.{via}.")]
+            if via_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
+                for item in via_items:
+                    field = item["key"].rsplit(".", 1)[1]
+                    out["right_to_work"].append(
+                        _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
+                              applies_via=via, **({"confirmed": False} if item.get("confirmed") is False else {}))
+                    )
+                have = {i["key"] for block in out.values() for i in block}
+        if region and f"salary.{country}" not in have:
+            for item in [i for i in out["salary"] if i["key"] == f"salary.{region}"]:
+                out["salary"].append(
+                    _mk(f"salary.{country}", item["value"], "memory", item["saved_at"],
+                          applies_via=region, **({"confirmed": False} if item.get("confirmed") is False else {}))
                 )
             have = {i["key"] for block in out.values() for i in block}
-            _mark_sensitive(out)
+        _mark_sensitive(out)
     for block, items in out.items():
         for item in items:
             if _is_sensitive(block, str(item["key"])) and consented.get(_SENSITIVE_PATH.get(block, "")):
