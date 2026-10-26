@@ -6,6 +6,8 @@ import { getStats, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { RunProblems } from "@/components/needs-you/RunProblems";
+import { MorningCheck } from "@/components/needs-you/MorningCheck";
+import { BatchApplyPanel } from "@/components/needs-you/BatchApplyPanel";
 import { DutyStatus } from "@/components/home/DutyStatus";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
@@ -245,6 +247,8 @@ export function Home() {
           </header>
 
           <RunProblems />
+          {/* The morning check and Batch apply moved here from Needs you (owner, 2026-10-26). */}
+          <MorningCheck />
           <DutyStatus />
 
           {apps.status === "error" && (
@@ -258,6 +262,7 @@ export function Home() {
 
           {/* Lessons live on Home (owner, 2026-10-26), not on Profile. */}
           <LessonsList />
+          <BatchApplyPanel />
         </div>
 
         {showRail && (

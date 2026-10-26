@@ -5,6 +5,8 @@
  * `data/logs/` instead of vanishing when the user closes the tab. Best-effort
  * and fire-and-forget: it must NEVER throw or surface an error to the user.
  */
+import { stripSecretsFromUrl } from "./stripSecretsFromUrl";
+
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export type ClientLogLevel = "error" | "warning" | "info";
@@ -23,7 +25,7 @@ export function reportClientLog(payload: ClientLogPayload): void {
       message: payload.message.slice(0, 2000),
       stack: payload.stack?.slice(0, 4000),
       context: payload.context,
-      url: typeof window !== "undefined" ? window.location.href : undefined,
+      url: typeof window !== "undefined" ? stripSecretsFromUrl(window.location.href) : undefined,
     });
     void fetch(`${API}/api/client-log`, {
       method: "POST",

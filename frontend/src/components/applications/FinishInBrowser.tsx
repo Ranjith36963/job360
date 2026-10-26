@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
 
@@ -94,8 +94,9 @@ export function FinishInBrowser({
     return () => window.clearInterval(id);
   }, [shot, step]);
 
-  // Full-screen: Esc closes it, and the page behind it stops scrolling.
-  useEffect(() => {
+  // Full-screen: Esc closes it, and the page behind it stops scrolling. A layout effect, so the scroll lock is
+  // released in the same commit that closes full screen (a submit seen there), never a frame later.
+  useLayoutEffect(() => {
     if (!maximized) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMaximized(false);
