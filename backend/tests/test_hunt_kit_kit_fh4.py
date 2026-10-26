@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from tests._timing import best_of
+
 KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
 sys.path.insert(0, str(KIT_DIR))
 
@@ -409,10 +411,11 @@ def test_profession_hostile_markup_is_cheap_and_linear():
     def timed(n):
         page = _pf_page(sections={"tasks": "<p>Real body</p>" + "<div>" * n + "<p>deep</p>" + "<li>" * n + "x" * 100_000})
         http = _pf_http({_U1: page})
-        t0 = time.perf_counter()
-        jobs, _ = _run("profession", _row("profession", "itdev"), http)
-        assert len(jobs) == 1 and jobs[0]["description"].startswith("Real body")
-        return time.perf_counter() - t0
+
+        def once():
+            jobs, _ = _run("profession", _row("profession", "itdev"), http)
+            assert len(jobs) == 1 and jobs[0]["description"].startswith("Real body")
+        return best_of(once)[1]  # best of three: noise on a busy runner only adds time
 
     times = [timed(n) for n in (1500, 3000, 6000)]  # 1x, 2x, 4x
     assert max(times) < 1.0, times

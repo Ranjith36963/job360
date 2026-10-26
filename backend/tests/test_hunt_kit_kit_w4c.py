@@ -9,11 +9,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+
+from tests._timing import best_of
 
 KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
 sys.path.insert(0, str(KIT_DIR))
@@ -258,15 +259,12 @@ def test_joinup_missing_or_broken_next_data_fails_the_board_instead_of_reporting
 def test_joinup_hostile_markup_is_linear_and_loses_nothing():
     hit = {"title": "Real", "slug": "real-1", "startup": "S"}
     junk = "<script " * 40_000 + "<!--" * 40_000 + "<div " * 40_000
-    t0 = time.perf_counter()
-    jobs, _ = _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, _page([hit], junk))}))
-    assert [j["title"] for j in jobs] == ["Real"] and time.perf_counter() - t0 < 1.0
+    (jobs, _), elapsed = best_of(lambda: _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, _page([hit], junk))})))
+    assert [j["title"] for j in jobs] == ["Real"] and elapsed < 1.0
     # a doubling of the junk costs about a doubling of the time (no super-linear scan)
     def cost(n: int) -> float:
         page = _page([hit], "<script " * n + "<a " * n)
-        t = time.perf_counter()
-        _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, page)}))
-        return time.perf_counter() - t
+        return best_of(lambda: _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, page)})))[1]
     cost(1000)
     small, big = cost(20_000), cost(80_000)
     assert big < max(small * 12, 0.5)
@@ -275,10 +273,11 @@ def test_joinup_hostile_markup_is_linear_and_loses_nothing():
 def test_joinup_repeated_next_data_ids_in_one_unclosed_tag_are_linear():
     def cost(n: int) -> float:
         page = "<html><script " + 'id="__NEXT_DATA__" ' * n
-        t = time.perf_counter()
-        jobs, _ = _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, page)}))
-        assert jobs == []
-        return time.perf_counter() - t
+
+        def once():
+            jobs, _ = _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, page)}))
+            assert jobs == []
+        return best_of(once)[1]
     cost(1000)
     small, big = cost(25_000), cost(100_000)  # a span regex retried at every id costs ~16x for 4x the ids
     assert big < 1.0 and big < max(small * 8, 0.3)
