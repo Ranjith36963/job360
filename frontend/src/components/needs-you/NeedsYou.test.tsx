@@ -26,7 +26,7 @@ vi.mock("@/lib/api", () => ({
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
-vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
+vi.mock("./MorningCheck", () => ({ MorningCheck: () => <div data-testid="morning-check" /> }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
 // Approve CV has its own tests (CvToApprove.test.tsx).
 vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
@@ -94,6 +94,14 @@ beforeEach(() => {
 });
 
 describe("NeedsYou", () => {
+  it("no longer renders the morning check or the Batch apply panel (they moved to Home, owner 2026-10-26)", async () => {
+    setup([]);
+    render(<NeedsYou />);
+    await screen.findByTestId("needs-you-main");
+    expect(screen.queryByTestId("morning-check")).toBeNull();
+    expect(screen.queryByTestId("batch-apply-panel")).toBeNull();
+  });
+
   it("a CAPTCHA in Job360's browser offers Finish it here on the card; other asks do not", async () => {
     setup([
       { ...base, id: 3, question: "Your assistant got stuck: a CAPTCHA", status: "open", finish_here: true },

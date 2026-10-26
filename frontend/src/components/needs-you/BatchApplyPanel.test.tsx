@@ -90,13 +90,16 @@ describe("BatchApplyPanel", () => {
     expect(html.indexOf("batch-queue")).toBeLessThan(html.indexOf("batch-rules"));
   });
 
-  it("is placed beside the main column on the Needs-you page", async () => {
+  it("is not on the Needs-you page any more (it moved to Home, owner 2026-10-26)", async () => {
     listAsks.mockResolvedValue({ asks: [], open_count: 0 });
     render(<NeedsYou />);
-    const layout = await screen.findByTestId("needs-you-layout");
-    expect(layout.className).toContain("xl:grid-cols-");
-    expect(within(layout).getByTestId("needs-you-main")).toBeInTheDocument();
-    expect(within(layout).getByTestId("batch-apply-panel")).toBeInTheDocument();
+    await screen.findByTestId("needs-you-main");
+    expect(screen.queryByTestId("batch-apply-panel")).toBeNull();
+  });
+
+  it("is one full-width block with no side-column layout, so it stacks on a phone", () => {
+    render(<BatchApplyPanel />);
+    expect(screen.getByTestId("batch-apply-panel").className).not.toMatch(/xl:|grid-cols/);
   });
 
   describe("Your rules", () => {
@@ -135,9 +138,8 @@ describe("BatchApplyPanel", () => {
       expect(screen.getByTestId("batch-rules-link")).toBeInTheDocument();
     });
 
-    it("Needs you renders no rule inputs and links to /connect?tab=assistant", async () => {
-      listAsks.mockResolvedValue({ asks: [], open_count: 0 });
-      render(<NeedsYou />);
+    it("the panel renders no rule inputs and links to /connect?tab=assistant", async () => {
+      render(<BatchApplyPanel />);
       const panel = await screen.findByTestId("batch-apply-panel");
       await screen.findByTestId("batch-row-11");
       expect(within(panel).getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=assistant");
