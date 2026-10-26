@@ -24,7 +24,10 @@ import {
   P_EVERY,
   P_HUNT_EVERY,
   P_INBOX,
+  P_PC_ON,
   P_PEOPLE_HUNT,
+  PC_ON_DAYS,
+  PC_ON_HELP,
   PEOPLE_HUNT_HELP,
   P_SCORE,
   PREF_HISTORY_PATHS,
@@ -33,6 +36,8 @@ import {
   huntText,
   inboxKey,
   mergeHistory,
+  pcOnOf,
+  pcOnText,
   peopleHuntLastText,
   settingAutoEmails,
   settingOutreachSend,
@@ -115,6 +120,9 @@ export function AssistantTab() {
   const [busy, setBusy] = useState(false);
   const [score, setScore] = useState("");
   const [hunt, setHunt] = useState("");
+  const [pcDays, setPcDays] = useState<string[]>([]);
+  const [pcFrom, setPcFrom] = useState("");
+  const [pcTo, setPcTo] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
   const enterDone = useRef(false);
@@ -137,6 +145,10 @@ export function AssistantTab() {
     setView(v);
     setScore(settingScore(v.apply_min_score) == null ? "" : String(settingScore(v.apply_min_score)));
     setHunt(settingScore(v.hunt_every_hours) == null ? "" : String(settingScore(v.hunt_every_hours)));
+    const pc = pcOnOf(v.pc_on_hours);
+    setPcDays(pc.days);
+    setPcFrom(pc.from);
+    setPcTo(pc.to);
   }, []);
 
   const load = useCallback(async () => {
@@ -225,6 +237,19 @@ export function AssistantTab() {
   const savedScore: number | null = settingScore(view.apply_min_score);
   const savedHunt: number | null = settingScore(view.hunt_every_hours);
   const peopleHunt = settingAutoEmails(view.people_hunt);
+  const savedPc = pcOnOf(view.pc_on_hours);
+  const pcSet = savedPc.days.length > 0 && savedPc.from !== "" && savedPc.to !== "";
+  function savePc() {
+    if (pcDays.length === 0 || !pcFrom || !pcTo) {
+      toast.error("Pick at least one day and both times, or press Clear for any time. Not saved.");
+      return;
+    }
+    if (pcFrom === pcTo) {
+      toast.error("The two times must be different. Not saved.");
+      return;
+    }
+    void save(P_PC_ON, { days: pcDays, from: pcFrom, to: pcTo });
+  }
   const liveState = { apply_min_score: savedScore, above_line: aboveLine, below_line: belowLine, submit_mode };
   function commitScore() {
     const t = score.trim();
@@ -427,6 +452,78 @@ export function AssistantTab() {
           </Row>
         </Section>
 
+        <Section title="Your own browser" hint="Job360's browser goes first">
+          <Row title="My PC-on time" sub={PC_ON_HELP}>
+            <div className="flex flex-wrap items-center gap-2" data-testid="pc-on-row">
+              <div role="group" aria-label="Days your PC is on" className="flex flex-wrap gap-1">
+                {PC_ON_DAYS.map((d) => {
+                  const on = pcDays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={on}
+                      data-testid={`pc-on-day-${d}`}
+                      disabled={busy}
+                      onClick={() => setPcDays(on ? pcDays.filter((x) => x !== d) : [...pcDays, d])}
+                      className={cn(
+                        "min-h-11 rounded-lg border border-border px-2.5 text-xs font-medium capitalize md:min-h-9",
+                        on ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+                      )}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className="flex items-center gap-1.5 text-[13px]">
+                From
+                <input
+                  type="time"
+                  aria-label="PC on from"
+                  data-testid="pc-on-from"
+                  value={pcFrom}
+                  disabled={busy}
+                  onChange={(e) => setPcFrom(e.target.value)}
+                  className="min-h-11 rounded-lg border border-border bg-card px-2 font-mono text-sm md:min-h-9"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-[13px]">
+                to
+                <input
+                  type="time"
+                  aria-label="PC on to"
+                  data-testid="pc-on-to"
+                  value={pcTo}
+                  disabled={busy}
+                  onChange={(e) => setPcTo(e.target.value)}
+                  className="min-h-11 rounded-lg border border-border bg-card px-2 font-mono text-sm md:min-h-9"
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="pc-on-save"
+                disabled={busy}
+                onClick={savePc}
+                className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+              >
+                Save
+              </button>
+              {pcSet && (
+                <button
+                  type="button"
+                  data-testid="pc-on-clear"
+                  disabled={busy}
+                  onClick={() => void save(P_PC_ON, null)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </Row>
+        </Section>
+
         <Section title="Employer emails" hint="Sent in your name by your assistant">
           <Row title="Automatic employer emails" sub={AUTO_EMAILS_HELP}>
             <button
@@ -580,6 +677,7 @@ export function AssistantTab() {
                 ...(inbox ? [["Gmail check", [INBOX_MODES.find((m) => m.value === inbox)?.label, everyText(every)].filter(Boolean).join(", ")]] : []),
                 ...(savedHunt !== null ? [["Job hunt", huntText(savedHunt)]] : []),
                 ...(peopleHunt ? [["People hunt", "On"]] : []),
+                ...(pcSet ? [["PC on", pcOnText(view.pc_on_hours?.value)]] : []),
               ] as [string, string][]
             ).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3">

@@ -31,7 +31,7 @@ above, and below, the line; `submit_mode` (confirm | auto_when_sure),
 to ONE company in that many days; null = no limit), `weekly_cap` (Monday-Sunday in the user's timezone; null = none),
 `min_gap_minutes` (0-240 minutes between submits, whole seconds allowed; null = none), `apply_hours` ({from, to} "HH:MM" in the user's timezone; null = any time),
 `auto_grant_count` / `auto_grant_until` ("auto for my next N until <time>"), `paused_until` ("" | "until_resumed" | a time),
-`outreach_send` (draft_only | auto: may you press Send on an outreach email; empty = draft_only), `hunt_every_hours` (null = no scheduled hunt), `people_hunt` (true = your scheduled task finds people for new applications)
+`outreach_send` (draft_only | auto: may you press Send on an outreach email; empty = draft_only), `hunt_every_hours` (null = no scheduled hunt), `people_hunt` (true = your scheduled task finds people for new applications), `pc_on_hours` ({days, from, to}: when the user's PC is on; null = any time)
 and `pause_reason` has a `value` (what was chosen, empty = not chosen) and an
 `effective` (the safe default filled in: no line, ask, ask, confirm, no cap,
 not paused, draft only) - OBEY `effective`. `paused: true` means stop all apply work.
@@ -44,7 +44,7 @@ confirmed on the Job360 website - do not ask again, and do not act as if they
 were applied. Read `settings` before any apply step and call `check_submit`
 before the final submit.
 
-Assistant settings are eighteen paths (`assistant_settings.auto_employer_emails` is under Automatic employer emails and `assistant_settings.outreach_send` under Outreach below): `assistant_settings.hunt_every_hours` (hunt every N hours, 1-168; null or 0 = off), `assistant_settings.people_hunt` (true | false), `assistant_settings.apply_min_score`
+Assistant settings are nineteen paths (`assistant_settings.auto_employer_emails` is under Automatic employer emails and `assistant_settings.outreach_send` under Outreach below): `assistant_settings.hunt_every_hours` (hunt every N hours, 1-168; null or 0 = off), `assistant_settings.people_hunt` (true | false), `assistant_settings.pc_on_hours` ({days: mon..sun, from, to} "HH:MM"; null = any time; always applies at once), `assistant_settings.apply_min_score`
 (the score line, whole number 0-100), `assistant_settings.above_line` and
 `assistant_settings.below_line` (ask | auto | skip), `assistant_settings.submit_mode` (confirm |
 auto_when_sure), `assistant_settings.daily_cap` (whole number >= 1, or null

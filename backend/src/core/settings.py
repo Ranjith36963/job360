@@ -943,6 +943,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.hunt_every_hours",
     # Owner 2026-10-24 - find people to reach for new applications on the schedule (true / false). On is riskier.
     "assistant_settings.people_hunt",
+    # Owner 2026-10-25 - when the user's PC is on: {days, from, to}; null = any time. Always safer.
+    "assistant_settings.pc_on_hours",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

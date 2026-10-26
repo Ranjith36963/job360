@@ -4549,6 +4549,7 @@ export interface components {
             /** Paused */
             paused: boolean;
             paused_until: components["schemas"]["SettingFieldOut"];
+            pc_on_hours: components["schemas"]["SettingFieldOut"];
             people_hunt: components["schemas"]["SettingFieldOut"];
             /** People Hunt Last At */
             people_hunt_last_at?: string | null;
