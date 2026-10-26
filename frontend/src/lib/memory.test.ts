@@ -10,6 +10,7 @@ describe("job targets (owner, 2026-10-26)", () => {
   it("asks roles, several levels and several years ranges, and no sanctions question", () => {
     expect(targetRows().map((r) => r.id)).toEqual([
       "preferences.target_job_titles", "preferences.experience_levels", "preferences.experience_ranges",
+      "preferences.avoid_companies",
     ]);
     expect(rtwTopRows().map((r) => r.id)).toEqual([`${RTW}.citizenship`]);
   });

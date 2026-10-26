@@ -24,6 +24,7 @@ export const SALARY = "preferences.salary_by_country";
 // work arrangement, what you look for and dealbreakers left (Where you'll work covers them).
 export const TARGET_PATHS = [
   "preferences.target_job_titles", "preferences.experience_levels", "preferences.experience_ranges",
+  "preferences.avoid_companies",
 ] as const;
 export const MEMORY_PATHS = [CONTACT, RTW, LOGISTICS, LANGUAGES, EQUALITY, ANSWERS, SALARY, ...TARGET_PATHS] as const;
 /** The backend's EXPERIENCE_LEVEL_CHOICES (services/profile/models.py), in order. */
@@ -254,6 +255,8 @@ export function targetRows(): RowSpec[] {
     row("target_job_titles", "Roles", "textarea", { placeholder: "One per line" }),
     row("experience_levels", "Levels", "levels", { options: EXPERIENCE_OPTIONS }),
     row("experience_ranges", "Years of experience", "ranges"),
+    // Owner decision 2026-10-26: the never-apply list lives here only (it left Connect).
+    row("avoid_companies", "Never apply to", "textarea", { placeholder: "One company per line" }),
   ];
 }
 
