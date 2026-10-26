@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   keepProfileEdit: vi.fn(),
   takeBackProfileEdit: vi.fn(),
   getProfileEditHistory: vi.fn(),
+  listLessons: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
@@ -98,6 +99,7 @@ function happy({ events = [event(1, "agent:Claude"), event(2, "web")], asks = []
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  api.listLessons.mockResolvedValue({ lessons: [], total: 0 });
 });
 
 describe("Home", () => {
@@ -242,101 +244,23 @@ describe("Home", () => {
     expect(screen.getByTestId("home-retry")).toBeInTheDocument();
   });
 
-  it("shows 'Things your AI assistant should know' ABOVE the sentence, saving the whole preferences block", async () => {
+  it("Home carries no assistant-instruction editor (they live on Connect your assistant)", async () => {
     happy();
-    api.uploadProfile.mockResolvedValue({
-      preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },
-      agent_edits: [],
-    });
-    render(<Home />);
-    const card = await screen.findByTestId("home-assistant-notes");
-    expect(card).toHaveTextContent("Things your AI assistant should know");
-    expect(card).toHaveTextContent("Set instructions for your AI assistant");
-    expect(card).toHaveTextContent("Never apply to agencies");
-    const h1 = await screen.findByTestId("home-sentence");
-    expect(card.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    fireEvent.change(screen.getByLabelText("New note for your assistant"), { target: { value: "No night shifts" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
-    await waitFor(() => expect(api.uploadProfile).toHaveBeenCalledTimes(1));
-    const [cv, prefs] = api.uploadProfile.mock.calls[0];
-    expect(cv).toBeNull();
-    expect(prefs.assistant_notes).toEqual(["Never apply to agencies", "No night shifts"]);
-  });
-
-  it("Take back waits for a note save still in flight, so that save cannot undo it", async () => {
-    happy();
-    const agentEdit = {
-      path: "preferences.assistant_notes",
-      value: ["Never apply to agencies"],
-      previous_value: [],
-      set_by: "agent:Claude",
-      set_at: NOW,
-    };
-    api.getProfile.mockResolvedValue({
-      preferences: { assistant_notes: ["Never apply to agencies"] },
-      agent_edits: [agentEdit],
-    });
-    let finishSave: (p: unknown) => void = () => {};
-    api.uploadProfile.mockImplementation(() => new Promise((resolve) => (finishSave = resolve)));
-    api.takeBackProfileEdit.mockResolvedValue({ preferences: { assistant_notes: [] }, agent_edits: [] });
-
-    render(<Home />);
-    await screen.findByTestId("home-assistant-notes");
-    fireEvent.change(screen.getByLabelText("New note for your assistant"), { target: { value: "No night shifts" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
-    await waitFor(() => expect(api.uploadProfile).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(screen.getByTestId("take-back"));
-    // The save is still in flight: Take back has not gone out yet.
-    await new Promise((r) => setTimeout(r, 0));
-    expect(api.takeBackProfileEdit).not.toHaveBeenCalled();
-    // Until Take back answers, no edit can start from the list it is changing.
-    expect(screen.getByLabelText("New note for your assistant")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Remove note: No night shifts" })).toBeDisabled();
-
-    finishSave({
-      preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },
-      agent_edits: [agentEdit],
-    });
-    await waitFor(() => expect(api.takeBackProfileEdit).toHaveBeenCalledWith("preferences.assistant_notes"));
-    // Take back landed last, and the screen shows its answer.
-    await waitFor(() =>
-      expect(screen.getByTestId("home-assistant-notes")).not.toHaveTextContent("Never apply to agencies"),
-    );
-    expect(api.uploadProfile).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText("New note for your assistant")).toBeEnabled();
-  });
-
-  it("a failed Take back unlocks the notes again", async () => {
-    happy();
-    api.getProfile.mockResolvedValue({
-      preferences: { assistant_notes: ["Never apply to agencies"] },
-      agent_edits: [
-        {
-          path: "preferences.assistant_notes",
-          value: ["Never apply to agencies"],
-          previous_value: [],
-          set_by: "agent:Claude",
-          set_at: NOW,
-        },
-      ],
-    });
-    api.takeBackProfileEdit.mockRejectedValue(new Error("500"));
-    render(<Home />);
-    await screen.findByTestId("home-assistant-notes");
-    fireEvent.click(screen.getByTestId("take-back"));
-    await waitFor(() => expect(api.takeBackProfileEdit).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByLabelText("New note for your assistant")).toBeEnabled());
-    expect(screen.getByTestId("home-assistant-notes")).toHaveTextContent("Never apply to agencies");
-  });
-
-  it("no profile yet: the notes card is simply absent", async () => {
-    happy();
-    api.getProfile.mockRejectedValue(new Error("404"));
     render(<Home />);
     await screen.findByTestId("home-sentence");
-    await screen.findByTestId("home-feed");
-    expect(screen.queryByTestId("home-assistant-notes")).toBeNull();
+    expect(screen.queryByTestId("assistant-notes")).toBeNull();
+    expect(screen.queryByLabelText("New note for your assistant")).toBeNull();
+  });
+});
+
+describe("Home lessons", () => {
+  it("shows the Lessons section on Home (moved from Profile)", async () => {
+    api.listLessons.mockResolvedValue({
+      lessons: [{ application_id: 8282, detail: "Ask about sponsorship first.", job_title: "AI Engineer", job_company: "Acme", occurred_at: "2026-10-18T10:00:00+00:00" }],
+      total: 1,
+    });
+    render(<Home />);
+    expect(await screen.findByText("Ask about sponsorship first.")).toBeInTheDocument();
+    expect(api.listLessons).toHaveBeenCalled();
   });
 });

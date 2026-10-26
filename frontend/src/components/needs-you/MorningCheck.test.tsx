@@ -76,8 +76,7 @@ describe("MorningCheck", () => {
     expect(strip).toHaveTextContent("Score line not set");
     expect(screen.queryByTestId("mc-below")).toBeNull();
     expect(screen.getByTestId("mc-always-asks")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("mc-score-line-set"));
-    expect(screen.getByTestId("mc-score-input")).toHaveValue(null);
+    expect(screen.getByTestId("mc-score-line-set")).toHaveAttribute("href", "/connect?tab=assistant");
   });
 
   it("paused with no limit: '4 today', who and when", async () => {
@@ -147,52 +146,39 @@ describe("MorningCheck", () => {
 });
 
 describe("MorningCheck inline editor", () => {
+  // Owner rule 2026-10-26: every assistant setting lives on /connect. The strip only
+  // reports; Change is a link, and nothing here can write a setting.
+  const HREF = "/connect?tab=assistant";
+  const noEditor = () => {
+    for (const id of ["mc-editor", "mc-score-input", "mc-batch-on", "mc-batch-off", "mc-save", "mc-cancel"]) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+  };
+
   it("Change opens the editor with the saved values; Cancel closes it without a write", async () => {
     render(<MorningCheck />);
     await screen.findByTestId("mc-strip");
-    expect(screen.queryByTestId("mc-editor")).toBeNull();
+    expect(screen.getByTestId("mc-edit")).toHaveAttribute("href", HREF);
     fireEvent.click(screen.getByTestId("mc-edit"));
-    expect(screen.getByTestId("mc-score-input")).toHaveValue(75);
-    expect(screen.getByTestId("mc-batch-off")).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByTestId("mc-below-ask")).toBeNull();
-    expect(screen.queryByTestId("mc-submit-confirm")).toBeNull();
-    fireEvent.click(screen.getByTestId("mc-cancel"));
-    expect(screen.queryByTestId("mc-editor")).toBeNull();
+    noEditor();
     expect(updateProfileFields).not.toHaveBeenCalled();
   });
 
   it("Batch auto apply ON writes both halves; the strip re-reads", async () => {
+    getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure" }));
     render(<MorningCheck />);
-    await screen.findByTestId("mc-strip");
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "80" } });
-    fireEvent.click(screen.getByTestId("mc-batch-on"));
-    getMorningCheck.mockResolvedValue(payload({ apply_min_score: 80, above_line: "auto", submit_mode: "auto_when_sure" }));
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
-    expect(updateProfileFields).toHaveBeenCalledWith([
-      { path: "assistant_settings.apply_min_score", value: 80 },
-      { path: "assistant_settings.above_line", value: "auto" },
-      { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
-    ]);
-    await waitFor(() => expect(screen.queryByTestId("mc-editor")).toBeNull());
-    expect(toastSuccess).toHaveBeenCalledWith("Saved.");
-    await waitFor(() => expect(screen.getByTestId("mc-strip")).toHaveTextContent("Score line 80"));
-    expect(screen.getByTestId("mc-strip")).toHaveTextContent("Batch auto apply: on");
+    const strip = await screen.findByTestId("mc-strip");
+    expect(strip).toHaveTextContent("Batch auto apply: on");
+    noEditor();
+    expect(updateProfileFields).not.toHaveBeenCalled();
   });
 
   it("Batch auto apply OFF writes ask + confirm back", async () => {
-    getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure" }));
     render(<MorningCheck />);
-    await screen.findByTestId("mc-strip");
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    expect(screen.getByTestId("mc-batch-on")).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(screen.getByTestId("mc-batch-off"));
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
-      { path: "assistant_settings.above_line", value: "ask" },
-      { path: "assistant_settings.submit_mode", value: "confirm" },
-    ]));
+    const strip = await screen.findByTestId("mc-strip");
+    expect(strip).toHaveTextContent("Batch auto apply: off");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(updateProfileFields).not.toHaveBeenCalled();
   });
 
   it("an older below-line value is turned into 'dropped' by the user's own Save", async () => {
@@ -200,59 +186,39 @@ describe("MorningCheck inline editor", () => {
     render(<MorningCheck />);
     await screen.findByTestId("mc-strip");
     fireEvent.click(screen.getByTestId("mc-edit"));
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
-      { path: "assistant_settings.below_line", value: "skip" },
-    ]));
+    expect(updateProfileFields).not.toHaveBeenCalled();
   });
 
   it("a re-read mid-edit never turns an assistant's newer change into a user edit", async () => {
     render(<MorningCheck />);
     await screen.findByTestId("mc-strip");
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    // The assistant flips above_line to auto; a Send below re-reads the strip.
-    getMorningCheck.mockResolvedValue(payload({ above_line: "auto" }));
+    getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure" }));
     window.dispatchEvent(new CustomEvent("job360:ready-changed"));
-    await waitFor(() => expect(getMorningCheck).toHaveBeenCalledTimes(2));
-    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "60" } });
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_min_score", value: 60 }]));
+    await waitFor(() => expect(screen.getByTestId("mc-strip")).toHaveTextContent("Batch auto apply: on"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
   });
 
   it("a blank score line saves null (back to not set)", async () => {
+    getMorningCheck.mockResolvedValue(payload({ apply_min_score: null }));
     render(<MorningCheck />);
     await screen.findByTestId("mc-strip");
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "" } });
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_min_score", value: null }]));
+    expect(screen.getByTestId("mc-score-line-set")).toHaveAttribute("href", HREF);
+    noEditor();
   });
 
   it("a bad score line is refused before any write", async () => {
     render(<MorningCheck />);
     await screen.findByTestId("mc-strip");
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "101" } });
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Score line must be a whole number from 0 to 100. Not saved."));
+    expect(screen.queryByRole("spinbutton")).toBeNull();
     expect(updateProfileFields).not.toHaveBeenCalled();
-    expect(screen.getByTestId("mc-editor")).toBeInTheDocument();
   });
 
   it("Save with nothing changed just closes; a failed save says so and stays open", async () => {
     render(<MorningCheck />);
     await screen.findByTestId("mc-strip");
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(screen.queryByTestId("mc-editor")).toBeNull());
+    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
     expect(updateProfileFields).not.toHaveBeenCalled();
-
-    updateProfileFields.mockRejectedValueOnce(new Error("down"));
-    fireEvent.click(screen.getByTestId("mc-edit"));
-    fireEvent.click(screen.getByTestId("mc-batch-on"));
-    fireEvent.click(screen.getByTestId("mc-save"));
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not save. Try again."));
-    expect(screen.getByTestId("mc-editor")).toBeInTheDocument();
   });
 });
 

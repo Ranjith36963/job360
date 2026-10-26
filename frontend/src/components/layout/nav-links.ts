@@ -7,6 +7,7 @@ import {
   BarChart3,
   MessageCircleQuestion,
   Users,
+  Brain,
   Plug,
   CircleUser,
   type LucideIcon,
@@ -17,10 +18,11 @@ import {
 // and the mission sweep removed Channels/notifications. Job360 never sources
 // or ranks jobs (VISION rule 4), so there is no catalog to browse either.
 //
-// Owner's final sketch, 2026-10-26: Needs you, Home, Jobs in, Applications,
-// Outreach (> People), Receipts, Stats, Profile (> Memory), Connect your
-// assistant, Account. There is no Settings item: the old settings pages moved
-// to /account and /connect. Sub-items show indented under their parent.
+// Owner, 2026-10-26: Needs you, Home, Jobs in, Applications, Outreach,
+// Receipts, Stats, Profile, Memory, Connect your assistant, Account - every one
+// a top-level item. Outreach IS the people page (no People sub-item); Memory
+// has its own brain icon. There is no Settings item: the old settings pages
+// moved to /account and /connect. `children` stays for a future sub-item.
 export type NavLink = {
   href: string;
   label: string;
@@ -33,20 +35,11 @@ export const NAV_LINKS: readonly NavLink[] = [
   { href: "/", label: "Home", icon: House },
   { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
-  {
-    href: "/outreach/people",
-    label: "Outreach",
-    icon: Users,
-    children: [{ href: "/outreach/people", label: "People" }],
-  },
+  { href: "/outreach/people", label: "Outreach", icon: Users },
   { href: "/receipts", label: "Receipts", icon: Receipt },
   { href: "/stats", label: "Stats", icon: BarChart3 },
-  {
-    href: "/profile",
-    label: "Profile",
-    icon: User,
-    children: [{ href: "/profile/memory", label: "Memory" }],
-  },
+  { href: "/profile", label: "Profile", icon: User },
+  { href: "/profile/memory", label: "Memory", icon: Brain },
   { href: "/connect", label: "Connect your assistant", icon: Plug },
   { href: "/account", label: "Account", icon: CircleUser },
 ];
@@ -81,9 +74,10 @@ export function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-/** A parent lights up on its own pages, not while one of its sub-items does
- *  (two active links at once looks broken). Outreach and its only sub-item,
- *  People, share an address, so People is the one that lights up there. */
+/** A link lights up on its own pages, not while a deeper link does (Profile stays dark on
+ *  /profile/memory, which is Memory's): two active links at once looks broken. */
 export function isParentActive(pathname: string, link: NavLink): boolean {
-  return isNavActive(pathname, link.href) && !(link.children ?? []).some((c) => isNavActive(pathname, c.href));
+  if (!isNavActive(pathname, link.href)) return false;
+  const deeper = [...NAV_LINKS.map((l) => l.href), ...(link.children ?? []).map((c) => c.href)];
+  return !deeper.some((h) => h !== link.href && h.startsWith(link.href + "/") && isNavActive(pathname, h));
 }

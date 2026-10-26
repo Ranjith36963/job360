@@ -29,7 +29,7 @@ describe("JobPriority", () => {
 
   it("renders a row per remote / on-site place, in record order, and none for places that are off", () => {
     render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
-    expect(screen.getByText("Job priority")).toBeInTheDocument();
+    expect(screen.getByText("Priorities")).toBeInTheDocument();
     expect(screen.getByText("Remote — United Kingdom")).toBeInTheDocument();
     expect(screen.getByText("On-site — United Kingdom")).toBeInTheDocument();
     expect(screen.getByText("Remote — anywhere else")).toBeInTheDocument();
@@ -203,6 +203,30 @@ describe("JobPriority", () => {
     expect(within(cells[1]).getAllByRole("button").map((b) => b.textContent)).toEqual(["Need", "No need"]);
     expect(cells[2]).toHaveTextContent("Add salary");
     expect(within(screen.getByTestId("work-grid-row-ANY")).getAllByRole("cell")[2]).toHaveTextContent("Set per country");
+  });
+
+  it("a whole region can be added as one line; it sits after the countries and before all other countries", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    const block = { countries: [{ country: "ANY", remote_ok: true }, { country: "EUROPE", onsite: "only_if_sponsored" }, { country: "IN", remote_ok: true }] };
+    render(<JobPriority rightToWork={block} onSaved={() => {}} />);
+    expect(screen.getAllByTestId(/^work-grid-row-/).map((r) => r.getAttribute("data-testid"))).toEqual([
+      "work-grid-row-IN", "work-grid-row-EUROPE", "work-grid-row-ANY",
+    ]);
+    expect(within(screen.getByTestId("work-grid-row-EUROPE")).getByRole("rowheader")).toHaveTextContent("Europe");
+    // Europe is already a line, so it is not offered again; the Middle East is
+    expect(screen.queryByTestId("work-grid-add-region-EUROPE")).toBeNull();
+    fireEvent.click(screen.getByTestId("work-grid-add-region-MIDDLE_EAST"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "user_info.right_to_work", value: { countries: [...block.countries, { country: "MIDDLE_EAST" }] } },
+    ]));
+  });
+
+  it("Priorities comes after the table (the table is the overall; Priorities ranks its places)", () => {
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    const grid = screen.getByTestId("work-grid");
+    const priorities = screen.getByTestId("priorities");
+    expect(grid.compareDocumentPosition(priorities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(priorities).getByText("Remote — United Kingdom")).toBeInTheDocument();
   });
 });
 
