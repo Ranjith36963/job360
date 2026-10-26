@@ -425,3 +425,12 @@ async def test_a_phone_saved_on_the_web_before_the_fill_is_a_saved_answer(
         card = (await _confirm(client, app_id, 0, fill, "+44 7700 900123")).json()
         assert _changed(card) == [("Phone", "+44 7700 900123", "owner_edit")]
         assert _changed_texts(card)[0].startswith("You changed an answer: Phone")
+
+
+def test_each_answer_says_verify_or_confirm():
+    """Owner 2026-10-26: a written answer (an essay for THIS job) is confirmed each time; every reused
+    fact - memory, profile, an approved answer, a guess at one - is verified once in Memory."""
+    from src.services.applications.ready import answer_check
+
+    assert answer_check({"source": "written"}) == "confirm"
+    assert [answer_check({"source": s}) for s in ("memory", "profile", "approved", "guessed")] == ["verify"] * 4
