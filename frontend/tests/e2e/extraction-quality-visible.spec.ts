@@ -130,7 +130,7 @@ test.describe("Extraction quality is visible to the user", () => {
     await expect(warning).toContainText(/connect your assistant/i);
     await expect(
       warning.getByRole("link", { name: /connect your assistant/i })
-    ).toHaveAttribute("href", "/settings/connect");
+    ).toHaveAttribute("href", "/connect");
     // The specific problems are shown so the warning is actionable.
     await expect(warning).toContainText(/no job titles/i);
   });
