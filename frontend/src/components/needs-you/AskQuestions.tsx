@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { Textarea } from "@/components/ui/textarea";
-import { AnswerText } from "@/components/AnswerText";
+import { AnswerValue, DraftMissing } from "./AnswerValue";
+import { looksLikePlaceholder } from "@/lib/answer-text";
 import { initialRow, isSensitiveQuestion, isVerifiedSource } from "@/lib/job-cards";
 import type { MergedRow } from "@/lib/job-cards";
 
@@ -45,13 +46,14 @@ export function AskQuestions({
         const saved = isVerifiedSource(q.source) && q.answer.trim() !== "" && row.value === q.answer;
         const state = row.ok || saved ? "Verified" : "Guessed";
         const sensitive = isSensitiveQuestion(q);
+        const stub = !q.choices?.length && !open && looksLikePlaceholder(q.question, row.value);
         return (
           <div key={id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`q-${askId}-${q.key}`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <p className="whitespace-pre-wrap text-sm font-medium">{q.question}</p>
               <span className="flex flex-wrap gap-1">
                 {sensitive && !row.ok && <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${warn}`}>Needs your click</span>}
-                {!pending && (
+                {!pending && !stub && (
                   <span data-testid={`q-state-${askId}-${q.key}`}
                     className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${state === "Verified" ? good : warn}`}>
                     {state}
@@ -84,15 +86,19 @@ export function AskQuestions({
               </>
             ) : (
               <>
-                <p className="whitespace-pre-wrap text-sm"><AnswerText value={row.value} /></p>
+                <div className="text-sm">
+                  {stub ? <DraftMissing id={`${askId}-${q.key}`} value={row.value} /> : <AnswerValue id={`${askId}-${q.key}`} value={row.value} />}
+                </div>
                 <div className="flex gap-2">
                   <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id)}>
                     Edit
                   </button>
-                  <button type="button" disabled={busy || row.ok} data-testid={`q-ok-${askId}-${q.key}`}
-                    className={row.ok ? picked : btn} onClick={() => onChange(id, { value: row.value, ok: true })}>
-                    {row.ok ? "Checked" : "Looks right"}
-                  </button>
+                  {!stub && (
+                    <button type="button" disabled={busy || row.ok} data-testid={`q-ok-${askId}-${q.key}`}
+                      className={row.ok ? picked : btn} onClick={() => onChange(id, { value: row.value, ok: true })}>
+                      {row.ok ? "Checked" : "Looks right"}
+                    </button>
+                  )}
                 </div>
               </>
             )}

@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 import { readyBrowser } from "@/lib/browser-contract";
 import { BrowserReason } from "./BrowserReason";
 import { AnswerText } from "@/components/AnswerText";
+import { AnswerValue, DraftMissing } from "./AnswerValue";
+import { looksLikePlaceholder } from "@/lib/answer-text";
 
 // Every string here (company, title, questions, answers, flags) was written by
 // the user's assistants - untrusted. Only ever rendered as React text nodes.
@@ -58,6 +60,9 @@ export function ReadyCard({
   const changed = card.answers.filter((a) => a.changed_to != null && isOwnerEdit(a)).length;
   const savedTyped = card.answers.filter((a) => a.changed_to != null && !isOwnerEdit(a)).length;
 
+  // Answers that only describe a draft: they count as needing attention here (the backend gate is unchanged).
+  const missing = card.answers.filter(isDraftStub).length;
+
   async function decide(send: boolean) {
     setBusy(true);
     try {
@@ -94,8 +99,19 @@ export function ReadyCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <p className="font-mono text-xs text-faint">{readyEyebrow(card)}</p>
-          <h3 className="font-heading text-2xl leading-tight">{card.job_title || "Untitled role"}</h3>
-          <p className="text-sm text-muted-foreground">{readySub(card)}</p>
+          <h3 className="font-heading text-2xl leading-tight">
+            <Link href={`/applications/${card.application_id}`} data-testid={`title-link-${card.application_id}`}
+              className="underline-offset-2 hover:underline">
+              {card.job_title || "Untitled role"}
+            </Link>
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            {card.job_company ? (
+              <Link href={`/applications/${card.application_id}`} data-testid={`company-link-${card.application_id}`}
+                className="underline-offset-2 hover:underline">{card.job_company}</Link>
+            ) : null}
+            {readySub(card).slice(card.job_company ? card.job_company.length : 0) || (card.job_company ? "" : readySub(card))}
+          </p>
           {card.form_open === false && (
             <p data-testid="ready-form-closed" className="text-[13px] text-muted-foreground">
               The form was closed. Press Send and it will be filled again, then sent.
@@ -137,11 +153,16 @@ export function ReadyCard({
         )}
       </div>
 
-      {card.flags.length > 0 && (
+      {(card.flags.length > 0 || missing > 0) && (
         <ul data-testid={`ready-flags-${card.application_id}`} className="flex flex-col gap-1 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
           {card.flags.map((f, i) => (
             <li key={`${f.code}-${i}`}>{flagText(f)}</li>
           ))}
+          {missing > 0 && (
+            <li data-testid={`ready-draft-missing-${card.application_id}`}>
+              {`${missing} answer${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} the draft text written.`}
+            </li>
+          )}
         </ul>
       )}
 
@@ -237,6 +258,11 @@ function isOwnerEdit(a: ReadyAnswer): boolean {
   return a.changed_reason === "owner_edit";
 }
 
+/** A stored answer that only describes a draft (and was not replaced by a saved or edited one). */
+function isDraftStub(a: ReadyAnswer): boolean {
+  return a.changed_to == null && !a.redacted && looksLikePlaceholder(a.question, a.answer);
+}
+
 /** One answer: what was typed, where it came from, and - for a memory answer or a
  * guess - Verify (the user stands behind it, blue double tick) or Edit (the right
  * answer). Both save the user's word in memory so the assistant learns it. */
@@ -255,7 +281,8 @@ function AnswerRow({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const chip = sourceChip(a, card.filled_by);
-  const checkable = canCheck(a);
+  const stub = isDraftStub(a);
+  const checkable = canCheck(a) || stub;
   const id = `${card.application_id}-${index}`;
 
   async function save(text?: string) {
@@ -332,8 +359,16 @@ function AnswerRow({
           <span className="text-xs text-info">Your answer. Your assistant types it in before it sends.</span>
         </span>
       ) : (
-        <span className="whitespace-pre-wrap break-words">
-          {a.redacted ? "(not kept: sensitive - Edit to type it)" : a.answer ? <AnswerText value={a.answer} /> : "(blank)"}
+        <span className="break-words">
+          {a.redacted ? (
+            "(not kept: sensitive - Edit to type it)"
+          ) : stub ? (
+            <DraftMissing id={id} value={a.answer} />
+          ) : a.answer ? (
+            <AnswerValue id={id} value={a.answer} />
+          ) : (
+            "(blank)"
+          )}
         </span>
       )}
       <span className="flex flex-wrap items-start gap-1.5 sm:justify-end">
@@ -351,7 +386,7 @@ function AnswerRow({
         )}
         {checkable && !editing && (
           <>
-            {!a.verified && a.changed_to == null && a.answer && (
+            {!a.verified && !stub && a.changed_to == null && a.answer && (
               <button
                 type="button"
                 data-testid={`ready-answer-verify-${id}`}
