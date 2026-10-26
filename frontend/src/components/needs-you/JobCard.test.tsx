@@ -66,6 +66,14 @@ describe("JobCard", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it("keeps the application-page link on a CAPTCHA row when the card has no form URL", () => {
+    const captcha = ask("Solve the CAPTCHA and press Submit");
+    render(<JobCard card={card([captcha], { formUrl: "" })} onChanged={onChanged} />);
+    const row = screen.getByTestId(`blocker-${captcha.id}`);
+    expect(within(row).getByTestId(`row-link-${captcha.id}`)).toHaveAttribute("href", "/applications/7");
+    expect(within(row).queryByTestId("ask-open-empty-form")).toBeNull();
+  });
+
   it("asks a yes/no question with buttons and saves every answer and the CV in one approve", async () => {
     const visa = ask("Do you need visa sponsorship for Germany?");
     const salary = ask("Expected yearly salary (EUR)");

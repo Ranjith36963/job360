@@ -231,7 +231,7 @@ export function JobCard({
           heldSeconds={ask.held_seconds} formUrl={card.formUrl} finishTestId={`finish-here-${ask.id}`} />
       )}
       <div className="flex flex-wrap gap-2">
-        {kind !== "captcha" && kind !== "login" && rowLink(ask.id)}
+        {(kind !== "captcha" && kind !== "login") || !card.formUrl ? rowLink(ask.id) : null}
         {kind === "upload" && card.latestCv && (
           <button type="button" className={btn} onClick={() => void downloadCv(card)}>
             Download CV
