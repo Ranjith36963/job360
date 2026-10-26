@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PersonToReach } from "@/lib/job-cards";
 import { PersonRow } from "./PersonRow";
+import { ApiError } from "@/lib/api-error";
 
 const requestJson = vi.fn();
 vi.mock("@/lib/api", () => ({ requestJson: (...a: unknown[]) => requestJson(...a) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toastError = vi.fn();
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (m: string) => toastError(m) } }));
 
 function person(contact: Record<string, unknown>, message = "Hi Ada"): PersonToReach {
   return {
@@ -21,6 +23,7 @@ function show(p: PersonToReach) {
 }
 
 beforeEach(() => {
+  toastError.mockReset();
   requestJson.mockReset().mockResolvedValue({});
   onChanged.mockClear();
 });
@@ -48,18 +51,17 @@ describe("PersonRow", () => {
     expect(screen.getByTestId("note-count-4")).toHaveAttribute("data-over", "true");
     expect(screen.getByTestId("note-count-4")).toHaveClass("text-danger");
     // Hidden, not just disabled: nothing to press that would send a too-long note.
-    expect(screen.queryByTestId("send-browser-4")).toBeNull();
+    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
     expect(screen.getByTestId("note-too-long-4")).toHaveTextContent("Too long for a connection note. Use it as a message after you connect, or rewrite it.");
     expect(screen.getByText("Open profile ↗")).toBeInTheDocument();
     expect(screen.getByTestId("sent-4")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
-    expect(screen.getByTestId("decline-browser-4")).toBeInTheDocument();
   });
 
   it("keeps Copy and the browser button at exactly 200 characters", () => {
     show(person({ linkedin_state: "not_connected", own_browser_task: task("waiting_on_you") }, "x".repeat(200)));
-    expect(screen.getByTestId("send-browser-4")).toBeEnabled();
+    expect(screen.getByTestId("own-browser-send-4")).toBeEnabled();
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByTestId("note-too-long-4")).toBeNull();
   });
@@ -67,7 +69,7 @@ describe("PersonRow", () => {
   it("never limits a connected contact's message", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you") }, "x".repeat(500)));
     expect(screen.queryByTestId("note-too-long-4")).toBeNull();
-    expect(screen.getByTestId("send-browser-4")).toBeEnabled();
+    expect(screen.getByTestId("own-browser-send-4")).toBeEnabled();
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 
@@ -79,47 +81,56 @@ describe("PersonRow", () => {
 
   it("has no browser button without own_browser_task", () => {
     show(person({ linkedin_state: "connected" }));
-    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
-    expect(screen.queryByText("Don't use it")).toBeNull();
+    expect(screen.queryByText("Send with my own browser")).toBeNull();
+    expect(screen.queryByText("Don't send")).toBeNull();
   });
 
   it("approves with the task's message_id", async () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you", 77) }));
-    fireEvent.click(screen.getByText("Use my assistant's browser"));
+    fireEvent.click(screen.getByText("Send with my own browser"));
     await waitFor(() =>
       expect(requestJson).toHaveBeenCalledWith("/api/contacts/4/own-browser-send", "POST", { message_id: 77, decision: "approve" }));
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it("declines with a quiet button", async () => {
-    show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you", 77) }));
-    fireEvent.click(screen.getByText("Don't use it"));
+  it("queued shows Queued and Don't send, which declines", async () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("queued", 77) }));
+    expect(screen.getByTestId("own-browser-queued-4")).toHaveTextContent("Queued");
+    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
+    fireEvent.click(screen.getByTestId("own-browser-cancel-4"));
     await waitFor(() =>
       expect(requestJson).toHaveBeenCalledWith("/api/contacts/4/own-browser-send", "POST", { message_id: 77, decision: "decline" }));
   });
 
-  it("shows queued, in-progress and declined states without an approve button", () => {
-    const { unmount } = show(person({ linkedin_state: "connected", own_browser_task: task("queued") }));
-    expect(screen.getByText("Queued for your browser")).toBeDisabled();
-    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
-    unmount();
-    const r2 = show(person({ linkedin_state: "connected", own_browser_task: task("in_progress") }));
-    expect(screen.getByText("Sending in your browser…")).toBeDisabled();
-    r2.unmount();
+  it("in progress shows Sending now with no buttons", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("in_progress") }));
+    expect(screen.getByTestId("own-browser-in-progress-4")).toHaveTextContent("Sending now");
+    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
+    expect(screen.queryByTestId("own-browser-cancel-4")).toBeNull();
+  });
+
+  it("declined offers Send with my own browser again", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("declined") }));
-    expect(screen.getByText("You said not to use your browser")).toBeInTheDocument();
-    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+    expect(screen.getByTestId("own-browser-send-4")).toHaveTextContent("Send with my own browser");
+  });
+
+  it("a 409 toasts that the draft changed and reloads", async () => {
+    requestJson.mockRejectedValueOnce(new ApiError(409, "the draft changed since you looked - look again"));
+    show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you", 77) }));
+    fireEvent.click(screen.getByTestId("own-browser-send-4"));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("The draft changed since you looked. Look again."));
+    expect(onChanged).toHaveBeenCalled();
   });
 
   it("ignores a malformed own_browser_task", () => {
     show(person({ linkedin_state: "connected", own_browser_task: { state: "weird", message_id: 1 } }));
-    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+    expect(screen.queryByText("Send with my own browser")).toBeNull();
   });
 
   it("shows the send browser label, and its reason only for own_browser or human", () => {
     const { unmount } = show(person({ linkedin_state: "connected",
-      send_browser: { kind: "own_browser", label: "Your Chrome", reason: "Job360's browser failed twice" } }));
-    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your Chrome");
+      send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360's browser failed twice" } }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Needs your own browser: turn your PC on");
     expect(screen.getByTestId("send-browser-reason-4")).toHaveTextContent("Job360's browser failed twice");
     unmount();
     show(person({ linkedin_state: "connected", send_browser: { kind: "job360", label: "Job360's browser", reason: "first choice" } }));

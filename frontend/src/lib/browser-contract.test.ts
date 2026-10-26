@@ -5,7 +5,7 @@ vi.mock("@/lib/api", () => ({ requestJson: (...a: unknown[]) => requestJson(...a
 
 import {
   askBrowser, browserLabel, effectiveAskBrowser, contactSendBrowser, decideOwnBrowserSend, needsOwnBrowser,
-  ownBrowserQueueCount, ownBrowserTask, readyBrowser, runOwnBrowserNow,
+  ownBrowserQueueCount, getOwnBrowserQueue, ownBrowserTask, readyBrowser, runOwnBrowserNow,
 } from "./browser-contract";
 
 const lab = (kind: unknown) => ({ kind, label: "L", reason: "R" });
@@ -73,7 +73,7 @@ describe("calls", () => {
 
 describe("effectiveAskBrowser", () => {
   const plain = { question: "q" } as unknown as import("@/lib/api").Ask;
-  const labelled = { browser: { kind: "own_browser", label: "Your Chrome", reason: "r" } } as unknown as import("@/lib/api").Ask;
+  const labelled = { browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "r" } } as unknown as import("@/lib/api").Ask;
 
   it.each(["captcha", "login", "upload", "safety"])("defaults an unlabelled %s to You (human)", (kind) => {
     expect(effectiveAskBrowser(plain, kind)).toEqual({ kind: "human", label: "You", reason: "" });
@@ -90,5 +90,20 @@ describe("effectiveAskBrowser", () => {
 
   it("gives no default to other kinds", () => {
     for (const k of ["question", "yes_no", "structured", "outreach"]) expect(effectiveAskBrowser(plain, k)).toBeNull();
+  });
+});
+
+describe("getOwnBrowserQueue", () => {
+  it("returns the QueueOut", async () => {
+    const q = { count: 1, open_now: true, why: "run_now", tasks: [] };
+    requestJson.mockResolvedValue(q);
+    expect(await getOwnBrowserQueue()).toEqual(q);
+    expect(requestJson).toHaveBeenCalledWith("/api/own-browser/queue", "GET");
+  });
+  it("is null on a failure or an unknown shape", async () => {
+    requestJson.mockRejectedValue(new Error("x"));
+    expect(await getOwnBrowserQueue()).toBeNull();
+    requestJson.mockResolvedValue({ items: [] });
+    expect(await getOwnBrowserQueue()).toBeNull();
   });
 });

@@ -6,7 +6,8 @@ import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
-import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
+import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
+import { BLOCKER_TITLE, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
@@ -32,7 +33,7 @@ const picked = "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-pri
 const chipBase = "rounded px-1.5 py-0.5 text-[11px] font-medium";
 const warn = "bg-amber-100 text-amber-950 dark:bg-amber-400/20 dark:text-amber-100";
 
-/** Which browser does this action: the backend's label (amber when it is the owner's Chrome), else Job360's browser. */
+/** Which browser does this action: the backend's label (amber when it is the owner's own browser), else Job360's browser. */
 function BrowserChip({ label, testid }: { label: BrowserLabel | null; testid: string }) {
   const own = label?.kind === "own_browser";
   return (
@@ -42,14 +43,11 @@ function BrowserChip({ label, testid }: { label: BrowserLabel | null; testid: st
   );
 }
 
-/** The one label a whole card shows: the owner's Chrome first, then a human step, then any label. */
+/** The one label a whole card shows: the owner's own browser first, then a human step, then any label. */
 function cardBrowser(asks: { ask: Ask; kind: RowKind }[]): BrowserLabel | null {
   const labels = asks.map((a) => effectiveAskBrowser(a.ask, a.kind)).filter((l): l is BrowserLabel => l !== null);
   return labels.find((l) => l.kind === "own_browser") ?? labels.find((l) => l.kind === "human") ?? labels[0] ?? null;
 }
-
-const PACE_TEXT =
-  "Job360's browser sends first; your Chrome only if it fails. 1–3 minutes between sends, at most 10 LinkedIn sends a day.";
 
 const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
@@ -240,7 +238,7 @@ export function JobCard({
           {blockers.filter((b) => !needsOwnBrowser(b.ask)).map(blockerRow)}
           {blockers.some((b) => needsOwnBrowser(b.ask)) && (
             <div className="flex flex-col gap-2" data-testid={`own-chrome-${card.applicationId}`}>
-              <h4 className="text-xs font-semibold">{OWN_CHROME_LABEL}</h4>
+              <h4 className="text-xs font-semibold">{OWN_BROWSER_LABEL}</h4>
               {blockers.filter((b) => needsOwnBrowser(b.ask)).map(blockerRow)}
             </div>
           )}

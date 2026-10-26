@@ -6,6 +6,7 @@ import { BrowserReason } from "./BrowserReason";
 import { closedSetLabel } from "@/lib/closed-sets";
 import type { PersonToReach } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
+import { ApiError } from "@/lib/api-error";
 
 // Names, roles and drafted messages are written by an assistant or a job site: untrusted,
 // rendered only as React text, never as HTML.
@@ -60,7 +61,11 @@ export function PersonRow({
       await decideOwnBrowserSend(c.id, task.message_id, decision);
       await onChanged();
     } catch (err) {
-      toast.apiError(err, "Couldn't save that");
+      if (err instanceof ApiError && err.status === 409) {
+        // The draft changed (or it was already sent): say so and show the current state.
+        toast.error("The draft changed since you looked. Look again.");
+        await onChanged().catch(() => {});
+      } else toast.apiError(err, "Couldn't save that");
     } finally {
       setSending(false);
     }
@@ -105,36 +110,25 @@ export function PersonRow({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        {task?.state === "waiting_on_you" && (
+        {(task?.state === "waiting_on_you" || task?.state === "declined") && !over && (
+          <button type="button" className={primaryBtn} data-testid={`own-browser-send-${c.id}`}
+            disabled={busy || sending}
+            onClick={() => void decide("approve")}>
+            Send with my own browser
+          </button>
+        )}
+        {task?.state === "queued" && (
           <>
-            {!over && (
-              <button type="button" className={primaryBtn} data-testid={`send-browser-${c.id}`}
-                disabled={busy || sending}
-                onClick={() => void decide("approve")}>
-                Use my assistant&apos;s browser
-              </button>
-            )}
-            <button type="button" className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:underline disabled:opacity-50"
-              data-testid={`decline-browser-${c.id}`} disabled={busy || sending}
+            <span className={chip} data-testid={`own-browser-queued-${c.id}`}>Queued</span>
+            <button type="button" className={btn} data-testid={`own-browser-cancel-${c.id}`}
+              disabled={busy || sending}
               onClick={() => void decide("decline")}>
-              Don&apos;t use it
+              Don&apos;t send
             </button>
           </>
         )}
-        {task?.state === "queued" && (
-          <button type="button" className={primaryBtn} disabled data-testid={`queued-${c.id}`}>
-            Queued for your browser
-          </button>
-        )}
         {task?.state === "in_progress" && (
-          <button type="button" className={primaryBtn} disabled data-testid={`in-progress-${c.id}`}>
-            Sending in your browser…
-          </button>
-        )}
-        {task?.state === "declined" && (
-          <span className="self-center text-xs text-muted-foreground" data-testid={`declined-${c.id}`}>
-            You said not to use your browser
-          </span>
+          <span className={chip} data-testid={`own-browser-in-progress-${c.id}`}>Sending now</span>
         )}
         {!over && (
         <button type="button" className={btn}
