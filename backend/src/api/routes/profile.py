@@ -2183,28 +2183,22 @@ def _settings_riskier_to_reset(user: CurrentUser) -> frozenset[str]:
     return frozenset(riskier)
 
 
-def _snapshot_memory_then_clear(user: CurrentUser, base: UserInfo) -> None:
-    """Before the user-info memory BASE is wiped, append every non-empty field of
-    it to ``profile_edits`` (then a clearing row per ``user_info.*`` path), so a
-    clear is recoverable. The memory is in no version snapshot; the CV and the
-    preferences are (``save_profile``), and overlay values are already history.
-    Logs ``memory_snapshot`` with the user id and field NAMES, never a value."""
+def _erase_memory_then_clear(user: CurrentUser, base: UserInfo) -> None:
+    """Before the user-info memory BASE is wiped, ERASE the user's earlier
+    ``user_info.*`` rows from ``profile_edits`` and append a clearing row (no
+    value) per path that held something (owner decision 2026-10-26: "Clear memory
+    should erase. Just clear it." No copy is kept). Logs ``memory_erased`` with the
+    user id, path NAMES and the row count, never a value."""
     editable = set(profile_edits.editable_paths())
-    snapshot = [
-        (f"user_info.{name}", value)
-        for name, value in asdict(base).items()
-        if value and f"user_info.{name}" in editable
+    base_paths = [
+        f"user_info.{name}" for name, value in asdict(base).items() if value and f"user_info.{name}" in editable
     ]
-    overlay = [
-        str(row["path"]) for row in profile_edits.current_overlay(user.id)
-        if str(row["path"]).startswith("user_info.") and row["path"] in editable
-    ]
-    written = profile_edits.record_snapshot_then_clear(user.id, actor_for(user), snapshot, overlay)
+    erased, cleared = profile_edits.erase_then_clear(user.id, actor_for(user), "user_info.", base_paths)
     logger.info(
-        "memory_snapshot",
+        "memory_erased",
         extra={
-            "event": "memory_snapshot", "user_id": safe_log_value(user.id),
-            "fields": [path for path, _ in snapshot], "rows": written,
+            "event": "memory_erased", "user_id": safe_log_value(user.id),
+            "fields": cleared, "rows": erased,
         },
     )
 
@@ -2225,8 +2219,8 @@ async def clear_profile_section(
     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
     (``user_info.*``: contact, right to work, logistics, languages, equality
     answers, saved answers): the base column and the assistant's overlay rows.
-    It takes no version snapshot (it copies the memory into ``profile_edits``
-    first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+    It takes no version snapshot and ERASES the user's earlier ``user_info.*``
+    history rows (``_erase_memory_then_clear``), and leaves the CV, the
     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
     ``github`` leave it alone; only ``all`` resets it.
@@ -2268,9 +2262,9 @@ async def clear_profile_section(
 
     if section == "memory":
         # The memory has its own column and ONE writer, and is not part of a
-        # version snapshot: no save_profile, no new version. Its values go to
-        # the append-only history first, with the overlay's clearing rows.
-        _snapshot_memory_then_clear(user, profile.user_info)
+        # version snapshot: no save_profile, no new version. Its history rows
+        # are erased first (owner decision 2026-10-26), leaving clearing rows.
+        _erase_memory_then_clear(user, profile.user_info)
         save_user_info(user.id, UserInfo(), "clear_memory")
         _log_profile_cleared(user.id, section)
         return load_profile_response(user.id)[1]
@@ -2315,9 +2309,9 @@ async def clear_profile_section(
         _reinfer_level_from_what_remains(profile)
     save_profile(profile, user.id, f"clear_{section}")
     if section == "all":
-        # Memory first to the history (its overlay paths then read as cleared,
-        # so the prefix sweep below skips them).
-        _snapshot_memory_then_clear(user, profile.user_info)
+        # Memory first: its history is erased (its overlay paths then read as
+        # cleared, so the prefix sweep below skips them).
+        _erase_memory_then_clear(user, profile.user_info)
         save_user_info(user.id, UserInfo(), "clear_all")
         # S2 — a full reset also returns the assistant settings to their safe
         # defaults and cancels every request still waiting for the user's OK.

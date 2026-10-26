@@ -38,6 +38,7 @@ from src.api.routes import (
     bring,
     browser,
     calendar,
+    changes,
     client_log,
     common_questions,
     connectors,
@@ -303,6 +304,7 @@ app.include_router(own_browser.router, prefix="/api")  # the own-browser queue (
 app.include_router(schedule.router, prefix="/api")  # what is due now (owner 2026-10-23, migration 0082)
 app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
 app.include_router(ready_to_send.router, prefix="/api")  # approval cards for Ready to send (S5d)
+app.include_router(changes.router, prefix="/api")  # what changed: the web page's live cursor (session only)
 # Batch 2 — auth
 app.include_router(auth.router, prefix="/api")
 # Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)
