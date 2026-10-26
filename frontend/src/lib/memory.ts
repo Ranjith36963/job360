@@ -20,14 +20,19 @@ export const ANSWERS = "user_info.answers";
 export const SALARY = "preferences.salary_by_country";
 // Owner decision 2026-10-26: what the setup's "targets" round asks lives in
 // Memory -> Job targets (it left the CV tab). Each is a whole preference.
+// Owner decision 2026-10-26: several levels and several years ranges; locations,
+// work arrangement, what you look for and dealbreakers left (Where you'll work covers them).
 export const TARGET_PATHS = [
-  "preferences.target_job_titles", "preferences.experience_level", "preferences.experience_years_min",
-  "preferences.experience_years_max", "preferences.preferred_locations", "preferences.work_arrangement",
-  "preferences.looking_for", "preferences.dealbreakers",
+  "preferences.target_job_titles", "preferences.experience_levels", "preferences.experience_ranges",
 ] as const;
 export const MEMORY_PATHS = [CONTACT, RTW, LOGISTICS, LANGUAGES, EQUALITY, ANSWERS, SALARY, ...TARGET_PATHS] as const;
-export const EXPERIENCE_OPTIONS = ["entry", "mid", "senior", "lead", "executive"] as const;
-export const ARRANGEMENT_OPTIONS = ["remote", "hybrid", "onsite"] as const;
+/** The backend's EXPERIENCE_LEVEL_CHOICES (services/profile/models.py), in order. */
+export const EXPERIENCE_OPTIONS = ["entry", "junior", "junior_mid", "mid", "mid_senior", "senior", "lead", "executive"] as const;
+export const EXPERIENCE_LABEL: Record<string, string> = {
+  entry: "Entry", junior: "Junior", junior_mid: "Junior–mid", mid: "Mid", mid_senior: "Mid–senior",
+  senior: "Senior", lead: "Lead", executive: "Executive",
+};
+export const YEARS_MAX = 60;
 
 export const PNS = "Prefer not to say";
 export const WORK_AUTH_OPTIONS = ["citizen", "permanent_resident", "visa", "needs_sponsorship"] as const;
@@ -82,7 +87,8 @@ export const FIELD_LABEL: Record<string, string> = {
   onsite_priority: "On-site priority",
 };
 
-export type PartInput = "text" | "date" | "number" | "textarea" | "yesno" | "select" | "countries" | "languages";
+export type PartInput =
+  | "text" | "date" | "number" | "textarea" | "yesno" | "select" | "countries" | "languages" | "levels" | "ranges";
 
 export interface Part {
   key: string;
@@ -202,8 +208,8 @@ export function rtwCountryRows(code: string): RowSpec[] {
 export function rtwTopRows(): RowSpec[] {
   const d = { kind: "dict" } as const;
   return [
+    // Owner decision 2026-10-26: the sanctioned-country question is not asked here.
     single(RTW, `${RTW}.citizenship`, "citizenship", "countries", d),
-    single(RTW, `${RTW}.sanctions_country_citizen`, "sanctions_country_citizen", "yesno", d, { pns: true }),
   ];
 }
 
@@ -246,13 +252,8 @@ export function targetRows(): RowSpec[] {
   });
   return [
     row("target_job_titles", "Roles", "textarea", { placeholder: "One per line" }),
-    row("experience_level", "Level", "select", { options: EXPERIENCE_OPTIONS }),
-    row("experience_years_min", "Years of experience, from", "number"),
-    row("experience_years_max", "Years of experience, up to", "number"),
-    row("preferred_locations", "Locations", "textarea", { placeholder: "One per line" }),
-    row("work_arrangement", "Work arrangement", "select", { options: ARRANGEMENT_OPTIONS }),
-    row("looking_for", "What you look for", "textarea", { placeholder: "One per line" }),
-    row("dealbreakers", "Dealbreakers", "textarea", { placeholder: "One per line" }),
+    row("experience_levels", "Levels", "levels", { options: EXPERIENCE_OPTIONS }),
+    row("experience_ranges", "Years of experience", "ranges"),
   ];
 }
 
@@ -347,7 +348,10 @@ function partToInput(part: Part, v: unknown): string {
     case "yesno":
       return isPns(v) ? "pns" : v === true ? "yes" : v === false ? "no" : "";
     case "countries":
+    case "levels":
       return Array.isArray(v) ? v.join(",") : "";
+    case "ranges":
+      return recordsOf(v).map((r) => `${String(r.min)}-${String(r.max)}`).join(",");
     case "textarea":
       return Array.isArray(v) ? v.join("\n") : String(v);
     case "languages":
@@ -381,6 +385,46 @@ export function parseLanguages(text: string): { language: string; level: string 
   return out;
 }
 
+/** "1-3,2-5" -> [{min: 1, max: 3}, ...]; `null` when a piece is not a 0-60 range with from <= to. */
+export function parseRanges(text: string): { min: number; max: number }[] | null {
+  const out: { min: number; max: number }[] = [];
+  for (const piece of text.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const m = /^(\d{1,2})\s*[-–]\s*(\d{1,2})$/.exec(piece);
+    const min = Number(m?.[1]), max = Number(m?.[2]);
+    if (!m || min > max || max > YEARS_MAX) return null;
+    out.push({ min, max });
+  }
+  return out;
+}
+
+export function rangeText(r: Record<string, unknown>): string {
+  return r.min === r.max ? `${String(r.min)} years` : `${String(r.min)}–${String(r.max)} years`;
+}
+
+/** A target saved before several levels / ranges (2026-10-26) shows as the new
+ *  list until the user saves it again: the single level, and from-up to years. */
+export function legacyTarget(prefs: Record<string, unknown> | undefined, key: string): unknown {
+  if (!prefs) return undefined;
+  if (key === "experience_levels" && isEmpty(prefs.experience_levels)) {
+    const old = prefs.experience_level;
+    return typeof old === "string" && (EXPERIENCE_OPTIONS as readonly string[]).includes(old) ? [old] : undefined;
+  }
+  if (key === "experience_ranges" && isEmpty(prefs.experience_ranges)) {
+    const lo = prefs.experience_years_min, hi = prefs.experience_years_max;
+    if (typeof lo !== "number" && typeof hi !== "number") return undefined;
+    const min = typeof lo === "number" ? lo : 0;
+    return [{ min, max: typeof hi === "number" ? hi : Math.max(min, YEARS_MAX) }];
+  }
+  return prefs[key];
+}
+
+/** The older single answers a new target replaces: cleared in the same save, so
+ *  the assistant never reads two answers to one question. */
+export const LEGACY_PATHS: Record<string, string[]> = {
+  "preferences.experience_levels": ["preferences.experience_level"],
+  "preferences.experience_ranges": ["preferences.experience_years_min", "preferences.experience_years_max"],
+};
+
 function inputToPart(part: Part, text: string): unknown {
   const t = text.trim();
   if (t === "") return undefined;
@@ -390,7 +434,10 @@ function inputToPart(part: Part, text: string): unknown {
     case "number":
       return Number(t);
     case "countries":
+    case "levels":
       return t.split(",").filter(Boolean);
+    case "ranges":
+      return parseRanges(t) ?? undefined;
     case "textarea":
       return text.split("\n").map((s) => s.trim()).filter(Boolean);
     case "languages":
@@ -419,6 +466,7 @@ export function inputProblem(spec: RowSpec, inputs: Record<string, string>): str
       return "Write each one like English (fluent). Levels: native, fluent, professional, basic.";
     }
     if (part.input === "number" && t && !Number.isFinite(Number(t))) return "Numbers only, please.";
+    if (part.input === "ranges" && t && parseRanges(t) === null) return `Each range is two whole numbers, 0 to ${YEARS_MAX}, from no more than to.`;
   }
   if (spec.scope.kind === "salary") {
     const min = Number(inputs.min);
@@ -487,6 +535,8 @@ export function showRow(spec: RowSpec, value: unknown): string {
   }
   if (key === "visa_expires" || key === "date_of_birth") return formatDateText(String(value));
   if (key === "travel_ok_pct") return `${String(value)}%`;
+  if (key === "experience_levels" && Array.isArray(value)) return value.map((v) => EXPERIENCE_LABEL[String(v)] ?? String(v)).join(", ");
+  if (key === "experience_ranges") return recordsOf(value).map(rangeText).join(", ");
   if (key === "experience_level" || key === "work_arrangement") {
     const t = String(value);
     return t.charAt(0).toUpperCase() + t.slice(1);

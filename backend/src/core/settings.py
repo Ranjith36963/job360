@@ -908,6 +908,8 @@ PROFILE_EDITABLE_PATHS = (
     "preferences.experience_years_min", "preferences.experience_years_max",
     "preferences.looking_for", "preferences.dealbreakers", "preferences.avoid_companies",
     "preferences.target_companies",
+    # Owner decision 2026-10-26 - several levels and several year ranges at once.
+    "preferences.experience_levels", "preferences.experience_ranges",
     # Owner decision 2026-10-08 — THREE STORES. (1) The salary the user wants,
     # one record per hiring country, is a normal PREFERENCE. (2) USER INFO
     # MEMORY — the facts job forms ask (contact, right to work, logistics,
