@@ -59,3 +59,12 @@ async def test_saved_answers_show_and_the_users_own_are_verified(authenticated_a
             assert put.status_code == 200, put.text
         notice = (await _rows(client))["notice_period"]
         assert (notice["answer"], notice["verified"], notice["state"]) == ("1 month", False, "inferred")
+        # An approved answer the assistant saved itself shows, but is not the user's verified word.
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as agent:
+            put = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "op": "upsert",
+                "value": {"question": "Referred by an employee?", "answer": "No", "approved": True,
+                          "topic": "form.referred"}}]})
+            assert put.status_code == 200, put.text
+        referred = (await _rows(client))["referred"]
+        assert (referred["answer"], referred["verified"]) == ("No", False)

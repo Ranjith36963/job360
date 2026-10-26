@@ -72,7 +72,10 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         "answer": _shown(item["value"]) if item is not None else None,
         "source": item.get("source") if item is not None else None,
         "state": item.get("state") if item is not None else "missing",
-        "verified": item is not None and item.get("state") == "confirmed",
+        # Verified = the USER stood behind it: an approved answer an assistant saved itself is not (review
+        # of #1263: an assistant can write approved: true).
+        "verified": item is not None and item.get("state") == "confirmed"
+        and (item.get("source") != "approved_text" or bool(item.get("by_user"))),
         "seen": int(q.get("seen") or 0),
     }
 
