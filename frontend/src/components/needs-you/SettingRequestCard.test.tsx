@@ -17,21 +17,11 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
+  getReadyToSend: async () => ({ paused: false, total: 0, unflagged: 0, items: [] }),
 }));
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) } }));
 
 const evil = "<img src=x onerror=alert(1)>";
