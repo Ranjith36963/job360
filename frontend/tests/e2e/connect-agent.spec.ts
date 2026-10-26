@@ -4,7 +4,7 @@ import { test, expect } from "@playwright/test";
  * Connect your assistant — personal API tokens for the MCP server, folded
  * under "For developers" (owner-approved copy, 2026-09-27).
  *
- * 1. Anonymous /settings/connect redirects to /login (middleware).
+ * 1. Anonymous /connect redirects to /login (middleware).
  * 2. Create a token → the plain token is shown ONCE with a ready-to-paste
  *    `claude mcp add` command that carries it as a Bearer header.
  * 3. The list shows only the prefix, never the token.
@@ -38,23 +38,15 @@ const json = (body: unknown, status = 200) => ({
 });
 
 test.describe("Connect your assistant", () => {
-  test("anonymous /settings/connect redirects to /login", async ({ page }) => {
-    await page.goto("/settings/connect");
+  test("anonymous /connect redirects to /login", async ({ page }) => {
+    await page.goto("/connect");
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("old /connect URL redirects to /settings/connect, keeping the query", async ({
-    page,
-  }) => {
-    // Anonymous, so the middleware then bounces to /login?next=/settings/connect.
-    // That `next` value proves the redirect landed on /settings/connect.
-    for (const from of ["/connect", "/connect/?ref=old"]) {
-      await page.goto(from);
-      await expect(page).toHaveURL(/\/login\?.*next=%2Fsettings%2Fconnect/);
-    }
-    const res = await page.request.get("/connect?ref=old", { maxRedirects: 0 });
+  test("old /settings/connect URL redirects to /connect, keeping the query", async ({ page }) => {
+    const res = await page.request.get("/settings/connect?tab=apps", { maxRedirects: 0 });
     expect(res.status()).toBe(308);
-    expect(res.headers()["location"]).toBe("/settings/connect?ref=old");
+    expect(res.headers()["location"]).toBe("/connect?tab=apps");
   });
 
   test("create → token shown once with the connect command → revoke", async ({
@@ -84,7 +76,7 @@ test.describe("Connect your assistant", () => {
       return route.continue();
     });
 
-    await page.goto("/settings/connect");
+    await page.goto("/connect");
     await expect(page).not.toHaveURL(/\/login/);
     await expect(page.getByRole("heading", { name: "Connect your assistant" })).toBeVisible();
     await expect(page.getByTestId("mcp-url")).toHaveValue(/\/api\/mcp$/);
@@ -128,4 +120,21 @@ test.describe("Connect your assistant", () => {
     await expect(page.getByTestId("tokens-empty")).toBeVisible({ timeout: 10_000 });
     expect(revokedId).toBe(String(TOKEN_ROW.id));
   });
+});
+
+test.describe("moved pages keep their old URLs", () => {
+  const cases: [string, string][] = [
+    ["/settings", "/account"],
+    ["/settings/account", "/account"],
+    ["/settings/job-sites?ref=old", "/connect?ref=old&tab=job-sites"],
+    ["/people", "/outreach/people"],
+    ["/people?q=x", "/outreach/people?q=x"],
+  ];
+  for (const [from, to] of cases) {
+    test(`${from} redirects to ${to}`, async ({ page }) => {
+      const res = await page.request.get(from, { maxRedirects: 0 });
+      expect(res.status()).toBe(308);
+      expect(res.headers()["location"]).toBe(to);
+    });
+  }
 });

@@ -50,14 +50,35 @@ beforeEach(() => {
 });
 
 describe("MemoryTab", () => {
-  it("reads the profile and the seven histories in parallel", async () => {
+  it("reads the profile and every memory history (job targets included) in parallel", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(getProfileEditHistory.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "preferences.salary_by_country", "user_info.answers", "user_info.contact", "user_info.equality",
+      "preferences.avoid_companies", "preferences.dealbreakers", "preferences.experience_level",
+      "preferences.experience_years_max", "preferences.experience_years_min", "preferences.looking_for",
+      "preferences.preferred_locations", "preferences.salary_by_country", "preferences.target_job_titles",
+      "preferences.work_arrangement",
+      "user_info.answers", "user_info.contact", "user_info.equality",
       "user_info.languages", "user_info.logistics", "user_info.right_to_work",
     ]);
+  });
+
+  it("Job targets shows the roles and other targets; an edit saves that one preference", async () => {
+    const withTargets = { ...profile, preferences: { ...profile.preferences, target_job_titles: ["Data Engineer"], experience_level: "senior" } };
+    getProfile.mockResolvedValue(withTargets);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const targets = screen.getByTestId("memory-step-targets");
+    expect(within(targets).getByTestId("memory-row-preferences.target_job_titles")).toHaveTextContent("Data Engineer");
+    expect(within(targets).getByTestId("memory-row-preferences.experience_level")).toHaveTextContent("Senior");
+    expect(within(targets).getByTestId("memory-row-preferences.dealbreakers")).toHaveTextContent("Not saved yet");
+    fireEvent.click(within(targets).getByRole("button", { name: "Edit Roles" }));
+    fireEvent.change(screen.getByLabelText("Roles"), { target: { value: "Data Engineer\nAnalytics Engineer" } });
+    fireEvent.click(within(screen.getByTestId("memory-row-preferences.target_job_titles")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.target_job_titles", value: ["Data Engineer", "Analytics Engineer"] },
+    ]));
   });
 
   it("puts your details for forms first and pinned open, then the four steps, then approved answers", async () => {
@@ -225,4 +246,19 @@ describe("MemoryTab", () => {
       { path: "preferences.assistant_notes", value: ["About you: I go by Alex.", "Logistics: No travel in August."] },
     ]);
   });
+
+  it("your details ask citizenship, the country and the city you live in as separate questions, in that order", async () => {
+    const lives = { ...profile, user_info: { ...profile.user_info, contact: { ...profile.user_info.contact, residence_country: "GB", residence_city: "London" } } };
+    getProfile.mockResolvedValue(lives);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const ids = within(screen.getByTestId("memory-step-you")).getAllByTestId(/^memory-row-/).map((r) => r.getAttribute("data-testid"));
+    const at = (id: string) => ids.indexOf(`memory-row-${id}`);
+    expect(at("user_info.right_to_work.citizenship")).toBeLessThan(at("user_info.contact.residence_country"));
+    expect(at("user_info.contact.residence_country")).toBe(at("user_info.contact.residence_city") - 1);
+    expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("Country you live in");
+    expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("United Kingdom");
+    expect(screen.getByTestId("memory-row-user_info.contact.residence_city")).toHaveTextContent("London");
+  });
 });
+

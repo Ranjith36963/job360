@@ -1,8 +1,8 @@
 /**
- * PreferencesForm — "Things your AI assistant should know" lives on Home only
- * (owner, 2026-10-19). Profile no longer shows the notes, but every Profile
- * save still sends them back unchanged: the save replaces the whole
- * preferences block, so dropping them here would wipe them.
+ * PreferencesForm — "Things your AI assistant should know" lives on Home and in
+ * Memory's step facts, never on Profile. A Profile save never sends the notes:
+ * the server keeps an omitted key as stored, so facts added elsewhere are never
+ * overwritten by this tab's older copy.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,15 +29,10 @@ describe("PreferencesForm — assistant notes", () => {
     expect(screen.queryByTestId("assistant-notes")).toBeNull();
   });
 
-  it("a Profile save keeps the notes exactly as stored", async () => {
+  it("a Profile save never sends the notes, so facts added in Memory or on Home are kept", async () => {
+    // Before, a save sent this tab's copy of the notes and could overwrite newer ones.
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(
-      <PreferencesForm
-        preferences={{ assistant_notes: ["Never apply to agencies", "No night shifts"] }}
-        onSave={onSave}
-        loading={false}
-      />
-    );
+    render(<PreferencesForm preferences={{ assistant_notes: ["Never apply to agencies", "About you: I go by Alex."] }} onSave={onSave} loading={false} />);
     fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
       target: { value: "Data engineer" },
     });
@@ -45,12 +40,9 @@ describe("PreferencesForm — assistant notes", () => {
       vi.advanceTimersByTime(900);
     });
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({
-        about_me: "Data engineer",
-        assistant_notes: ["Never apply to agencies", "No night shifts"],
-      })
-    );
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["assistant_notes"]) expect(sent).not.toHaveProperty(key);
   });
 
   it("hydration alone never saves", async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import posthog from "posthog-js";
 import { User, AlertCircle, History } from "lucide-react";
@@ -13,9 +14,6 @@ import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer"
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
-import { AssistantTab } from "@/components/profile/AssistantTab";
-import { MemoryTab } from "@/components/profile/MemoryTab";
-import { ProfileHeader, ProfileTabs, useProfileTab } from "@/components/profile/ProfileTabs";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
   getProfile,
@@ -131,7 +129,7 @@ function optionalExtras(profile: ProfileResponse | null): string[] {
  * Owner-approved copy, 2026-09-27: with a CV on file this used to always say
  * "Your profile is ready for your assistant" — true only once an assistant
  * is actually connected. Checking live connection state here would mean this
- * page also polling tokens/grants (the API /settings/connect already reads
+ * page also polling tokens/grants (the API /connect already reads
  * for that reason); the owner's own fallback for that cost is neutral
  * wording that is true either way: the CV is saved regardless of connection,
  * and an assistant, once connected, is what fills in the rest. */
@@ -143,7 +141,7 @@ function headerLine(profile: ProfileResponse | null): string {
 
 // ── Page component ──────────────────────────────────────────
 
-/** The CV tab: today's Profile page (the tab row sits under its header). */
+/** The Profile page (/profile): CV, LinkedIn, GitHub, preferences. */
 function CvTab() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -370,7 +368,6 @@ function CvTab() {
           </div>
         </div>
 
-        <ProfileTabs />
         <div className="mb-6" />
 
         {/* ── Error banner ────────────────────────────── */}
@@ -576,19 +573,30 @@ function CvTab() {
   );
 }
 
-/** Profile has three tabs, picked by `?tab=` (CV when absent). Memory is the
- *  five setup steps, each holding its own facts (owner, 2026-10-26). Only the open
- *  tab mounts, so the CV page's fetches stay off the other tabs. */
+// Old Profile tabs were `/profile?tab=…`. Memory is /profile/memory; the assistant
+// settings tab is on Connect your assistant. Other query parameters are kept.
+const OLD_TAB_TARGET: Record<string, string> = {
+  memory: "/profile/memory",
+  setup: "/profile/memory",
+  assistant: "/connect?tab=assistant",
+};
+
 function ProfileRouter() {
-  const tab = useProfileTab();
-  if (tab === "cv") return <CvTab />;
-  return (
-    <PageContainer className="py-8 lg:py-12">
-      <ProfileHeader />
-      <ProfileTabs />
-      {tab === "assistant" ? <AssistantTab /> : <MemoryTab />}
-    </PageContainer>
-  );
+  const router = useRouter();
+  const params = useSearchParams();
+  const tab = params?.get("tab") ?? null;
+  const target = tab === null ? null : (OLD_TAB_TARGET[tab] ?? "/profile");
+  useEffect(() => {
+    if (tab === null || target === null) return;
+    const q = new URLSearchParams(target.split("?")[1] ?? "");
+    params?.forEach((v, k) => {
+      if (k !== "tab") q.append(k, v);
+    });
+    const path = target.split("?")[0];
+    router.replace(q.toString() ? `${path}?${q}` : path);
+  }, [tab, target, params, router]);
+  if (tab !== null) return null;
+  return <CvTab />;
 }
 
 export default function ProfilePage() {

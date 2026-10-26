@@ -232,7 +232,7 @@ function DutyRow({ row, schedule, onChanged }: { row: DutyTrigger; schedule: str
 }
 
 /**
- * Settings → Connect your assistant: "Start each job at once". One start link per duty; a press in Job360 (or
+ * Connect your assistant: "Start each job at once". One start link per duty; a press in Job360 (or
  * Run now) starts that routine right away instead of waiting for the hourly run. Website only: an assistant's
  * token can neither read, change nor fire these. Each token is saved encrypted and never shown again.
  */

@@ -67,13 +67,13 @@ test.describe("Landing CTA → profile journeys", () => {
   // Owner, 2026-09-24 — connecting the assistant is the hero's FIRST action;
   // href check only, the middleware redirect for a protected route is covered
   // above.
-  test("hero 'Connect your assistant' link points at /settings/connect", async ({
+  test("hero 'Connect your assistant' link points at /connect", async ({
     page,
   }) => {
     await page.goto("/");
     await expect(
       page.getByRole("link", { name: /connect your assistant/i }).first()
-    ).toHaveAttribute("href", "/settings/connect");
+    ).toHaveAttribute("href", "/connect");
   });
 
   // ── Journey 3: already signed in → straight to /profile ───────────────────

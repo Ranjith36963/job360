@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, Settings } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { useAuth } from "@/components/layout/AuthProvider";
-import { NAV_LINKS, isNavActive, isSettingsActive } from "@/components/layout/nav-links";
+import { NAV_LINKS, isNavActive, isParentActive } from "@/components/layout/nav-links";
 import { NeedsYouBadge, useOpenAsks } from "@/components/layout/useOpenAsks";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +31,6 @@ export function navItemClass(active: boolean): string {
 export function Sidebar({ className }: { className?: string }) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const settingsActive = isSettingsActive(pathname);
   const openAsks = useOpenAsks(Boolean(user), pathname);
 
   return (
@@ -49,19 +48,34 @@ export function Sidebar({ className }: { className?: string }) {
 
       <nav aria-label="Main navigation" className="flex flex-col gap-px">
         {user &&
-          NAV_LINKS.map(({ href, label, icon: Icon }) => {
-            const active = isNavActive(pathname, href);
+          NAV_LINKS.map((link) => {
+            const { href, label, icon: Icon } = link;
+            const active = isParentActive(pathname, link);
             return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={navItemClass(active)}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {label}
-                {href === "/needs-you" && <NeedsYouBadge count={openAsks} />}
-              </Link>
+              <div key={href + label} className="flex flex-col gap-px">
+                <Link
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={navItemClass(active)}
+                >
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {label}
+                  {href === "/needs-you" && <NeedsYouBadge count={openAsks} />}
+                </Link>
+                {(link.children ?? []).map((c) => {
+                  const on = isNavActive(pathname, c.href);
+                  return (
+                    <Link
+                      key={c.href}
+                      href={c.href}
+                      aria-current={on ? "page" : undefined}
+                      className={cn(navItemClass(on), "ml-6 py-[5px]")}
+                    >
+                      {c.label}
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
       </nav>
@@ -69,14 +83,6 @@ export function Sidebar({ className }: { className?: string }) {
       <div className="mt-auto flex flex-col gap-2 border-t border-sidebar-border pt-3">
         {user && (
           <>
-            <Link
-              href="/settings"
-              aria-current={settingsActive ? "page" : undefined}
-              className={navItemClass(settingsActive)}
-            >
-              <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
-              Settings
-            </Link>
             <p className="truncate px-2.5 text-xs text-muted-foreground" title={user.email}>
               {user.email}
             </p>

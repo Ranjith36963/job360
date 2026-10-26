@@ -9,7 +9,7 @@ import {
 /**
  * A brand-new user (no applications, no events): no sentence, no ledger, no
  * right pane — just the heading and the same three connect steps that live on
- * /settings/connect, shared from one component so the copy cannot drift.
+ * /connect, shared from one component so the copy cannot drift.
  */
 export function HomeWelcome() {
   return (

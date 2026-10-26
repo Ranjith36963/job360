@@ -26,7 +26,7 @@ vi.mock("@/lib/api", async (importOriginal) => ({
   listLessons: vi.fn().mockResolvedValue({ lessons: [], total: 0 }),
 }));
 
-function profile(workArrangement: string, edits: unknown[]) {
+function profile(aboutMe: string, edits: unknown[]) {
   return {
     summary: {
       is_complete: true,
@@ -38,7 +38,8 @@ function profile(workArrangement: string, edits: unknown[]) {
       education: [],
       experience_level: "",
     },
-    preferences: { work_arrangement: workArrangement },
+    // A field the CV tab still shows (work arrangement moved to Memory, 2026-10-26).
+    preferences: { about_me: aboutMe },
     cv_detail: null,
     skill_tiers: {},
     skill_esco: {},
@@ -47,9 +48,9 @@ function profile(workArrangement: string, edits: unknown[]) {
 }
 
 const EDIT = {
-  path: "preferences.work_arrangement",
-  value: "remote",
-  previous_value: "hybrid",
+  path: "preferences.about_me",
+  value: "Data engineer",
+  previous_value: "ML engineer",
   set_by: "agent:Claude",
   set_at: "2026-09-25T10:00:00Z",
 };
@@ -63,30 +64,30 @@ describe("ProfilePage — Take back", () => {
   });
 
   it("takes back the assistant's change and drops the mark", async () => {
-    getProfile.mockResolvedValue(profile("remote", [EDIT]));
-    takeBackProfileEdit.mockResolvedValue(profile("hybrid", []));
+    getProfile.mockResolvedValue(profile("Data engineer", [EDIT]));
+    takeBackProfileEdit.mockResolvedValue(profile("ML engineer", []));
     render(<ProfilePage />);
 
     const mark = await screen.findByTestId("agent-edit-mark");
-    expect(mark.textContent).toBe("Changed by Claude · was hybrid");
+    expect(mark.textContent).toBe("Changed by Claude · was ML engineer");
     expect(screen.getByRole("link", { name: "1 preference set by your assistant" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Take back Claude's change" }));
     await waitFor(() =>
-      expect(takeBackProfileEdit).toHaveBeenCalledWith("preferences.work_arrangement")
+      expect(takeBackProfileEdit).toHaveBeenCalledWith("preferences.about_me")
     );
     await waitFor(() => expect(screen.queryByTestId("agent-edit-mark")).toBeNull());
     expect(screen.queryByText(/set by your assistant/)).toBeNull();
   });
 
   it("keeps the assistant's change: the value stays and the mark goes", async () => {
-    getProfile.mockResolvedValue(profile("remote", [EDIT]));
-    keepProfileEdit.mockResolvedValue(profile("remote", []));
+    getProfile.mockResolvedValue(profile("Data engineer", [EDIT]));
+    keepProfileEdit.mockResolvedValue(profile("Data engineer", []));
     render(<ProfilePage />);
 
     await screen.findByTestId("agent-edit-mark");
     fireEvent.click(screen.getByRole("button", { name: "Keep Claude's change" }));
-    await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledWith("preferences.work_arrangement"));
+    await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledWith("preferences.about_me"));
     expect(takeBackProfileEdit).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByTestId("agent-edit-mark")).toBeNull());
     expect(screen.queryByText(/set by your assistant/)).toBeNull();

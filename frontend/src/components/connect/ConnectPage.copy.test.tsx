@@ -1,5 +1,5 @@
 /**
- * Owner-approved copy pass on /settings/connect (2026-09-27): plain three-step
+ * Owner-approved copy pass on /connect (2026-09-27): plain three-step
  * flow, one tested claim (Claude only), personal tokens folded by default,
  * and no MCP/OAuth/bearer-token jargon in the visible copy outside the
  * developer section.
@@ -7,13 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
-import ConnectAgentPage from "./page";
+import ConnectAgentPage from "./ConnectPage";
 
 // The page reads ?tab= from the URL (Setup | Schedules | Connected apps | Developers).
 const nav = vi.hoisted(() => ({ tab: "setup" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => "/settings/connect",
+  usePathname: () => "/connect",
   useSearchParams: () => new URLSearchParams(`tab=${nav.tab}`),
 }));
 

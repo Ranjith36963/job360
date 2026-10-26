@@ -51,7 +51,7 @@ const newsreader = localFont({
 // in use; do not invent another. Same line as the landing headline
 // (Landing.tsx), the MCP server's own description/INSTRUCTIONS
 // (backend/src/api/mcp_server.py) and the Connect page intro
-// (settings/connect/page.tsx).
+// (connect/page.tsx).
 const TITLE = "Job360 — the job tracker your AI assistant fills in for you";
 const TAGLINE =
   "The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.";

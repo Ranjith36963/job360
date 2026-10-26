@@ -1,21 +1,8 @@
 /**
- * Experience Level must not invent an answer for a brand-new account.
- *
- * THE BUG, as measured. A brand-new account has no profile row, so
- * GET /profile 404s, page.tsx keeps `profile = null`, and passes
- * `preferences={}` to this form. `prefsFromRaw` then substitutes "mid" for the
- * missing experience_level, and the first save posts it as though the user had
- * chosen it. The backend stores it verbatim -- `_apply_preferences` reads
- * experience_level with a bare `.get(..., "")` and normalises nothing.
- *
- * "mid" is not inert. It would be stored on the profile as though the user
- * had stated it, and the user's own agent -- which reads this profile to
- * judge job fit -- has no way to tell a guess from a real answer.
- *
- * Rule #29: an unstated preference is silence, never a guess. This is the
- * identical defect already fixed one field over for `work_arrangement`,
- * whose "any" sentinel was reaching the profile as a real constraint. That
- * fix was never copied here.
+ * Experience level and work arrangement left the CV tab (owner, 2026-10-26):
+ * they are Memory -> Job targets rows now. This card has no control for them
+ * and never sends them, so a stored answer is kept as it is and nothing is
+ * ever invented for a brand-new account (rule #29).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,60 +16,41 @@ describe("PreferencesForm — experience level is never invented", () => {
     vi.clearAllMocks();
   });
 
-  it("a brand-new account does not save an experience level it never chose", async () => {
+  it("the CV tab has no level or work-arrangement control: they live in Memory, Job targets", () => {
+    render(<PreferencesForm preferences={{ experience_level: "senior", work_arrangement: "remote" }} onSave={vi.fn()} loading={false} />);
+    expect(screen.queryByText(/Experience Level/i)).toBeNull();
+    expect(screen.queryByText(/Work Arrangement/i)).toBeNull();
+  });
+
+  it("a save never sends experience_level, so a real choice is kept as stored", async () => {
+    // Never invented, never overwritten from here (rule #29).
     const onSave = vi.fn().mockResolvedValue(undefined);
-    // Exactly what page.tsx passes when GET /profile 404s: `profile?.preferences ?? {}`.
-    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
-
-    // Touch an UNRELATED field, the way a real user would while filling the form.
-    const about = screen.getByPlaceholderText(/Experienced data scientist/i);
-    fireEvent.change(about, { target: { value: "Looking for ML roles." } });
-
+    render(<PreferencesForm preferences={{ experience_level: "senior" }} onSave={onSave} loading={false} />);
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
-
     expect(onSave).toHaveBeenCalledTimes(1);
     const sent = onSave.mock.calls[0][0];
-    expect(sent.experience_level).toBe("");
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["experience_level"]) expect(sent).not.toHaveProperty(key);
   });
 
-  it("a real choice is still sent", async () => {
+  it("a save never sends work_arrangement, so an empty one stays empty", async () => {
+    // Empty = not chosen; nothing here turns it into a default.
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(
-      <PreferencesForm
-        preferences={{ experience_level: "senior" }}
-        onSave={onSave}
-        loading={false}
-      />
-    );
-
-    const about = screen.getByPlaceholderText(/Experienced data scientist/i);
-    fireEvent.change(about, { target: { value: "x" } });
+    render(<PreferencesForm preferences={{ work_arrangement: "" }} onSave={onSave} loading={false} />);
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
-
-    expect(onSave.mock.calls[0][0].experience_level).toBe("senior");
-  });
-
-  it("a stored empty value stays empty rather than becoming a default", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    // What the backend actually returns once any profile row exists.
-    render(
-      <PreferencesForm
-        preferences={{ experience_level: "" }}
-        onSave={onSave}
-        loading={false}
-      />
-    );
-
-    const about = screen.getByPlaceholderText(/Experienced data scientist/i);
-    fireEvent.change(about, { target: { value: "y" } });
-    await act(async () => {
-      vi.advanceTimersByTime(900);
-    });
-
-    expect(onSave.mock.calls[0][0].experience_level).toBe("");
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["work_arrangement"]) expect(sent).not.toHaveProperty(key);
   });
 });

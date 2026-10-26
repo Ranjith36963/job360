@@ -210,7 +210,7 @@ describe("/people", () => {
 
   it("page is a server component titled People", () => {
     expect(metadata.title).toBe("People");
-    const src = readFileSync(join(process.cwd(), "src/app/people/page.tsx"), "utf-8");
+    const src = readFileSync(join(process.cwd(), "src/app/outreach/people/page.tsx"), "utf-8");
     expect(src).not.toContain('"use client"');
     render(<PeoplePage />);
     expect(screen.getByRole("heading", { level: 1, name: "People" })).toBeInTheDocument();

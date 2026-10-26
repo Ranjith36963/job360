@@ -5,36 +5,57 @@ import {
   FolderClock,
   Receipt,
   BarChart3,
-  Plug,
   MessageCircleQuestion,
   Users,
+  Plug,
+  CircleUser,
   type LucideIcon,
 } from "lucide-react";
 
-// R14 (docs/plans/2026-09-04-application-spine) removed /receipts from the
-// nav — the URL kept working, but a new-user walk (2026-09-27) found no way
-// to discover it at all, so it is back as a first-class link. Slice 5
-// (delete-sourcing-era) removed the Dashboard link and the route it pointed
-// at, and the mission sweep removed Channels/notifications outright
-// (VISION:133 — notifications are pull-not-push) — Job360 never sources or
-// ranks jobs (VISION rule 4), so there is no catalog left to browse either.
+// Nav history: R14 put /receipts back as a first-class link after a new-user
+// walk (2026-09-27) found no way to discover it; slice 5 removed Dashboard,
+// and the mission sweep removed Channels/notifications. Job360 never sources
+// or ranks jobs (VISION rule 4), so there is no catalog to browse either.
 //
-// Agentic UX audit (2026-09-08) — the whole product depends on the user
-// connecting their own assistant, but /settings/connect was reachable only
-// via the gear icon. It is a first-class destination now, not a settings tab.
-// "Needs you" leads the list (owner, 2026-10-19): the questions only the user
-// can answer are the first thing to look at, above Home.
-export const NAV_LINKS: readonly { href: string; label: string; icon: LucideIcon }[] = [
+// Owner's final sketch, 2026-10-26: Needs you, Home, Jobs in, Applications,
+// Outreach (> People), Receipts, Stats, Profile (> Memory), Connect your
+// assistant, Account. There is no Settings item: the old settings pages moved
+// to /account and /connect. Sub-items show indented under their parent.
+export type NavLink = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  children?: readonly { href: string; label: string }[];
+};
+
+export const NAV_LINKS: readonly NavLink[] = [
   { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
   { href: "/", label: "Home", icon: House },
-  { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
-  { href: "/people", label: "People", icon: Users },
-  { href: "/stats", label: "Stats", icon: BarChart3 },
+  {
+    href: "/outreach/people",
+    label: "Outreach",
+    icon: Users,
+    children: [{ href: "/outreach/people", label: "People" }],
+  },
   { href: "/receipts", label: "Receipts", icon: Receipt },
-  { href: "/settings/connect", label: "Connect your assistant", icon: Plug },
+  { href: "/stats", label: "Stats", icon: BarChart3 },
+  {
+    href: "/profile",
+    label: "Profile",
+    icon: User,
+    children: [{ href: "/profile/memory", label: "Memory" }],
+  },
+  { href: "/connect", label: "Connect your assistant", icon: Plug },
+  { href: "/account", label: "Account", icon: CircleUser },
 ];
+
+/** Every link in drawing order, sub-items right after their parent. */
+export const NAV_FLAT: readonly { href: string; label: string; child: boolean }[] = NAV_LINKS.flatMap((l) => [
+  { href: l.href, label: l.label, child: false },
+  ...(l.children ?? []).map((c) => ({ href: c.href, label: c.label, child: true })),
+]);
 
 /** Mirrors PROTECTED_PATHS in src/middleware.ts: routes only a signed-in user
  *  can reach. While the session is still loading, the shell uses this to draw
@@ -44,10 +65,11 @@ const PROTECTED_PREFIXES = [
   "/bring",
   "/receipts",
   "/applications",
-  "/people",
+  "/outreach",
   "/stats",
   "/needs-you",
-  "/settings",
+  "/account",
+  "/connect",
   "/oauth",
 ];
 
@@ -59,8 +81,9 @@ export function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-/** /settings/connect is its own nav entry, so the Settings link must not
- *  also light up for it — two active links at once looks broken. */
-export function isSettingsActive(pathname: string): boolean {
-  return pathname.startsWith("/settings") && !pathname.startsWith("/settings/connect");
+/** A parent lights up on its own pages, not while one of its sub-items does
+ *  (two active links at once looks broken). Outreach and its only sub-item,
+ *  People, share an address, so People is the one that lights up there. */
+export function isParentActive(pathname: string, link: NavLink): boolean {
+  return isNavActive(pathname, link.href) && !(link.children ?? []).some((c) => isNavActive(pathname, c.href));
 }
