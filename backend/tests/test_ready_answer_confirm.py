@@ -255,11 +255,9 @@ async def test_sensitive_memory_goes_to_its_field_never_the_approved_list(authen
         await _fill(client, app_id, [GENDER])
         card = await _card(client, app_id)
         assert _codes(card) == ["sensitive", "not_in_memory"]
-        # G023 (slice 11): not in memory, so the fill kept only its hash - Verify cannot see it, Edit types it.
-        assert (card["answers"][0]["redacted"], card["answers"][0]["answer"]) == (True, "")
-        refused = await _confirm(client, app_id, 0, card["form_filled_event_id"])
-        assert refused.status_code == 422 and "use Edit" in refused.json()["detail"]
-        resp = await _confirm(client, app_id, 0, card["form_filled_event_id"], "Female")
+        # Owner 2026-10-26 (G023 retired): the typed value is kept, so Verify sees it and saves it to its field.
+        assert (card["answers"][0]["redacted"], card["answers"][0]["answer"]) == (False, "Female")
+        resp = await _confirm(client, app_id, 0, card["form_filled_event_id"])
         assert resp.status_code == 200, resp.text
         assert resp.json()["answers"][0]["verified"] is True and _codes(resp.json()) == []
         profile = load_profile(fixture_user_id)
@@ -434,3 +432,20 @@ def test_each_answer_says_verify_or_confirm():
 
     assert answer_check({"source": "written"}) == "confirm"
     assert [answer_check({"source": s}) for s in ("memory", "profile", "approved", "guessed")] == ["verify"] * 4
+
+
+def test_a_row_hashed_before_offers_the_users_saved_answer_as_a_draft():
+    """Owner 2026-10-26: no "(not kept...)" placeholder. A row hashed before G023 was retired offers the
+    user's own saved answer as ``draft``; when its hash matches what was typed, it reads as typed again."""
+    from src.services.applications import kit, ready
+    from src.services.profile.models import UserInfo, UserProfile
+
+    profile = UserProfile(user_info=UserInfo(equality={"gender": "Female"}))
+    saved = {"user_info.equality": ("web", "2026-10-01T00:00:00+00:00")}
+    row = {"question": "Gender", "source": "memory", "key": "equality.gender", "redacted": True}
+    same = ready._hashed_row({**row, "value_sha256": kit.sha256_text("Female")}, profile, saved, None)
+    assert (same["answer"], "redacted" in same) == ("Female", False)
+    other = ready._hashed_row({**row, "value_sha256": kit.sha256_text("Male")}, profile, saved, None)
+    assert (other["answer"], other["redacted"], other["draft"]) == ("", True, "Female")
+    none = ready._hashed_row({**row, "value_sha256": "x"}, UserProfile(), {}, None)
+    assert (none["redacted"], none["draft"]) == (True, None)

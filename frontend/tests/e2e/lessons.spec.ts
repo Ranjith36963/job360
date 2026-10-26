@@ -198,7 +198,7 @@ test.describe("Flag for next time (slice 9)", () => {
     });
   });
 
-  test("profile page lists a mocked lesson linking to its application", async ({ page, context }) => {
+  test("home page lists a mocked lesson linking to its application", async ({ page, context }) => {
     await context.addCookies([SESSION_COOKIE]);
     await mockAuth(page);
 
@@ -209,10 +209,7 @@ test.describe("Flag for next time (slice 9)", () => {
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockLessons()) })
     );
 
-    await page.goto("/profile");
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Profile", exact: true })
-    ).toBeVisible({ timeout: 10_000 });
+    await page.goto("/");
 
     const items = page.getByTestId("lesson-item");
     await expect(items).toHaveCount(1);

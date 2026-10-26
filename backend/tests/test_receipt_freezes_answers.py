@@ -9,7 +9,6 @@ only (G023) - in the event AND the receipt, both append-only (M3). Real rows, re
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -171,9 +170,9 @@ async def test_a_count_with_no_answers_warns_and_the_counts_line_keeps_the_count
 
 
 @pytest.mark.asyncio
-async def test_a_sensitive_answer_not_remembered_is_hashed_in_the_event_and_the_receipt(authenticated_async_context):
-    """Visa and salary said for THIS form only: the event and the receipt keep the question and
-    the sha256, never the value. A remembered sensitive answer (the user's own save) stays as typed."""
+async def test_every_typed_answer_is_kept_as_typed_in_the_event_and_the_receipt(authenticated_async_context):
+    """Owner decision 2026-10-26 ("yes, keep them"; G023 retired): visa, salary and equality answers said
+    for THIS form are kept as typed in the event and the receipt, so the card can show them to edit."""
     gender = {"question": "Gender", "answer": "Female", "source": "memory", "key": "equality.gender"}
     async with authenticated_async_context() as client:
         resp = await client.patch("/api/profile", json={"edits": [{"path": "user_info.equality", "value": {"gender": "Female"}}]})
@@ -188,19 +187,14 @@ async def test_a_sensitive_answer_not_remembered_is_hashed_in_the_event_and_the_
     rows = [r[0] for r in _sql(
         "SELECT answers FROM application_receipts WHERE id IN (?, ?)", (frozen["receipt_id"], given["receipt_id"])
     )]
-    for raw in (event_payload, *rows):
-        assert "Skilled Worker 7731" not in raw and "61,500" not in raw
-    sha = {a["question"]: hashlib.sha256(a["answer"].encode("utf-8")).hexdigest() for a in (VISA, PAY)}
     for stored in (json.loads(event_payload)["answers"], json.loads(rows[0])):
         by_q = {a["question"]: a for a in stored}
-        for q in (VISA["question"], PAY["question"]):
-            assert by_q[q] == {"question": q, "source": "profile", "value_sha256": sha[q], "redacted": True}
-        assert by_q["Why this role?"]["answer"] == "I like the product."
-        assert by_q["Gender"]["answer"] == "Female", "remembered with the user's OK: kept as typed"
-    assert [a["redacted"] for a in json.loads(rows[1]) if a["question"] == VISA["question"]] == [True]
+        assert [by_q[a["question"]]["answer"] for a in (WHY, VISA, PAY, gender)] == [
+            a["answer"] for a in (WHY, VISA, PAY, gender)]
+        assert not any(a.get("redacted") or "value_sha256" in a for a in stored)
+    assert [a["answer"] for a in json.loads(rows[1]) if a["question"] == VISA["question"]] == [VISA["answer"]]
     shown = {a["question"]: a for a in full["answers"]}
-    assert (shown[VISA["question"]]["answer"], shown[VISA["question"]]["redacted"]) == ("", True)
-    assert shown[VISA["question"]]["value_sha256"] == sha[VISA["question"]]
+    assert (shown[VISA["question"]]["answer"], shown[VISA["question"]].get("redacted", False)) == (VISA["answer"], False)
     assert full["counts_line"] == f"4 of 4 fields {_DOT} 0 skipped {_DOT} 0 guessed"
 
 

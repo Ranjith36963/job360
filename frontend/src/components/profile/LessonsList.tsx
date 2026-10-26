@@ -6,7 +6,7 @@ import { BookOpen } from "lucide-react";
 import { listLessons, type Lesson } from "@/lib/api";
 import { formatDate } from "@/lib/format-date";
 
-/** Profile page's "Lessons" section (slice 9, #516) — every lesson flagged
+/** Home page's "Lessons" section (moved from Profile 2026-10-26) (slice 9, #516) — every lesson flagged
  * from any application's timeline, newest first, linking back to its
  * application. This is the store half of the loop: the agent reads these
  * back (door 2, `ProfileResponse.lessons`) before tailoring the next CV. */
