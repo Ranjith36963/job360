@@ -46,6 +46,7 @@ from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.answer_match import fits_country
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
+from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -1902,19 +1903,29 @@ def compute_answers(
             dropped.append(path)
     have = {i["key"] for block in out.values() for i in block}
     _mark_sensitive(out)
-    # No record for the job's country: the user's "ANY" record (every other country) answers it, so the
-    # assistant is not asked again. Its facts ride along as right_to_work.<country>.<field> items.
+    # No record for the job's country: its region's record (owner decision 2026-10-26), else the
+    # user's "ANY" record (every other country), answers it, so the assistant is not asked again.
+    # Its facts ride along as right_to_work.<country>.<field> items; a region's salary as salary.<country>.
     if country:
-        any_items = [i for i in out["right_to_work"] if i["key"].startswith("right_to_work.ANY.")]
-        if any_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
-            for item in any_items:
-                field = item["key"].rsplit(".", 1)[1]
-                out["right_to_work"].append(
-                    _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
-                          applies_via="ANY", **({"confirmed": False} if item.get("confirmed") is False else {}))
+        region = region_of(country)
+        for via in ([region] if region else []) + ["ANY"]:
+            via_items = [i for i in out["right_to_work"] if i["key"].startswith(f"right_to_work.{via}.")]
+            if via_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
+                for item in via_items:
+                    field = item["key"].rsplit(".", 1)[1]
+                    out["right_to_work"].append(
+                        _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
+                              applies_via=via, **({"confirmed": False} if item.get("confirmed") is False else {}))
+                    )
+                have = {i["key"] for block in out.values() for i in block}
+        if region and f"salary.{country}" not in have:
+            for item in [i for i in out["salary"] if i["key"] == f"salary.{region}"]:
+                out["salary"].append(
+                    _mk(f"salary.{country}", item["value"], "memory", item["saved_at"],
+                          applies_via=region, **({"confirmed": False} if item.get("confirmed") is False else {}))
                 )
             have = {i["key"] for block in out.values() for i in block}
-            _mark_sensitive(out)
+        _mark_sensitive(out)
     for block, items in out.items():
         for item in items:
             if _is_sensitive(block, str(item["key"])) and consented.get(_SENSITIVE_PATH.get(block, "")):
