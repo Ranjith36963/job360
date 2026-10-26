@@ -9,6 +9,7 @@ rate-limited or malformed-ish call returns 204.
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -23,6 +24,30 @@ router = APIRouter(tags=["client-log"])
 
 _client_log = get_logger("client")  # "job360.client" → main job360 handlers (data/logs/)
 _LEVELS = {"error", "warning", "info"}
+
+
+_WHITESPACE = re.compile(r"(\s+)")
+_QUERY_OR_HASH = re.compile(r"[?#]")
+
+
+def _strip_url(value: Optional[str]) -> Optional[str]:
+    """Drop the query string and fragment from a URL, and from any URL inside free text.
+
+    A page URL can carry a live credential (``/auth/magic?token=...``); it must not
+    reach the log file or audit_log. Text without a URL passes through unchanged."""
+    if not value:
+        return value
+    # Word by word (linear time): a single backtracking regex over free text is a ReDoS.
+    # The scheme may sit anywhere in a word: "(https://x/a.js?t=1:2:3)", "url=https://...".
+    parts = _WHITESPACE.split(value)
+    for i, part in enumerate(parts):
+        low = part.lower()
+        at = min((n for n in (low.find("http://"), low.find("https://")) if n >= 0), default=-1)
+        if at >= 0:
+            cut = _QUERY_OR_HASH.search(part, at)
+            if cut:
+                parts[i] = part[: cut.start()]
+    return "".join(parts)
 
 
 class ClientLogRequest(BaseModel):
@@ -48,6 +73,13 @@ async def client_log(
     if not auth_rate_limit.check_and_record(key, max_in_window=60, window_seconds=60):
         return None
 
+    # Credentials ride in page URLs (?token=...): strip query and fragment from every
+    # URL-bearing field before anything is written.
+    page_url = _QUERY_OR_HASH.split(body.url, maxsplit=1)[0] if body.url else body.url  # relative URLs too
+    message = _strip_url(body.message) or ""
+    stack = _strip_url(body.stack)
+    context = _strip_url(body.context)
+
     level = body.level if body.level in _LEVELS else "error"
 
     # GIVE BROWSER ERRORS A DURABLE, QUERYABLE HOME.
@@ -65,9 +97,11 @@ async def client_log(
     # info/warn stay in the file stream — so the flood that motivated the Sentry
     # exclusion cannot happen here either, and the per-IP 60/min cap above
     # bounds it regardless.
-    if level == "error":
+    # Anonymous posts stay in the file stream only: audit_log is durable and any
+    # unauthenticated caller could otherwise write free text into it.
+    if level == "error" and user is not None:
         try:
-            from src.utils.logger import get_audit_logger, safe_log_value
+            from src.utils.logger import get_audit_logger, mask_ip, safe_log_value
 
             get_audit_logger().error(
                 "client_error",
@@ -78,10 +112,10 @@ async def client_log(
                 extra={
                     "event": "client_error",
                     "status": "error",
-                    "user_id": user.id if user else None,
-                    "client_ip": ip,
-                    "client_message": safe_log_value(body.message or "", max_len=500),
-                    "client_url": safe_log_value(body.url or "", max_len=300),
+                    "user_id": user.id,
+                    "client_ip": mask_ip(ip),  # audit_log is never pruned: no raw IPs
+                    "client_message": safe_log_value(message, max_len=500),
+                    "client_url": safe_log_value(page_url or "", max_len=300),
                 },
             )
         except Exception:  # noqa: BLE001 — logging must never break the client
@@ -93,10 +127,10 @@ async def client_log(
         extra={
             "event": "client_event",
             "client_level": level,
-            "client_message": body.message,
-            "client_url": body.url,
-            "client_stack": body.stack,
-            "client_context": body.context,
+            "client_message": message,
+            "client_url": page_url,
+            "client_stack": stack,
+            "client_context": context,
             "user_id": user.id if user else None,
             "client_ip": ip,
         },
