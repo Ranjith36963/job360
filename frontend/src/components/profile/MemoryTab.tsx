@@ -14,7 +14,7 @@ import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse } from "@/lib/types";
 import {
   ANSWERS, LOGISTICS, MEMORY_PATHS, RTW, SALARY,
-  contactRows, equalityRows, fieldProvenance, isEmpty, logisticsCountryRows, logisticsRows,
+  contactRows, equalityRows, targetRows, fieldProvenance, isEmpty, logisticsCountryRows, logisticsRows,
   answerApprover, approvalText, countrySaved, provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, showRow, writeRow,
   type HistoryRow, type RowSpec,
 } from "@/lib/memory";
@@ -24,7 +24,7 @@ type Histories = Record<string, HistoryRow[]>;
 
 function blockOf(profile: ProfileResponse | null, path: string): unknown {
   if (!profile) return undefined;
-  if (path === SALARY) return (profile.preferences as Record<string, unknown>)?.[ "salary_by_country" ];
+  if (path.startsWith("preferences.")) return (profile.preferences as Record<string, unknown>)?.[path.replace("preferences.", "")];
   return (profile.user_info as Record<string, unknown>)?.[path.replace("user_info.", "")];
 }
 
@@ -250,7 +250,7 @@ export function MemoryTab() {
   // details never confirms a visa answer you have not seen.
   const steps: { id: string; title: string; fact: string; pinned?: boolean; specs: RowSpec[] }[] = [
     { id: "you", title: "Your details for forms", fact: "About you", pinned: true, specs: contactRows() },
-    { id: "targets", title: "Job targets", fact: "Job targets", specs: salaryCodes.map(salaryRow) },
+    { id: "targets", title: "Job targets", fact: "Job targets", specs: [...targetRows(), ...salaryCodes.map(salaryRow)] },
     { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...visaCardRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
     { id: "logistics", title: "Logistics", fact: "Logistics", specs: logisticsRows() },
     { id: "equality", title: "Equality (voluntary)", fact: "Equality", specs: equalityRows() },
@@ -305,7 +305,10 @@ export function MemoryTab() {
   const STEP_BODY: Record<string, React.ReactNode> = {
     targets: (
       <>
-              <JobPriority embedded rightToWork={blockOf(profile, RTW)} salaries={blockOf(profile, SALARY)} onSaved={gridSaved} />
+              {targetRows().map((s) => row(s))}
+              <div className="mt-5">
+                <JobPriority embedded rightToWork={blockOf(profile, RTW)} salaries={blockOf(profile, SALARY)} onSaved={gridSaved} />
+              </div>
       </>
     ),
     you: (

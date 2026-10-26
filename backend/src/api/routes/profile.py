@@ -1389,13 +1389,17 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     # there is exactly one stored answer and the two cannot disagree.
     years = _years_or_422(pref_dict, existing)
     profile.preferences = UserPreferences(
-        target_job_titles=pref_dict.get("target_job_titles", []),
+        # Owner decision 2026-10-26: job targets and salary moved to Memory, so the
+        # CV-tab form no longer sends them. Same partial-save shape as
+        # work_arrangement below: an OMITTED key keeps the stored value, an
+        # explicit [] / null clears it.
+        target_job_titles=pref_dict.get("target_job_titles", existing.target_job_titles),
         additional_skills=pref_dict.get("additional_skills", []),
         excluded_skills=pref_dict.get("excluded_skills", []),
-        preferred_locations=pref_dict.get("preferred_locations", []),
+        preferred_locations=pref_dict.get("preferred_locations", existing.preferred_locations),
         industries=pref_dict.get("industries", []),
-        salary_min=pref_dict.get("salary_min"),
-        salary_max=pref_dict.get("salary_max"),
+        salary_min=pref_dict.get("salary_min", existing.salary_min),
+        salary_max=pref_dict.get("salary_max", existing.salary_max),
         # An OMITTED key keeps the stored value; an explicit "" still clears it.
         # The old default of "" meant any partial save wiped the answer, and
         # the damage was hidden by the preferred_workplace fallback that this

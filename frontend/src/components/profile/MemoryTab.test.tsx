@@ -50,14 +50,35 @@ beforeEach(() => {
 });
 
 describe("MemoryTab", () => {
-  it("reads the profile and the seven histories in parallel", async () => {
+  it("reads the profile and every memory history (job targets included) in parallel", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(getProfileEditHistory.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "preferences.salary_by_country", "user_info.answers", "user_info.contact", "user_info.equality",
+      "preferences.avoid_companies", "preferences.dealbreakers", "preferences.experience_level",
+      "preferences.experience_years_max", "preferences.experience_years_min", "preferences.looking_for",
+      "preferences.preferred_locations", "preferences.salary_by_country", "preferences.target_job_titles",
+      "preferences.work_arrangement",
+      "user_info.answers", "user_info.contact", "user_info.equality",
       "user_info.languages", "user_info.logistics", "user_info.right_to_work",
     ]);
+  });
+
+  it("Job targets shows the roles and other targets; an edit saves that one preference", async () => {
+    const withTargets = { ...profile, preferences: { ...profile.preferences, target_job_titles: ["Data Engineer"], experience_level: "senior" } };
+    getProfile.mockResolvedValue(withTargets);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const targets = screen.getByTestId("memory-step-targets");
+    expect(within(targets).getByTestId("memory-row-preferences.target_job_titles")).toHaveTextContent("Data Engineer");
+    expect(within(targets).getByTestId("memory-row-preferences.experience_level")).toHaveTextContent("Senior");
+    expect(within(targets).getByTestId("memory-row-preferences.dealbreakers")).toHaveTextContent("Not saved yet");
+    fireEvent.click(within(targets).getByRole("button", { name: "Edit Roles" }));
+    fireEvent.change(screen.getByLabelText("Roles"), { target: { value: "Data Engineer\nAnalytics Engineer" } });
+    fireEvent.click(within(screen.getByTestId("memory-row-preferences.target_job_titles")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.target_job_titles", value: ["Data Engineer", "Analytics Engineer"] },
+    ]));
   });
 
   it("puts your details for forms first and pinned open, then the four steps, then approved answers", async () => {

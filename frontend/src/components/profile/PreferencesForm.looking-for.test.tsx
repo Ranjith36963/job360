@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { PreferencesForm } from "./PreferencesForm";
 
 describe("PreferencesForm - what you're looking for", () => {
@@ -9,45 +9,27 @@ describe("PreferencesForm - what you're looking for", () => {
     vi.clearAllMocks();
   });
 
-  it("empty on a new account: nothing is invented (rule #29)", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
-    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/i), { target: { value: "x" } });
-    await act(async () => {
-      vi.advanceTimersByTime(900);
-    });
-    const sent = onSave.mock.calls[0][0];
-    expect(sent.experience_years_min).toBeNull();
-    expect(sent.experience_years_max).toBeNull();
-    expect(sent.looking_for).toEqual([]);
-    expect(sent.dealbreakers).toEqual([]);
-    expect(sent.avoid_companies).toEqual([]);
+  it("the CV tab has no job-target controls: they live in Memory, Job targets", () => {
+    render(<PreferencesForm preferences={{ target_job_titles: ["Data Engineer"], looking_for: ["small team"] }} onSave={vi.fn()} loading={false} />);
+    expect(screen.queryByTestId("looking-for")).toBeNull();
+    expect(screen.queryByTestId("years-min")).toBeNull();
+    expect(screen.queryByText("Data Engineer")).toBeNull();
+    expect(screen.queryByText(/Preferred Locations/i)).toBeNull();
   });
 
-  it("loads stored values and autosaves edits", async () => {
+  it("a save never sends the job targets, so values edited in Memory are kept", async () => {
+    // A stale copy on this tab can never overwrite them.
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(
-      <PreferencesForm
-        preferences={{ experience_years_min: 3, experience_years_max: 6, dealbreakers: ["on-call"] }}
-        onSave={onSave}
-        loading={false}
-      />,
-    );
-    expect(screen.getByText("What you're looking for")).toBeInTheDocument();
-    expect((screen.getByTestId("years-min") as HTMLInputElement).value).toBe("3");
-    expect((screen.getByTestId("years-max") as HTMLInputElement).value).toBe("6");
-    expect(within(screen.getByTestId("dealbreakers-list")).getByText("on-call")).toBeInTheDocument();
-    fireEvent.change(screen.getByTestId("years-max"), { target: { value: "8" } });
-    const box = within(screen.getByTestId("avoid-companies-list")).getByRole("textbox");
-    fireEvent.change(box, { target: { value: "Acme" } });
-    fireEvent.keyDown(box, { key: "Enter" });
+    render(<PreferencesForm preferences={{ target_job_titles: ["Data Engineer"], preferred_locations: ["London"], looking_for: ["small team"], dealbreakers: ["on-call"], avoid_companies: ["Acme"], experience_years_min: 2, experience_years_max: 5 }} onSave={onSave} loading={false} />);
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
-    const sent = onSave.mock.calls.at(-1)![0];
-    expect(sent.experience_years_min).toBe(3);
-    expect(sent.experience_years_max).toBe(8);
-    expect(sent.avoid_companies).toEqual(["Acme"]);
-    expect(sent.dealbreakers).toEqual(["on-call"]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["target_job_titles", "preferred_locations", "looking_for", "dealbreakers", "avoid_companies", "experience_years_min", "experience_years_max"]) expect(sent).not.toHaveProperty(key);
   });
 });
