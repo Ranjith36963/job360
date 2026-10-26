@@ -16,6 +16,31 @@ export const LINKEDIN_OWN_BROWSER_LABEL = "Your own browser: runs when your PC i
 /** The route reason the server sends with it. */
 export const LINKEDIN_OWN_BROWSER_REASON = "linkedin_own_browser";
 
+/** One chip per route reason, equal to the server's `routing.ROUTE_LABELS` (a test pins both). `{site}`,
+ *  `{date}`, `{until}`, `{n}` and `{cap}` are filled from closed values. Assistant-neutral. */
+export const ROUTE_LABELS = {
+  default: "I'll use Job360's browser",
+  linkedin_own_browser: "Your own browser: runs when your PC is on",
+  learned_blocked: "Job360's browser was blocked on {site} on {date}: your own browser until {until}",
+  learned_login: "{site} asks you to sign in: your own browser, or sign in once in Job360's browser",
+  probe: "Trying Job360's browser on {site} again",
+  at_cap: "Today's LinkedIn limit is used ({n} of {cap}): waits until tomorrow",
+  linkedin_paused: "LinkedIn showed a limit warning: LinkedIn tasks paused until {date}",
+  account_step: "This site wants a new account: your own browser, or sign in once in Job360's browser",
+  linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
+  waiting: "Waiting for your PC",
+} as const;
+
+type RouteFmt = Partial<Record<"site" | "date" | "until" | "n" | "cap", string | number>>;
+
+/** Fill a `ROUTE_LABELS` string from closed values; a missing value reads as a neutral default. */
+export function routeLabel(reason: keyof typeof ROUTE_LABELS, fmt: RouteFmt = {}): string {
+  const defaults = { site: "this site", date: "soon", until: "soon", n: "?", cap: "?" };
+  return ROUTE_LABELS[reason].replace(/\{(site|date|until|n|cap)\}/g, (_, k: keyof typeof defaults) =>
+    String(fmt[k] ?? defaults[k]),
+  );
+}
+
 /** The section heading for tasks that wait for the user's own browser. */
 export const OWN_BROWSER_LABEL = BROWSER_LABELS.own_browser;
 /** The short name of Job360's own browser, on a chip with no server label. */
