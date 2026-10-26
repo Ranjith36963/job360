@@ -89,8 +89,17 @@ def _rules_section() -> str:
     return match.group(1)
 
 
+def test_new_route_reasons_have_a_chip_text_and_old_chips_are_unchanged():
+    for reason in ("learned_blocked", "learned_login", "probe", "at_cap", "linkedin_paused", "account_step",
+                   "linkedin_guest_blocked"):
+        assert reason in routing.ROUTE_REASONS and reason in routing.ROUTE_LABELS
+    assert "waiting" in routing.ROUTE_LABELS
+    assert routing.ROUTE_LABELS["default"] == routing.LABELS["job360"]
+    assert routing.ROUTE_LABELS["linkedin_own_browser"] == routing.LINKEDIN_LABEL
+
+
 def test_no_text_names_an_assistant():
-    texts = [*routing.LABELS.values(), browser_routes.HAND_OFF_DETAIL, _rules_section()]
+    texts = [*routing.LABELS.values(), *routing.ROUTE_LABELS.values(), routing.SERVER_READ_LABEL, browser_routes.HAND_OFF_DETAIL, _rules_section()]
     assert len(_rules_section()) > 400
     for text in texts:
         assert not re.search(r"claude|chatgpt|gemini|atlas|chrome", text, re.I), text
