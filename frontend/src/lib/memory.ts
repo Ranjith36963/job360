@@ -478,14 +478,22 @@ export function fieldProvenance(
   current: unknown,
 ): Provenance | null {
   let prev: unknown;
+  let prevBlock: unknown;
   let last: Provenance | null = null;
   for (const row of [...history].reverse()) {
     const val = read(row.value ?? null);
+    const userSaid = row.set_by === "web" || row.source === "user_said";
     if (!same(val, prev)) {
       last = { by: row.set_by, at: row.set_at, previous: prev };
-      if (row.set_by !== "web" && row.source !== "user_said") last.unconfirmed = true;
+      if (!userSaid) last.unconfirmed = true;
       prev = val;
+    } else if (userSaid && last?.unconfirmed && same(row.value ?? null, prevBlock)) {
+      // Confirm (Keep) stores the WHOLE block again, unchanged, as the user's
+      // word: still the assistant's answer, no longer waiting on the user. A
+      // web edit to another key of the block is not a confirm of this one.
+      delete last.unconfirmed;
     }
+    prevBlock = row.value ?? null;
   }
   return same(prev, current) ? last : null;
 }

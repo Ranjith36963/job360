@@ -78,6 +78,17 @@ describe("fieldProvenance", () => {
     expect(fieldProvenance(history, readPhone, "+44 2")).toMatchObject({ by: "web", previous: undefined });
   });
 
+  it("Confirm (the whole block stored again by the web) clears 'unconfirmed' but keeps who wrote it", () => {
+    const block = { phone: "+44 1", email: "a@b.co" };
+    const history = [
+      { set_by: "web", set_at: T2, value: block },
+      { set_by: "agent:Claude", set_at: T1, value: block },
+    ];
+    expect(fieldProvenance(history, readPhone, "+44 1")).toEqual({ by: "agent:Claude", at: T1, previous: undefined });
+    // without the confirm row it is still waiting on the user
+    expect(fieldProvenance(history.slice(1), readPhone, "+44 1")).toMatchObject({ unconfirmed: true });
+  });
+
   it("an edit to a DIFFERENT key does not move this row's mark", () => {
     const history = [
       { set_by: "web", set_at: T2, value: { phone: "+44 1", email: "a@b.co" } },
