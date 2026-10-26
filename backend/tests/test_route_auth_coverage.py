@@ -73,6 +73,7 @@ ROUTE_MODULES = [
     "oauth",
     "hunt_kit",
     "own_browser",
+    "browser",
     "asks",
 ]
 
@@ -192,6 +193,7 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/contacts/{contact_id}/own-browser-send"): "the user's own yes to one LinkedIn send",
     ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
     ("POST", "/api/asks/{ask_id}/answers/save"): "the user's own saved rows read as checked on Needs you",
+    ("POST", "/api/applications/{application_id}/browser/refill"): "the user's own Refill the form: replays and holds",
 }
 
 
