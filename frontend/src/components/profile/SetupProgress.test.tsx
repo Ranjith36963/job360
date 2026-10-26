@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SetupCard, SetupProgress } from "./SetupProgress";
+import { SetupCard, SetupProgress, useSetupProgress } from "./SetupProgress";
 import { doneDate } from "@/lib/assistant-tab";
 
 const getAssistantSettings = vi.fn();
@@ -59,6 +59,16 @@ describe("SetupCard (Home)", () => {
     const { container } = render(<SetupCard />);
     await vi.waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("a failed read is reported as failed, not left loading (Memory shows its steps as not done)", async () => {
+    getAssistantSettings.mockImplementation(() => Promise.reject(new Error("down")));
+    function Probe() {
+      const { progress, failed } = useSetupProgress();
+      return <p data-testid="probe">{failed ? "failed" : progress ? "loaded" : "loading"}</p>;
+    }
+    render(<Probe />);
+    expect(await screen.findByText("failed")).toBeInTheDocument();
   });
 
   it("a failed read shows no card", async () => {
