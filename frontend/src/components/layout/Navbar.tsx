@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Menu, Settings, LogOut } from "lucide-react";
+import { Menu, LogOut } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
@@ -12,7 +12,7 @@ import {
   NAV_LINKS,
   isNavActive,
   isProtectedPath,
-  isSettingsActive,
+  isParentActive,
 } from "@/components/layout/nav-links";
 import { PauseButton } from "@/components/layout/TopBar";
 import { NeedsYouBadge, useOpenAsks } from "@/components/layout/useOpenAsks";
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
  * - Signed out: logo, Log in, Get started, theme toggle (md and up); a drawer
  *   with the same on a phone.
  * - Signed in: only on narrow screens (< md), where the sidebar is gone — logo
- *   plus a drawer holding the nav links, Settings, account and theme toggle.
+ *   plus a drawer holding the nav links, account and theme toggle.
  *   From md up the Sidebar (Sidebar.tsx) takes over and this bar hides.
  */
 export function Navbar() {
@@ -44,7 +44,6 @@ export function Navbar() {
   const signedOut = !loading && !user;
   // The sidebar owns desktop whenever we are (or are about to be) signed in.
   const sidebarOnDesktop = signedIn || (loading && isProtectedPath(pathname));
-  const settingsActive = isSettingsActive(pathname);
   const openAsks = useOpenAsks(signedIn, pathname);
 
   const drawerLink = (active: boolean) =>
@@ -116,33 +115,38 @@ export function Navbar() {
               </SheetTitle>
               <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
                 {signedIn &&
-                  NAV_LINKS.map(({ href, label, icon: Icon }) => {
-                    const active = isNavActive(pathname, href);
+                  NAV_LINKS.map((link) => {
+                    const { href, label, icon: Icon } = link;
+                    const active = isParentActive(pathname, link);
                     return (
-                      <Link
-                        key={href}
-                        href={href}
-                        onClick={() => setMobileOpen(false)}
-                        aria-current={active ? "page" : undefined}
-                        className={drawerLink(active)}
-                      >
-                        <Icon className="h-4 w-4" aria-hidden="true" />
-                        {label}
-                        {href === "/needs-you" && <NeedsYouBadge count={openAsks} />}
-                      </Link>
+                      <div key={href + label} className="flex flex-col gap-1">
+                        <Link
+                          href={href}
+                          onClick={() => setMobileOpen(false)}
+                          aria-current={active ? "page" : undefined}
+                          className={drawerLink(active)}
+                        >
+                          <Icon className="h-4 w-4" aria-hidden="true" />
+                          {label}
+                          {href === "/needs-you" && <NeedsYouBadge count={openAsks} />}
+                        </Link>
+                        {(link.children ?? []).map((c) => {
+                          const on = isNavActive(pathname, c.href);
+                          return (
+                            <Link
+                              key={c.href}
+                              href={c.href}
+                              onClick={() => setMobileOpen(false)}
+                              aria-current={on ? "page" : undefined}
+                              className={cn(drawerLink(on), "ml-7 min-h-10 py-2")}
+                            >
+                              {c.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
                     );
                   })}
-                {signedIn && (
-                  <Link
-                    href="/settings"
-                    onClick={() => setMobileOpen(false)}
-                    aria-current={settingsActive ? "page" : undefined}
-                    className={drawerLink(settingsActive)}
-                  >
-                    <Settings className="h-4 w-4" aria-hidden="true" />
-                    Settings
-                  </Link>
-                )}
                 {/* Without this the signed-out drawer opened completely empty. */}
                 {signedOut && (
                   <>

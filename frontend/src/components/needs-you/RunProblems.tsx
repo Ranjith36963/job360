@@ -43,7 +43,7 @@ export function RunProblems() {
               <p className="mt-1 text-muted-foreground">{p.what_to_do}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 It now waits longer between tries.{" "}
-                <Link href="/settings/connect?tab=schedules" className="underline underline-offset-2">
+                <Link href="/connect?tab=schedules" className="underline underline-offset-2">
                   Run it now
                 </Link>
               </p>

@@ -42,7 +42,7 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
 
       <div className="flex flex-wrap items-center gap-3">
         <Link
-          href="/settings/connect"
+          href="/connect"
           className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
         >
           Connect your assistant

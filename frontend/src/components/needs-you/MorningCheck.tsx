@@ -305,7 +305,7 @@ export function MorningCheck() {
             <button type="button" data-testid="mc-cancel" disabled={saving} onClick={() => setEditing(false)} className={linkBtn}>
               Cancel
             </button>
-            <Link href="/profile?tab=assistant" className={cn(linkBtn, "ml-auto")}>
+            <Link href="/connect?tab=assistant" className={cn(linkBtn, "ml-auto")}>
               More in Profile → Assistant
             </Link>
           </div>
