@@ -20,6 +20,38 @@ const chip = "rounded-full border border-border px-2 py-0.5 text-[11px] font-med
 
 export const NOTE_LIMIT = 200;
 
+function clock(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** The plain-words line for a queued or in-progress send. Text only, never HTML. */
+function sendStatus(
+  task: { state: string; approved_at: string | null; claim_until: string | null },
+  kind: string | undefined,
+): { state: string; text: string } {
+  if (task.state === "in_progress") {
+    const t = clock(task.claim_until);
+    return { state: "sending", text: `Sending now${t ? ` \u2014 held until ${t}` : ""}.` };
+  }
+  if (kind === "own_browser") {
+    return {
+      state: "needs-own-browser",
+      text: "Needs your own browser. Job360's browser couldn't send this one (see why below). Ask your assistant to send it from your own browser \u2014 you stay signed in to LinkedIn there.",
+    };
+  }
+  if (kind === "human") {
+    return { state: "needs-you", text: "Needs you. Open the profile and send it yourself, then press I sent it." };
+  }
+  const t = clock(task.approved_at);
+  return {
+    state: "waiting",
+    text: `Waiting to send. You said yes${t ? ` at ${t}` : ""}. Your assistant sends it the next time it runs.`,
+  };
+}
+
 const STATE_LABEL: Record<string, string> = {
   connected: "Connected",
   not_connected: "Not connected",
@@ -56,6 +88,9 @@ export function PersonRow({
   const sendBrowser = contactSendBrowser(c);
   // Which browser will send it: the backend's label, else Job360's browser (it goes first) while a Send is on offer.
   const browserText = sendBrowser?.label ?? (task ? JOB360_BROWSER_LABEL : null);
+  const status = task && (task.state === "queued" || task.state === "in_progress")
+    ? sendStatus(task, sendBrowser?.kind)
+    : null;
 
   async function decide(decision: "approve" | "decline") {
     if (!task) return;
@@ -120,18 +155,23 @@ export function PersonRow({
             Send
           </button>
         )}
-        {task?.state === "queued" && (
-          <>
-            <span className={chip} data-testid={`own-browser-queued-${c.id}`}>Queued</span>
-            <button type="button" className={btn} data-testid={`own-browser-cancel-${c.id}`}
-              disabled={busy || sending}
-              onClick={() => void decide("decline")}>
-              Don&apos;t send
-            </button>
-          </>
+        {status && task && (
+          <div className="w-full" data-testid={`own-browser-${task.state === "queued" ? "queued" : "in-progress"}-${c.id}`}>
+            <p
+              className={`text-xs ${status.state.startsWith("needs") ? "text-warning" : "text-muted-foreground"}`}
+              data-testid={`send-status-${c.id}`}
+              data-state={status.state}
+            >
+              {status.text}
+            </p>
+          </div>
         )}
-        {task?.state === "in_progress" && (
-          <span className={chip} data-testid={`own-browser-in-progress-${c.id}`}>Sending now</span>
+        {task?.state === "queued" && (
+          <button type="button" className={btn} data-testid={`own-browser-cancel-${c.id}`}
+            disabled={busy || sending}
+            onClick={() => void decide("decline")}>
+            Don&apos;t send
+          </button>
         )}
         {!over && (
         <button type="button" className={btn}
