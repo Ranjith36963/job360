@@ -44,6 +44,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
+from src.services.profile.answer_match import fits_country
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -1842,6 +1843,8 @@ def compute_answers(
             scoped = str(rec.get("company") or "").strip()
             if scoped and normalized_company_key(scoped) != company_key:
                 continue  # given for ONE employer; this kit is for another (or an unknown) one
+            if not fits_country(rec, country):
+                continue  # a sponsorship / right-to-work answer for another country (owner, 2026-10-26)
             out["approved_text"].append(
                 _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),
                     **({"company": scoped} if scoped else {}),
@@ -2463,6 +2466,7 @@ def _file_kind(text: str) -> Optional[str]:
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
+    country: Optional[str] = None,
 ) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
@@ -2504,7 +2508,7 @@ def form_check(
             if item is None:
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
             if item is None:
-                rec, note = resolve_answer(records, topic=key, company_key=company_key)
+                rec, note = resolve_answer(records, topic=key, company_key=company_key, country=country)
                 if note:
                     why = note
                 elif rec is not None:
@@ -2513,7 +2517,7 @@ def form_check(
             if item is None and not why:
                 why = f"key '{key}' is not in this application's kit"
         else:
-            rec, note = resolve_answer(records, question=text, company_key=company_key)
+            rec, note = resolve_answer(records, question=text, company_key=company_key, country=country)
             matched_by = "wording"
             if note:
                 why = note
@@ -2601,7 +2605,7 @@ async def check_form(
             "result": "refused",
         })
         raise SpineError(404, "application not found")
-    profile, _country, answers, _missing = await _application_answers(db, user, app_row)
+    profile, country, answers, _missing = await _application_answers(db, user, app_row)
     documents = {}
     for kind in _DOCUMENT_LABELS:
         row = await spine.latest_artifact(db, user.id, application_id, kind)
@@ -2609,6 +2613,7 @@ async def check_form(
             documents[kind] = row
     out = form_check(
         answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None, documents,
+        country=country,
     )
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
