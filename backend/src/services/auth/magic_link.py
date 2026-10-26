@@ -177,28 +177,24 @@ async def consume_magic_link(
     (unknown / expired / already-used token). On success the emailed link is
     treated as proof of email ownership, so ``email_verified_at`` is stamped
     (created users start verified; existing unverified users become verified).
+    An existing UNVERIFIED account is also stripped of its password, sessions
+    and agent access first: whoever set those never proved the address (AUTH-1).
     """
     h = tokens.hash_token(raw_token)
     now = _now_iso()
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
+        # Claim the token in ONE statement (single-use): a concurrent second
+        # consume matches zero rows, so only one caller ever gets a session.
         cur = await db.execute(
-            """
-            SELECT id, email, expires_at, used_at
-            FROM magic_link_tokens
-            WHERE token_hash = ?
-            """,
-            (h,),
+            "UPDATE magic_link_tokens SET used_at = ? "
+            "WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? "
+            "RETURNING id, email",
+            (now, h, now),
         )
         row = await cur.fetchone()
         if row is None:
-            logger.info("magic link consume: unknown token")
-            return None
-        if row["used_at"] is not None:
-            logger.info("magic link consume: token already used")
-            return None
-        if row["expires_at"] <= now:
-            logger.info("magic link consume: token expired")
+            logger.info("magic link consume: unknown, used or expired token")
             return None
 
         # EMAIL-CASE belt-and-suspenders: tokens minted BEFORE the request-path
@@ -206,11 +202,6 @@ async def consume_magic_link(
         # here too so the find-or-create below can never split one mailbox
         # into two accounts.
         email = (row["email"] or "").strip().lower()
-        # Mark the token used first — single-use enforcement.
-        await db.execute(
-            "UPDATE magic_link_tokens SET used_at = ? WHERE id = ?",
-            (now, row["id"]),
-        )
 
         # Find-or-create the user by email, ATOMICALLY. `INSERT OR IGNORE`
         # (shim → `ON CONFLICT DO NOTHING`) creates the row on first sight and is
@@ -223,25 +214,46 @@ async def consume_magic_link(
         # Clicking the emailed link proves ownership, so a new row starts verified.
         # has_password=FALSE (migration 0071): nobody knows that random secret, so
         # account deletion asks for a fresh link instead of a password. Only the
-        # row this INSERT creates gets it; an existing account keeps its value.
+        # row this INSERT creates gets it; an existing VERIFIED account keeps its
+        # value (an unverified one is reset below).
         new_id = uuid.uuid4().hex
-        random_pw = secrets.token_urlsafe(32)
+        # One unusable hash serves both the new row and an unproven row's reset below.
+        unusable_hash = hash_password(secrets.token_urlsafe(32))
         await db.execute(
             "INSERT OR IGNORE INTO users(id, email, password_hash, email_verified_at, has_password) "
             "VALUES (?, ?, ?, ?, FALSE)",
-            (new_id, email, hash_password(random_pw), now),
+            (new_id, email, unusable_hash, now),
         )
         # Read back the real id: the row we just inserted, or the existing owner.
         cur = await db.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         user_id = (await cur.fetchone())["id"]
-        # Prove ownership: verify (keep any existing timestamp) AND reactivate a
-        # soft-deleted account — magic-link sign-in brings you back in.
-        await db.execute(
-            "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?), "
-            "deleted_at = NULL WHERE id = ?",
-            (now, user_id),
-        )
-        await db.commit()
+        async with db.transaction():
+            # Pre-account hijack (AUTH-1): an EXISTING row that was never verified
+            # was made by someone who never proved they own this mailbox (register
+            # or change_email need no proof). This click is the first proof, so
+            # whatever that someone holds dies here: their password (replaced by an
+            # unusable random hash, has_password FALSE), every session, j360_ token
+            # and OAuth grant. A row this consume just inserted starts verified, and
+            # an already-verified account is the owner's own, so neither matches.
+            reset = await db.execute(
+                "UPDATE users SET password_hash = ?, has_password = FALSE "
+                "WHERE id = ? AND email_verified_at IS NULL",
+                (unusable_hash, user_id),
+            )
+            revoked: Optional[dict[str, int]] = None
+            if reset.rowcount:
+                dropped = await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+                agents = await auth_sessions.revoke_agent_access(db, user_id)
+                revoked = {"sessions": int(dropped.rowcount or 0), **agents}
+            # Prove ownership: verify (keep any existing timestamp) AND reactivate a
+            # soft-deleted account — magic-link sign-in brings you back in.
+            await db.execute(
+                "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?), "
+                "deleted_at = NULL WHERE id = ?",
+                (now, user_id),
+            )
+        if revoked is not None:
+            logger.warning("magic link consume: unproven account reset user=%s revoked=%s", user_id, revoked)
 
     cookie = await auth_sessions.create_session(db_path, user_id=user_id, secret=secret)
     logger.info("magic link consume: ok user=%s", user_id)

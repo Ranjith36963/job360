@@ -16,6 +16,32 @@ export const LINKEDIN_OWN_BROWSER_LABEL = "Your own browser: runs when your PC i
 /** The route reason the server sends with it. */
 export const LINKEDIN_OWN_BROWSER_REASON = "linkedin_own_browser";
 
+/** One chip per route reason, equal to the server's `routing.ROUTE_LABELS` (a test pins both). `{site}`,
+ *  `{date}`, `{until}`, `{n}` and `{cap}` are filled from closed values. Assistant-neutral. */
+export const ROUTE_LABELS = {
+  default: "I'll use Job360's browser",
+  linkedin_own_browser: "Your own browser: runs when your PC is on",
+  learned_blocked: "Job360's browser was blocked on {site} on {date}: your own browser until {until}",
+  learned_login: "{site} asks you to sign in: your own browser, or sign in once in Job360's browser",
+  probe: "Trying Job360's browser on {site} again",
+  at_cap: "Today's LinkedIn limit is used ({n} of {cap}): waits until tomorrow",
+  linkedin_paused: "LinkedIn showed a limit warning: LinkedIn tasks paused until {date}",
+  account_step: "This site wants a new account: your own browser, or sign in once in Job360's browser",
+  linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
+  link_unclear: "This link looks broken or disguised: your own browser checks it",
+  waiting: "Waiting for your PC",
+} as const;
+
+type RouteFmt = Partial<Record<"site" | "date" | "until" | "n" | "cap", string | number>>;
+
+/** Fill a `ROUTE_LABELS` string from closed values; a missing value reads as a neutral default. */
+export function routeLabel(reason: keyof typeof ROUTE_LABELS, fmt: RouteFmt = {}): string {
+  const defaults = { site: "this site", date: "soon", until: "soon", n: "?", cap: "?" };
+  return ROUTE_LABELS[reason].replace(/\{(site|date|until|n|cap)\}/g, (_, k: keyof typeof defaults) =>
+    String(fmt[k] ?? defaults[k]),
+  );
+}
+
 /** The section heading for tasks that wait for the user's own browser. */
 export const OWN_BROWSER_LABEL = BROWSER_LABELS.own_browser;
 /** The short name of Job360's own browser, on a chip with no server label. */
@@ -26,3 +52,22 @@ export const PACE_TEXT =
 
 export const RUN_OWN_BROWSER_TASKS = "Run my own-browser tasks now";
 export const RUN_NOW_DONE = "Open for the next 60 minutes. Your assistant on your PC takes them one at a time.";
+
+/** The server's route reason codes (`routing.ROUTE_REASONS`) in plain words. "default" and the
+ *  LinkedIn choice need no line. A code not listed here is never shown raw. */
+export const REASON_WORDS: Record<string, string> = {
+  job360_login_required: "Job360's browser reached a sign-in page it cannot pass.",
+  job360_bot_check: "Job360's browser was stopped by a robot check.",
+  job360_safety_stop: "Job360's browser stopped here to be safe.",
+  password: "It asks for your password. Only you type passwords.",
+  mfa: "It asks for a one-time code. Only you can enter it.",
+  only_you: "This step is yours: no browser does it for you.",
+  link_unclear: "The apply link has no clear web address, so your own browser checks it.",
+};
+
+/** The words for a route reason: the plain line for a known code, "" for an unknown code
+ *  (a bare snake_case word), and an older server's already-written sentence as it is. */
+export function reasonWords(reason: string): string {
+  if (reason in REASON_WORDS) return REASON_WORDS[reason];
+  return /^[a-z0-9_]+$/.test(reason) ? "" : reason;
+}

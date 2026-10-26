@@ -770,7 +770,58 @@ async def test_clear_memory_clears_only_the_memory_and_takes_no_version(
         assert body["preferences"]["salary_by_country"][0]["currency"] == "AED", "salary is a preference, not memory"
         assert await _versions(client) == versions, "memory is not in a version snapshot"
         rows = (await client.get("/api/profile/edits/history", params={"path": CONTACT})).json()["rows"]
-        assert rows[0]["value"] is None, "the clear is a row, not a delete"
+        assert rows[0]["value"] is None, "the clear leaves a clearing row (no value)"
+
+
+def _memory_rows(user_id: str) -> list[tuple[str, Any]]:
+    """Every ``user_info.*`` profile_edits row of ``user_id``, oldest first, value decoded."""
+    from src.repositories import pgsync
+
+    with pgsync.connect(str(settings.DB_PATH)) as conn:
+        rows = conn.execute(
+            "SELECT path, value FROM profile_edits WHERE user_id = ? ORDER BY id", (user_id,)
+        ).fetchall()
+    return [(r[0], None if r[1] is None else json.loads(r[1])) for r in rows if r[0].startswith("user_info.")]
+
+
+@pytest.mark.asyncio
+async def test_clear_memory_erases_the_values_from_history_and_export(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-10-26: "Clear memory should erase. Just clear it." The cleared
+    equality answer and salary are gone from the memory, from every earlier profile_edits row
+    of the user and from export_history; another user's rows are untouched."""
+    from src.repositories import pgsync
+    from src.services.profile.storage import save_user_info
+
+    salary = {"amount": 54321, "currency": "GBP", "period": "year"}
+    other_value = {"gender": "Fake other"}
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        save_user_info(fixture_user_id, UserInfo(equality={"gender": "Fake base"}), "test")
+        resp = await _patch(
+            client,
+            {"path": EQ, "value": {"gender": "Fake woman"}},
+            {"path": LOGI, "value": {"current_salary": salary}},
+        )
+        assert resp.status_code == 200, resp.text
+        assert [v for _, v in _memory_rows(fixture_user_id)] == [{"gender": "Fake woman"}, {"current_salary": salary}]
+        with pgsync.connect(str(settings.DB_PATH)) as conn:
+            conn.execute(
+                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source) VALUES (?, ?, ?, ?, ?, ?)",
+                ("other-user", EQ, json.dumps(other_value), "web", "2026-10-26T00:00:00+00:00", "user_said"),
+            )
+            conn.commit()
+
+        resp = await client.post("/api/profile/clear", data={"section": "memory"})
+        assert resp.status_code == 200, resp.text
+        body = await _get(client)
+        assert body["user_info"]["equality"] == {} and body["user_info"]["logistics"] == {}
+        assert _base_info(fixture_user_id) == UserInfo()
+        kept = [(p, v) for p, v in _memory_rows(fixture_user_id) if v is not None]
+        assert kept == [], f"a cleared value is still in profile_edits: {[p for p, _ in kept]}"
+        export = (await client.get("/api/applications/export")).json()
+        exported = [e["path"] for e in export["profile_edits"] if e["path"].startswith("user_info.") and e["value"]]
+        assert exported == [], f"export_history still serves cleared values: {exported}"
+    assert _memory_rows("other-user") == [(EQ, other_value)], "another user's history is untouched"
 
 
 @pytest.mark.asyncio
@@ -826,11 +877,11 @@ async def test_clear_cv_leaves_the_memory_and_clear_all_resets_it(authenticated_
         for path in (*SIX, SALARY):
             rows = (await client.get("/api/profile/edits/history", params={"path": path})).json()["rows"]
             assert rows[0]["value"] is None, path
-            if path == CONTACT:
-                # The base memory the clear wiped is copied into history first (slice 3).
-                assert rows[1]["value"] == {"preferred_name": "Base Ada"} and len(rows) == 3, rows
+            if path == SALARY:
+                assert len(rows) == 2, f"{path}: one write + one clearing row, history kept"
                 continue
-            assert len(rows) == 2, f"{path}: one write + one clearing row, history kept"
+            # Owner decision 2026-10-26: a clear ERASES the memory's history; only a clearing row stays.
+            assert len(rows) == 1, f"{path}: the memory's earlier values are erased"
 
 
 @pytest.mark.asyncio
@@ -1097,6 +1148,8 @@ def test_answer_topic_is_validated_and_old_items_stay_valid():
 # ═══════════════════════════════════════════════════════════════════════════
 
 NOTES = "preferences.assistant_notes"
+# Security review D1: an assistant's notes change waits for Confirm, so the MCP item-op test uses this.
+DEALBREAKERS = "preferences.dealbreakers"
 
 
 def _ans(question: str, answer: str, **kw: Any) -> dict[str, Any]:
@@ -1262,21 +1315,21 @@ async def test_mcp_update_profile_agrees_with_the_route(authenticated_async_cont
             got = await tools.get_tool("get_profile").fn()
             assert got["profile_edit_id"] == (await _get(client))["profile_edit_id"] == 0
             reply = await tools.get_tool("update_profile").fn(
-                [{"path": NOTES, "op": "append", "value": "be brief"}], expected_profile_version=0
+                [{"path": DEALBREAKERS, "op": "append", "value": "be brief"}], expected_profile_version=0
             )
             assert reply["profile_edit_id"] == edits.current_edit_id(fixture_user_id) > 0
-            assert (await tools.get_tool("get_profile").fn())["fields"][NOTES] == ["be brief"]
+            assert (await tools.get_tool("get_profile").fn())["fields"][DEALBREAKERS] == ["be brief"]
             with pytest.raises(Exception) as info:
                 await tools.get_tool("update_profile").fn(
-                    [{"path": NOTES, "op": "append", "value": "lost"}], expected_profile_version=0
+                    [{"path": DEALBREAKERS, "op": "append", "value": "lost"}], expected_profile_version=0
                 )
             assert "409" in str(info.value) and "stale_profile" in str(info.value)
             with pytest.raises(Exception) as info:
-                await tools.get_tool("update_profile").fn([{"path": NOTES, "op": "insert", "value": "x"}])
+                await tools.get_tool("update_profile").fn([{"path": DEALBREAKERS, "op": "insert", "value": "x"}])
             assert "Nothing was saved." in str(info.value)
         finally:
             mcp_server._current_user.set(None)
-        assert (await _get(client))["preferences"]["assistant_notes"] == ["be brief"]
+        assert (await _get(client))["preferences"]["dealbreakers"] == ["be brief"]
 
 
 @pytest.mark.asyncio

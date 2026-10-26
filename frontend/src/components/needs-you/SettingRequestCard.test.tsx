@@ -17,21 +17,13 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
+  getReadyToSend: async () => ({ paused: false, total: 0, unflagged: 0, items: [] }),
 }));
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
-vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
+vi.mock("./OutcomeSuggestions", () => ({
+  useOutcomeSuggestions: () => ({ items: [], busy: false, act: async () => {} }), OutcomeSuggestionCard: () => null,
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) } }));
 
 const evil = "<img src=x onerror=alert(1)>";
@@ -108,6 +100,13 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("assistant_settings.people_hunt", false).change).toBe("Stop the people hunt");
   });
 
+  it("standing instructions: shows every line, so a note is never confirmed blind", () => {
+    const notes = describeSettingRequest("preferences.assistant_notes", ["Be brief", "No agencies"]);
+    expect(notes.title).toBe("Standing instructions for your assistants");
+    expect(notes.change).toBe("Save these instructions:\n• Be brief\n• No agencies");
+    expect(describeSettingRequest("preferences.assistant_notes", null).change).toBe("Clear all your instructions");
+  });
+
   it("says EVERY job plainly when the auto side covers all of them", () => {
     expect(describeSettingRequest("assistant_settings.above_line", "auto", 0).change).toBe(
       "Apply on its own for EVERY job (your score line is 0)",
@@ -136,6 +135,12 @@ describe("SettingRequestCard", () => {
     expect(screen.getByText(/Nothing changes until you confirm/)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull(); // the actor name is text, never HTML
     expect(confirmSettingRequest).not.toHaveBeenCalled();
+  });
+
+  it("says who asked by name, never the raw author id", () => {
+    render(<SettingRequestCard request={{ ...request, requested_by: "agent:Claude" }} onChanged={async () => {}} />);
+    expect(screen.getByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
   });
 
   it("Confirm applies the request and reloads", async () => {
@@ -189,8 +194,10 @@ describe("Needs-you page", () => {
     window.addEventListener("job360:asks-changed", on);
     listAsks.mockResolvedValue({ asks: [], open_count: 2 });
     render(<NeedsYou />);
+    // One Review row in the Other list; Review opens the full request card inline.
+    expect(await screen.findByTestId("other-open-setting-11")).toHaveTextContent("Review");
+    fireEvent.click(screen.getByTestId("other-open-setting-11"));
     expect(await screen.findByTestId("setting-request-11")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for your OK")).toBeInTheDocument();
     await waitFor(() => expect(seen).toEqual([3])); // 2 open asks + 1 waiting
     // after the user confirms, the reload comes back empty and the badge follows
     getAssistantSettings.mockResolvedValue({ waiting: [] });
@@ -204,7 +211,7 @@ describe("Needs-you page", () => {
     getAssistantSettings.mockRejectedValue(new Error("down"));
     render(<NeedsYou />);
     expect(await screen.findByText("Nothing needs you right now.")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for your OK")).toBeNull();
+    expect(screen.queryByTestId("other-list")).toBeNull();
   });
 });
 

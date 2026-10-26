@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from src.services.applications.job_checks import redact_url_for_display
+from src.services.browser_agent import outcome as outcomes
 from src.services.browser_agent import routing
 from src.services.browser_agent.deploy_hold import Beacon
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
@@ -86,6 +87,9 @@ AGENT_KEYS = frozenset({"ArrowDown", "ArrowUp", "Tab", "Escape", "Enter"})
 MAX_ELEMENTS = 150
 # The answer's key carrying the action's replayable steps (refill.note): server-side only, never shown.
 STEPS_KEY = "_fill_steps"
+# The answer's key saying a stop came from the page's own text (outcome.TEXT_STOP): server-side only, the route
+# reads it for the outcome and drops it from the answer.
+STOP_KEY = "_stop_source"
 MAX_TEXT = 6000
 # The page sets these: its title, its address and the element list are each bounded.
 MAX_TITLE = 200
@@ -409,6 +413,10 @@ class BrowserPool:
         context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
 
         async def _route(route: Any) -> None:
+            if routing.is_linkedin(route.request.url):  # defence in depth: the egress proxy is the real door
+                logger.info("browser_agent blocked a request: linkedin is the user's own browser")
+                await route.abort("blockedbyclient")
+                return
             verdict = await self.screen.screen(route.request.url)
             if verdict.ok:
                 await route.continue_()
@@ -1015,6 +1023,8 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     blocker = blocker_for(captcha_urls, text, has_password, account_step(site, out["title"], text))
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
+        if blocker.from_text:
+            out[STOP_KEY] = outcomes.TEXT_STOP
     return out
 
 
@@ -1418,6 +1428,21 @@ async def run(
         return result
 
 
+def _transport(response: Any, opened: str, page: Any) -> dict[str, Any]:
+    """What the server saw for the main document (outcome.transport_of): its status and headers, and the host
+    the tab ended on. Never the body. A missing response (a same-document load) is status 0."""
+    try:
+        status = int(response.status) if response is not None else 0
+        headers = dict(response.headers) if response is not None else {}
+    except Exception:  # noqa: BLE001 - a response that cannot be read is no transport fact
+        status, headers = 0, {}
+    try:
+        final = str(page.url or "")
+    except Exception:  # noqa: BLE001 - a closed tab: no final host
+        final = ""
+    return outcomes.transport_of(status, headers, opened, final)
+
+
 # Roles a click ticks, like a checkbox or radio input.
 _TICK_ROLES = ("checkbox", "radio", "switch")
 
@@ -1441,7 +1466,7 @@ async def _act(
             # Every tab was closed: open a fresh one, or "call open" would be a dead end.
             page = s.page = await s.context.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded")
+            response = await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
             first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
@@ -1449,6 +1474,7 @@ async def _act(
         if (refusal := _refusal(s, page)) is not None:
             raise refusal
         result = await look(s)
+        result["transport"] = _transport(response, url, page)
         if url != requested:
             result["opened_as"] = (
                 "Greenhouse embed form (lighter page for the same job): " + redact_url_for_display(url)

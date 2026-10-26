@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.repositories import pg
+from tests._signin import sign_in
 
 
 @asynccontextmanager
@@ -121,26 +122,10 @@ def api(monkeypatch, tmp_path):
     return client
 
 
-def _register(client, email, password="s3cretpassword"):
-    r = client.post(
-        "/api/auth/register", json={"email": email, "password": password}
-    )
-    assert r.status_code == 201, r.text
-    # #15: app routes (e.g. /search) now require a verified email. These tests
-    # exercise IDOR/auth scoping, not verification, so mark the user verified.
-    import src.core.settings as _settings
-    from src.repositories import pgsync as _sqlite3
-
-    _c = _sqlite3.connect(str(_settings.DB_PATH))
-    _c.execute(
-        "UPDATE users SET email_verified_at = ? WHERE email = ?",
-        ("2026-01-01T00:00:00Z", email),
-    )
-    _c.commit()
-    _c.close()
-    # M2 — register no longer auto-logs-in; sign in so the client is authenticated.
-    lr = client.post("/api/auth/login", json={"email": email, "password": password})
-    assert lr.status_code == 200, lr.text
+def _register(client, email):
+    # Sign in through the magic-link flow: it creates the user, marks the email
+    # verified (app routes require it) and authenticates the client.
+    sign_in(client, email)
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +228,7 @@ def test_profile_upsert_per_user_does_not_overwrite_peer(api):
     # Alice logs back in and checks her row is untouched
     api.post("/api/auth/logout")
     api.cookies.clear()
-    r_login = api.post("/api/auth/login", json={
-        "email": "alice@example.com", "password": "s3cretpassword"
-    })
-    assert r_login.status_code == 200, r_login.text
+    sign_in(api, "alice@example.com")
 
     r_alice = api.get("/api/profile")
     assert r_alice.status_code == 200

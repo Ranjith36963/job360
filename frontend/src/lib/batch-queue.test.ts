@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { preflightProblems, queueSummaryLine } from "./batch-queue";
+import { browserReasonWords, preflightProblems, queueSummaryLine } from "./batch-queue";
 
 describe("queueSummaryLine", () => {
   it("reads as one line", () => {
@@ -37,5 +37,13 @@ describe("preflightProblems", () => {
       preflightProblems({ kit_missing: [], has_cv: true, duplicate_flag: "", avoided: false, company_left: null, blocked_count: 0, hold: null }),
     ).toEqual([]);
     expect(preflightProblems(null)).toEqual([]);
+  });
+});
+
+describe("browserReasonWords", () => {
+  it("has a plain line for an unclear apply link, none for the LinkedIn choice or an unknown code", () => {
+    expect(browserReasonWords("link_unclear")).toBe("The apply link has no clear web address");
+    expect(browserReasonWords("linkedin_own_browser")).toBe("");
+    expect(browserReasonWords("some_new_code")).toBe("");
   });
 });

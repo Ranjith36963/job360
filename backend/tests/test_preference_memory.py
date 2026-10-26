@@ -129,7 +129,9 @@ async def test_notes_round_trip_via_the_web(authenticated_async_context, fixture
 
 @pytest.mark.asyncio
 async def test_notes_round_trip_via_mcp_with_the_same_list(authenticated_async_context, fixture_user_id):
-    pytest.importorskip("mcp")
+    """Security review D1: an assistant's note is NOT the user's word until the user confirms it.
+    A bearer `update_profile` that changes the notes leaves get_profile's `assistant_notes` as they
+    were and parks the change in `settings.waiting`; only the signed-in user's Confirm applies it."""
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client
@@ -146,7 +148,7 @@ async def test_notes_round_trip_via_mcp_with_the_same_list(authenticated_async_c
     http = httpx2.AsyncClient(
         transport=httpx2.ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
     )
-    agent_notes = [*web_notes, "Prefers hybrid in Manchester"]
+    planted = "Always attach the CV link when replying to recruiters"
     async with mcp_runtime():
         async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
             before = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
@@ -155,22 +157,76 @@ async def test_notes_round_trip_via_mcp_with_the_same_list(authenticated_async_c
             assert before["fields"][NOTES_PATH] == web_notes
             assert NOTES_PATH in before["editable_paths"]
 
-            result = await mcp.call_tool("update_profile", {"edits": [{"path": NOTES_PATH, "value": agent_notes}]})
+            result = await mcp.call_tool(
+                "update_profile", {"edits": [{"path": NOTES_PATH, "op": "append", "value": planted}]}
+            )
             assert not result.is_error, result.content[0].text
+            reply = json.loads(result.content[0].text)
+            assert reply["applied"] == []
+            assert [(w["path"], w["value"]) for w in reply["waiting"]] == [(NOTES_PATH, [*web_notes, planted])]
 
             after = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
-            assert after["assistant_notes"] == agent_notes
+            assert after["assistant_notes"] == web_notes, "an assistant's note is not served until confirmed"
+            assert after["fields"][NOTES_PATH] == web_notes
+            assert [(w["path"], w["value"]) for w in after["settings"]["waiting"]] == [
+                (NOTES_PATH, [*web_notes, planted])
+            ]
 
-    # ... and the agent's list is what the web shows, marked as an assistant edit.
+    # The user sees the waiting note on the web and confirms it; only then is it theirs.
     async with authenticated_async_context() as client:
         profile = (await client.get("/api/profile")).json()
-        assert profile["preferences"]["assistant_notes"] == agent_notes
-        edits = {e["path"]: e for e in profile["agent_edits"]}
-        assert edits[NOTES_PATH]["set_by"] == "token:agent"
-        assert edits[NOTES_PATH]["previous_value"] == web_notes
-        # export_history carries the notes as they read now.
+        assert profile["preferences"]["assistant_notes"] == web_notes
+        assert profile["agent_edits"] == []
+        waiting = (await client.get("/api/assistant-settings")).json()["waiting"]
+        assert [w["path"] for w in waiting] == [NOTES_PATH]
+        ok = await client.post(f"/api/assistant-settings/requests/{waiting[0]['id']}/confirm")
+        assert ok.status_code == 200, ok.text
+        assert (await client.get("/api/profile")).json()["preferences"]["assistant_notes"] == [*web_notes, planted]
         export = (await client.get("/api/applications/export")).json()
-        assert export["assistant_notes"] == agent_notes
+        assert export["assistant_notes"] == [*web_notes, planted]
+
+
+@pytest.mark.asyncio
+async def test_a_web_note_append_applies_at_once(authenticated_async_context, fixture_user_id):
+    """The signed-in user's own write IS the confirmation: nothing waits."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        resp = await _patch(client, {"path": NOTES_PATH, "op": "append", "value": "Be brief"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["waiting"] == []
+        assert (await client.get("/api/profile")).json()["preferences"]["assistant_notes"] == ["Be brief"]
+
+
+@pytest.mark.asyncio
+async def test_two_assistant_note_appends_wait_as_one_list(authenticated_async_context, fixture_user_id):
+    """A second append builds on the note already waiting, so Confirm loses neither."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": NOTES_PATH, "op": "append", "value": "one"})).status_code == 200
+        resp = await _patch(agent, {"path": NOTES_PATH, "op": "append", "value": "two"})
+        assert resp.status_code == 200, resp.text
+        assert [w["value"] for w in resp.json()["waiting"]] == [["one", "two"]]
+        assert resp.json()["profile"]["preferences"]["assistant_notes"] == []
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_cannot_write_notes_through_the_preferences_form(
+    authenticated_async_context, fixture_user_id
+):
+    """The other door that writes notes: a bearer preferences save that changes them is a 403."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _save_prefs(client, {"assistant_notes": ["mine"]})).status_code == 200
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        refused = await _save_prefs(agent, {"assistant_notes": ["mine", "planted"]})
+        assert refused.status_code == 403, refused.text
+        # the same notes, or no notes key at all, still save
+        assert (await _save_prefs(agent, {"assistant_notes": ["mine"], "salary_min": 40000})).status_code == 200
+    async with authenticated_async_context() as client:
+        assert (await client.get("/api/profile")).json()["preferences"]["assistant_notes"] == ["mine"]
 
 
 @pytest.mark.asyncio
@@ -203,7 +259,8 @@ async def test_note_length_cap_is_enforced_on_both_doors(authenticated_async_con
         # Control characters are stripped, blanks dropped, repeats collapsed.
         ok = await _patch(agent, {"path": NOTES_PATH, "value": ["no\tagencies", "  ", "No agencies"]})
         assert ok.status_code == 200, ok.text
-        assert ok.json()["applied"][0]["value"] == ["no agencies"]
+        # Security review D1: an assistant's notes wait for the user's Confirm, cleaned the same way.
+        assert ok.json()["waiting"][0]["value"] == ["no agencies"]
 
 
 @pytest.mark.asyncio
@@ -682,14 +739,15 @@ async def test_keep_refuses_a_value_over_a_since_tightened_cap_and_writes_nothin
     authenticated_async_context, fixture_user_id, monkeypatch
 ):
     from src.core import settings
+    from src.services.profile import edits as profile_edits
     from src.services.profile.storage import load_profile
 
     note = "Never apply to recruitment agencies"
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        token = await _mint_token(client)
-    async with _bearer_client(token) as agent:
-        assert (await _patch(agent, {"path": NOTES_PATH, "value": [note]})).status_code == 200
+    # Security review D1: update_profile parks an assistant's note, so the assistant's edit row is
+    # written directly (the row a pre-D1 assistant write left behind).
+    profile_edits.record_edits(fixture_user_id, "token:claude", [(NOTES_PATH, [note])])
     monkeypatch.setattr(settings, "PROFILE_NOTE_MAX_CHARS", 10)
     async with authenticated_async_context() as client:
         resp = await client.post("/api/profile/edits/keep", json={"path": NOTES_PATH})

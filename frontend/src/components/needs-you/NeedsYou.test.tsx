@@ -18,31 +18,24 @@ vi.mock("@/lib/api", () => ({
   confirmSettingRequest: vi.fn(),
   declineSettingRequest: vi.fn(),
   // The job cards have their own tests (JobCard.test.tsx). A job record that fails to load drops
-  // its card and its asks show as plain cards under "Other questions", which these tests cover.
+  // its card and its asks show as question rows in the Other list, which these tests cover.
   getApplication: () => Promise.reject(new Error("no job record in this test")),
   getCvToApprove: async () => ({ items: [] }),
   listPeople: async () => ({ people: [] }),
+  // Ready to send has its own tests (ReadyToSend.test.tsx); here only its total, for the badge.
+  getReadyToSend: async () => ({ paused: false, total: readyMock.total, unflagged: 0, items: [] }),
 }));
+const readyMock = vi.hoisted(() => ({ total: 0 }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
-vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
-vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Approve CV has its own tests (CvToApprove.test.tsx).
-vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
-vi.mock("./UnmatchedMail", () => ({ UnmatchedMail: () => null }));
-// Ready to send has its own tests (ReadyToSend.test.tsx).
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
+vi.mock("./MorningCheck", () => ({ MorningCheck: () => <div data-testid="morning-check" /> }));
+vi.mock("./OutcomeSuggestions", () => ({
+  useOutcomeSuggestions: () => ({ items: [], busy: false, act: async () => {} }), OutcomeSuggestionCard: () => null,
+}));
+vi.mock("./UnmatchedMail", () => ({
+  useUnmatchedMail: () => ({ items: [], apps: [], resolve: async () => {} }), InboxItemCard: () => null,
+}));
 // The live view is tested in ApplicationDecisions.test.tsx; this stand-in only offers Done.
 vi.mock("@/components/applications/FinishInBrowser", () => ({
   FinishInBrowser: ({ onDone }: { onDone: () => void }) => (
@@ -81,9 +74,15 @@ function setup(open: unknown[], answered: unknown[] = []) {
   );
 }
 
-// An answered ask shows as one line; "Change" opens the full card these tests check.
+// Answered is folded; opened, each answer is one line and "Change" opens the full card these tests check.
 async function openAnswered() {
+  fireEvent.click(await screen.findByTestId("answered-toggle"));
   for (const b of await screen.findAllByTestId(/^answered-change-/)) fireEvent.click(b);
+}
+
+// Each Other row opens its own card inline (Answer / Review / Match).
+async function openOther() {
+  for (const b of await screen.findAllByTestId(/^other-open-/)) fireEvent.click(b);
 }
 
 beforeEach(() => {
@@ -94,12 +93,21 @@ beforeEach(() => {
 });
 
 describe("NeedsYou", () => {
+  it("no longer renders the morning check or the Batch apply panel (they moved to Home, owner 2026-10-26)", async () => {
+    setup([]);
+    render(<NeedsYou />);
+    await screen.findByTestId("needs-you-main");
+    expect(screen.queryByTestId("morning-check")).toBeNull();
+    expect(screen.queryByTestId("batch-apply-panel")).toBeNull();
+  });
+
   it("a CAPTCHA in Job360's browser offers Finish it here on the card; other asks do not", async () => {
     setup([
       { ...base, id: 3, question: "Your assistant got stuck: a CAPTCHA", status: "open", finish_here: true },
       { ...base, id: 4, application_id: 8, question: "Salary?", status: "open", finish_here: false },
     ]);
     render(<NeedsYou />);
+    await openOther();
     const button = await screen.findByTestId("ask-finish-here");
     expect(screen.getAllByTestId("ask-finish-here")).toHaveLength(1);
     expect(screen.getByTestId("ask-3").contains(button)).toBe(true);
@@ -112,6 +120,7 @@ describe("NeedsYou", () => {
   it("renders the question as literal text, never HTML", async () => {
     setup([openAsk]);
     const { container } = render(<NeedsYou />);
+    await openOther();
     expect(await screen.findByText(evil)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByRole("link", { name: "AI Engineer · Acme" })).toHaveAttribute(
@@ -120,9 +129,18 @@ describe("NeedsYou", () => {
     );
   });
 
+  it("says who asked by name, never the raw author id", async () => {
+    setup([{ ...openAsk, question: "Salary?", asked_by: "agent:Claude" }]);
+    render(<NeedsYou />);
+    await openOther();
+    expect(await screen.findByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
+  });
+
   it("puts a long question's tail and its context behind Details, as text", async () => {
     setup([{ ...base, id: 9, question: "Batch run paused. <b>Three</b> jobs failed; open each form.", status: "open" }]);
     const { container } = render(<NeedsYou />);
+    await openOther();
     const d = await screen.findByTestId("details-9");
     expect(d.tagName).toBe("DETAILS");
     expect(d).toHaveTextContent("<b>Three</b> jobs failed; open each form.");
@@ -134,6 +152,7 @@ describe("NeedsYou", () => {
   it("answers only after the confirm", async () => {
     setup([openAsk]);
     render(<NeedsYou />);
+    await openOther();
     fireEvent.change(await screen.findByTestId("ask-input-1"), { target: { value: "Yes" } });
     fireEvent.click(screen.getByTestId("ask-save"));
     expect(screen.getByText("Save this answer? Your assistants will use it.")).toBeInTheDocument();
@@ -146,6 +165,7 @@ describe("NeedsYou", () => {
   it("withdraw needs a confirm", async () => {
     setup([openAsk]);
     render(<NeedsYou />);
+    await openOther();
     fireEvent.click(await screen.findByTestId("ask-withdraw"));
     expect(withdrawAsk).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("ask-withdraw-confirm"));
@@ -212,6 +232,61 @@ describe("NeedsYou", () => {
     expect(screen.getByTestId("ask-input-2")).toHaveValue("A2");
   });
 
+  it("puts the one job list first, then Waiting for your OK and Other questions", async () => {
+    getAssistantSettings.mockResolvedValue({ waiting: [{ id: 11, key: "apply_daily_cap", value: 25, asked_by: "agent:Claude", asked_at: base.asked_at, reason: "" }] });
+    setup([{ ...openAsk, application_id: null }]);
+    render(<NeedsYou />);
+    // Both now sit in the ONE Other list, setting request first, after the job list.
+    const ok = await screen.findByTestId("other-row-setting-11");
+    const other = await screen.findByTestId("other-row-question-1");
+    const jobs = screen.getByText("Waiting for you");
+    expect(screen.getByTestId("other-count")).toHaveTextContent("Other · 2");
+    expect(jobs.compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ok.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId("other-questions")).toBeNull();
+  });
+
+  it("the Other list is hidden when nothing is in it", async () => {
+    setup([]);
+    render(<NeedsYou />);
+    await screen.findByText("Nothing needs you right now.");
+    expect(screen.queryByTestId("other-list")).toBeNull();
+  });
+
+  it("an Other question row is one line with Answer; the button opens the full card", async () => {
+    setup([{ ...openAsk, application_id: null, job_company: null, question: "Include contract roles?\nMore detail." }]);
+    render(<NeedsYou />);
+    const row = await screen.findByTestId("other-row-question-1");
+    expect(row).toHaveTextContent("Include contract roles?");
+    expect(screen.queryByTestId("ask-input-1")).toBeNull();
+    fireEvent.click(screen.getByTestId("other-open-question-1"));
+    expect(screen.getByTestId("other-open-question-1")).toHaveAttribute("aria-expanded", "true");
+    expect(row).toContainElement(screen.getByTestId("ask-input-1"));
+  });
+
+  it("closing an Other row keeps a half-typed answer for when it opens again", async () => {
+    setup([{ ...openAsk, application_id: null, job_company: null, question: "Include contract roles?" }]);
+    render(<NeedsYou />);
+    fireEvent.click(await screen.findByTestId("other-open-question-1"));
+    fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Only if remote" } });
+    fireEvent.click(screen.getByTestId("other-open-question-1"));
+    expect(screen.getByTestId("other-open-question-1")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("ask-input-1")).not.toBeVisible();
+    fireEvent.click(screen.getByTestId("other-open-question-1"));
+    expect(screen.getByTestId("ask-input-1")).toHaveValue("Only if remote");
+  });
+
+  it("Answered is folded with its count and opens on tap", async () => {
+    setup([], [{ ...base, id: 2, question: "Q2", status: "answered", answer: "A2" }]);
+    render(<NeedsYou />);
+    const toggle = await screen.findByTestId("answered-toggle");
+    expect(toggle).toHaveTextContent("Answered (1)");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("answered-2")).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("answered-2")).toBeInTheDocument();
+  });
+
   it("shows the empty state", async () => {
     setup([]);
     render(<NeedsYou />);
@@ -224,6 +299,7 @@ describe("NeedsYou", () => {
     window.addEventListener("job360:asks-changed", on);
     setup([openAsk]);
     render(<NeedsYou />);
+    await openOther();
     await waitFor(() => expect(seen).toEqual([1]));
     setup([]); // the user answered it
     fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
@@ -266,6 +342,7 @@ describe("NeedsYou", () => {
   it("a failed reload after an action shows the error and a retry, keeping the list", async () => {
     setup([openAsk]);
     render(<NeedsYou />);
+    await openOther();
     await screen.findByTestId("ask-input-1");
     listAsks.mockRejectedValue(new Error("down"));
     fireEvent.click(screen.getByTestId("ask-withdraw"));
@@ -289,6 +366,7 @@ describe("NeedsYou", () => {
         : { asks: offset === 0 ? page(0, 50) : page(50, 1), open_count: 0 }
     );
     render(<NeedsYou />);
+    fireEvent.click(await screen.findByTestId("answered-toggle"));
     fireEvent.click(await screen.findByTestId("needs-you-older"));
     expect(await screen.findByText("Q50")).toBeInTheDocument();
     expect(listAsks).toHaveBeenCalledWith("answered", 50);

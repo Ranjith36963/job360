@@ -6,16 +6,11 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
-import { MorningCheck } from "./MorningCheck";
-import { OutcomeSuggestions } from "./OutcomeSuggestions";
-import { ReadyToSend } from "./ReadyToSend";
-import { CvToApprove } from "./CvToApprove";
-import { BatchApplyPanel } from "./BatchApplyPanel";
-import { UnmatchedMail } from "./UnmatchedMail";
-import { SettingRequestCard } from "./SettingRequestCard";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { OtherList } from "./OtherList";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
-import { whoLabel } from "@/lib/event-labels";
+import { askerName, whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
@@ -87,7 +82,7 @@ export function AskCard({
         <AskText id={ask.id} question={ask.question} context={ask.context}
           headClass="font-heading text-xl leading-snug" restClass="whitespace-pre-wrap text-sm text-muted-foreground" />
         <p className="text-[12.5px] text-muted-foreground">
-          asked by {ask.asked_by === "web" ? "you" : ask.asked_by} · <span className="font-mono">{relativeTime(ask.asked_at)}</span>
+          asked by {askerName(ask.asked_by)} · <span className="font-mono">{relativeTime(ask.asked_at)}</span>
           {job && " · "}
           {job &&
             (ask.application_id != null ? (
@@ -314,18 +309,20 @@ function announce(openCount: number) {
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
   // What the job list reports: its loaded cards, the asks it could not place, how many jobs it lists.
-  const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false });
+  const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false, readyTotal: null });
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
+  // Answered is folded until the user opens it (owner plan 3b).
+  const [showAnswered, setShowAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The badge counts the questions, the changes waiting for an OK AND what is ready to send.
   const [askCount, setAskCount] = useState(0);
-  // null until Ready to send has answered (0 if its read failed): announcing
+  // null until the job list's Ready to send read has answered (0 if it failed): announcing
   // before then would drop the ready count from the badge for a moment.
-  const [readyTotal, setReadyTotal] = useState<number | null>(null);
+  const readyTotal = jobs.readyTotal;
   // Tasks waiting for the user's own browser (null: unknown or none).
   const [queue, setQueue] = useState<OwnBrowserQueue | null>(null);
 
@@ -413,12 +410,7 @@ export function NeedsYou() {
   }
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
-      <MorningCheck />
-      <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
-      <ReadyToSend onTotal={setReadyTotal} asks={open} />
-      <OutcomeSuggestions />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -427,57 +419,49 @@ export function NeedsYou() {
           </button>
         </div>
       )}
-      {waiting.length > 0 && (
-        <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
-          <h2 id="waiting-ok" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            Waiting for your OK
-          </h2>
-          <ul className="flex flex-col gap-3" data-testid="waiting-for-ok">
-            {waiting.map((r) => (
-              <SettingRequestCard key={r.id} request={r} onChanged={load} />
-            ))}
-          </ul>
-        </section>
-      )}
+      {/* One card per job (owner 2026-10-26): its ready form, CV, questions and people, most urgent first. */}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
         <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
         {queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
-        {jobs.settled && jobs.total === 0 && general.length === 0 ? (
+        {jobs.settled && jobs.total === 0 && !jobs.connections && general.length === 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
             {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
-        ) : (
-          <>
-            {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
-            <JobCards open={open} onChanged={load} onReport={setJobs} />
-            {general.length > 0 && (
-              <>
-                <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
-                <ul className="flex flex-col gap-3">
-                  {general.map((a) => (
-                    <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
-                  ))}
-                </ul>
-              </>
-            )}
-          </>
         )}
+        {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
+        <JobCards open={open} onChanged={load} onReport={setJobs} />
       </section>
-      <UnmatchedMail />
+      <OtherList
+        waiting={waiting}
+        questions={general}
+        onChanged={load}
+        renderQuestion={(a) => <AskCard key={a.id} ask={a} mode="open" onChanged={load} />}
+      />
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
-          <h2 id="answered-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            Answered
+          <h2 id="answered-asks">
+            <button
+              type="button"
+              aria-expanded={showAnswered}
+              data-testid="answered-toggle"
+              onClick={() => setShowAnswered((v) => !v)}
+              className="flex items-center gap-1 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint hover:text-foreground"
+            >
+              {showAnswered ? <ChevronDown aria-hidden className="size-3.5" /> : <ChevronRight aria-hidden className="size-3.5" />}
+              Answered ({answered.length}{moreAnswered ? "+" : ""})
+            </button>
           </h2>
-          <ul className="flex flex-col gap-2">
-            {answered.map((a) => (
-              <AnsweredRow key={a.id} ask={a} onChanged={load} />
-            ))}
-          </ul>
-          {moreAnswered && (
+          {showAnswered && (
+            <ul className="flex flex-col gap-2">
+              {answered.map((a) => (
+                <AnsweredRow key={a.id} ask={a} onChanged={load} />
+              ))}
+            </ul>
+          )}
+          {showAnswered && moreAnswered && (
             <div>
               <button
                 type="button"
@@ -492,8 +476,6 @@ export function NeedsYou() {
           )}
         </section>
       )}
-    </div>
-    <BatchApplyPanel />
     </div>
   );
 }

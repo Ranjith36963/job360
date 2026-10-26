@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STATUS_LABEL, EVENT_LABEL, eventLabel, whoLabel } from "./event-labels";
+import { STATUS_LABEL, EVENT_LABEL, askerName, eventLabel, whoLabel } from "./event-labels";
 
 // The closed sets from backend/src/core/settings.py, via a checked-in JSON that
 // backend/tests/test_event_types_json_matches_settings.py pins to the settings
@@ -121,5 +121,14 @@ describe("whoLabel", () => {
 
   it("anything else -> {agent, recordedBy}", () => {
     expect(whoLabel("something-weird")).toEqual({ who: "agent", name: "something-weird" });
+  });
+});
+
+describe("askerName", () => {
+  it("never shows the raw author id on 'asked by'", () => {
+    expect(askerName("agent:Claude")).toBe("Claude");
+    expect(askerName("token:claude-code")).toBe("claude-code");
+    expect(askerName("web")).toBe("you");
+    expect(askerName(null)).toBe("your assistant");
   });
 });

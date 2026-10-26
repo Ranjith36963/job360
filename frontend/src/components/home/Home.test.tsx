@@ -22,6 +22,10 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
 vi.mock("posthog-js", () => ({ default: { capture: vi.fn() } }));
+// The morning check and Batch apply have their own tests; here only where they sit on Home matters.
+vi.mock("@/components/needs-you/MorningCheck", () => ({ MorningCheck: () => <div data-testid="morning-check" /> }));
+vi.mock("@/components/needs-you/BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
+vi.mock("@/components/home/DutyStatus", () => ({ DutyStatus: () => <section data-testid="duty-status" /> }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 // "Now" is the real clock: the sentence counts events after the last visit
@@ -247,5 +251,21 @@ describe("Home lessons", () => {
     render(<Home />);
     expect(await screen.findByText("Ask about sponsorship first.")).toBeInTheDocument();
     expect(api.listLessons).toHaveBeenCalled();
+  });
+});
+
+describe("Home: moved from Needs you (owner, 2026-10-26)", () => {
+  it("puts MorningCheck above what the assistant is doing, and Batch apply below Lessons", async () => {
+    happy();
+    api.listLessons.mockResolvedValue({ lessons: [], total: 0 });
+    render(<Home />);
+    const morning = await screen.findByTestId("morning-check");
+    const duty = screen.getByTestId("duty-status");
+    const batch = screen.getByTestId("batch-apply-panel");
+    const lessons = await screen.findByRole("heading", { name: "Lessons" });
+    const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(morning, duty)).toBe(true);
+    expect(before(lessons, batch)).toBe(true);
+    expect(screen.getByTestId("home-rail")).not.toContainElement(batch);
   });
 });

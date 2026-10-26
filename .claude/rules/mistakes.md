@@ -26,6 +26,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
   gate the merged tree, commit. A script hides the merge from the commit-gate hook.
 - Run the gate as its own command and read its PASS line; never `gate && git commit` (the hook misses it).
+- A worktree with no `frontend/node_modules` fails the gate with `vitest: not found`: link it first, and read the last gate line before any commit.
 - Before a PR with a migration merges, merge main and check its NNNN is still free (two 0067s 10-21, two 0077s 10-22). Rules: backend/README.md "Numbering".
 - Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
 - A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
@@ -64,6 +65,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
   `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.
 - Worker briefs forbid `pytest.importorskip` and any skip or quarantine: the test-integrity check goes red (#1107, #1135).
+- Worker briefs name the CodeQL traps: no backtracking regex on caller text (scan word by word), and tests compare exact hosts or tokens, never `"host" in s` (#1303, #1306).
 - Run `npm ci` before `npm run lint` in a long-lived checkout; a stale node_modules lacks new rules (#1134, 2026-10-23).
 - Name `model:` on every Agent call (model-delegation); an unnamed worker inherits the lead's model (2026-10-24).
 - A machine never adds `assistant-merge` to a hand-merge PR, nor removes it: that switch is the owner's yes (owner, 2026-10-26).

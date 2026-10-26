@@ -32,7 +32,7 @@ const sectionLabel = "font-mono text-[11px] font-medium uppercase tracking-[0.09
 const linkBtn = "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
 
 /**
- * The top of "Needs you" (owner decision 2026-10-09): are the assistants
+ * On Home, above what the assistant is doing (owner decisions 2026-10-09, moved 2026-10-26): are the assistants
  * running, under which settings, how much of today's limit is used - then what
  * happened since the user last looked: sent, blocked, waiting, failed.
  */

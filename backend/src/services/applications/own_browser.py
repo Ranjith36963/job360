@@ -51,6 +51,7 @@ WHY_WORDS = {
     "job360_safety_stop": "Job360's browser stopped for safety.",
     "default": "You pressed Send for this message.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
+    "link_unclear": "This link looks broken or disguised: your own browser checks it.",
 }
 
 
@@ -257,7 +258,7 @@ async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]
 # ── The queue ───────────────────────────────────────────────────────────────────────────────────────────
 
 
-async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> list[dict[str, Any]]:
+async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[dict[str, Any]]:
     from src.services.applications import contacts  # noqa: PLC0415
 
     # Only a person whose NEWEST decision is an approval of their NEWEST message, a LinkedIn one with no
@@ -273,18 +274,18 @@ async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> l
         "AND NOT EXISTS (SELECT 1 FROM contact_outreach s WHERE s.contact_id = a.contact_id "
         "                AND s.entry IN ('sent', 'reply') AND s.id > CAST(a.text AS INTEGER)) "
         "ORDER BY a.id ASC LIMIT ?",
-        (user.id, APPROVED, APPROVED, DECLINED, QUEUE_MAX),
+        (user_id, APPROVED, APPROVED, DECLINED, QUEUE_MAX),
     )
     out: list[dict[str, Any]] = []
     for r in await cur.fetchall():
         contact_id = int(dict(r)["contact_id"])
-        base = await contacts.get_owned_contact(db, user.id, contact_id)
+        base = await contacts.get_owned_contact(db, user_id, contact_id)
         if base is None:
             continue
         task = derive(await _rows(db, contact_id), now)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
-        view = await contacts._full_contact_view(db, user.id, base)
+        view = await contacts._full_contact_view(db, user_id, base)
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
         route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
         out.append({
@@ -297,8 +298,37 @@ async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> l
             "claim": ({"session": task["claimed_by"], "until": task["claim_until"], "actor": task["claimed_actor"]}
                       if task["state"] == "in_progress" else None),
             "browser": routing.label(route),
+            "approved_at": task["approved_at"],  # read by queued_outreach; the route models drop it
         })
     return out
+
+
+async def queued_outreach(db: JobDatabase, user_id: str, now: datetime) -> list[dict[str, Any]]:
+    """The approved, unsent LinkedIn sends (state queued / in_progress) as rows of the ONE batch queue (owner
+    2026-10-26: applications and outreach in one list, ``list_applications queued=true``). Read-only: nothing
+    here sends; the click, the claim and ``check_outreach`` are unchanged. Email has no approved-but-unsent
+    state (``outreach_send`` = auto is a setting, not a per-message yes), so it is never listed. No draft
+    text, only names and ids. Scoped by ``user_id``."""
+    out: list[dict[str, Any]] = []
+    for t in await _contact_tasks(db, user_id, now):
+        note = "linkedin_message" if t["linkedin_state"] == "connected" else "linkedin_note"
+        out.append({
+            "task_id": t["task_id"], "kind": "outreach", "outreach_kind": note,
+            "title": f"LinkedIn {'message' if note == 'linkedin_message' else 'note'} to {t['name']}",
+            "name": t["name"], "contact_id": t["contact_id"], "application_id": t["application_id"],
+            "message_id": t["message_id"], "approved_at": t["approved_at"],
+            "state": "in_progress" if t["claim"] else "queued", "browser": t["browser"],
+        })
+    return out
+
+
+def merged_order(queued_at: dict[int, str], outreach: list[dict[str, Any]]) -> list[str]:
+    """The one queue's order: ``application:<id>`` by when it was queued and ``contact:<id>`` by when the user
+    pressed Send, oldest yes first (ties: applications first, then id)."""
+    far = datetime.max.replace(tzinfo=timezone.utc)
+    keyed = [((_when(at) or far), 0, app_id, f"application:{app_id}") for app_id, at in queued_at.items()]
+    keyed += [((_when(o["approved_at"]) or far), 1, int(o["contact_id"]), str(o["task_id"])) for o in outreach]
+    return [k[3] for k in sorted(keyed)]
 
 
 async def _application_tasks(
@@ -327,6 +357,7 @@ async def _application_tasks(
             routes.append((app_id, route))
     # Easy Apply (owner 2026-10-26): a batch-queued application on linkedin.com with no open block waits here
     # from the start, oldest queued first; Job360's browser never opens it.
+    # A link whose host cannot be named waits here too ("link_unclear"), so the user's own browser can check it.
     linked = [i for i, a in apps.items() if i not in blocks and routing.is_linkedin(str(a.get("job_url") or ""))]
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
@@ -356,7 +387,7 @@ async def queue_tasks(
     then applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
     batch-queued Easy Apply applications (an apply link on linkedin.com, no open block). With a
     ``session`` (an assistant's read) an application another session holds is left out; the website passes none."""
-    tasks = await _contact_tasks(db, user, now) + await _application_tasks(db, user, now, session)
+    tasks = await _contact_tasks(db, user.id, now) + await _application_tasks(db, user, now, session)
     return tasks[:QUEUE_MAX]
 
 
@@ -425,7 +456,7 @@ async def easy_apply_today(db: JobDatabase, user_id: str, now: datetime) -> int:
         f"AND e.user_id = a.user_id WHERE a.user_id = ? AND {_SUBMIT_MARKS} AND e.recorded_at >= ?",
         (user_id, floor),
     )
-    ids = [int(dict(r)["id"]) for r in await cur.fetchall() if routing.is_linkedin(str(dict(r)["job_url"] or ""))]
+    ids = [int(dict(r)["id"]) for r in await cur.fetchall() if routing.names_linkedin(str(dict(r)["job_url"] or ""))]
     if not ids:
         return 0
     marks = ",".join("?" for _ in ids)
@@ -532,10 +563,10 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
-    if any(routing.is_linkedin(t["url"]) for t in apps) and (
+    if any(routing.names_linkedin(t["url"]) for t in apps) and (
         await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
     ):  # Easy Apply's own day cap; any other application is still handed out
-        apps = [t for t in apps if not routing.is_linkedin(t["url"])]
+        apps = [t for t in apps if not routing.names_linkedin(t["url"])]
         refusal = refusal or _answer("daily_limit", "daily_limit", wait_seconds=0)
     if apps:
         _log("own_browser_take", user.id, "task", application_id=apps[0]["application_id"])

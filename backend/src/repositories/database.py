@@ -951,10 +951,11 @@ class JobDatabase:
 
     async def update_user_email(self, user_id: str, new_email: str) -> None:
         """Replace the email address for the given user. The new address is
-        unproven, so ``email_verified_at`` is cleared in the same UPDATE."""
+        unproven, so ``email_verified_at`` is cleared in the same UPDATE. Stored
+        lowercased, like register, so the case-sensitive UNIQUE blocks twins."""
         await self._db.execute(
             "UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?",
-            (new_email, user_id),
+            (new_email.strip().lower(), user_id),
         )
         await self._db.commit()
 

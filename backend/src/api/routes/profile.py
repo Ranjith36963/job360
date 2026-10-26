@@ -652,6 +652,59 @@ def _sends_avoid_list(preferences_json: str) -> bool:
     return isinstance(sent, dict) and "avoid_companies" in sent
 
 
+# Security review D1 (2026-10-26): get_profile serves the notes to every assistant as the user's
+# standing instructions, so an assistant's change to them (a prompt injection's "save a note")
+# waits for the user's Confirm on the website, like a riskier setting. A web write applies at once.
+def _waiting_notes(user_id: str, current: Any) -> Any:
+    """The notes list a request already waiting holds, else ``current``: an assistant's next
+    item op builds on it, so its new request (which supersedes the old) loses no note."""
+    for row in setting_requests.list_waiting(user_id):
+        if row["path"] == _NOTES_PATH and isinstance(row["value"], list):
+            return row["value"]
+    return current
+
+
+def _hold_notes(
+    user_id: str, actor: str, write_now: list[tuple[str, Any]], hold: list[tuple[str, Any]]
+) -> tuple[list[tuple[str, Any]], list[tuple[str, Any]]]:
+    """Move a non-web change to ``preferences.assistant_notes`` from ``write_now`` to ``hold``."""
+    if actor == profile_edits.WEB_ACTOR or not any(p == _NOTES_PATH for p, _ in write_now):
+        return write_now, hold
+    have = list((load_profile(user_id) or UserProfile()).preferences.assistant_notes or [])
+    keep: list[tuple[str, Any]] = []
+    for path, value in write_now:
+        if path != _NOTES_PATH:
+            keep.append((path, value))
+            continue
+        after = None if value is None else profile_edits.validate_edit(path, value)
+        if after != have:
+            hold.append((path, after))
+    return keep, hold
+
+
+def _guard_notes(user: CurrentUser, preferences_json: str, after: list[str]) -> None:
+    """The preferences form is the other door that writes notes: a non-web caller that would
+    change them gets a 403 (it asks through update_profile, which waits for the user's Confirm)."""
+    if actor_for(user) == profile_edits.WEB_ACTOR:
+        return
+    try:
+        sent = json.loads(preferences_json)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(sent, dict) or "assistant_notes" not in sent:
+        return
+    have = list((load_profile(user.id) or UserProfile()).preferences.assistant_notes or [])
+    if list(after) != have:
+        _log_edit_rejected(user.id, actor_for(user), [(_NOTES_PATH, None)], _NOTES_PATH, 403, "notes_need_confirm")
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{_NOTES_PATH}: an assistant's change to the user's standing instructions waits for the "
+                "user's Confirm; send it with update_profile."
+            ),
+        )
+
+
 def _split_gated(
     user_id: str, actor: str, pairs: list[tuple[str, Any]]
 ) -> tuple[list[tuple[str, Any]], list[tuple[str, Any]], dict[str, str]]:
@@ -915,6 +968,8 @@ def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> Updat
     # off the current profile under the lock; the checks below then see exactly what is written.
     op_paths = {e.path for e in body.edits if e.op != "set" and e.path in profile_edits.editable_paths()}
     current = profile_edits.field_values(load_profile(user.id) or UserProfile(), op_paths) if op_paths else {}
+    if actor != profile_edits.WEB_ACTOR and _NOTES_PATH in current:
+        current[_NOTES_PATH] = _waiting_notes(user.id, current[_NOTES_PATH])
     try:
         pairs = profile_edits.resolve_ops([(e.path, e.op, e.value, e.index) for e in body.edits], current)
     except profile_edits.ProfileEditError as exc:
@@ -967,6 +1022,7 @@ def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> Updat
     # hourly budget for held requests is checked HERE, before any write of the
     # call, so a 429 changes nothing.
     write_now, hold, risk = _split_gated(user.id, actor, pairs)
+    write_now, hold = _hold_notes(user.id, actor, write_now, hold)
     _refuse_avoid_list_removal(user.id, actor, pairs)
     # Weak spot #6 wave 2 - permission to fill is not permission to remember (answer-memory
     # SKILL.md L151; job-apply-store.py L503-507: "sensitive answer value requires explicit
@@ -1723,6 +1779,7 @@ async def upsert_preferences(
     _apply_preferences(preferences, profile)
     if _sends_avoid_list(preferences):
         _guard_avoid_list(user, profile.preferences.avoid_companies)
+    _guard_notes(user, preferences, profile.preferences.assistant_notes)
     kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     _record_web_preference_changes(preferences, before, profile, user, skip=kept)
@@ -1754,6 +1811,7 @@ async def upsert_profile(
         _apply_preferences(preferences, profile)
         if _sends_avoid_list(preferences):
             _guard_avoid_list(user, profile.preferences.avoid_companies)
+        _guard_notes(user, preferences, profile.preferences.assistant_notes)
         kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     if preferences is not None and before is not None:
@@ -2125,28 +2183,22 @@ def _settings_riskier_to_reset(user: CurrentUser) -> frozenset[str]:
     return frozenset(riskier)
 
 
-def _snapshot_memory_then_clear(user: CurrentUser, base: UserInfo) -> None:
-    """Before the user-info memory BASE is wiped, append every non-empty field of
-    it to ``profile_edits`` (then a clearing row per ``user_info.*`` path), so a
-    clear is recoverable. The memory is in no version snapshot; the CV and the
-    preferences are (``save_profile``), and overlay values are already history.
-    Logs ``memory_snapshot`` with the user id and field NAMES, never a value."""
+def _erase_memory_then_clear(user: CurrentUser, base: UserInfo) -> None:
+    """Before the user-info memory BASE is wiped, ERASE the user's earlier
+    ``user_info.*`` rows from ``profile_edits`` and append a clearing row (no
+    value) per path that held something (owner decision 2026-10-26: "Clear memory
+    should erase. Just clear it." No copy is kept). Logs ``memory_erased`` with the
+    user id, path NAMES and the row count, never a value."""
     editable = set(profile_edits.editable_paths())
-    snapshot = [
-        (f"user_info.{name}", value)
-        for name, value in asdict(base).items()
-        if value and f"user_info.{name}" in editable
+    base_paths = [
+        f"user_info.{name}" for name, value in asdict(base).items() if value and f"user_info.{name}" in editable
     ]
-    overlay = [
-        str(row["path"]) for row in profile_edits.current_overlay(user.id)
-        if str(row["path"]).startswith("user_info.") and row["path"] in editable
-    ]
-    written = profile_edits.record_snapshot_then_clear(user.id, actor_for(user), snapshot, overlay)
+    erased, cleared = profile_edits.erase_then_clear(user.id, actor_for(user), "user_info.", base_paths)
     logger.info(
-        "memory_snapshot",
+        "memory_erased",
         extra={
-            "event": "memory_snapshot", "user_id": safe_log_value(user.id),
-            "fields": [path for path, _ in snapshot], "rows": written,
+            "event": "memory_erased", "user_id": safe_log_value(user.id),
+            "fields": cleared, "rows": erased,
         },
     )
 
@@ -2167,8 +2219,8 @@ async def clear_profile_section(
     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
     (``user_info.*``: contact, right to work, logistics, languages, equality
     answers, saved answers): the base column and the assistant's overlay rows.
-    It takes no version snapshot (it copies the memory into ``profile_edits``
-    first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+    It takes no version snapshot and ERASES the user's earlier ``user_info.*``
+    history rows (``_erase_memory_then_clear``), and leaves the CV, the
     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
     ``github`` leave it alone; only ``all`` resets it.
@@ -2210,9 +2262,9 @@ async def clear_profile_section(
 
     if section == "memory":
         # The memory has its own column and ONE writer, and is not part of a
-        # version snapshot: no save_profile, no new version. Its values go to
-        # the append-only history first, with the overlay's clearing rows.
-        _snapshot_memory_then_clear(user, profile.user_info)
+        # version snapshot: no save_profile, no new version. Its history rows
+        # are erased first (owner decision 2026-10-26), leaving clearing rows.
+        _erase_memory_then_clear(user, profile.user_info)
         save_user_info(user.id, UserInfo(), "clear_memory")
         _log_profile_cleared(user.id, section)
         return load_profile_response(user.id)[1]
@@ -2257,9 +2309,9 @@ async def clear_profile_section(
         _reinfer_level_from_what_remains(profile)
     save_profile(profile, user.id, f"clear_{section}")
     if section == "all":
-        # Memory first to the history (its overlay paths then read as cleared,
-        # so the prefix sweep below skips them).
-        _snapshot_memory_then_clear(user, profile.user_info)
+        # Memory first: its history is erased (its overlay paths then read as
+        # cleared, so the prefix sweep below skips them).
+        _erase_memory_then_clear(user, profile.user_info)
         save_user_info(user.id, UserInfo(), "clear_all")
         # S2 — a full reset also returns the assistant settings to their safe
         # defaults and cancels every request still waiting for the user's OK.

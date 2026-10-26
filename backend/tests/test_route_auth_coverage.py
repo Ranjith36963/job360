@@ -75,6 +75,7 @@ ROUTE_MODULES = [
     "own_browser",
     "browser",
     "asks",
+    "changes",
 ]
 
 # Route modules main.py mounts at the site ROOT (no "/api"). Only the OAuth
@@ -194,6 +195,7 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
     ("POST", "/api/asks/{ask_id}/answers/save"): "the user's own saved rows read as checked on Needs you",
     ("POST", "/api/applications/{application_id}/browser/refill"): "the user's own Refill the form: replays and holds",
+    ("GET", "/api/changes"): "the web page's own live poll; agents have whats_new, and a token never polls it",
 }
 
 

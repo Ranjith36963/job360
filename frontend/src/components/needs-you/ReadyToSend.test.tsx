@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { ReadyToSend } from "./ReadyToSend";
+import { JobCards } from "./JobCards";
+import type { JobCardsReport } from "./JobCards";
+
+// Ready to send lives on each job's card now; with no job record here each ready card shows alone.
+function ReadyToSend({ onTotal }: { onTotal?: (n: number) => void }) {
+  return <JobCards open={[]} onChanged={async () => {}} onReport={(r: JobCardsReport) => r.readyTotal !== null && onTotal?.(r.readyTotal)} />;
+}
 import { ReadyCard } from "./ReadyCard";
-import { card } from "./ready-fixtures";
+import { answer, card, sendableCard } from "./ready-fixtures";
 import { ApiError } from "@/lib/api-error";
 import { dayMonth } from "@/lib/ready-to-send";
 
@@ -11,6 +17,9 @@ const approveSend = vi.fn();
 const declineSend = vi.fn();
 const browserLive = vi.fn();
 vi.mock("@/lib/api", () => ({
+  getApplication: () => Promise.reject(new Error("no job record in this test")),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: (...a: unknown[]) => declineSend(...a),
@@ -49,11 +58,11 @@ describe("Ready to send", () => {
     expect(el.textContent).toContain(`Cover letter v1 · ${dayMonth("2026-10-08T08:05:00+00:00", true)}`);
     expect(screen.getByRole("link", { name: "Open both" })).toHaveAttribute("href", "/applications/64#section-documents");
     expect(el).toHaveTextContent("Every answer that will go out");
-    expect(el.textContent).toContain(`Memory · saved by Claude, ${dayMonth("2026-10-03T09:00:00+00:00")}`);
-    expect(el).toHaveTextContent("Profile");
-    expect(el).toHaveTextContent("Written new · by Claude");
-    expect(el).toHaveTextContent("Guessed · by Claude");
-    expect(el).toHaveTextContent("Your choice is saved with the time and this page as the place.");
+    expect(screen.getByTestId("ready-answer-source-64-0")).toHaveTextContent("From your Memory · your assistant saved it");
+    expect(screen.getByTestId("ready-answer-source-64-1")).toHaveTextContent("From your profile");
+    expect(screen.getByTestId("ready-answer-source-64-2")).toHaveTextContent("Written by your assistant");
+    expect(screen.getByTestId("ready-answer-source-64-3")).toHaveTextContent("Your assistant's guess");
+    expect(el.textContent).not.toMatch(/Your choice is saved|by Claude,|Written new|Guessed/);
   });
 
   it("flags show in words, with the country spelled out", async () => {
@@ -64,7 +73,7 @@ describe("Ready to send", () => {
   });
 
   it("Send and Don't send call the routes for that application, then reload", async () => {
-    getReadyToSend.mockResolvedValue(payload([card(64)]));
+    getReadyToSend.mockResolvedValue(payload([sendableCard(64)]));
     render(<ReadyToSend />);
     fireEvent.click(await screen.findByTestId("ready-send-64"));
     await waitFor(() => expect(approveSend).toHaveBeenCalledWith(64, { artifactId: 64, formFilledEventId: 640 }));
@@ -76,7 +85,7 @@ describe("Ready to send", () => {
 
   it("a failed Send says so and keeps the card", async () => {
     approveSend.mockRejectedValue(new Error("no"));
-    getReadyToSend.mockResolvedValue(payload([card(64)]));
+    getReadyToSend.mockResolvedValue(payload([sendableCard(64)]));
     render(<ReadyToSend />);
     fireEvent.click(await screen.findByTestId("ready-send-64"));
     await waitFor(() => expect(toastError).toHaveBeenCalled());
@@ -85,7 +94,7 @@ describe("Ready to send", () => {
 
   it("a card that changed since it loaded (409) says so and reloads", async () => {
     approveSend.mockRejectedValue(new ApiError(409, "the CV changed since you looked - look again"));
-    getReadyToSend.mockResolvedValue(payload([card(64)]));
+    getReadyToSend.mockResolvedValue(payload([sendableCard(64)]));
     render(<ReadyToSend />);
     fireEvent.click(await screen.findByTestId("ready-send-64"));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("This changed since you looked. Check it again."));
@@ -186,5 +195,38 @@ describe("the form was closed line", () => {
     expect(screen.getByTestId("ready-finish-5")).toBeTruthy();
     rerender(<ReadyCard card={card(5, { form_open: null })} paused={false} onChanged={() => undefined} />);
     expect(screen.queryByTestId("ready-form-closed")).toBeNull();
+  });
+});
+
+describe("Send waits for every answer to read OK (owner, 2026-10-26)", () => {
+  it("a guessed or written answer keeps Send off and says how many to check", () => {
+    render(<ReadyCard card={card(64)} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-send-64")).toBeDisabled();
+    // The fixture holds a written answer and a guessed one, plus assistant-saved Memory (OK).
+    expect(screen.getByTestId("ready-send-blocked-64")).toHaveTextContent("OK or edit 2 answers above to turn on Send.");
+    fireEvent.click(screen.getByTestId("ready-send-64"));
+    expect(approveSend).not.toHaveBeenCalled();
+  });
+
+  it("a blank answer keeps Send off", () => {
+    const c = sendableCard(65);
+    c.answers.push({ ...answer({ question: "Notice period", answer: "", source: "none", key: null }), verified: false });
+    render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-send-65")).toBeDisabled();
+    expect(screen.getByTestId("ready-send-blocked-65")).toHaveTextContent("OK or edit 1 answer above");
+  });
+
+  it("an answer the user edited never blocks Send", () => {
+    const c = sendableCard(66);
+    c.answers.push({ ...answer({ question: "Visa?", answer: "no", source: "guessed", key: null, changed_to: "yes", changed_reason: "owner_edit" }), verified: false });
+    render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-send-66")).not.toBeDisabled();
+    expect(screen.queryByTestId("ready-send-blocked-66")).toBeNull();
+  });
+
+  it("every answer confirmed: Send is on and there is no hint", () => {
+    render(<ReadyCard card={sendableCard(67)} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-send-67")).not.toBeDisabled();
+    expect(screen.queryByTestId("ready-send-blocked-67")).toBeNull();
   });
 });
