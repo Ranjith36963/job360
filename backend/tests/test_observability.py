@@ -40,7 +40,7 @@ async def test_json_api_gets_strict_csp_and_permissions_policy():
         resp = await client.get("/api/health")
     csp = resp.headers["content-security-policy"]
     assert csp == "default-src 'none'; frame-ancestors 'none'"
-    assert "cdn.jsdelivr.net" not in csp
+    assert "cdn.jsdelivr.net" not in set(csp.replace(";", " ").split())  # exact CSP source tokens
     pp = resp.headers.get("permissions-policy", "")
     for feature in ("camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()"):
         assert feature in pp
@@ -55,7 +55,7 @@ async def test_docs_pages_keep_relaxed_csp_for_swagger(path):
         resp = await client.get(path)
     assert resp.status_code == 200, f"{path} not mounted in the test env"
     csp = resp.headers["content-security-policy"]
-    assert "cdn.jsdelivr.net" in csp
+    assert "cdn.jsdelivr.net" in set(csp.replace(";", " ").split())  # exact CSP source tokens
     assert "frame-ancestors 'none'" in csp
     assert "permissions-policy" in resp.headers
 
