@@ -280,7 +280,9 @@ function AnswerRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  const chip = sourceChip(a, card.filled_by);
+  // No value to type (a sensitive answer not kept, or blank): never "Approved"; it waits for the user.
+  const missing = a.changed_to == null && (a.redacted || !a.answer.trim());
+  const chip = missing ? { text: "Needs your answer", tone: "guess" as const } : sourceChip(a, card.filled_by);
   const stub = isDraftStub(a);
   const checkable = canCheck(a) || stub;
   const id = `${card.application_id}-${index}`;
@@ -360,14 +362,14 @@ function AnswerRow({
         </span>
       ) : (
         <span className="break-words">
-          {a.redacted ? (
-            "(not kept: sensitive - Edit to type it)"
+          {missing ? (
+            <span data-testid={`ready-answer-missing-${id}`} className="font-medium text-danger">
+              {a.redacted ? "Not kept (private). Tap Edit to type your answer." : "Blank. Tap Edit to type your answer."}
+            </span>
           ) : stub ? (
             <DraftMissing id={id} value={a.answer} />
-          ) : a.answer ? (
-            <AnswerValue id={id} value={a.answer} />
           ) : (
-            "(blank)"
+            <AnswerValue id={id} value={a.answer} />
           )}
         </span>
       )}
@@ -384,9 +386,11 @@ function AnswerRow({
             Verified
           </span>
         )}
-        {checkable && !editing && (
+        {/* Edit sits on EVERY row (owner 2026-10-26: a private salary row had no way to type it); Verify only
+            where there is an answer to vouch for. */}
+        {!editing && (
           <>
-            {!a.verified && !stub && a.changed_to == null && a.answer && (
+            {checkable && !missing && !a.verified && !stub && a.changed_to == null && (
               <button
                 type="button"
                 data-testid={`ready-answer-verify-${id}`}
