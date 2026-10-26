@@ -7938,6 +7938,12 @@ export interface components {
             changed_reason?: ("owner_edit" | "approved_for_employer" | "saved_answer") | null;
             /** Changed To */
             changed_to?: string | null;
+            /**
+             * Check
+             * @default verify
+             * @enum {string}
+             */
+            check: "verify" | "confirm";
             /** Key */
             key?: string | null;
             /** Question */

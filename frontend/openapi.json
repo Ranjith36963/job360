@@ -11056,6 +11056,15 @@
             ],
             "title": "Changed To"
           },
+          "check": {
+            "default": "verify",
+            "enum": [
+              "verify",
+              "confirm"
+            ],
+            "title": "Check",
+            "type": "string"
+          },
           "key": {
             "anyOf": [
               {
