@@ -132,18 +132,19 @@ async def ready_to_send(
         items=[
             ReadyCard(
                 **c, held_seconds=_held(user.id, c["application_id"]), form_open=_open(user.id, c["application_id"]),
-                browser=_browser(),
+                browser=_browser(c.get("apply_url") or ""),
             )
             for c in cards[:limit]
         ],
     )
 
 
-def _browser() -> BrowserLabelOut:
-    """A ready card's form is filled in Job360's browser first. A form whose browser stopped has an open
-    block and is never listed here (``_READY_SQL``), so every ready card says Job360's browser; no read."""
-    route = routing.browser_for()
-    return BrowserLabelOut(kind=route.kind, label=routing.LABELS[route.kind], reason=route.reason)
+def _browser(apply_url: str) -> BrowserLabelOut:
+    """A ready card's form is filled in Job360's browser first, unless its apply link is on linkedin.com
+    (Easy Apply: the user's own browser only, owner 2026-10-26). A form whose browser stopped has an open
+    block and is never listed here (``_READY_SQL``); no read."""
+    route = routing.browser_for(url=apply_url)
+    return BrowserLabelOut(kind=route.kind, label=routing.label(route)["label"], reason=route.reason)
 
 
 def _held(user_id: str, application_id: int) -> Optional[int]:
@@ -230,4 +231,4 @@ async def confirm_answer(
     cards = await ready_service.ready_cards(db, user.id, limit=1, application_id=application_id)
     if not cards:  # pragma: no cover - a memory write never takes a card off the list
         raise HTTPException(status_code=404, detail="This form is no longer waiting for you")
-    return ReadyCard(**cards[0])
+    return ReadyCard(**cards[0], browser=_browser(cards[0].get("apply_url") or ""))

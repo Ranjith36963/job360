@@ -1329,9 +1329,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def own_browser_queue(
         action: str = "list", session: str = "", task_id: str = "", reason: str = "", contact_id: Optional[int] = None
     ) -> dict[str, Any]:
-        """The queue of LinkedIn messages the user pressed Send on, plus what Job360's browser could not finish.
-        Every LinkedIn send needs a live claim: `take` the person FIRST (needs `session`; `contact_id` = that
-        one person), in Job360's `browser` too, then check_outreach(contact_id, message_id, session=<your
+        """The queue of LinkedIn messages the user pressed Send on, Easy Apply, and what Job360's browser could
+        not finish. Every LinkedIn send needs a live claim: `take` the person FIRST (needs `session`; `contact_id`
+        = that one person), only in the user's own browser, then check_outreach(contact_id, message_id, session=<your
         session>) and send ONLY if it says send, then record_event outreach_sent; else `release` (session,
         task_id, reason = captcha | login_wall | weekly_limit | draft_rewritten | already_pending |
         profile_not_found | other). `list` = open_now, why, count, tasks. take = status task | already_yours |

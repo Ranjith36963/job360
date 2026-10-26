@@ -2103,21 +2103,20 @@ async def _full_contact_view(
     view["reachable"] = is_reachable(view)
     rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
-    view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"], rows)
+    view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
     view["own_browser_task"] = own_browser.public_task(own_browser.derive(rows, datetime.now(timezone.utc)))
     return view
 
 
 def _send_browser(
-    user_id: str, contact_id: int, messages: list[dict[str, Any]], rows: list[dict[str, Any]]
+    user_id: str, contact_id: int, messages: list[dict[str, Any]]
 ) -> Optional[dict[str, str]]:
-    """Which browser sends this person's newest message: a LinkedIn one goes through Job360's browser
-    first (owner, 2026-10-25), and the user's own browser once Job360's browser released it with a failure
-    after the newest click (``own_browser.job360_failure``); email goes through Gmail, so no browser (None).
-    Logs ids only."""
+    """Which browser sends this person's newest message: a LinkedIn one goes only through the user's own
+    browser, from the start (owner, 2026-10-26: Job360's browser never opens linkedin.com); email goes
+    through Gmail, so no browser (None). Logs ids only."""
     if not messages or messages[-1].get("channel") != "linkedin":
         return None
-    route = browser_routing.browser_for(job360_failed=own_browser.job360_failure(rows))
+    route = browser_routing.browser_for(linkedin=True)
     get_audit_logger().info(
         "contact_send_browser",
         extra={

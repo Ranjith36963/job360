@@ -510,28 +510,29 @@ async def test_the_weekly_invitation_limit_blocks_notes_and_not_messages_from_ei
 
 
 @pytest.mark.asyncio
-async def test_the_chip_flips_to_the_own_browser_after_job360s_browser_gives_the_person_back(
+async def test_the_chip_is_the_own_browser_from_the_click_through_every_release(
     authenticated_async_context
 ):
     async with authenticated_async_context() as client:
         app_id, cid, mid = await _person(client)
         await _click(client, cid, mid)
-        assert await _send_browser(client, cid) == "job360"
+        assert await _send_browser(client, cid) == "own_browser"
         assert (await _take(client, cid))["status"] == "task"
-        assert await _send_browser(client, cid) == "job360"  # held, nothing failed yet
+        assert await _send_browser(client, cid) == "own_browser"  # held
         await _release(client, cid, "login_wall")
         assert await _send_browser(client, cid) == "own_browser"
         queued = (await client.get("/api/own-browser/queue")).json()["tasks"]
         assert [t["contact_id"] for t in queued] == [cid] and queued[0]["browser"]["kind"] == "own_browser"
-        # a reason that is not a browser failure leaves the chip alone; a new draft starts over
+        # Owner 2026-10-26 (reverses the 2026-10-25 flip after a release): every release, and a new draft, keep it
+        # on the own browser: LinkedIn never goes to Job360's browser.
         assert (await _take(client, cid))["status"] == "task"
         await _release(client, cid, "weekly_limit")
-        assert await _send_browser(client, cid) == "job360"
+        assert await _send_browser(client, cid) == "own_browser"
         assert (await _take(client, cid))["status"] == "task"
         await _release(client, cid, "captcha")
         assert await _send_browser(client, cid) == "own_browser"
         await _draft(client, app_id, cid, "Another version")
-        assert await _send_browser(client, cid) == "job360"
+        assert await _send_browser(client, cid) == "own_browser"
 
 
 # ── another session, the gap and the day ─────────────────────────────────────

@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from src.services.applications.job_checks import redact_url_for_display
+from src.services.browser_agent import routing
 from src.services.browser_agent.deploy_hold import Beacon
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
@@ -503,6 +504,15 @@ BLOCKED_HOP = (
     "Open another link."
 )
 UNREACHABLE_HOP = "That site could not be found or did not answer. Open another link."
+# Owner 2026-10-26: linkedin.com runs only in the user's own browser; Job360's browser never opens it.
+LINKEDIN_REFUSED = (
+    "LinkedIn opens only in the user's own browser (their choice). Leave this task in the own-browser queue."
+)
+
+
+def _refuse_linkedin(url: str) -> None:
+    if routing.is_linkedin(url):
+        raise BrowserError("refused", "linkedin_own_browser", LINKEDIN_REFUSED)
 # The proxy's own marks (fresh each process: a site cannot send them) and what each one answers.
 _REFUSAL = {BLOCK_MARK: "blocked_address", UNREACHABLE_MARK: "load_failed"}
 
@@ -1417,6 +1427,7 @@ async def _act(
     gate: Optional[Gate], files: Optional[FileFn], fields: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     if action == "open":
+        _refuse_linkedin(url)
         requested = url
         url = greenhouse_embed_url(url)  # before the screen: the guard sees the URL that is opened
         verdict = await pool.screen.screen(url)
@@ -2111,6 +2122,7 @@ async def live(
             _mark_typed(s)  # the user may answer a field in the hand-off view: that page's "Apply" stays gated
         try:
             if action == "start":
+                _refuse_linkedin(url)
                 verdict = await pool.screen.screen(url)
                 if not verdict.ok:
                     raise BrowserError(

@@ -339,12 +339,21 @@ async def browser_for_asks(
     """Which browser each OPEN ask needs, by ask id (``routing.label``). ``blocks`` is the shared
     ``open_blocks`` map and ``finish`` the ``finish_here_ask_ids`` set (each read here when not given): the
     block counts only for the ask it opened, ``by: browser`` marks Job360's own browser having failed (a
-    caller can never write it), and a CAPTCHA the user can finish right now on Needs you is theirs alone.
+    caller can never write it), and a CAPTCHA the user can finish right now on Needs you is theirs alone. An
+    ask on an application whose apply link is on linkedin.com is the user's own browser (owner 2026-10-26).
     Read-only; logs counts only."""
     if blocks is None:
         blocks = await open_blocks(db, user_id, open_app_ids(asks))
     if finish is None:
         finish = await finish_here_ask_ids(db, user_id, asks, blocks)
+    ids = open_app_ids(asks)
+    urls: dict[int, str] = {}
+    if ids:
+        cur = await db._db.execute(
+            f"SELECT id, job_url FROM applications WHERE user_id = ? AND id IN ({','.join('?' for _ in ids)})",  # noqa: S608
+            (user_id, *ids),
+        )
+        urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     out: dict[int, dict[str, str]] = {}
     for a in asks:
         if a.get("status") != "open":
@@ -354,6 +363,7 @@ async def browser_for_asks(
         route = routing.ask_route(
             a.get("kind") or "", block_reason=str(mine.get("reason") or ""),
             block_by_browser=mine.get(BY_KEY) == BY_BROWSER, finish_here=a["id"] in finish,
+            url=urls.get(int(a.get("application_id") or 0), ""),
         )
         out[int(a["id"])] = routing.label(route)
     get_audit_logger().info(

@@ -1,27 +1,24 @@
-# 360-own_browser — send a LinkedIn message the user clicked Send on, Job360's browser first
+# 360-own_browser — send a LinkedIn message the user clicked Send on, in their own browser only
 <!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
-Only for a person whose card the user pressed **Send** on. Job360's browser (the `browser` tool) goes FIRST: it
-works with the user's computer off, so a scheduled cloud run may use it. The user's OWN browser (the one your app
-drives on their PC) takes only a person Job360's browser gave back; a scheduled run never takes those. Both
-browsers send ONLY while you hold the person: take first. Which browser: get_recipe("rules") "Which browser".
+Only for a person whose card the user pressed **Send** on. Every LinkedIn step runs ONLY in the user's OWN
+browser (the one your app drives on their PC), the user's choice: Job360's browser never opens linkedin.com.
+PC off, or a scheduled cloud run: the person waits in the queue; a scheduled run never takes those. You send
+ONLY while you hold the person: take first. Which browser: get_recipe("rules") "Which browser".
 
 Print this checklist and tick each step:
 [ ] 1 Take  [ ] 2 Read their state  [ ] 3 Right draft  [ ] 4 Gate  [ ] 5 Send  [ ] 6 Record  [ ] 7 Gap
 
-1. **Take ONE person.** Use ONE `session` label for the whole run. Job360's browser: `list_people` shows a person
-   whose newest draft has `own_browser_task` state `queued` and a `send_browser` of Job360's browser; call
-   `own_browser_queue(action="take", session, contact_id)`. Own browser: `own_browser_queue(action="list")`
-   (`open_now` false: tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session`.
+1. **Take ONE person.** Use ONE `session` label for the whole run. `own_browser_queue(action="list")` (`open_now`
+   false: tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session` (one person
+   the user just clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`).
    `empty`, `wait`, `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead.
-   Open the person's `linkedin_url` (Job360's `browser`, passing the `application_id` when there is one).
-   **Done when** you hold one person.
+   Open the person's `linkedin_url` in the own browser. **Done when** you hold one person.
 2. **Read their state** on the page: a `1st` badge or a Message button with no Connect = `connected`; Pending =
    `pending`; Connect (also under More) = `not_connected`. Save it: `update_contact(contact_id, linkedin_state=...)`.
-   A login page, CAPTCHA or security check, in either browser: `own_browser_queue(action="release", session,
-   task_id, reason="login_wall" or "captcha")`. From Job360's browser that sends the person to the user's own
-   browser; from the own browser `ask_user` (kind login or captcha) and STOP. Never solve it, never type or ask
-   for a password. Profile gone: release `profile_not_found`. Pending: release `already_pending`, next person.
+   A login page, CAPTCHA or security check: `own_browser_queue(action="release", session, task_id,
+   reason="login_wall" or "captcha")`, then `ask_user` (kind login or captcha) and STOP. Never solve it, never type
+   or ask for a password. Profile gone: release `profile_not_found`. Pending: release `already_pending`, next person.
 3. **The right draft.** `not_connected` needs a connection note of at most 200 characters (300 with Premium, only
    if the user set it); `connected` needs a message of at most 400. Wrong kind or too long: rewrite it (true facts
    only) with `save_artifact(contact_id, kind="outreach", channel="linkedin", draft_kind="connection_note" or
@@ -31,7 +28,7 @@ Print this checklist and tick each step:
    in one line (`too_soon`: wait, then ask again; `needs_claim`: take the person first). Release `other`, next.
 5. **Send exactly this text.** Not connected: Connect, Add a note, paste, Send. Connected: Message, paste, Send.
    Paste it as saved; never add, cut or change a word. LinkedIn's weekly invitation limit (or any limit page): do
-   not send; release `weekly_limit` (either browser), `ask_user` once, STOP the run. A CAPTCHA or sign-in wall
+   not send; release `weekly_limit`, `ask_user` once, STOP the run. A CAPTCHA or sign-in wall
    now: release as in step 2.
 6. **Record it at once:** `record_event` `outreach_sent` with contact_id and channel "linkedin" (no job: rules,
    Outreach). A note: then `update_contact(contact_id, linkedin_state="pending")`. **Done when** the mark is saved.

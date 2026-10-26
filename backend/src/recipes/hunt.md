@@ -36,8 +36,9 @@ you have, at full strength: code (the hunt kit), web search and fetch, a browser
       service). **Job alerts:** suggest LinkedIn, Indeed, freehire, Himalayas; the daily check reads them from Gmail.
    e. **LinkedIn, Glassdoor, Google Jobs, Indeed (owner, 2026-10-19):** the hunt kit now reads LinkedIn, Glassdoor and Google
       Jobs itself at low volume (README "LinkedIn, Glassdoor, Google Jobs and Indeed"). You open Indeed search and job pages
-      yourself, slowly, and read LinkedIn's logged-out job pages at very low volume only without the kit. Never log in, spoof
-      an app, use copied keys or proxies (owner exception 2026-10-19: the kit's Naukri reader). A login wall, CAPTCHA or bot check = stop that site, never solve or dodge it; tell the user.
+      yourself, slowly, and read LinkedIn's search and logged-out job pages at very low volume only without the kit and
+      ONLY in the user's own browser (never Job360's; owner 2026-10-26): at most 5 searches a day, read each result slowly;
+      a scheduled cloud run skips LinkedIn. Never log in, spoof an app, use copied keys or proxies (owner exception 2026-10-19: the kit's Naukri reader). A login wall, CAPTCHA or bot check = stop that site, never solve or dodge it; tell the user.
    Prefer the employer's own posting; from a LinkedIn or Indeed ad follow "Apply on company site". Never log
    in for the user or type a password. **Handing off:** a helper gets `get_recipe("hunt")` and `search_brief`
    word for word plus one line naming its rows, never your own summary; check every job it returns against the rows before you bring
@@ -66,5 +67,4 @@ you have, at full strength: code (the hunt kit), web search and fetch, a browser
    while the brief has more rows: say so and search the thin rows again. Then two lists - "Above your line (N)"
    and "Below your line (N)" (`settings.apply_min_score.effective`; null = ask for it first): company, title,
    place, your score, visa answer, and the link to the Job360 application page. Inside `run 360 daily`, apply
-   per each job's `save_fit` `line.switch` with `get_recipe("apply")` (the kit first); `ask` means ask. Alone,
-   the fits are in the batch: work it with `get_recipe("batch")`.
+   per each job's `save_fit` `line.switch` with `get_recipe("apply")` (the kit first); `ask` means ask. Alone, the fits are in the batch: work it with `get_recipe("batch")`.

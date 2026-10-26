@@ -262,7 +262,10 @@ async def test_contact_send_browser(authenticated_async_context):
             assert msg.status_code == 201, msg.text
             views[channel] = cid
         contacts = {c["id"]: c for c in (await client.get(f"/api/applications/{app_id}")).json()["contacts"]}
-        assert contacts[views["linkedin"]]["send_browser"] == JOB360
+        # Owner 2026-10-26 (reverses 2026-10-25 "Job360 first for LinkedIn"): the own browser, from the start.
+        assert contacts[views["linkedin"]]["send_browser"] == {
+            "kind": "own_browser", "label": "Your own browser: runs when your PC is on", "reason": "linkedin_own_browser",
+        }
         assert contacts[views["email"]]["send_browser"] is None
 
 
