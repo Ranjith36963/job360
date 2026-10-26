@@ -65,13 +65,16 @@ beforeEach(() => {
 describe("JobCards", () => {
   it("renders every header at once but loads only the first 8 jobs", async () => {
     render(<JobCards open={twenty} onChanged={async () => {}} />);
-    for (let i = 1; i <= 20; i++) expect(screen.getByTestId(`job-header-${i}`)).toBeInTheDocument();
-    expect(screen.getByTestId("job-skeleton-20")).toBeInTheDocument(); // newest first
+    // Only the first page shows, each as a placeholder while its card loads (newest first).
+    for (let i = 13; i <= 20; i++) expect(screen.getByTestId(`job-header-${i}`)).toBeInTheDocument();
+    expect(screen.queryByTestId("job-header-12")).toBeNull();
+    expect(screen.getByTestId("job-skeleton-20")).toBeInTheDocument();
     expect(screen.getByTestId("jobs-count")).toHaveTextContent("20 jobs waiting for you");
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
     expect(getApplication).toHaveBeenCalledTimes(8);
     expect(peak).toBeLessThanOrEqual(8);
-    expect(screen.getAllByTestId(/^job-header-/)).toHaveLength(12);
+    expect(screen.queryAllByTestId(/^job-header-/)).toHaveLength(0); // no header-only rows
+    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 8 more · 12 left");
   });
 
   it("Show 8 more jobs loads the next 8, then the rest", async () => {
@@ -80,7 +83,7 @@ describe("JobCards", () => {
     fireEvent.click(screen.getByTestId("more-jobs"));
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(16));
     expect(getApplication).toHaveBeenCalledTimes(16);
-    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 4 more jobs");
+    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 4 more · 4 left");
     fireEvent.click(screen.getByTestId("more-jobs"));
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(20));
     expect(screen.queryByTestId("more-jobs")).toBeNull();
@@ -147,7 +150,7 @@ describe("JobCards", () => {
     listPeople.mockResolvedValue({
       people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 500, job_company: "Reach Co", job_title: "Dev" }] }],
     });
-    render(<JobCards open={twenty.slice(0, 8)} onChanged={async () => {}} />);
+    render(<JobCards open={twenty.slice(0, 7)} onChanged={async () => {}} />);
     expect(await screen.findByTestId("job-header-500")).toHaveTextContent("Send notes");
   });
 
@@ -156,9 +159,22 @@ describe("JobCards", () => {
       people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 500, job_company: "Reach Co", job_title: "Dev" }] }],
     });
     render(<JobCards open={twenty.slice(0, 8)} onChanged={async () => {}} />);
-    expect(await screen.findByTestId("job-header-500")).toHaveTextContent("Reach Co · Dev");
-    await waitFor(() => expect(screen.getAllByTestId(/^card-/).length).toBeGreaterThan(0));
+    expect(await screen.findByTestId("more-jobs")).toHaveTextContent("Show 1 more · 1 left");
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
+    expect(screen.queryByTestId("job-header-500")).toBeNull(); // no header-only row for it
     expect(getApplication).not.toHaveBeenCalledWith(500);
+    fireEvent.click(screen.getByTestId("more-jobs"));
+    await waitFor(() => expect(getApplication).toHaveBeenCalledWith(500));
+  });
+
+  it("52 jobs show 8 full cards, one Show more button and zero header-only rows", async () => {
+    const many = Array.from({ length: 52 }, (_, i) => ask(i + 1, i + 1));
+    render(<JobCards open={many} onChanged={async () => {}} />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
+    expect(screen.queryAllByTestId(/^job-header-/)).toHaveLength(0);
+    expect(screen.getAllByTestId("more-jobs")).toHaveLength(1);
+    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 8 more · 44 left");
+    expect(screen.getByTestId("jobs-count")).toHaveTextContent("52 jobs waiting for you");
   });
 
   it("a job whose record fails drops its header and reports its asks", async () => {

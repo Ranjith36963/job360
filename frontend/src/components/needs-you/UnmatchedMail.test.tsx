@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { UnmatchedMail } from "./UnmatchedMail";
+import { OtherList } from "./OtherList";
 
 const listInboxItems = vi.fn();
 const resolveInboxItem = vi.fn();
@@ -9,7 +9,11 @@ vi.mock("@/lib/api", () => ({
   listInboxItems: (...a: unknown[]) => listInboxItems(...a),
   resolveInboxItem: (...a: unknown[]) => resolveInboxItem(...a),
   listApplications: (...a: unknown[]) => listApplications(...a),
+  listOutcomeSuggestions: async () => ({ suggestions: [], truncated: false }),
 }));
+
+// Unmatched mail now lives as rows of the one Other list (owner plan 3b): Match opens the card inline.
+const UnmatchedMail = () => <OtherList waiting={[]} questions={[]} onChanged={async () => {}} renderQuestion={() => null} />;
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const item = {
@@ -35,6 +39,8 @@ describe("UnmatchedMail", () => {
   it("shows the item, enables Match only after a pick, resolves, and dismisses", async () => {
     listInboxItems.mockResolvedValue({ items: [item], open_count: 1 });
     render(<UnmatchedMail />);
+    expect(await screen.findByTestId("other-open-mail-5")).toHaveTextContent("Match");
+    fireEvent.click(screen.getByTestId("other-open-mail-5"));
     const row = await screen.findByTestId("inbox-item-5");
     expect(row).toHaveTextContent("talent@globex.example");
     expect(row).toHaveTextContent("Your application at Globex");

@@ -125,8 +125,8 @@ function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: 
 }
 
 /** One card per job holding everything it needs: its ready-to-send form, its CV to approve, its
- *  questions and its people to reach (owner 2026-10-26). Fast first paint: a header per job, the full
- *  card (getApplication) only for the first 8, then 8 more on each press of "Show 8 more jobs". */
+ *  questions and its people to reach (owner 2026-10-26). Only the first 8 jobs show (a placeholder
+ *  while each card loads), then 8 more on each press of "Show 8 more · N left": no header-only rows. */
 export function JobCards({
   open,
   onChanged,
@@ -209,8 +209,21 @@ export function JobCards({
     return sortByUrgency([...all.values()]);
   }, [byJob, people, ready, cvRows, cvs]);
 
-  const page = useMemo(() => headers.slice(0, limit), [headers, limit]);
+  // A loaded card takes this header's current CV; it stays while anything on it is open.
+  const cardOf = useCallback((h: Header): JobCardData | null => {
+    const s = slots.get(h.id);
+    return s?.status === "ready" ? { ...s.card, cv: h.cv } : null;
+  }, [slots]);
+  const live = useCallback((h: Header) => {
+    const s = slots.get(h.id);
+    if (s?.status === "failed") return h.ready !== null;
+    const c = cardOf(h);
+    return !c || c.asks.length > 0 || c.people.length > 0 || h.ready !== null || h.cv !== null;
+  }, [slots, cardOf]);
 
+  const alive = useMemo(() => headers.filter(live), [headers, live]);
+  // The shown jobs: a card that loads with nothing open drops out and the next job takes its place.
+  const page = useMemo(() => alive.slice(0, limit), [alive, limit]);
   // Load the full card of every job on a shown page, at most MAX_IN_FLIGHT at a time.
   useEffect(() => {
     const set = (id: number, slot: Slot, onlyIfAbsent = false) =>
@@ -226,19 +239,6 @@ export function JobCards({
     }
   }, [page, gen, limiter, byJob]);
 
-  // A loaded card takes this header's current CV; it stays while anything on it is open.
-  const cardOf = useCallback((h: Header): JobCardData | null => {
-    const s = slots.get(h.id);
-    return s?.status === "ready" ? { ...s.card, cv: h.cv } : null;
-  }, [slots]);
-  const live = useCallback((h: Header) => {
-    const s = slots.get(h.id);
-    if (s?.status === "failed") return h.ready !== null;
-    const c = cardOf(h);
-    return !c || c.asks.length > 0 || c.people.length > 0 || h.ready !== null || h.cv !== null;
-  }, [slots, cardOf]);
-
-  const alive = headers.filter(live);
   const cards = useMemo(() => headers.flatMap((h) => cardOf(h) ?? []), [headers, cardOf]);
   const failed = useMemo(
     () => headers.flatMap((h) => (slots.get(h.id)?.status === "failed" ? h.asks.filter((a) => !h.ready || !a.questions?.length) : [])),
@@ -268,7 +268,7 @@ export function JobCards({
   const paused = ready?.paused ?? false;
   const readyPart = (h: Header, embedded: boolean) =>
     h.ready && <ReadySection card={h.ready} asks={h.asks} paused={paused} embedded={embedded} onChanged={readyChanged} salaryFacts={salaryFacts} />;
-  const pending = headers.length - page.length;
+  const pending = alive.length - page.length;
   const next = Math.min(JOBS_PER_PAGE, pending);
   return (
     <div className="flex flex-col gap-3">
@@ -278,7 +278,7 @@ export function JobCards({
       {readyError}
       {clean.length >= 2 && <SendAllCard clean={clean} held={held} paused={paused} onChanged={readyChanged} />}
       <ul className="flex flex-col gap-3" data-testid="job-cards">
-        {alive.map((h) => {
+        {page.map((h) => {
           const slot = slots.get(h.id);
           const card = cardOf(h);
           if (card) return <JobCard key={h.id} card={card} onChanged={onChanged} ready={readyPart(h, true)} />;
@@ -299,16 +299,14 @@ export function JobCards({
         })}
       </ul>
       {pending > 0 && (
-        <div>
-          <button
-            type="button"
-            data-testid="more-jobs"
-            onClick={() => setLimit((n) => n + JOBS_PER_PAGE)}
-            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
-            Show {next} more jobs
-          </button>
-        </div>
+        <button
+          type="button"
+          data-testid="more-jobs"
+          onClick={() => setLimit((n) => n + JOBS_PER_PAGE)}
+          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+        >
+          Show {next} more · {pending} left
+        </button>
       )}
     </div>
   );
