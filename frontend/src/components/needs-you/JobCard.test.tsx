@@ -60,10 +60,18 @@ describe("JobCard", () => {
     expect(screen.getByText("Only you can do this")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
     for (const l of screen.getAllByRole("link", { name: "Open the form ↗" })) expect(l).toHaveAttribute("href", "https://jobs.example.com/7");
-    expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByRole("link", { name: "Open the form ↗" })).toBeInTheDocument();
+    expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByTestId("ask-open-empty-form")).toHaveAttribute("href", "https://jobs.example.com/7");
     fireEvent.click(screen.getByTestId(`did-it-${captcha.id}`));
     await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(captcha.id, "I did it myself on the form."));
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("keeps the application-page link on a CAPTCHA row when the card has no form URL", () => {
+    const captcha = ask("Solve the CAPTCHA and press Submit");
+    render(<JobCard card={card([captcha], { formUrl: "" })} onChanged={onChanged} />);
+    const row = screen.getByTestId(`blocker-${captcha.id}`);
+    expect(within(row).getByTestId(`row-link-${captcha.id}`)).toHaveAttribute("href", "/applications/7");
+    expect(within(row).queryByTestId("ask-open-empty-form")).toBeNull();
   });
 
   it("asks a yes/no question with buttons and saves every answer and the CV in one approve", async () => {
