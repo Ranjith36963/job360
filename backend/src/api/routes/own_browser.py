@@ -72,6 +72,7 @@ class QueueOut(BaseModel):
 class TakeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session: str = Field(default="", max_length=200)
+    contact_id: Optional[int] = Field(default=None, ge=1)
 
 
 class TakeOut(BaseModel):
@@ -146,7 +147,7 @@ async def take(
 ) -> TakeOut:
     """Hand ONE task to this assistant session (see ``own_browser.take`` for the statuses)."""
     try:
-        got = await own_browser.take(db, user, body.session, datetime.now(timezone.utc))
+        got = await own_browser.take(db, user, body.session, datetime.now(timezone.utc), body.contact_id)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises

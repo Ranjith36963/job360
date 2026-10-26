@@ -2032,7 +2032,9 @@ export interface paths {
         };
         /**
          * Outreach Check
-         * @description THE one gate before pressing Send on an outreach email (feature 10).
+         * @description THE one gate before pressing Send on an outreach email, or on a LinkedIn message after the user's
+         *     click on that person's card (feature 10). ``session`` is the caller's own session label: a LinkedIn
+         *     person another session holds reads as ``claimed_by_other_session``.
          *
          *     Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
          *     ask; the Gmail mode never does), this contact's facts and the saved message
@@ -9731,6 +9733,8 @@ export interface components {
         };
         /** TakeIn */
         TakeIn: {
+            /** Contact Id */
+            contact_id?: number | null;
             /**
              * Session
              * @default
@@ -13694,6 +13698,7 @@ export interface operations {
         parameters: {
             query: {
                 message_id: number;
+                session?: string;
             };
             header?: {
                 authorization?: string | null;

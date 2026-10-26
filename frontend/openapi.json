@@ -16481,6 +16481,18 @@
       "TakeIn": {
         "additionalProperties": false,
         "properties": {
+          "contact_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
           "session": {
             "default": "",
             "maxLength": 200,
@@ -25029,7 +25041,7 @@
     },
     "/api/contacts/{contact_id}/outreach-check": {
       "get": {
-        "description": "THE one gate before pressing Send on an outreach email (feature 10).\n\nReads the user's settings (``assistant_settings.outreach_send`` decides send vs\nask; the Gmail mode never does), this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
+        "description": "THE one gate before pressing Send on an outreach email, or on a LinkedIn message after the user's\nclick on that person's card (feature 10). ``session`` is the caller's own session label: a LinkedIn\nperson another session holds reads as ``claimed_by_other_session``.\n\nReads the user's settings (``assistant_settings.outreach_send`` decides send vs\nask; the Gmail mode never does), this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
         "operationId": "outreach_check_api_contacts__contact_id__outreach_check_get",
         "parameters": [
           {
@@ -25048,6 +25060,17 @@
             "schema": {
               "title": "Message Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Session",
+              "type": "string"
             }
           },
           {
