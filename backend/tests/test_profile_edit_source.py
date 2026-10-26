@@ -240,10 +240,12 @@ def test_answers_summary_counts_each_state():
     ]
     answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
     states = sorted(i["state"] for block in answers.values() for i in block)
-    assert states == ["confirmed", "confirmed", "inferred", "inferred", "sensitive", "sensitive"]
+    assert states == ["confirmed", "confirmed", "confirmed", "inferred", "inferred", "sensitive"]
     assert kit.answers_summary(answers)["relayed"] == 0
-    # contact.email + approved_text = 2 confirmed; notice + citizenship = 2 inferred; equality + sanctions = 2.
-    assert kit.answers_summary(answers) == {"confirmed": 2, "relayed": 0, "inferred": 2, "sensitive": 2}
+    # contact.email + approved_text + the equality answer nobody's assistant wrote = 3 confirmed; notice +
+    # citizenship = 2 inferred; the inferred sanctions answer = 1 sensitive (owner 2026-10-26: only an
+    # answer the user has not stood behind waits on the form).
+    assert kit.answers_summary(answers) == {"confirmed": 3, "relayed": 0, "inferred": 2, "sensitive": 1}
 
 
 def test_a_profile_item_an_assistant_inferred_is_inferred():
@@ -328,10 +330,15 @@ def test_visa_fields_are_sensitive_and_citizenship_is_not():
     rows = [_kit_rows("user_info.right_to_work", {}, "user_said", set_by="web")]
     answers, _ = kit.compute_answers(profile, rows, "GB")
     rtw = {i["key"]: i for i in answers["right_to_work"]}
-    assert rtw["right_to_work.GB.work_authorization"]["state"] == "sensitive"
-    assert rtw["right_to_work.GB.needs_sponsorship"]["state"] == "sensitive"
+    # Owner 2026-10-26: the user's own web-saved visa answers are confirmed and filled like any fact.
+    assert rtw["right_to_work.GB.work_authorization"]["state"] == "confirmed"
+    assert rtw["right_to_work.GB.needs_sponsorship"]["state"] == "confirmed"
     assert rtw["right_to_work.GB.needs_sponsorship"]["value"] is False
     assert rtw["right_to_work.citizenship"]["state"] == "confirmed"
+    # An assistant's inferred visa answer still waits for the user on the form.
+    inferred, _ = kit.compute_answers(profile, [_kit_rows("user_info.right_to_work", {}, "agent_inferred")], "GB")
+    rtw = {i["key"]: i for i in inferred["right_to_work"]}
+    assert rtw["right_to_work.GB.work_authorization"]["state"] == "sensitive"
     assert "confirmed_at" not in rtw["right_to_work.GB.work_authorization"]
 
 
