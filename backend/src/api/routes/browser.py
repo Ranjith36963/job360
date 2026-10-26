@@ -456,7 +456,8 @@ async def browser_live(
     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
     human check in their assistant's browser instead (shot, click, type, key, scroll, back, done), in the
-    browser of ``application_id``."""
+    browser of ``application_id``; when the user's click or key lands on the site's confirmation page,
+    the application is recorded as submitted by the user and the answer carries ``submitted: true``."""
     if body.mode == "finish" and body.application_id is None:
         raise HTTPException(status_code=422, detail="application_id is required for mode finish")
     if not settings.BROWSER_AGENT_ENABLED:
@@ -482,8 +483,42 @@ async def browser_live(
     except browser_agent.BrowserError as exc:
         _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", exc.status, exc.reason)
         return exc.as_dict()
+    proof_image = result.pop(browser_agent.PROOF_KEY, None)
+    if body.mode == "finish" and body.application_id is not None and result.pop("confirmation_seen", False):
+        result["submitted"] = await _user_submitted(user, body.application_id, str(result.get("url", "")), proof_image)
     _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", str(result.get("status", "")))
     return result
+
+
+async def _user_submitted(user: CurrentUser, application_id: int, url: str, image: Optional[bytes]) -> bool:
+    """The user's own click in the hand-off view landed on the site's confirmation (the detector the
+    assistant's submit uses, ``agent._confirmation``): record it as "I submitted it" does (``unblocked``
+    user_did_it, the receipt by web, the CAPTCHA asks closed), keep the page as proof, and let the browser
+    go as Done does. True also when it was already recorded (a second confirmation writes nothing)."""
+    from src.api.routes import applications as applications_route  # noqa: PLC0415 - avoid an import cycle
+    from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+    host = site_host(url) or "the site"
+    try:
+        async with _db() as db:
+            await applications_route.record_user_submit(db, user, application_id, seen_on=host)
+    except HTTPException as exc:
+        if exc.status_code != 409:  # 409: already applied, so nothing new (no second receipt, no second proof)
+            raise
+        browser_agent.release_for_user(browser_agent.get_pool(), user.id, application_id)
+        return True
+    save_proof = _gate_and_files(user, application_id, "")[0].save_proof
+    if image and save_proof is not None:
+        try:
+            await save_proof(image)
+        except Exception:  # noqa: BLE001 - proof is extra: the receipt is already kept
+            get_audit_logger().warning(
+                "live_proof_failed",
+                extra={"event": "live_proof_failed", "user_id": safe_log_value(user.id),
+                       "application_id": int(application_id), "result": "error"},
+            )
+    browser_agent.release_for_user(browser_agent.get_pool(), user.id, application_id)
+    return True
 
 
 @router.get("/browser/sign-ins")

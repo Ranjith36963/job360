@@ -11,12 +11,12 @@ import {
   recordApplicationReceipt,
   releaseHold,
 } from "@/lib/api";
+import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import type { ApplicationControls, ApplicationDetail, ReadyCardData, VisaShape } from "@/lib/api";
 import { ReadyCard } from "@/components/needs-you/ReadyCard";
 import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
-import { BatchButton } from "@/components/applications/BatchButton";
-import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
+import { BatchButton } from "@/components/applications/BatchButton";import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
 import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
@@ -156,6 +156,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     // Re-count everything the badge counts (questions, waiting changes, ready to send).
     await announceOpenCount();
   }, [load]);
+
+  // The user's own Apply in "Finish it here" was seen confirmed: the job is applied now, re-read it.
+  useEffect(() => {
+    const onSubmitted = () => void reloadAfterAsk();
+    window.addEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
+    return () => window.removeEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
+  }, [reloadAfterAsk]);
 
   // Weak spot #3 wave 2: the user frees an application a crashed/closed assistant session
   // still holds. Posts once, then re-reads so the banner follows the stored state.

@@ -1913,6 +1913,44 @@ FINISH_ACTIONS = ("shot", "click", "type", "key", "scroll", "back", "done")
 HANDOFF_HOLD_SECONDS = 30 * 60
 
 
+# The hand-off view: the confirmation page's picture, for the route to keep as proof (never returned).
+PROOF_KEY = "_proof_image"
+
+
+def _release(s: Session) -> None:
+    """Done: the held browser goes back to its idle clock (never closed: it is the assistant's)."""
+    s.held_until = None
+    s.swept_on = None
+    s.last_used = time.monotonic()
+
+
+def release_for_user(pool: Optional[BrowserPool], user_id: str, application_id: int) -> bool:
+    """What Done does, for the route: that job's browser stops being held. False when none is open."""
+    s = pool._sessions.get(browser_key(user_id, application_id)) if pool is not None else None
+    if s is None:
+        return False
+    _release(s)
+    return True
+
+
+async def _confirmation(s: Session) -> dict[str, Any]:
+    """After the USER's click or key in the hand-off view: the same submit detector ``look`` runs after the
+    assistant's own submit click (``outcome_for``). ``confirmation_seen`` only when it fires, with the page's
+    picture under PROOF_KEY (taken as ``_save_proof`` takes it). A page that cannot be read says nothing."""
+    try:
+        seen = (await look(s, after_action=True)).get("confirmation_seen") is True
+    except Exception:  # noqa: BLE001 - mid-navigation or the proxy's refusal: no confirmation
+        return {}
+    if not seen:
+        return {}
+    out: dict[str, Any] = {"confirmation_seen": True}
+    try:
+        out[PROOF_KEY] = await _capture(_live_page(s), quality=70)
+    except Exception:  # noqa: BLE001 - proof is extra: the confirmation still counts
+        logger.warning("browser proof screenshot not taken", exc_info=True)
+    return out
+
+
 def hold_for_user(
     pool: Optional[BrowserPool], user_id: str, application_id: Optional[int] = None,
     seconds: float = HANDOFF_HOLD_SECONDS, *, renew: bool = False, swept: bool = False,
@@ -2052,9 +2090,7 @@ async def live(
                 "refused", "no_form", "The form has closed. Ask your assistant to fill it again, or apply yourself.",
             )
         if action == "done":  # the user is finished: the browser goes back to its idle clock
-            s.held_until = None
-            s.swept_on = None
-            s.last_used = time.monotonic()
+            _release(s)
             return {"status": "ok", "done": True}
     else:
         if action == "cancel":
@@ -2134,7 +2170,10 @@ async def live(
                 out = await _shot(s)
                 out["kept"] = kept
                 return out
-            return await _shot(s)
+            out = await _shot(s)
+            if finish and action in ("click", "key"):  # the user's own press may have been the submit
+                out.update(await _confirmation(s))
+            return out
         except BrowserError:
             raise
         except Exception as exc:  # noqa: BLE001 - shown to the user in one line

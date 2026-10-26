@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FinishInBrowser } from "./FinishInBrowser";
+import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 
 const browserLive = vi.fn();
+const success = vi.fn();
 vi.mock("@/lib/api", () => ({ browserLive: (...a: unknown[]) => browserLive(...a) }));
-vi.mock("@/lib/toast", () => ({ toast: { error: vi.fn(), apiError: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { error: vi.fn(), apiError: vi.fn(), success: (m: string) => success(m) } }));
 
 // The real page is 1280x800; the picture is shown at 320x200 (a quarter size, as on a phone).
 const SHOT = { status: "ok", image: "data:image/jpeg;base64,AA==", width: 1280, height: 800, title: "Apply" };
 
 beforeEach(() => {
   browserLive.mockReset();
+  success.mockReset();
   browserLive.mockResolvedValue(SHOT);
 });
 afterEach(() => {
@@ -113,5 +116,29 @@ describe("FinishInBrowser", () => {
     browserLive.mockResolvedValue({ status: "ok", done: true });
     fireEvent.click(screen.getByTestId("finish-done"));
     await waitFor(() => expect(onDone).toHaveBeenCalled());
+  });
+
+  it("submitted: says Applied, closes the view and tells the page to re-read", async () => {
+    const { pic, onDone } = await open({ startMaximized: true });
+    browserLive.mockResolvedValue({ ...SHOT, submitted: true });
+    const heard = vi.fn();
+    window.addEventListener(LIVE_SUBMITTED_EVENT, heard);
+    fireEvent.click(pic, { clientX: 20, clientY: 110, detail: 1 });
+    expect(await screen.findByTestId("live-submitted")).toHaveTextContent("Applied — Job360 saw the confirmation page.");
+    expect(screen.queryByTestId("live-fullscreen")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(success).toHaveBeenCalledWith("Applied — Job360 saw the confirmation page.");
+    expect((heard.mock.calls[0][0] as CustomEvent).detail).toBe(7);
+    window.removeEventListener(LIVE_SUBMITTED_EVENT, heard);
+  });
+
+  it("a click with no confirmation keeps the live view", async () => {
+    const { pic, onDone } = await open();
+    fireEvent.click(pic, { clientX: 20, clientY: 110, detail: 1 });
+    await waitFor(() => expect(browserLive).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("live-submitted")).toBeNull();
+    expect(screen.getByTestId("finish-view")).toBeInTheDocument();
+    expect(onDone).not.toHaveBeenCalled();
   });
 });

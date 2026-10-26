@@ -1348,8 +1348,9 @@ export type BrowserLiveShot = {
   image?: string;
   kept?: Record<string, number>;
   closed?: boolean;
-};
-export type BrowserLiveAction =
+  /** finish mode: the user's own press landed on the site's confirmation; Job360 recorded it as applied. */
+  submitted?: boolean;
+};export type BrowserLiveAction =
   | { action: "start"; url: string }
   | { action: "shot" | "keep" | "cancel" | "done" }
   | { action: "click"; x: number; y: number }

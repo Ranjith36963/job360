@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
 
 import { browserLive, type BrowserLiveAction, type BrowserLiveShot } from "@/lib/api";
+import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import { toast } from "@/lib/toast";
 
 const BTN =
@@ -37,10 +38,16 @@ export function FinishInBrowser({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [gone, setGone] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const [maximized, setMaximized] = useState(startMaximized);
   const busyRef = useRef(false);
   const touch = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  // Read at call time: the parents pass a fresh arrow each render, which must not restart `step`.
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
   const step = useCallback(async (s: BrowserLiveAction, quiet = false) => {
     if (busyRef.current) return null;
@@ -48,6 +55,15 @@ export function FinishInBrowser({
     if (!quiet) setBusy(true);
     try {
       const res = await browserLive(s, "finish", applicationId);
+      if (res.submitted === true) {
+        // Job360 saw the confirmation page after the user's own press: it is recorded as applied.
+        setSubmitted(true);
+        setMaximized(false); // ends the full-screen scroll lock too
+        toast.success("Applied — Job360 saw the confirmation page.");
+        window.dispatchEvent(new CustomEvent(LIVE_SUBMITTED_EVENT, { detail: applicationId }));
+        onDoneRef.current();
+        return res;
+      }
       if (res.status === "ok" && res.image) setShot(res);
       else if (res.reason === "no_form") {
         setShot(null);
@@ -133,6 +149,13 @@ export function FinishInBrowser({
     if (res?.status === "ok" || res?.reason === "no_form") onDone();
   }
 
+  if (submitted) {
+    return (
+      <p data-testid="live-submitted" className="text-xs text-foreground">
+        Applied — Job360 saw the confirmation page.
+      </p>
+    );
+  }
   if (gone) {
     return (
       <p data-testid="finish-gone" className="text-xs text-muted-foreground">
