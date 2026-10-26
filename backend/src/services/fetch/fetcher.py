@@ -89,6 +89,7 @@ class FetchResult:
     source_hint: str = ""
     bytes_read: int = 0
     elapsed_ms: int = 0
+    status: int = 0  # the last hop's HTTP status (0 = no response)
     # Internal only — never serialised on the wire. The route runs extraction
     # over this (see module docstring for why it isn't done here).
     html: str = ""
@@ -161,8 +162,11 @@ def _peer_ip(resp: Any) -> Optional[str]:
         return None
 
 
-async def fetch_url(url: str) -> FetchResult:
+async def fetch_url(url: str, *, follow_redirects: bool = True) -> FetchResult:
     """Fetch ``url`` under the SSRF guard, following redirects by hand.
+
+    ``follow_redirects=False`` (the LinkedIn guest read): any 3xx ends the fetch as ``blocked`` with its
+    ``status``, and its ``Location`` is never opened.
 
     Reads its resolver/clock/peername-check switch from this module's OWN
     globals at call time (see module docstring) — never bound as defaults.
@@ -244,6 +248,8 @@ async def fetch_url(url: str) -> FetchResult:
                 return _result("unreachable", redirects=redirects, final_url=current)
 
             async with resp:
+                if not follow_redirects and 300 <= resp.status < 400:
+                    return _result("blocked", status=resp.status, redirects=redirects, final_url=current)
                 if resp.status in _REDIRECT_STATUSES:
                     location = resp.headers.get("Location", "")
                     if not location:
@@ -257,7 +263,7 @@ async def fetch_url(url: str) -> FetchResult:
                     continue
 
                 if resp.status >= 400:
-                    return _result("blocked", redirects=redirects, final_url=current)
+                    return _result("blocked", status=resp.status, redirects=redirects, final_url=current)
 
                 if verify_peer:
                     peer_ip = _peer_ip(resp)
@@ -330,5 +336,5 @@ async def fetch_url(url: str) -> FetchResult:
                 return _result(
                     "ok",
                     final_url=current, redirects=redirects, bytes_read=bytes_read,
-                    elapsed_ms=max(0, elapsed_ms), html=html_text,
+                    elapsed_ms=max(0, elapsed_ms), html=html_text, status=resp.status,
                 )
