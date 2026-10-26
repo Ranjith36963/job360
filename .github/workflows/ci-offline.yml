@@ -193,7 +193,18 @@ jobs:
       - name: Install Chromium for the browser-agent tests
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
-        run: python -m playwright install --with-deps chromium
+        # Usually ~20 s. On #1258 (2026-10-26) the runner's apt mirror stalled
+        # and this step took 14 min, so the job hit its 30-min timeout mid-suite
+        # and was CANCELLED, not judged. Cap each attempt at 5 min and try once
+        # more: a stalled mirror fails fast and a retry usually lands on a
+        # working one. Two failed attempts are a real failure (red).
+        run: |
+          for attempt in 1 2; do
+            if timeout 300 python -m playwright install --with-deps chromium; then exit 0; fi
+            echo "::warning title=chromium::install attempt $attempt failed or took over 5 min"
+          done
+          echo "::error title=chromium::Chromium install failed twice"
+          exit 1
       # Fail in seconds, not after the suite: the tests' own helper must now
       # see Chromium. If it ever does not, the suite would skip ~66 tests and
       # the skip ratchet in `offline-suite` goes red too ("Playwright + Chromium
