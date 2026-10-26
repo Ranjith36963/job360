@@ -78,6 +78,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("inbox_items", "user_id"),  # 0086: unmatched mail waiting for the user to pick an application
     # S7 proof of application (migration 0053).
     ("application_proof_screenshots", "user_id"),
+    ("application_fill_steps", "user_id"),
     ("proof_upload_links", "user_id"),
     # Outreach tracking (migration 0046) — CI's test_observe.py caught these
     # missing (coordinator review, 2026-09-26): a per-user table nobody
