@@ -41,6 +41,7 @@ from src.api.dependencies import get_request_db
 from src.core import settings
 from src.services.applications import spine as applications_spine
 from src.services.browser_agent import agent as browser_agent
+from src.services.browser_agent import outcome as browser_outcome
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["browser"])
@@ -231,10 +232,14 @@ async def browser_action(
             )
         return refused
     steps = result.pop(browser_agent.STEPS_KEY, None)
+    stop_source = str(result.pop(browser_agent.STOP_KEY, "") or "")
     if steps and body.application_id is not None:
         await _keep_steps(user, body.application_id, steps)
     if result.get("status") == "needs_you" and body.application_id is not None:
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
+    elif body.action == "open" and body.application_id is not None and _bot_blocked(result, stop_source):
+        # A bot wall answered the open (transport facts only, C3): the job waits on Needs you as a bot check.
+        result["blocked_recorded"] = await _hand_off(user, body.application_id, result, reason="bot_check")
     elif body.action in _FILL_ACTIONS and body.application_id is not None and result.get("status") == "ok":
         result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
@@ -242,7 +247,17 @@ async def browser_action(
 
 
 # Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).
-_BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed"}
+_BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check"}
+
+
+def _bot_blocked(result: dict[str, Any], stop_source: str) -> bool:
+    """The open's outcome is ``bot_block``: read from its ``transport`` (status, headers, final host) only,
+    never the page text (a body-text stop is ``outcome.TEXT_STOP``, never a bot block)."""
+    needs_you = str(result.get("reason") or "") if result.get("status") == "needs_you" else ""
+    transport = result.get("transport")
+    return browser_outcome.classify(
+        transport if isinstance(transport, dict) else {}, stop_reason=stop_source, needs_you=needs_you,
+    ) == "bot_block"
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."
@@ -272,14 +287,17 @@ async def _hold_if_waiting(user: CurrentUser, application_id: int) -> bool:
     return browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id, swept=True)
 
 
-async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
+async def _hand_off(
+    user: CurrentUser, application_id: int, result: dict[str, Any], reason: Optional[str] = None,
+) -> bool:
     """Record ``blocked`` for the application the browser stopped on, so the job waits on Needs you
     whatever the assistant does next. Once per open block of the same reason (no event per look).
-    True when a new ``blocked`` was recorded."""
+    ``reason``: the browser's stop reason to record (default: the result's own). True when a new
+    ``blocked`` was recorded."""
     from src.services.applications import blocked as blocked_service  # noqa: PLC0415
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
-    reason = _BLOCKED_REASON.get(str(result.get("reason")), "other")
+    reason = _BLOCKED_REASON.get(str(reason or result.get("reason")), "other")
     # A fresh CAPTCHA gets its full 30 minutes, even inside a form_swept hold that is almost over.
     held = reason == "captcha" and browser_agent.hold_for_user(
         browser_agent.get_pool(), user.id, application_id, renew=True
