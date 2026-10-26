@@ -200,3 +200,37 @@ async def test_needs_you_offers_finish_here_and_a_refill_is_held_for_the_user(au
             "action": "fill", "fields": [{"ref": "e1_ab", "text": "Grace"}], "application_id": other_app,
         })).json()
         assert other["held_for_you"] is False and pool._sessions[other_key].held_until is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_a_superseding_captcha_ask_still_offers_finish_it_here(authenticated_async_context, monkeypatch):
+    """Owner, 2026-10-26 (application 138): an ask_user CAPTCHA ask replaced the ask the block opened (one
+    ask per job), the block kept the old id, and Needs you lost "Finish it here"."""
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = agent.BrowserPool(max_sessions=1, idle_s=600, resolve=_no_dns)
+
+    async def fake_run(p, user_id, action, **kw):
+        pool._sessions[agent.browser_key(user_id, kw.get("application_id"))] = agent.Session(  # noqa: SLF001
+            context=_Ctx(), page=None,
+        )
+        return {"status": "needs_you", "reason": "captcha", "detail": "x", "url": "https://jobs.acme.com/apply/7"}
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/7",
+        })
+        app_id = brought.json()["application_id"]
+        await client.post("/api/browser", json={"action": "click", "ref": "e1_ab", "application_id": app_id})
+        first = [a for a in (await client.get("/api/asks")).json()["asks"] if a["application_id"] == app_id]
+        again = {"application_id": app_id, "question": "Please solve the CAPTCHA on the form.", "kind": "captcha"}
+        assert (await client.post("/api/asks", json=again)).status_code == 201
+        (ask,) = [a for a in (await client.get("/api/asks")).json()["asks"] if a["application_id"] == app_id]
+        assert [a["id"] for a in first] != [ask["id"]], "the new ask superseded the block's own"
+        assert ask["finish_here"] is True and ask["held_seconds"] > 0, ask
