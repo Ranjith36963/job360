@@ -180,10 +180,16 @@ async def confirm_password_reset(
         # `execute()` calls, but aiosqlite buffers them as one tx until
         # commit(). If any step fails the tx rolls back.
         new_hash = hash_password(new_password)
-        await db.execute(
-            "UPDATE password_resets SET used_at = ? WHERE id = ?",
-            (now, row["reset_id"]),
+        # Single-use claim: the guard makes a concurrent second confirm match
+        # zero rows, so only one caller resets the password.
+        claim = await db.execute(
+            "UPDATE password_resets SET used_at = ? "
+            "WHERE id = ? AND used_at IS NULL AND expires_at > ?",
+            (now, row["reset_id"], now),
         )
+        if not claim.rowcount:
+            logger.info("password reset confirm: lost the race for the token user=%s", row["user_id"])
+            return None
         await db.execute(
             # has_password (migration 0071): a magic-link-only account now has one.
             "UPDATE users SET password_hash = ?, has_password = TRUE WHERE id = ?",
