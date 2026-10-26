@@ -293,7 +293,8 @@ def _recrutei(row: dict[str, Any], http: Http) -> list[Job] | None:
                     data=b'{"search":""}', headers=_POST)
     inner = data.get("data") if isinstance(data, dict) else None
     depts = inner.get("vacancies") if isinstance(inner, dict) else None
-    if st != 200 or not isinstance(inner, dict) or not isinstance(depts, list) or not isinstance(inner.get("total"), int):
+    # The API answers 202 with the full payload (live 2026-10-25), so any 2xx counts.
+    if not 200 <= st < 300 or not isinstance(inner, dict) or not isinstance(depts, list) or not isinstance(inner.get("total"), int):
         return None
     items: list[Any] = []
     for dept in depts:

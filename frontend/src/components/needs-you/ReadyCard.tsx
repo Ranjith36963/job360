@@ -21,6 +21,8 @@ import { AnswerValue, DraftMissing } from "./AnswerValue";
 import { AskQuestions } from "./AskQuestions";
 import { openQuestionAsks, useReadyAsks } from "./useReadyAsks";
 import { looksLikePlaceholder } from "@/lib/answer-text";
+import { suggestSalary } from "@/lib/salary-suggest";
+import type { SalaryFacts } from "@/lib/salary-suggest";
 
 // Every string here (company, title, questions, answers, flags) was written by
 // the user's assistants - untrusted. Only ever rendered as React text nodes.
@@ -45,7 +47,10 @@ export function ReadyCard({
   status = "considering",
   changes,
   asks,
+  salaryFacts,
 }: {
+  /** The user's saved salary facts (from Memory), read once by the page: they feed the suggested salary answers. */
+  salaryFacts?: SalaryFacts;
   /** This job's open asks: the ones with form questions show inline and must be answered before Send. */
   asks?: Ask[];
   /** The application status: "Nothing has been sent" shows while the table says so. */
@@ -212,6 +217,7 @@ export function ReadyCard({
                 answer={a}
                 index={i}
                 card={card}
+                salaryFacts={salaryFacts}
                 onSaved={onChanged}
               />
             ))}
@@ -294,6 +300,11 @@ function isOwnerEdit(a: ReadyAnswer): boolean {
   return a.changed_reason === "owner_edit";
 }
 
+/** No value to type (a private answer not kept, or blank) and nothing the user saved over it: it waits for the user. */
+export function isMissingAnswer(a: ReadyAnswer): boolean {
+  return a.changed_to == null && (!!a.redacted || !a.answer.trim());
+}
+
 /** A stored answer that only describes a draft (and was not replaced by a saved or edited one). */
 function isDraftStub(a: ReadyAnswer): boolean {
   return a.changed_to == null && !a.redacted && looksLikePlaceholder(a.question, a.answer);
@@ -306,8 +317,10 @@ function AnswerRow({
   answer: a,
   index,
   card,
+  salaryFacts,
   onSaved,
 }: {
+  salaryFacts?: SalaryFacts;
   answer: ReadyAnswer;
   index: number;
   card: ReadyCardData;
@@ -317,7 +330,9 @@ function AnswerRow({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   // No value to type (a sensitive answer not kept, or blank): never "Approved"; it waits for the user.
-  const missing = a.changed_to == null && (a.redacted || !a.answer.trim());
+  const missing = isMissingAnswer(a);
+  // A salary the user already saved in Memory, offered (never saved) until they tap Use this or Edit.
+  const suggestion = missing ? suggestSalary(a.question, card.job_country, salaryFacts) : null;
   const chip = missing ? { text: "Needs your answer", tone: "guess" as const } : sourceChip(a, card.filled_by);
   const stub = isDraftStub(a);
   const checkable = canCheck(a) || stub;
@@ -397,11 +412,30 @@ function AnswerRow({
           <span className="text-xs text-info">Your answer. Your assistant types it in before it sends.</span>
         </span>
       ) : (
-        <span className="break-words">
+        <span className="flex flex-col gap-1 break-words">
           {missing ? (
-            <span data-testid={`ready-answer-missing-${id}`} className="font-medium text-danger">
-              {a.redacted ? "Not kept (private). Tap Edit to type your answer." : "Blank. Tap Edit to type your answer."}
-            </span>
+            <>
+              <span data-testid={`ready-answer-missing-${id}`} className="font-medium text-danger">
+                {a.redacted ? "Not kept (private). Tap Edit to type your answer." : "Blank. Tap Edit to type your answer."}
+              </span>
+              {suggestion && (
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span data-testid={`ready-answer-suggest-${id}`} className="text-xs text-muted-foreground">
+                    {`Suggested from your Memory: ${suggestion}`}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid={`ready-answer-use-${id}`}
+                    disabled={saving}
+                    onClick={() => void save(suggestion)}
+                    aria-label={`Use this answer for: ${a.question}`}
+                    className={cn(tap, "rounded-full border border-info px-2 py-px text-[11px] font-medium text-info hover:bg-info-soft disabled:opacity-50")}
+                  >
+                    Use this
+                  </button>
+                </span>
+              )}
+            </>
           ) : stub ? (
             <DraftMissing id={id} value={a.answer} />
           ) : (
@@ -444,7 +478,7 @@ function AnswerRow({
               data-testid={`ready-answer-edit-${id}`}
               disabled={saving}
               onClick={() => {
-                setDraft(a.changed_to ?? a.answer ?? "");
+                setDraft(a.changed_to ?? (a.answer || suggestion) ?? "");
                 setEditing(true);
               }}
               aria-label={`Edit: ${a.question}`}
