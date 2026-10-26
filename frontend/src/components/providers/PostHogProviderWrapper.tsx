@@ -7,8 +7,8 @@
  *   1. Initialise the posthog-js singleton once on the client (useEffect guards
  *      SSR; the "use client" directive ensures this never runs server-side).
  *   2. Mount the PostHogProvider context so any child can call usePostHog().
- *   3. Track SPA route changes as $pageview events via usePathname +
- *      useSearchParams (both in a <Suspense> boundary as required by Next.js).
+ *   3. Track SPA route changes as $pageview events via usePathname (path only,
+ *      never the query string: it can carry sign-in tokens).
  *
  * Identify / reset are handled by AuthProvider — it imports posthog-js directly
  * and calls posthog.identify() on login and posthog.reset() on logout. The
@@ -20,11 +20,47 @@
 
 import posthog from "posthog-js";
 import { PostHogProvider } from "posthog-js/react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useSyncExternalStore, Suspense } from "react";
 
 import type { ConsentValue } from "@/lib/consent";
 import { getConsent, subscribeConsent } from "@/lib/consent";
+
+// ── URL scrubbing ────────────────────────────────────────────────────────────
+// Magic-link and reset tokens travel in the query string, and posthog-js adds
+// $current_url / $referrer to EVERY event by itself (pageleave included). So the
+// only safe place to strip them is before_send, which sees the final event.
+
+const URL_KEY = /url|referrer|pathname/i;
+const ABSOLUTE_URL = /^https?:\/\//i;
+
+function stripQueryAndHash(value: string): string {
+  const cut = value.search(/[?#]/);
+  return cut === -1 ? value : value.slice(0, cut);
+}
+
+function scrubBag<T>(bag: T): T {
+  if (!bag || typeof bag !== "object") return bag;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(bag as Record<string, unknown>)) {
+    out[key] =
+      typeof value === "string" && (URL_KEY.test(key) || ABSOLUTE_URL.test(value))
+        ? stripQueryAndHash(value)
+        : value;
+  }
+  return out as T;
+}
+
+/** Remove query strings and hashes from every URL-valued property of an event. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function scrubUrlProperties<T extends Record<string, any> | null>(event: T): T {
+  if (!event) return event;
+  const copy = { ...event } as Record<string, unknown>;
+  for (const field of ["properties", "$set", "$set_once"]) {
+    if (copy[field]) copy[field] = scrubBag(copy[field]);
+  }
+  return copy as T;
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
@@ -45,17 +81,23 @@ function ensurePostHogLoaded(): boolean {
     // We fire $pageview manually so route-change events have the correct URL.
     capture_pageview: false,
     capture_pageleave: true,
+    // Autocapture sends the text of every clicked element (equality answers,
+    // Art. 9 data) linked to the user's email. Funnel events are fired by hand.
+    autocapture: false,
+    before_send: scrubUrlProperties,
     // Only build profiles for identified users to stay GDPR-friendly.
     person_profiles: "identified_only",
     // Never record sessions: it would capture the user's CV, salary and
     // application content — far beyond what they consented to (fable/05 C3).
     disable_session_recording: true,
+    // Belt and braces should recording ever be switched on remotely.
+    session_recording: { maskAllInputs: true },
   });
   return true;
 }
 
 // ── Page-view tracker ────────────────────────────────────────────────────────
-// Separate component because useSearchParams requires a <Suspense> boundary in
+// Separate component, kept inside a <Suspense> boundary (harmless; it used to need one) in
 // Next.js App Router (it opts into dynamic rendering).
 //
 // WHY THIS EFFECT INITIALISES POSTHOG ITSELF — a real production outage of this
@@ -80,16 +122,14 @@ function ensurePostHogLoaded(): boolean {
 // it silent.
 function PageViewTracker({ consent }: { consent: ConsentValue | null }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
     if (consent !== "accepted") return;
     if (!ensurePostHogLoaded()) return;
-    const qs = searchParams.toString();
-    const url =
-      window.location.origin + (qs ? `${pathname}?${qs}` : pathname);
+    // origin + pathname only: the query string can hold a sign-in token.
+    const url = window.location.origin + pathname;
     posthog.capture("$pageview", { $current_url: url });
-  }, [consent, pathname, searchParams]);
+  }, [consent, pathname]);
 
   return null;
 }
@@ -147,7 +187,7 @@ export function PostHogProviderWrapper({
   return (
     // Pass the singleton as `client` — PostHogProvider reads it for usePostHog().
     <PostHogProvider client={posthog}>
-      {/* Suspense required because PageViewTracker calls useSearchParams() */}
+      {/* Suspense kept from when the tracker read useSearchParams() */}
       <Suspense fallback={null}>
         <PageViewTracker consent={consent} />
       </Suspense>
