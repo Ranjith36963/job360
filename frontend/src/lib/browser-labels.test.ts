@@ -33,6 +33,11 @@ describe("browser-labels", () => {
     expect(routeLabel("probe")).toBe("Trying Job360's browser on this site again");
   });
 
+  it("link_unclear has the broken-link chip text", () => {
+    expect(ROUTE_LABELS.link_unclear).toBe("This link looks broken or disguised: your own browser checks it");
+    expect(routeLabel("link_unclear")).toBe(ROUTE_LABELS.link_unclear);
+  });
+
   it("names no assistant or browser product", () => {
     for (const t of [...Object.values(BROWSER_LABELS), ...Object.values(ROUTE_LABELS), JOB360_BROWSER_LABEL, PACE_TEXT, RUN_NOW_DONE, RUN_OWN_BROWSER_TASKS]) {
       expect(t).not.toMatch(/chrome|claude/i);

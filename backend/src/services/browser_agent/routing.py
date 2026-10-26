@@ -33,10 +33,13 @@ ROUTE_REASONS = (
     "default", "job360_login_required", "job360_bot_check", "job360_safety_stop", "password", "mfa", "only_you",
     "linkedin_own_browser",
     "learned_blocked", "learned_login", "probe", "at_cap", "linkedin_paused", "account_step", "linkedin_guest_blocked",
-    "linkedin_guest_read",
+    "linkedin_guest_read", "link_unclear",
 )
 
+# "unnamed" is never stored by the route learner (its CHECK allows only the four named kinds): a link whose host
+# cannot be named is not a site.
 SITE_KINDS = ("linkedin", "job_board", "ats", "company")
+UNNAMED = "unnamed"
 LEARN_TASKS = ("read", "fill")
 # The signed-in LinkedIn tasks: notes and messages, Easy Apply and form fill, search, profile reads.
 QUEUE_KINDS = ("linkedin_outreach", "application", "linkedin_search", "profile_read")
@@ -94,6 +97,7 @@ ROUTE_LABELS: dict[str, str] = {
     "linkedin_paused": "LinkedIn showed a limit warning: LinkedIn tasks paused until {date}",
     "account_step": "This site wants a new account: your own browser, or sign in once in Job360's browser",
     "linkedin_guest_blocked": "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
+    "link_unclear": "This link looks broken or disguised: your own browser checks it",
     "waiting": "Waiting for your PC",
 }
 # Shown for a route Job360's server reads itself (reason "linkedin_guest_read").
@@ -142,24 +146,37 @@ def is_linkedin(url: str) -> bool:
     return host is None or is_linkedin_host(host)
 
 
+def names_linkedin(url: str) -> bool:
+    """True only when the link NAMES a LinkedIn host (``canonical_host`` + ``is_linkedin_host``). Unlike
+    :func:`is_linkedin` it does not fail closed: a link whose host cannot be named is False. Use it to COUNT
+    LinkedIn work (the Easy Apply cap); use :func:`is_linkedin` as a safety test."""
+    text = _web_url(url)
+    host = canonical_host(text) if text else None
+    return host is not None and is_linkedin_host(host)
+
+
 def _matches(host: str, domains: tuple[str, ...]) -> bool:
     return any(host == d or host.endswith("." + d) for d in domains)
 
 
 def site_of(url: str) -> tuple[str, str, str]:
     """``(site_kind, site_key, tenant_host)`` of a page, from ``guard.canonical_host`` only (S0: no page text).
-    LinkedIn (and a link whose host cannot be trusted, like :func:`is_linkedin`) is answered first, before any
-    task is inferred. ATS keys come from ``sites.SITES`` (one list), a job board from ``JOB_BOARDS``, Oracle
-    HCM from its host plus its candidate-experience path; anything else is ``("company", "host:" + host, host)``.
-    A link with no web host at all is ``("company", "host:", "")``."""
+    LinkedIn is answered first, before any task is inferred. A non-empty web link whose host cannot be named
+    (unparseable, userinfo, a host IDNA would remap) is ``("unnamed", "unnamed", "")``: :func:`strict` sends
+    it to the own browser as ``link_unclear``, and it is never called LinkedIn. ATS keys come from
+    ``sites.SITES`` (one list), a job board from ``JOB_BOARDS``, Oracle HCM from its host plus its
+    candidate-experience path; anything else is ``("company", "host:" + host, host)``. A link with no web
+    host at all is ``("company", "host:", "")``."""
     from src.services.browser_agent.sites import SITES  # noqa: PLC0415 - sites imports nothing back
 
     text = _web_url(url)
     if text is None:
         return "company", "host:", ""
     host = canonical_host(text)
-    if host is None or is_linkedin_host(host):
-        return "linkedin", "linkedin", host or ""
+    if host is None:
+        return UNNAMED, UNNAMED, ""
+    if is_linkedin_host(host):
+        return "linkedin", "linkedin", host
     for key, domains in JOB_BOARDS.items():
         if _matches(host, domains):
             return "job_board", key, host
@@ -193,7 +210,8 @@ def strict(
 ) -> Route | None:
     """The rules no learning can change, in order. S0: every input is a closed value or the task's own link,
     never page or email text. S1: a password or a code is the user's alone. S3: a signed-in LinkedIn task
-    (``QUEUE_KINDS``) is the own browser. S6: a public LinkedIn job page is read by Job360's server when
+    (``QUEUE_KINDS``) is the own browser. S3b: a link whose host cannot be named is the own browser, reason
+    ``link_unclear`` (fail closed, not LinkedIn). S6: a public LinkedIn job page is read by Job360's server when
     ``LINKEDIN_GUEST_READS``, else the own browser. S7: every other LinkedIn page is the own browser. S8: a
     create-account step is the own browser. S9: None means the learner may decide. (S2, the submit gate, and
     S4/S5, the caps and the pause, are enforced in their own modules.)"""
@@ -204,6 +222,8 @@ def strict(
         if queue_kind not in QUEUE_KINDS and LINKEDIN_GUEST_READS and _LINKEDIN_JOB_READ.match(path or ""):
             return Route("job360", "linkedin_guest_read")
         return Route("own_browser", "linkedin_own_browser")
+    if site_kind == UNNAMED:
+        return Route("own_browser", "link_unclear")
     if account_step:
         return Route("own_browser", "account_step")
     return None
@@ -253,8 +273,8 @@ def ask_route(
         return Route("human", "password")
     if kind in ("upload", "safety", "captcha"):
         return Route("human", "only_you")
-    if is_linkedin(url):
-        return Route("own_browser", "linkedin_own_browser")
+    if is_linkedin(url):  # fails closed; the reason names what the link is
+        return Route("own_browser", "linkedin_own_browser" if names_linkedin(url) else "link_unclear")
     return Route("job360", "default")
 
 

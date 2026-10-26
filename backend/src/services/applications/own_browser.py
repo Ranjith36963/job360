@@ -51,6 +51,7 @@ WHY_WORDS = {
     "job360_safety_stop": "Job360's browser stopped for safety.",
     "default": "You pressed Send for this message.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
+    "link_unclear": "This link looks broken or disguised: your own browser checks it.",
 }
 
 
@@ -327,6 +328,7 @@ async def _application_tasks(
             routes.append((app_id, route))
     # Easy Apply (owner 2026-10-26): a batch-queued application on linkedin.com with no open block waits here
     # from the start, oldest queued first; Job360's browser never opens it.
+    # A link whose host cannot be named waits here too ("link_unclear"), so the user's own browser can check it.
     linked = [i for i, a in apps.items() if i not in blocks and routing.is_linkedin(str(a.get("job_url") or ""))]
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
@@ -425,7 +427,7 @@ async def easy_apply_today(db: JobDatabase, user_id: str, now: datetime) -> int:
         f"AND e.user_id = a.user_id WHERE a.user_id = ? AND {_SUBMIT_MARKS} AND e.recorded_at >= ?",
         (user_id, floor),
     )
-    ids = [int(dict(r)["id"]) for r in await cur.fetchall() if routing.is_linkedin(str(dict(r)["job_url"] or ""))]
+    ids = [int(dict(r)["id"]) for r in await cur.fetchall() if routing.names_linkedin(str(dict(r)["job_url"] or ""))]
     if not ids:
         return 0
     marks = ",".join("?" for _ in ids)
@@ -532,10 +534,10 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
-    if any(routing.is_linkedin(t["url"]) for t in apps) and (
+    if any(routing.names_linkedin(t["url"]) for t in apps) and (
         await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
     ):  # Easy Apply's own day cap; any other application is still handed out
-        apps = [t for t in apps if not routing.is_linkedin(t["url"])]
+        apps = [t for t in apps if not routing.names_linkedin(t["url"])]
         refusal = refusal or _answer("daily_limit", "daily_limit", wait_seconds=0)
     if apps:
         _log("own_browser_take", user.id, "task", application_id=apps[0]["application_id"])

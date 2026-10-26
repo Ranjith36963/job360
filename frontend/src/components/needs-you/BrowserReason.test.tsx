@@ -5,7 +5,7 @@ import { REASON_WORDS, reasonWords } from "@/lib/browser-labels";
 import type { BrowserLabel } from "@/lib/browser-contract";
 
 // The server's real route reasons (backend routing.ROUTE_REASONS). None may ever show raw.
-const CODES = ["job360_login_required", "job360_bot_check", "job360_safety_stop", "password", "mfa", "only_you"];
+const CODES = ["job360_login_required", "job360_bot_check", "job360_safety_stop", "password", "mfa", "only_you", "link_unclear"];
 
 const label = (kind: BrowserLabel["kind"], reason: string): BrowserLabel => ({ kind, label: "chip", reason });
 
@@ -16,6 +16,11 @@ describe("BrowserReason shows the server's reason code in plain words", () => {
     expect(line.textContent).toBe(REASON_WORDS[code]);
     expect(line.textContent).not.toBe(code);
     expect(line.textContent).not.toMatch(/_/);
+  });
+
+  it("link_unclear renders its plain line for an own-browser chip", () => {
+    render(<BrowserReason label={label("own_browser", "link_unclear")} testid="why" />);
+    expect(screen.getByTestId("why")).toHaveTextContent("The apply link has no clear web address, so your own browser checks it.");
   });
 
   it("only_you says the step is the user's", () => {

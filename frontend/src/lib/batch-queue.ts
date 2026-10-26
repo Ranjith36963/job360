@@ -80,6 +80,7 @@ const BROWSER_REASON_WORDS: Record<string, string> = {
   mfa: "This site wants a code only you have",
   password: "This site wants your password",
   only_you: "Only you can do this step",
+  link_unclear: "The apply link has no clear web address",
 };
 
 export function browserReasonWords(reason: string | undefined): string {
