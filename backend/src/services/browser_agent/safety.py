@@ -255,6 +255,9 @@ _CAPTCHA_TEXT = re.compile(
 class Blocker:
     reason: str  # captcha | login_required
     detail: str
+    # The stop came from the page's own text alone (``_CAPTCHA_TEXT``), not a vendor frame: it still stops the
+    # page, but it is page-derived, so its outcome is never a bot block (outcome.TEXT_STOP, C3).
+    from_text: bool = False
 
 
 def blocker_for(
@@ -265,11 +268,13 @@ def blocker_for(
     A CAPTCHA wins over a sign-in wall: both need the user, the CAPTCHA is the
     one they cannot skip.
     """
-    if any(_captcha_frame(u or "") for u in frame_urls) or _CAPTCHA_TEXT.search(page_text or ""):
+    framed = any(_captcha_frame(u or "") for u in frame_urls)
+    if framed or _CAPTCHA_TEXT.search(page_text or ""):
         return Blocker(
             "captcha",
             "This page asks for a human check (CAPTCHA). Job360's browser never solves one: the user finishes "
             "this job with their own browser.",
+            from_text=not framed,
         )
     if has_password_box:
         return Blocker(

@@ -722,7 +722,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def get_profile(
         include_raw: bool = False, raw_section: str = "", raw_offset: int = 0
     ) -> dict[str, Any]:
-        """READ `assistant_notes` FIRST — the user's standing instructions to you; they win.
+        """READ `assistant_notes` FIRST — the user's confirmed standing instructions to you.
 
         Read `settings` before any apply step: obey each `effective`; `paused: true` = stop all apply work;
         `waiting` = changes the user has not yet confirmed — do not ask again or act as if applied.

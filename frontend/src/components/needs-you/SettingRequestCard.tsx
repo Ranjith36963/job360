@@ -176,6 +176,14 @@ export function describeSettingRequest(
       };
     case "preferences.daily_check":
       return { title: "Your inbox", change: INBOX_MODES[String(value)] ?? "Change the inbox check" };
+    case "preferences.assistant_notes": {
+      // Security review D1: show every line, so the user never confirms a note blind.
+      const notes = Array.isArray(value) ? value.map(String) : [];
+      return {
+        title: "Standing instructions for your assistants",
+        change: notes.length ? `Save these instructions:\n${notes.map((n) => `• ${n}`).join("\n")}` : "Clear all your instructions",
+      };
+    }
     default:
       return { title: "A setting", change: "A change to your assistant settings" };
   }

@@ -6,11 +6,9 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
-import { MorningCheck } from "./MorningCheck";
 import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
 import { CvToApprove } from "./CvToApprove";
-import { BatchApplyPanel } from "./BatchApplyPanel";
 import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
@@ -413,9 +411,7 @@ export function NeedsYou() {
   }
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
-      <MorningCheck />
       <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
       <ReadyToSend onTotal={setReadyTotal} asks={open} />
       <OutcomeSuggestions />
@@ -492,8 +488,6 @@ export function NeedsYou() {
           )}
         </section>
       )}
-    </div>
-    <BatchApplyPanel />
     </div>
   );
 }

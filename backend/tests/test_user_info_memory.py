@@ -1097,6 +1097,8 @@ def test_answer_topic_is_validated_and_old_items_stay_valid():
 # ═══════════════════════════════════════════════════════════════════════════
 
 NOTES = "preferences.assistant_notes"
+# Security review D1: an assistant's notes change waits for Confirm, so the MCP item-op test uses this.
+DEALBREAKERS = "preferences.dealbreakers"
 
 
 def _ans(question: str, answer: str, **kw: Any) -> dict[str, Any]:
@@ -1262,21 +1264,21 @@ async def test_mcp_update_profile_agrees_with_the_route(authenticated_async_cont
             got = await tools.get_tool("get_profile").fn()
             assert got["profile_edit_id"] == (await _get(client))["profile_edit_id"] == 0
             reply = await tools.get_tool("update_profile").fn(
-                [{"path": NOTES, "op": "append", "value": "be brief"}], expected_profile_version=0
+                [{"path": DEALBREAKERS, "op": "append", "value": "be brief"}], expected_profile_version=0
             )
             assert reply["profile_edit_id"] == edits.current_edit_id(fixture_user_id) > 0
-            assert (await tools.get_tool("get_profile").fn())["fields"][NOTES] == ["be brief"]
+            assert (await tools.get_tool("get_profile").fn())["fields"][DEALBREAKERS] == ["be brief"]
             with pytest.raises(Exception) as info:
                 await tools.get_tool("update_profile").fn(
-                    [{"path": NOTES, "op": "append", "value": "lost"}], expected_profile_version=0
+                    [{"path": DEALBREAKERS, "op": "append", "value": "lost"}], expected_profile_version=0
                 )
             assert "409" in str(info.value) and "stale_profile" in str(info.value)
             with pytest.raises(Exception) as info:
-                await tools.get_tool("update_profile").fn([{"path": NOTES, "op": "insert", "value": "x"}])
+                await tools.get_tool("update_profile").fn([{"path": DEALBREAKERS, "op": "insert", "value": "x"}])
             assert "Nothing was saved." in str(info.value)
         finally:
             mcp_server._current_user.set(None)
-        assert (await _get(client))["preferences"]["assistant_notes"] == ["be brief"]
+        assert (await _get(client))["preferences"]["dealbreakers"] == ["be brief"]
 
 
 @pytest.mark.asyncio

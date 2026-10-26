@@ -133,6 +133,10 @@ def init_sentry(*, component: str = "api") -> bool:
         # Frame locals are scrubbed at every depth, not only top-level names: a token inside a dict local
         # (request headers, a decrypted sign-in state, FastAPI's parsed body) is caught too.
         event_scrubber=EventScrubber(recursive=True),
+        # The scrubber matches dict KEYS only, so the repr of a pydantic LoginRequest, a CurrentUser or a
+        # profile/answers object in a frame local goes out in plaintext (emails, passwords, EEO values).
+        # Send no frame locals at all; the traceback and message still say where it failed.
+        include_local_variables=False,
     )
     sentry_sdk.set_tag("component", component)
     # The positive half. Without it, "Sentry is quiet" is unfalsifiable: you

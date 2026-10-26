@@ -131,3 +131,10 @@ def test_label_formats_from_closed_values_only():
     assert routing.label(Route("own_browser", "at_cap"), n="<i>", cap=True)["label"].count("?") == 2
     for reason, text in routing.ROUTE_LABELS.items():
         assert not re.search(r"\{(?!site|date|until|n|cap)\w*\}", text), reason
+
+
+@pytest.mark.parametrize("url", ["foo.com[/x", "jobs.acme.com[/apply", "https://[::1"])
+def test_an_unsplittable_link_fails_closed_and_never_raises(url):
+    route = routing.browser_for(url=url)
+    assert route.kind == "own_browser"
+    assert routing.site_of(url)[0] == "linkedin"
