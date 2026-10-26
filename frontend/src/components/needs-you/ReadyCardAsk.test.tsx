@@ -40,7 +40,10 @@ describe("Send with an open ask", () => {
     expect(screen.getByTestId("ready-ask-questions")).toBeInTheDocument();
     const send = screen.getByTestId("ready-send-64");
     expect(send).toBeDisabled();
-    fireEvent.click(screen.getByTestId("q-ok-166-salary"));
+    // A saved profile fact is already OK: no OK button to press.
+    expect(screen.getByTestId("q-state-166-salary")).toHaveTextContent("OK");
+    expect(screen.queryByTestId("q-ok-166-salary")).toBeNull();
+    expect(screen.getByTestId("q-state-166-sms")).toHaveTextContent("Needs you");
     expect(send).toBeDisabled(); // the SMS row is still open
     fireEvent.click(screen.getByRole("button", { name: "Leave blank" }));
     await waitFor(() => expect(send).not.toBeDisabled());

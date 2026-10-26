@@ -138,6 +138,12 @@ describe("SettingRequestCard", () => {
     expect(confirmSettingRequest).not.toHaveBeenCalled();
   });
 
+  it("says who asked by name, never the raw author id", () => {
+    render(<SettingRequestCard request={{ ...request, requested_by: "agent:Claude" }} onChanged={async () => {}} />);
+    expect(screen.getByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
+  });
+
   it("Confirm applies the request and reloads", async () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     render(<SettingRequestCard request={request} onChanged={onChanged} />);

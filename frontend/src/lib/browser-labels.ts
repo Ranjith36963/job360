@@ -26,3 +26,21 @@ export const PACE_TEXT =
 
 export const RUN_OWN_BROWSER_TASKS = "Run my own-browser tasks now";
 export const RUN_NOW_DONE = "Open for the next 60 minutes. Your assistant on your PC takes them one at a time.";
+
+/** The server's route reason codes (`routing.ROUTE_REASONS`) in plain words. "default" and the
+ *  LinkedIn choice need no line. A code not listed here is never shown raw. */
+export const REASON_WORDS: Record<string, string> = {
+  job360_login_required: "Job360's browser reached a sign-in page it cannot pass.",
+  job360_bot_check: "Job360's browser was stopped by a robot check.",
+  job360_safety_stop: "Job360's browser stopped here to be safe.",
+  password: "It asks for your password. Only you type passwords.",
+  mfa: "It asks for a one-time code. Only you can enter it.",
+  only_you: "This step is yours: no browser does it for you.",
+};
+
+/** The words for a route reason: the plain line for a known code, "" for an unknown code
+ *  (a bare snake_case word), and an older server's already-written sentence as it is. */
+export function reasonWords(reason: string): string {
+  if (reason in REASON_WORDS) return REASON_WORDS[reason];
+  return /^[a-z0-9_]+$/.test(reason) ? "" : reason;
+}
