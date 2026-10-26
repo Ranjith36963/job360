@@ -38,10 +38,15 @@ def _strip_url(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     # Word by word (linear time): a single backtracking regex over free text is a ReDoS.
+    # The scheme may sit anywhere in a word: "(https://x/a.js?t=1:2:3)", "url=https://...".
     parts = _WHITESPACE.split(value)
     for i, part in enumerate(parts):
-        if part.lower().startswith(("http://", "https://")):
-            parts[i] = _QUERY_OR_HASH.split(part, maxsplit=1)[0]
+        low = part.lower()
+        at = min((n for n in (low.find("http://"), low.find("https://")) if n >= 0), default=-1)
+        if at >= 0:
+            cut = _QUERY_OR_HASH.search(part, at)
+            if cut:
+                parts[i] = part[: cut.start()]
     return "".join(parts)
 
 

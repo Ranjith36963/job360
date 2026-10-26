@@ -140,3 +140,13 @@ def test_url_stripping_is_linear_on_hostile_text():
     assert _strip_url("see https://a.example/x?token=t1 and HTTPS://b.example/y#h") == (
         "see https://a.example/x and HTTPS://b.example/y"
     )
+
+
+def test_wrapped_urls_in_text_lose_their_query_too():
+    from src.api.routes.client_log import _strip_url
+
+    text = 'at fn (https://job360.uk/app.js?token=w1:1:2) url=https://x.example/?token=w2 "https://y.example/#w3"'
+    out = _strip_url(text)
+    for secret in ("w1", "w2", "w3"):
+        assert secret not in out
+    assert "at fn (https://job360.uk/app.js" in out
