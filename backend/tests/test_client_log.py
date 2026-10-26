@@ -126,3 +126,17 @@ def test_relative_client_url_query_is_stripped_too(audit_capture):
         assert c.post("/api/client-log", json=body).status_code == 204
     assert "rel123" not in _everything(audit_capture.records)
     assert audit_capture.records[-1].client_url == "/auth/magic"
+
+
+def test_url_stripping_is_linear_on_hostile_text():
+    import time
+
+    from src.api.routes.client_log import _strip_url
+
+    hostile = "http://" * 3000
+    t0 = time.perf_counter()
+    assert _strip_url(hostile) == hostile
+    assert time.perf_counter() - t0 < 0.5
+    assert _strip_url("see https://a.example/x?token=t1 and HTTPS://b.example/y#h") == (
+        "see https://a.example/x and HTTPS://b.example/y"
+    )

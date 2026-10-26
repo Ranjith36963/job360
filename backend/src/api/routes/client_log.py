@@ -26,7 +26,8 @@ _client_log = get_logger("client")  # "job360.client" → main job360 handlers (
 _LEVELS = {"error", "warning", "info"}
 
 
-_URL_IN_TEXT = re.compile(r"(https?://[^\s?#]+)[?#]\S*")
+_WHITESPACE = re.compile(r"(\s+)")
+_QUERY_OR_HASH = re.compile(r"[?#]")
 
 
 def _strip_url(value: Optional[str]) -> Optional[str]:
@@ -36,7 +37,12 @@ def _strip_url(value: Optional[str]) -> Optional[str]:
     reach the log file or audit_log. Text without a URL passes through unchanged."""
     if not value:
         return value
-    return _URL_IN_TEXT.sub(r"\1", value)
+    # Word by word (linear time): a single backtracking regex over free text is a ReDoS.
+    parts = _WHITESPACE.split(value)
+    for i, part in enumerate(parts):
+        if part.lower().startswith(("http://", "https://")):
+            parts[i] = _QUERY_OR_HASH.split(part, maxsplit=1)[0]
+    return "".join(parts)
 
 
 class ClientLogRequest(BaseModel):
@@ -64,7 +70,7 @@ async def client_log(
 
     # Credentials ride in page URLs (?token=...): strip query and fragment from every
     # URL-bearing field before anything is written.
-    page_url = re.split(r"[?#]", body.url, maxsplit=1)[0] if body.url else body.url  # relative URLs too
+    page_url = _QUERY_OR_HASH.split(body.url, maxsplit=1)[0] if body.url else body.url  # relative URLs too
     message = _strip_url(body.message) or ""
     stack = _strip_url(body.stack)
     context = _strip_url(body.context)
