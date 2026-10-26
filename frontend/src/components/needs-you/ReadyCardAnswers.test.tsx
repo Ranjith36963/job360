@@ -31,16 +31,42 @@ describe("Verify / Edit on each answer", () => {
     expect(screen.getByTestId("ready-answer-verify-64-0")).toHaveTextContent("Verify");
   });
 
-  it("memory, written and guessed rows get Verify and Edit; profile rows do not", () => {
+  it("memory, written and guessed rows get Verify and Edit; profile rows get Edit only", () => {
     render(<ReadyCard card={card(64)} paused={false} onChanged={() => {}} />);
     for (const i of [0, 2, 3]) {
       expect(screen.getByTestId(`ready-answer-verify-64-${i}`)).toHaveTextContent("Verify");
       expect(screen.getByTestId(`ready-answer-edit-64-${i}`)).toHaveTextContent("Edit");
     }
-    for (const i of [1]) {
-      expect(screen.queryByTestId(`ready-answer-verify-64-${i}`)).toBeNull();
-      expect(screen.queryByTestId(`ready-answer-edit-64-${i}`)).toBeNull();
+    // Owner 2026-10-26: every row can be edited, whatever its source.
+    expect(screen.queryByTestId("ready-answer-verify-64-1")).toBeNull();
+    expect(screen.getByTestId("ready-answer-edit-64-1")).toHaveTextContent("Edit");
+  });
+
+  it("a private answer not kept says Needs your answer, never Approved, and Edit saves it", async () => {
+    const salary = { question: "What is your expected salary package?", answer: "", source: "approved", key: "salary.expected", redacted: true, saved_by: null, saved_at: "2026-10-20T09:00:00+00:00" };
+    const blank = { question: "Notice period?", answer: "", source: "approved", key: null, saved_by: null, saved_at: null };
+    const onChanged = vi.fn();
+    render(<ReadyCard card={card(122, { answers: [answer(salary), answer(blank)] })} paused={false} onChanged={onChanged} />);
+    for (const i of [0, 1]) {
+      const row = screen.getByTestId(`ready-answer-122-${i}`);
+      expect(row).toHaveTextContent("Needs your answer");
+      expect(row).not.toHaveTextContent("Approved");
+      expect(screen.queryByTestId(`ready-answer-verify-122-${i}`)).toBeNull();
     }
+    expect(screen.getByTestId("ready-answer-missing-122-0")).toHaveTextContent("Tap Edit to type your answer");
+    fireEvent.click(screen.getByTestId("ready-answer-edit-122-0"));
+    fireEvent.change(screen.getByTestId("ready-answer-input-122-0"), { target: { value: "£80,000" } });
+    fireEvent.click(screen.getByTestId("ready-answer-save-122-0"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(confirmAnswer).toHaveBeenCalledWith(122, 0, 1220, "£80,000");
+  });
+
+  it("after the save the reloaded card shows the owner's value as Verified", () => {
+    const saved = { question: "What is your expected salary package?", answer: "", source: "approved", redacted: true, changed_to: "£80,000", changed_reason: "owner_edit", verified: true };
+    render(<ReadyCard card={card(122, { answers: [answer(saved)] })} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-answer-changed-122-0")).toHaveTextContent("£80,000");
+    expect(screen.getByTestId("ready-answer-verified-122-0")).toHaveTextContent("Verified");
+    expect(screen.getByTestId("ready-answer-edit-122-0")).toBeInTheDocument();
   });
 
   it("Verify sends the fill id and no text, then reloads the card", async () => {
