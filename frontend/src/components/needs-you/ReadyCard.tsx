@@ -64,11 +64,15 @@ export function ReadyCard({
   const prepared = clock(card.filled_at);
   // Answers that only describe a draft: they count as needing attention here (the backend gate is unchanged).
   const missing = card.answers.filter(isDraftStub).length;
+  // Send waits until every answer reads OK: a guess or a draft needs the user's OK, a blank or
+  // sensitive row needs their answer (owner, 2026-10-26). Answers the user edited read OK.
+  const unchecked = card.answers.filter((a) => readyRowLabel(a, card).status !== "ok").length;
 
   async function decide(send: boolean) {
     setBusy(true);
     try {
       // Never approve a job whose open ask is unanswered: answer it first (the owner's own click on each row).
+      if (send && unchecked > 0) return;
       if (send && openAsks.length > 0) {
         if (!ra.complete) return;
         await ra.answerAll();
@@ -218,7 +222,7 @@ export function ReadyCard({
         <button
           type="button"
           data-testid={`ready-send-${card.application_id}`}
-          disabled={busy || paused || askBlocked}
+          disabled={busy || paused || askBlocked || unchecked > 0}
           onClick={() => void decide(true)}
           className={cn(tap, "rounded-lg bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50")}
         >
@@ -233,6 +237,11 @@ export function ReadyCard({
         >
           Don&apos;t send
         </button>
+        {unchecked > 0 && (
+          <span data-testid={`ready-send-blocked-${card.application_id}`} className="text-xs text-muted-foreground">
+            {`OK or edit ${unchecked} answer${unchecked === 1 ? "" : "s"} above to turn on Send.`}
+          </span>
+        )}
         {card.held_seconds != null && card.held_seconds > 0 && !finishing && (
           <button
             type="button"
