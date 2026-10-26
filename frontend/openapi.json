@@ -2402,6 +2402,11 @@
               }
             ]
           },
+          "can_refill": {
+            "default": false,
+            "title": "Can Refill",
+            "type": "boolean"
+          },
           "confirmed_at": {
             "anyOf": [
               {
@@ -4474,6 +4479,11 @@
             "title": "By",
             "type": "string"
           },
+          "can_refill": {
+            "default": false,
+            "title": "Can Refill",
+            "type": "boolean"
+          },
           "detail": {
             "title": "Detail",
             "type": "string"
@@ -4629,6 +4639,11 @@
                 "type": "null"
               }
             ]
+          },
+          "can_refill": {
+            "default": false,
+            "title": "Can Refill",
+            "type": "boolean"
           },
           "confirmed_at": {
             "anyOf": [
@@ -19660,6 +19675,83 @@
         "summary": "Submitted Blocked",
         "tags": [
           "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/browser/refill": {
+      "post": {
+        "description": "\"Refill the form\": Job360's own browser opens this job's form again and replays exactly what the user's\nassistant did there last time (the same answers, the same CV upload, the same option clicks), never\nanything new, never a submit, never a CAPTCHA; then keeps it open 30 minutes for Finish it here. Records\n``form_filled`` {by: refill}: identical answers keep the user's yes. 404 when the job is not the\ncaller's. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``.",
+        "operationId": "refill_form_api_applications__application_id__browser_refill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Refill Form Api Applications  Application Id  Browser Refill Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refill Form",
+        "tags": [
+          "browser"
         ]
       }
     },
