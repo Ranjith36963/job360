@@ -87,7 +87,7 @@ git log for `doc-sync.yml` if you need the old design.
 
 | Tier | What | When | Cost |
 |------|------|------|------|
-| **1 — Gate** | `scripts/doc_sync_check.py` compares hard code facts (route/endpoint counts, migration head, …) against every numeric doc claim; **blocks the PR** on drift (`.github/workflows/doc-sync.yml`) | `doc-sync.yml`'s own `on:` block | Free, no LLM |
+| **1 — Gate** | `scripts/doc_sync_check.py` **blocks the PR** on drift (`.github/workflows/doc-sync.yml`); what it guards is `doc_sync_check.build_checks` and the guard functions beside it, not every numeric claim. | `doc-sync.yml`'s own `on:` block | Free, no LLM |
 | **2 — Fixer** | The `/sync` skill: scan code → compare LIVING docs → **edit the docs** → docs-only PR. Run it by hand, in the SAME PR whose diff introduced the drift the gate flagged. | Manual, whenever Tier 1 blocks a PR | One Claude session |
 | **3 — Auditor** | The `/doc-audit` skill: full lifecycle pass — classify docs, archive IMPLEMENTED plans, park contradictions, find undocumented modules, write the health report | Weekly, or after a multi-PR day | One Claude session |
 
