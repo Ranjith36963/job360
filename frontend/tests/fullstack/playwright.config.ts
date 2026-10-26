@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // TRUE end-to-end config: real Chromium -> real Next.js frontend -> real FastAPI
-// backend -> real Postgres. Unlike playwright.config.ts (specs in tests/e2e/,
+// backend -> real Postgres. Unlike frontend/playwright.config.ts (specs in tests/e2e/,
 // API mocked with page.route, E2E_TEST_MODE auth bypass) there is NO webServer
 // here and NO mocking: whoever runs this (the `fullstack-e2e` job in
 // .github/workflows/ci-offline.yml, or a developer) starts Postgres, the
@@ -11,7 +11,10 @@ import { defineConfig, devices } from "@playwright/test";
 const BASE_URL = process.env.FULLSTACK_BASE_URL ?? "http://localhost:3000";
 
 export default defineConfig({
-  testDir: "./tests/fullstack",
+  testDir: ".",
+  // Paths resolve against THIS file's folder; keep the report and results where
+  // the CI job's upload step (and a developer) expects them: frontend/.
+  outputDir: "../../test-results",
   // One user walks one journey; the steps share state, so no parallelism.
   fullyParallel: false,
   workers: 1,
@@ -20,7 +23,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   timeout: 120_000,
   expect: { timeout: 20_000 },
-  reporter: "html",
+  reporter: [["html", { outputFolder: "../../playwright-report", open: "never" }]],
   use: {
     baseURL: BASE_URL,
     trace: "retain-on-failure",

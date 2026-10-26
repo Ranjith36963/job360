@@ -3,7 +3,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 /**
  * TRUE end-to-end: no page.route, no cookie faking, no E2E_TEST_MODE. A real
  * Chromium drives the real frontend, which proxies /api/* to the real backend
- * on a real Postgres (CI job `fullstack-e2e`; see playwright.fullstack.config.ts).
+ * on a real Postgres (CI job `fullstack-e2e`; see tests/fullstack/playwright.config.ts).
  *
  * One journey, one fresh user, steps in order:
  *   a. register + sign in through the real UI

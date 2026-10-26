@@ -671,7 +671,7 @@ jobs:
       - name: Run the full-stack journey
         if: needs.scope.outputs.scope == 'full'
         working-directory: frontend
-        run: npx playwright test -c playwright.fullstack.config.ts --reporter=list,html
+        run: npx playwright test -c tests/fullstack/playwright.config.ts --reporter=list,html
       - name: Keep the evidence (report, traces, backend and frontend logs)
         if: always() && needs.scope.outputs.scope == 'full'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
