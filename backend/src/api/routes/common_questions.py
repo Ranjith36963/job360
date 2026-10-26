@@ -28,8 +28,10 @@ class CommonQuestionOut(BaseModel):
     topic: Optional[str] = None
     answer: Optional[str] = None
     source: Optional[str] = None
-    state: Literal["confirmed", "relayed", "inferred", "sensitive", "missing"]
+    state: Literal["confirmed", "relayed", "inferred", "sensitive", "guessed", "missing"]
     verified: bool
+    # Owner 2026-10-26: only two labels, "memory" or "guessed"; None until the assistant drafts it.
+    label: Optional[Literal["memory", "guessed"]] = None
     seen: int = 0
 
 

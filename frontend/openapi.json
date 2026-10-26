@@ -4031,6 +4031,21 @@
             ],
             "title": "Kit Key"
           },
+          "label": {
+            "anyOf": [
+              {
+                "enum": [
+                  "memory",
+                  "guessed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
           "question": {
             "title": "Question",
             "type": "string"
@@ -4057,6 +4072,7 @@
               "relayed",
               "inferred",
               "sensitive",
+              "guessed",
               "missing"
             ],
             "title": "State",

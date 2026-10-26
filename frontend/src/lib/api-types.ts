@@ -5092,6 +5092,8 @@ export interface components {
             id: string;
             /** Kit Key */
             kit_key?: string | null;
+            /** Label */
+            label?: ("memory" | "guessed") | null;
             /** Question */
             question: string;
             /**
@@ -5105,7 +5107,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "confirmed" | "relayed" | "inferred" | "sensitive" | "missing";
+            state: "confirmed" | "relayed" | "inferred" | "sensitive" | "guessed" | "missing";
             /** Topic */
             topic?: string | null;
             /** Verified */

@@ -68,3 +68,29 @@ async def test_saved_answers_show_and_the_users_own_are_verified(authenticated_a
             assert put.status_code == 200, put.text
         referred = (await _rows(client))["referred"]
         assert (referred["answer"], referred["verified"]) == ("No", False)
+
+
+@pytest.mark.asyncio
+async def test_only_memory_or_guessed_and_the_assistant_is_told_what_to_draft(authenticated_async_context):
+    """Owner 2026-10-26: "only two things, from memory and guessed; there is no not known". An answer the
+    assistant drafted (approved: false) reads Guessed; the open ones are listed for it in get_profile."""
+    from src.services.profile import common_questions as cq
+    from src.services.profile.models import UserInfo, UserProfile
+
+    async with authenticated_async_context() as client:
+        saved = await client.patch("/api/profile", json={"edits": [
+            {"path": "user_info.contact", "value": {"email": "ada@example.com"}},
+            {"path": "user_info.answers", "op": "upsert", "value": {
+                "question": "How did you hear about this job?", "answer": "LinkedIn", "approved": False,
+                "topic": "form.how_heard"}},
+        ]})
+        assert saved.status_code == 200, saved.text
+        rows = await _rows(client)
+        assert (rows["email"]["label"], rows["how_heard"]["label"]) == ("memory", "guessed")
+        assert rows["how_heard"]["verified"] is False and rows["phone"]["label"] is None
+        assert {r["label"] for r in rows.values()} <= {"memory", "guessed", None}
+    profile = UserProfile(user_info=UserInfo(contact={"email": "a@b.c"}))
+    open_ids = {o["id"]: o for o in cq.open_questions(profile)}
+    assert "email" not in open_ids and open_ids["phone"]["save_to"] == "user_info.contact"
+    assert open_ids["how_heard"] == {"id": "how_heard", "question": "How did you hear about this job?",
+                                     "save_to": "user_info.answers", "topic": "form.how_heard"}

@@ -18,6 +18,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "common_form_questions.json"
+# Owner 2026-10-26: "There are only two things, from memory and guessed. There is no not known."
+LABELS: tuple[str, ...] = ("memory", "guessed")
+# Where an answer to a kit_key row is saved (update_profile path), by the key's first part.
+_SAVE_PATH = {
+    "contact": "user_info.contact", "logistics": "user_info.logistics", "equality": "user_info.equality",
+    "right_to_work": "user_info.right_to_work", "salary": "preferences.salary_by_country",
+}
+_SAVE_PATH_EXACT = {"contact.name": "cv_data.name", "contact.github_url": "cv_data.links"}
 GROUPS: tuple[str, ...] = ("you", "experience", "work", "pay", "form", "equality")
 _COUNTRY_KEYS = ("{cc}",)
 
@@ -62,8 +70,18 @@ def _shown(value: Any) -> str:
     return str(value)
 
 
+def save_path(row: dict[str, Any]) -> str:
+    """The update_profile path a row's answer is saved to (a topic row: ``user_info.answers``)."""
+    key = row.get("kit_key")
+    if not key:
+        return "user_info.answers"
+    return _SAVE_PATH_EXACT.get(key) or _SAVE_PATH[key.split(".", 1)[0]]
+
+
 def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str]) -> dict[str, Any]:
     text = q["question"].replace("{country}", country or "")
+    verified = item is not None and item.get("state") == "confirmed" and (
+        item.get("source") != "approved_text" or bool(item.get("by_user")))
     return {
         "id": q["id"] if country is None else f"{q['id']}.{country}",
         "group": q["group"], "question": text, "country": country,
@@ -74,8 +92,10 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         "state": item.get("state") if item is not None else "missing",
         # Verified = the USER stood behind it: an approved answer an assistant saved itself is not (review
         # of #1263: an assistant can write approved: true).
-        "verified": item is not None and item.get("state") == "confirmed"
-        and (item.get("source") != "approved_text" or bool(item.get("by_user"))),
+        "verified": verified,
+        # Owner 2026-10-26: one of two labels - "memory" (the user's own) or "guessed" (anything else the
+        # assistant drafted). None only until the assistant drafts it (get_profile common_questions_open).
+        "label": None if item is None else ("memory" if verified else "guessed"),
         "seen": int(q.get("seen") or 0),
     }
 
@@ -92,8 +112,16 @@ def common_questions(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[s
     def items(answers: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
         return {str(i["key"]): i for block in answers.values() for i in block}
 
+    # An answer the assistant drafted for the user to check (approved: false) is a guess: shown, not used.
+    drafts = {
+        str(r["topic"]): {"value": r["answer"], "source": "guessed", "state": "guessed"}
+        for r in (getattr(getattr(profile, "user_info", None), "answers", None) or [])
+        if isinstance(r, dict) and r.get("topic") and r.get("approved") is not True
+        and str(r.get("answer") or "").strip()
+    }
+
     def by_topic(answers: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
-        return {str(i["topic"]): i for i in answers.get("approved_text", []) if i.get("topic")}
+        return {**drafts, **{str(i["topic"]): i for i in answers.get("approved_text", []) if i.get("topic")}}
 
     rows: list[dict[str, Any]] = []
     for q in catalog():
@@ -112,3 +140,13 @@ def summary(rows: list[dict[str, Any]]) -> dict[str, int]:
     verified = sum(1 for r in rows if r["verified"])
     missing = sum(1 for r in rows if r["answer"] is None)
     return {"total": len(rows), "verified": verified, "to_verify": len(rows) - verified - missing, "missing": missing}
+
+
+def open_questions(profile: Any) -> list[dict[str, str]]:
+    """The rows with no answer at all - what the assistant drafts next, as Guessed, from the profile.
+    Reads the base profile only (no overlay needed to know whether an answer exists)."""
+    return [
+        {"id": r["id"], "question": r["question"], "save_to": save_path(r),
+         **({"topic": r["topic"]} if r.get("topic") else {"kit_key": r["kit_key"]})}
+        for r in common_questions(profile, []) if r["answer"] is None
+    ]
