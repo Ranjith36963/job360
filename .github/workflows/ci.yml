@@ -189,6 +189,31 @@ jobs:
           python -m pip install --no-deps -e .
           python -m pip check
 
+      # The frontend's typed API (frontend/openapi.json + src/lib/api-types.ts) is
+      # generated from the backend. The Playwright specs mock the backend, so
+      # nothing else notices when the two drift. This job already has the locked
+      # backend installed; it only needs node + openapi-typescript on top.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: needs.scope.outputs.scope == 'full'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps (for the API types generator)
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      - name: Frontend API types match the backend (check:types-drift)
+        if: needs.scope.outputs.scope == 'full'
+        run: |
+          bash scripts/gen-api-types.sh
+          if ! git diff --exit-code -- frontend/openapi.json frontend/src/lib/api-types.ts; then
+            echo "::error::Frontend API types are out of date with the backend. Run 'npm run gen:types' in frontend/ and commit frontend/openapi.json + frontend/src/lib/api-types.ts."
+            exit 1
+          fi
+
       - name: Lint (ruff)
         if: needs.scope.outputs.scope == 'full'
         # Backlog drained 2026-07-10: 329 findings → 0. The bulk auto-fixed
