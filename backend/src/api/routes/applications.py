@@ -50,6 +50,7 @@ from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services import idempotency
+from src.services.applications import asks as asks_service
 from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
@@ -3455,6 +3456,20 @@ async def submitted_blocked(
     nothing is blocked, or when the application already has a receipt or is no longer
     ``considering`` (check_submit's ``already_applied``); nothing is written then.
     Session only; assistants use ``record_event`` + ``record_application``."""
+    receipt = await record_user_submit(db, user, application_id, confirmation=body.confirmation.strip())
+    return {"receipt_id": receipt["receipt_id"], "controls": await _controls(db, user, application_id)}
+
+
+async def record_user_submit(
+    db: JobDatabase, user: CurrentUser, application_id: int, *, confirmation: str = "",
+    seen_on: str = "",
+) -> dict[str, Any]:
+    """The USER pressed Submit themselves (web only): ``unblocked`` {resolution: user_did_it} for the open
+    block, the receipt (``recorded_by`` web; the CV the browser uploaded, as ``record_receipt`` picks it) and
+    the close of the job's open CAPTCHA asks, in ONE transaction. "I submitted it" needs an open block;
+    ``seen_on`` (the host of the confirmation page Job360's live view saw, ``POST /browser/live``) does not.
+    409 ``already_applied`` once a receipt exists or the job is no longer considering: nothing is written,
+    so a second confirmation is never a second ``applied``."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise HTTPException(status_code=404, detail="application not found")
     try:
@@ -3471,20 +3486,34 @@ async def submitted_blocked(
             if app_row is None or app_row["status"] != "considering" or await cur.fetchone() is not None:
                 raise _submitted_refused(user, application_id, 409, "already_applied")
             block = await blocked_service.open_block(db, user.id, application_id)
-            if block is None:
+            if block is None and not seen_on:
                 raise _submitted_refused(user, application_id, 409, "not_blocked")
-            stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
             now = datetime.now(timezone.utc).isoformat()
-            await blocked_service.record(db, user, application_id, "unblocked", stored, occurred_at=now)
+            if block is not None:
+                stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
+                await blocked_service.record(db, user, application_id, "unblocked", stored, occurred_at=now)
             # The form's host says where it was sent: a company's own form is company_site;
             # a job-board brand (Indeed, LinkedIn...) is left unsaid (rule #29), never guessed.
-            host = settings_rules.parse_site_host(block["page_host"]) if block["page_host"] else None
+            where = seen_on or (block["page_host"] if block is not None else "")
+            host = settings_rules.parse_site_host(where) if where else None
             channel = "company_site" if settings_rules.host_kind(host) == "company" else ""
+            note = (
+                f"Submitted by you in Job360's live view; confirmation page seen on {seen_on}." if seen_on
+                else f"You submitted this yourself after your assistant got stuck ({block['reason_label']})."
+                if block is not None else ""
+            )
             receipt = await spine.record_receipt(
                 db, user_id=user.id, application_id=application_id, recorded_by="web", channel=channel,
-                note=f"You submitted this yourself after your assistant got stuck ({block['reason_label']}).",
-                confirmation=body.confirmation.strip(), applied_at=now,
+                note=note, confirmation=confirmation, applied_at=now,
             )
+            # A CAPTCHA ask that superseded the block's own (ask_user, 2026-10-26 app 138) stood for this submit too.
+            cur = await db._db.execute(
+                "SELECT id FROM application_asks WHERE user_id = ? AND application_id = ? AND kind = 'captcha' "
+                "AND answered_at IS NULL AND withdrawn_at IS NULL",
+                (user.id, application_id),
+            )
+            for (ask_id,) in [tuple(r) for r in await cur.fetchall()]:
+                await asks_service.withdraw_ask(db, user.id, int(ask_id), "web", "you submitted the application")
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
@@ -3492,10 +3521,11 @@ async def submitted_blocked(
         "blocked_submitted",
         extra={
             "event": "blocked_submitted", "user_id": safe_log_value(user.id), "application_id": int(application_id),
-            "receipt_id": int(receipt["receipt_id"]), "channel": safe_log_value(channel, max_len=40), "result": "ok",
+            "receipt_id": int(receipt["receipt_id"]), "channel": safe_log_value(channel, max_len=40),
+            "via": "live_view" if seen_on else "web", "result": "ok",
         },
     )
-    return {"receipt_id": receipt["receipt_id"], "controls": await _controls(db, user, application_id)}
+    return receipt
 
 
 @router.get(

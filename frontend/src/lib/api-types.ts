@@ -1776,7 +1776,8 @@ export interface paths {
          *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
          *     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
          *     human check in their assistant's browser instead (shot, click, type, key, scroll, done), in the
-         *     browser of ``application_id``.
+         *     browser of ``application_id``; when the user's click or key lands on the site's confirmation page,
+         *     the application is recorded as submitted by the user and the answer carries ``submitted: true``.
          */
         post: operations["browser_live_api_browser_live_post"];
         delete?: never;

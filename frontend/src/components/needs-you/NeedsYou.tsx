@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
+import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import { MorningCheck } from "./MorningCheck";
 import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
@@ -26,7 +27,6 @@ import { RunChromeTasks } from "./RunChromeTasks";
 import { OwnBrowserQueueCard } from "./OwnBrowserQueueCard";
 import { getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
 import { FormHandoff } from "@/components/applications/FormHandoff";
-
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
 // a React text node, never as HTML or markdown.
@@ -372,6 +372,13 @@ export function NeedsYou() {
       cancelled = true;
     };
   }, [apply]);
+
+  // The user's own Apply in "Finish it here" was seen confirmed: its asks are closed now, re-read.
+  useEffect(() => {
+    const onSubmitted = () => void load();
+    window.addEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
+    return () => window.removeEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
+  }, [load]);
 
   useEffect(() => {
     if (open !== null && readyTotal !== null) announce(askCount + readyTotal);
