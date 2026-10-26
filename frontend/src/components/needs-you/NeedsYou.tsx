@@ -7,8 +7,6 @@ import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAs
 import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import { OutcomeSuggestions } from "./OutcomeSuggestions";
-import { ReadyToSend } from "./ReadyToSend";
-import { CvToApprove } from "./CvToApprove";
 import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
@@ -312,7 +310,7 @@ function announce(openCount: number) {
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
   // What the job list reports: its loaded cards, the asks it could not place, how many jobs it lists.
-  const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false });
+  const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false, readyTotal: null });
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
@@ -321,9 +319,9 @@ export function NeedsYou() {
   const [error, setError] = useState<string | null>(null);
   // The badge counts the questions, the changes waiting for an OK AND what is ready to send.
   const [askCount, setAskCount] = useState(0);
-  // null until Ready to send has answered (0 if its read failed): announcing
+  // null until the job list's Ready to send read has answered (0 if it failed): announcing
   // before then would drop the ready count from the badge for a moment.
-  const [readyTotal, setReadyTotal] = useState<number | null>(null);
+  const readyTotal = jobs.readyTotal;
   // Tasks waiting for the user's own browser (null: unknown or none).
   const [queue, setQueue] = useState<OwnBrowserQueue | null>(null);
 
@@ -412,9 +410,6 @@ export function NeedsYou() {
 
   return (
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
-      <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
-      <ReadyToSend onTotal={setReadyTotal} asks={open} />
-      <OutcomeSuggestions />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -423,6 +418,21 @@ export function NeedsYou() {
           </button>
         </div>
       )}
+      {/* One card per job (owner 2026-10-26): its ready form, CV, questions and people, most urgent first. */}
+      <section aria-labelledby="open-asks" className="flex flex-col gap-3">
+        <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+          Waiting for you
+        </h2>
+        {queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
+        {jobs.settled && jobs.total === 0 && general.length === 0 && (
+          <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
+            {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
+          </p>
+        )}
+        {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
+        <JobCards open={open} onChanged={load} onReport={setJobs} />
+      </section>
+      <OutcomeSuggestions />
       {waiting.length > 0 && (
         <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
           <h2 id="waiting-ok" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
@@ -435,32 +445,16 @@ export function NeedsYou() {
           </ul>
         </section>
       )}
-      <section aria-labelledby="open-asks" className="flex flex-col gap-3">
-        <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-          Waiting for you
-        </h2>
-        {queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
-        {jobs.settled && jobs.total === 0 && general.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
-            {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
-          </p>
-        ) : (
-          <>
-            {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
-            <JobCards open={open} onChanged={load} onReport={setJobs} />
-            {general.length > 0 && (
-              <>
-                <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
-                <ul className="flex flex-col gap-3">
-                  {general.map((a) => (
-                    <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
-                  ))}
-                </ul>
-              </>
-            )}
-          </>
-        )}
-      </section>
+      {general.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
+          <ul className="flex flex-col gap-3">
+            {general.map((a) => (
+              <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
+            ))}
+          </ul>
+        </section>
+      )}
       <UnmatchedMail />
 
       {answered.length > 0 && (

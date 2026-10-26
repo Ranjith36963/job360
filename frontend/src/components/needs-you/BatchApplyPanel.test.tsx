@@ -27,7 +27,6 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@/lib/home-fetch", () => ({ fetchWhatsNewPages: (...a: unknown[]) => fetchWhatsNewPages(...a) }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-vi.mock("./ReadyToSend", () => ({ ReadyToSend: () => null }));
 const toastSuccess = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: vi.fn() } }));
 

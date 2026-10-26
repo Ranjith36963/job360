@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { ReadyToSend } from "./ReadyToSend";
+import { JobCards } from "./JobCards";
+import type { JobCardsReport } from "./JobCards";
+
+// Ready to send lives on each job's card now; with no job record here each ready card shows alone.
+function ReadyToSend({ onTotal }: { onTotal?: (n: number) => void }) {
+  return <JobCards open={[]} onChanged={async () => {}} onReport={(r: JobCardsReport) => r.readyTotal !== null && onTotal?.(r.readyTotal)} />;
+}
 import { ReadyCard } from "./ReadyCard";
 import { answer, card, sendableCard } from "./ready-fixtures";
 import { ApiError } from "@/lib/api-error";
@@ -11,6 +17,9 @@ const approveSend = vi.fn();
 const declineSend = vi.fn();
 const browserLive = vi.fn();
 vi.mock("@/lib/api", () => ({
+  getApplication: () => Promise.reject(new Error("no job record in this test")),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: (...a: unknown[]) => declineSend(...a),
