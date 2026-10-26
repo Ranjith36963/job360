@@ -1890,6 +1890,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Changes
+         * @description What changed for the signed-in user: a cursor (also the ETag) and one marker per page area.
+         *     Send the last cursor as ``If-None-Match``; an unchanged cursor answers 304 with no body.
+         */
+        get: operations["changes_api_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/client-log": {
         parameters: {
             query?: never;
@@ -5090,6 +5111,32 @@ export interface components {
             title: string;
             /** Unlocks */
             unlocks: string;
+        };
+        /**
+         * ChangeAreas
+         * @description One short marker per area of the page; a marker that moved = refetch that area.
+         */
+        ChangeAreas: {
+            /** Applications */
+            applications: string;
+            /** Asks */
+            asks: string;
+            /** Assistant */
+            assistant: string;
+            /** Other */
+            other: string;
+            /** Ready */
+            ready: string;
+            /** Settings */
+            settings: string;
+        };
+        /** ChangesOut */
+        ChangesOut: {
+            areas: components["schemas"]["ChangeAreas"];
+            /** Assistant Last Active At */
+            assistant_last_active_at?: string | null;
+            /** Cursor */
+            cursor: string;
         };
         /** ClientLogRequest */
         ClientLogRequest: {
@@ -13602,6 +13649,47 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CapabilitiesOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    changes_api_changes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-none-match"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangesOut"];
+                };
+            };
+            /** @description Nothing changed since the cursor sent in If-None-Match */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
