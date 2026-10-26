@@ -387,4 +387,31 @@ describe("JobCard", () => {
     expect(pace).toHaveTextContent("Job360's browser sends first; your own browser only if Job360's browser fails. 1–3 minutes between sends, at most 10 LinkedIn sends a day.");
     expect(within(screen.getByTestId("section-outreach-7")).getByTestId("outreach-pace-7")).toBe(pace);
   });
+
+  it("links the company and the role to the application, and shows a stored draft note as missing", () => {
+    const listed = {
+      ...ask("Form answers"),
+      kind: "question",
+      questions: [
+        { key: "json", question: "Structured JSON outputs", answer: "drafted", source: "guess" },
+        { key: "city", question: "City?", answer: "Berlin", source: "guess" },
+      ],
+    } as unknown as Ask;
+    render(<JobCard card={card([listed])} onChanged={onChanged} />);
+    expect(screen.getByTestId("title-link-7")).toHaveAttribute("href", "/applications/7");
+    expect(screen.getByText("Acme")).toHaveAttribute("href", "/applications/7");
+    expect(screen.getByTestId(`draft-missing-${listed.id}-json`)).toHaveTextContent("Draft text missing");
+    expect(screen.getByText("Stored note: drafted")).toBeInTheDocument();
+    expect(screen.getByTestId(`q-edit-${listed.id}-json`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`q-ok-${listed.id}-json`)).toBeNull();
+    expect(screen.getByTestId(`q-ok-${listed.id}-city`)).toHaveTextContent("Looks right");
+  });
+
+  it("shows a long answer in full behind Show all", () => {
+    const long = "Built and shipped agent systems in production. ".repeat(10);
+    const listed = { ...ask("Form answers"), kind: "question", questions: [{ key: "x", question: "Experience", answer: long, source: "guess" }] } as unknown as Ask;
+    render(<JobCard card={card([listed])} onChanged={onChanged} />);
+    expect(screen.getByText("Show all")).toBeInTheDocument();
+    expect(screen.getByTestId(`answer-full-${listed.id}-x`).textContent).toBe(long);
+  });
 });
