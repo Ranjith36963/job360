@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryTab } from "./MemoryTab";
 
 const getProfile = vi.fn();
@@ -112,4 +112,26 @@ describe("MemoryTab confirm all, per step", () => {
     await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledTimes(1));
     expect(keepProfileEdit.mock.calls.map((c) => c[0])).toEqual(["user_info.contact"]);
   });
+
+  it("Confirm still works after the user edited another answer in the same block (owner's equality bug)", async () => {
+    // The assistant wrote three equality answers; the user later changed gender. Keep would 404
+    // ("No assistant change to keep"): the newest write is the user's. Confirm saves the block as the user's word.
+    const agentBlock = { gender: "male", ethnicity: "Indian", disability: "no" };
+    const userBlock = { ...agentBlock, gender: "Male" };
+    getProfile.mockResolvedValue({ user_info: { contact, equality: userBlock }, preferences: {} });
+    getProfileEditHistory.mockImplementation(async (p: string) =>
+      p === "user_info.equality"
+        ? [
+            { set_by: "web", set_at: "2026-10-26T12:00:00Z", value: userBlock, source: "user_said" },
+            { set_by: "agent:Claude", set_at: "2026-10-10T12:00:00Z", value: agentBlock, source: "" },
+          ]
+        : []);
+    updateProfileFields.mockResolvedValue({ user_info: { contact, equality: userBlock }, preferences: {} });
+    render(<MemoryTab />);
+    const row = await screen.findByTestId("memory-row-user_info.equality.ethnicity");
+    fireEvent.click(within(row).getByRole("button", { name: /Confirm/ }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "user_info.equality", value: userBlock }]));
+    expect(keepProfileEdit).not.toHaveBeenCalled();
+  });
 });
+
