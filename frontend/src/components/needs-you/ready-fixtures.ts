@@ -33,3 +33,9 @@ export const card = (id: number, over: Record<string, unknown> = {}) => ({
   flags: [],
   ...over,
 });
+
+/** A card whose every answer the user already confirmed: Send is on (nothing to check). */
+export const sendableCard = (id: number, over: Record<string, unknown> = {}) => {
+  const c = card(id, over);
+  return { ...c, answers: c.answers.map((a) => ({ ...a, verified: true })) };
+};

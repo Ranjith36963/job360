@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ApplicationClient } from "@/app/applications/[id]/ApplicationClient";
-import { card } from "@/components/needs-you/ready-fixtures";
+import { sendableCard } from "@/components/needs-you/ready-fixtures";
 import type { ApplicationDetail } from "@/lib/api";
 
 const getApplication = vi.fn();
@@ -52,7 +52,7 @@ const ready = (items: unknown[]) => ({ paused: false, total: items.length, unfla
 beforeEach(() => {
   getApplication.mockReset().mockResolvedValue(detail());
   getApplicationControls.mockReset().mockResolvedValue(controls());
-  getReadyToSend.mockReset().mockResolvedValue(ready([card(42)]));
+  getReadyToSend.mockReset().mockResolvedValue(ready([sendableCard(42)]));
   approveSend.mockReset().mockResolvedValue(controls({ declined: null }));
   declineSend.mockReset().mockResolvedValue(controls());
 });
