@@ -60,19 +60,28 @@ describe("MemoryTab", () => {
     ]);
   });
 
-  it("shows the five setup steps in order, then approved answers, with provenance and 'was'", async () => {
+  it("puts your details for forms first and pinned open, then the four steps, then approved answers", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    const steps = ["targets", "you", "visa", "logistics", "equality"].map((id) => screen.getByTestId(`memory-step-toggle-${id}`));
+    const sections = screen.getAllByTestId(/^memory-step-[a-z]+$/).map((s) => s.getAttribute("data-testid"));
+    expect(sections).toEqual(["memory-step-you", "memory-step-targets", "memory-step-visa", "memory-step-logistics", "memory-step-equality"]);
+    // the details block has no open/close toggle; citizenship sits there, not under Right to work
+    expect(screen.queryByTestId("memory-step-toggle-you")).toBeNull();
+    const details = screen.getByTestId("memory-step-you");
+    for (const id of ["name", "email", "phone", "address", "date_of_birth"]) {
+      expect(within(details).getByTestId(`memory-row-user_info.contact.${id}`)).toBeInTheDocument();
+    }
+    expect(within(details).getByTestId("memory-row-user_info.right_to_work.citizenship")).toBeInTheDocument();
+    expect(within(screen.getByTestId("memory-step-visa")).queryByTestId("memory-row-user_info.right_to_work.citizenship")).toBeNull();
+    const steps = ["targets", "visa", "logistics", "equality"].map((id) => screen.getByTestId(`memory-step-toggle-${id}`));
     expect(steps.every((b) => b.getAttribute("aria-expanded") === "true")).toBe(true);
     expect(steps.map((b) => b.textContent)).toEqual([
-      expect.stringContaining("Job targets"), expect.stringContaining("About you"),
-      expect.stringContaining("Right to work"), expect.stringContaining("Logistics"),
-      expect.stringContaining("Equality (voluntary)"),
+      expect.stringContaining("Job targets"), expect.stringContaining("Right to work"),
+      expect.stringContaining("Logistics"), expect.stringContaining("Equality (voluntary)"),
     ]);
     expect(screen.queryByText("Assistant settings")).toBeNull();
     const titles = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(titles).toEqual(["Approved answers", "How memory works"]);
+    expect(titles).toEqual([expect.stringContaining("Your details for forms"), "Approved answers", "How memory works"]);
     expect(screen.getByTestId("memory-row-user_info.contact.phone")).toHaveTextContent("You changed this");
     expect(screen.getByTestId("memory-row-user_info.contact.phone")).toHaveTextContent("was: +44 1");
     expect(screen.getByTestId("memory-row-user_info.contact.email")).toHaveTextContent("alex@example.com");

@@ -44,12 +44,14 @@ describe("MemoryTab confirm all, per step", () => {
     expect(screen.queryByTestId("memory-confirm-step-visa")).toBeNull();
   });
 
-  it("a done step with answers to confirm still starts open", async () => {
-    useHistory(agentHistory);
+  it("your details stay open when done and fully confirmed (they never fold away)", async () => {
+    useHistory(webHistory);
     fetchSettingsShared.mockResolvedValue({ setup_progress: { rounds: { you: { done_at: "2026-10-20T09:00:00Z" } } } });
     render(<MemoryTab />);
-    await screen.findByTestId("memory-confirm-step-you");
-    expect(screen.getByTestId("memory-step-toggle-you")).toHaveAttribute("aria-expanded", "true");
+    await screen.findByTestId("memory-tab");
+    await waitFor(() => expect(screen.getByTestId("memory-step-you")).toHaveAttribute("data-done", "true"));
+    expect(screen.getByTestId("memory-row-user_info.contact.email")).toHaveTextContent("alex@example.com");
+    expect(screen.queryByTestId("memory-confirm-step-you")).toBeNull();
   });
 
   it("is hidden when nothing is unconfirmed", async () => {
