@@ -628,12 +628,16 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
           (settings_only["lane"], settings_only["auto_merge"]), ("product_owner", True))
     # OWNER 2026-10-20: migrations and auth wait for his hand, and stay watched.
     for f in ("backend/migrations/0042_x.up.sql", "backend/src/api/routes/auth.py",
-              "backend/src/services/auth/tokens.py", "backend/src/api/routes/account_delete.py",
-              "backend/src/core/settings.py"):
+              "backend/src/services/auth/tokens.py", "backend/src/api/routes/account_delete.py"):
         got = classify([f], policy)
         check(f"product_human: {f} waits for the owner and is still watched",
               (got["lane"], got["auto_merge"], bool(got.get("watch_minutes")), got.get("rollback")),
               ("product_human", False, True, "railway"))
+
+    # 2026-10-26: settings.py left the owner's hand; it is watched like product_owner.
+    got = classify(["backend/src/core/settings.py"], policy)
+    check("product_owner: settings.py is machine-merged under the 15-minute watch",
+          (got["lane"], got["auto_merge"], got.get("watch_minutes")), ("product_owner", True, 15))
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
@@ -833,7 +837,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #      2026-09-17: the CLAIM these cases make is narrower now. They used to
     #      say "still needs you"; since the product_owner flip they say "still
     #      separated from ordinary prose" -- the two decision documents sit in
-    #      the watched lane, wear the `lane:product-owner` label, and do not ride the
+    #      the watched lane, get the 15-minute watch, and do not ride the
     #      fast lane with a README. They no longer stop for a hand. Moving these
     #      two lines to `harness_owner` in the policy is how the owner takes
     #      that back, and it is two lines.

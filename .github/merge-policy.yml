@@ -452,6 +452,8 @@ lanes:
       - "backend/src/services/profile/**"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
+      # flags change prod behaviour globally; watched, not hand-merged (2026-10-26)
+      - "backend/src/core/settings.py"
     requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true           # FLIPPED 2026-09-17 — the watcher below is the argument
     watch_minutes: 15          # ...and it is not optional; this is what buys the speed
@@ -470,7 +472,6 @@ lanes:
   product_human:
     paths:
       - "backend/migrations/**"
-      - "backend/src/core/settings.py"   # flags change prod behaviour globally (owner, 2026-10-20)
       - "backend/src/api/routes/auth.py"
       - "backend/src/services/auth/**"
       - "backend/src/api/routes/account*.py"

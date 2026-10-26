@@ -63,6 +63,11 @@ on:
   pull_request_review_comment:
     types: [created] # a reply on a thread usually precedes Resolve; the resolve itself fires nothing
   status: {} # CodeRabbit / semgrep post a commit STATUS, which `check_suite` never sees
+  # The owner switching a PR between `hand-merge` and `assistant-merge` is his
+  # yes or his no (2026-10-26), so it re-judges at once. `_target` runs THIS
+  # file from the default branch, never the PR's copy (rule G5).
+  pull_request_target:
+    types: [labeled, unlabeled]
   schedule:
     - cron: "*/20 * * * *" # the sweep — a webhook can be missed, this cannot
   workflow_dispatch:
@@ -111,6 +116,8 @@ jobs:
     # can be the last thing a PR waits on.
     if: >-
       !(github.event_name == 'status' && github.event.state == 'pending') &&
+      !(github.event_name == 'pull_request_target' &&
+        github.event.label.name != 'assistant-merge' && github.event.label.name != 'hand-merge') &&
       !(github.event_name == 'check_suite' &&
         (github.event.check_suite.conclusion == 'cancelled' ||
          github.event.check_suite.conclusion == 'stale' ||
@@ -272,6 +279,7 @@ jobs:
             check_suite)                prs="${SUITE_PR:-}" ;;
             pull_request_review)        prs="${REVIEW_PR:-}" ;;
             pull_request_review_comment) prs="${REVIEW_PR:-}" ;;
+            pull_request_target)        prs="${REVIEW_PR:-}" ;; # a merge label changed
             status)
               # A status that is still `pending` says nothing has arrived yet.
               # A finished one names only a SHA, so ask which open PRs it heads
