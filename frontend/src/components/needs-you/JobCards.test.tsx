@@ -64,12 +64,13 @@ beforeEach(() => {
 
 describe("JobCards", () => {
   it("renders every header at once but loads only the first 8 jobs", async () => {
-    render(<JobCards open={twenty} onChanged={async () => {}} />);
+    const onReport = vi.fn();
+    render(<JobCards open={twenty} onChanged={async () => {}} onReport={onReport} />);
     // Only the first page shows, each as a placeholder while its card loads (newest first).
     for (let i = 13; i <= 20; i++) expect(screen.getByTestId(`job-header-${i}`)).toBeInTheDocument();
     expect(screen.queryByTestId("job-header-12")).toBeNull();
     expect(screen.getByTestId("job-skeleton-20")).toBeInTheDocument();
-    expect(screen.getByTestId("jobs-count")).toHaveTextContent("20 jobs waiting for you");
+    expect(onReport.mock.calls.at(-1)![0].total).toBe(20);
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
     expect(getApplication).toHaveBeenCalledTimes(8);
     expect(peak).toBeLessThanOrEqual(8);
@@ -169,12 +170,13 @@ describe("JobCards", () => {
 
   it("52 jobs show 8 full cards, one Show more button and zero header-only rows", async () => {
     const many = Array.from({ length: 52 }, (_, i) => ask(i + 1, i + 1));
-    render(<JobCards open={many} onChanged={async () => {}} />);
+    const onReport = vi.fn();
+    render(<JobCards open={many} onChanged={async () => {}} onReport={onReport} />);
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
     expect(screen.queryAllByTestId(/^job-header-/)).toHaveLength(0);
     expect(screen.getAllByTestId("more-jobs")).toHaveLength(1);
     expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 8 more · 44 left");
-    expect(screen.getByTestId("jobs-count")).toHaveTextContent("52 jobs waiting for you");
+    expect(onReport.mock.calls.at(-1)![0].total).toBe(52);
   });
 
   it("a job whose record fails drops its header and reports its asks", async () => {
@@ -209,8 +211,9 @@ describe("one card per job (owner 2026-10-26)", () => {
   it("the summary line counts every job once: asks, ready to send, CV to approve", async () => {
     getReadyToSend.mockResolvedValue(readyList([readyCard(1), readyCard(30)]));
     getCvToApprove.mockResolvedValue({ items: [cvRow(2), cvRow(31)] });
-    render(<JobCards open={[ask(1, 1), ask(2, 2), ask(3, 3)]} onChanged={async () => {}} />);
-    await waitFor(() => expect(screen.getByTestId("jobs-count")).toHaveTextContent("5 jobs waiting for you"));
+    const onReport = vi.fn();
+    render(<JobCards open={[ask(1, 1), ask(2, 2), ask(3, 3)]} onChanged={async () => {}} onReport={onReport} />);
+    await waitFor(() => expect(onReport.mock.calls.at(-1)![0]).toMatchObject({ total: 5, settled: true }));
   });
 
   it("a job with a CV, a ready-to-send form and questions renders ONE card holding all three", async () => {
@@ -236,5 +239,17 @@ describe("one card per job (owner 2026-10-26)", () => {
     expect(screen.getAllByTestId(/^card-|^job-header-/).map((e) => e.dataset.testid)).toEqual(
       ["card-10", "card-20", "card-30", "card-40", "card-31"],
     );
+  });
+
+  it("a chip shows only its jobs, and Oldest first reverses the dates", async () => {
+    getReadyToSend.mockResolvedValue(readyList([readyCard(20, { answers: [readyAnswer()] })]));
+    getCvToApprove.mockResolvedValue({ items: [cvRow(40, "2026-10-21T09:00:00+00:00")] });
+    const asks = [ask(1, 10), ask(2, 30)];
+    const { rerender } = render(<JobCards open={asks} onChanged={async () => {}} show="checks" />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-40"]));
+    rerender(<JobCards open={asks} onChanged={async () => {}} sort="oldest" />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(4));
+    // Asks at 10:01 and 10:02, the fill on 10-08, the CV on 10-21.
+    expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-20", "card-10", "card-30", "card-40"]);
   });
 });

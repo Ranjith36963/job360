@@ -7,7 +7,7 @@ import type { Ask, ReadyCardData } from "@/lib/api";
 import { askRowLabel, isDraftStub, readyRowLabel } from "@/lib/answer-status";
 import { initialRow, isBlocker, mergeQuestions, rowKind } from "@/lib/job-cards";
 
-/** 1 a held form waiting for a human step; 2 ready to send, nothing blocking; 3 stuck on you;
+/** 1 a held form waiting for a human step; 2 ready to send, nothing blocking; 3 waiting on your answer;
  *  4 quick checks (Check answers, a CV to approve); 5 people or notes only. */
 export type JobTier = 1 | 2 | 3 | 4 | 5;
 

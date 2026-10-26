@@ -7,7 +7,8 @@ import type { ApplicationDetail, Ask, CvToApproveRow, ReadyCardData, ReadyToSend
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { buildCard, groupAsks, waitSummary } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach } from "@/lib/job-cards";
-import { sortByUrgency } from "@/lib/needs-you-rank";
+import { jobChip, jobHeaders, sortJobs } from "@/lib/needs-you-items";
+import type { Chip, JobHeader as Header, PersonJob, SortKey } from "@/lib/needs-you-items";
 import { splitReady } from "@/lib/ready-to-send";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,8 +25,6 @@ import { useSalaryFacts } from "./useSalaryFacts";
 export const JOBS_PER_PAGE = 8;
 /** getApplication calls in flight at once. */
 const MAX_IN_FLIGHT = 8;
-
-type PersonJob = { application_id: number; job_company: string; job_title: string };
 
 /** Jobs with a drafted message nobody has marked sent, and the people with no job who have one
  *  (best effort: a failed read adds none). */
@@ -101,17 +100,8 @@ export type JobCardsReport = {
   settled: boolean;
   /** Ready-to-send cards for the badge: null until that read answers, 0 when it failed. */
   readyTotal: number | null;
-};
-
-type Header = {
-  id: number;
-  company: string;
-  role: string;
-  asks: Ask[];
-  ready: ReadyCardData | null;
-  cv: { artifactId: number; version: number } | null;
-  cvSavedAt: string | null;
-  people: boolean;
+  /** What the page counts (countNeedsYou): the ready cards, CVs, people's jobs and the jobs dropped. */
+  inputs?: { ready: ReadyCardData[]; cvRows: CvToApproveRow[]; people: PersonJob[]; dropped: number[] };
 };
 
 /** The ready-to-send part of a job's card: its label and the ReadyCard (answers, Send, Don't send). */
@@ -136,9 +126,15 @@ export function JobCards({
   open,
   onChanged,
   onReport,
+  sort = "urgent",
+  show = "all",
 }: {
   /** The open asks; the job-tied ones are grouped here, one card per job. */
   open: Ask[];
+  /** The order (Most urgent, Newest first, Oldest first). */
+  sort?: SortKey;
+  /** The chip chosen: only its jobs show ("other" shows only New connections). */
+  show?: Chip;
   onChanged: () => Promise<void>;
   onReport?: (report: JobCardsReport) => void;
 }) {
@@ -208,18 +204,11 @@ export function JobCards({
   }, [onChanged]);
 
   const salaryFacts = useSalaryFacts(!!ready?.items.some((c) => c.answers.some(isMissingAnswer)));
-  const cvs = useMemo(() => cvMap(cvRows ?? []), [cvRows]);
 
-  const headers: Header[] = useMemo(() => {
-    const all = new Map<number, Header>();
-    const add = (id: number, company: string, role: string, set: Partial<Header>) =>
-      all.set(id, Object.assign(all.get(id) ?? { id, company, role, asks: [], ready: null, cv: null, cvSavedAt: null, people: false }, set));
-    for (const [id, asks] of byJob) add(id, asks[0]?.job_company ?? "", asks[0]?.job_title ?? "", { asks });
-    for (const c of ready?.items ?? []) add(c.application_id, c.job_company, c.job_title, { ready: c });
-    for (const r of cvRows ?? []) add(r.application_id, r.job_company, r.job_title, { cv: cvs.get(r.application_id) ?? null, cvSavedAt: r.cv.saved_at });
-    for (const j of people ?? []) add(j.application_id, j.job_company, j.job_title, { people: true });
-    return sortByUrgency([...all.values()]);
-  }, [byJob, people, ready, cvRows, cvs]);
+  const headers: Header[] = useMemo(
+    () => sortJobs(jobHeaders(open, ready?.items ?? [], cvRows ?? [], people ?? []), sort),
+    [open, people, ready, cvRows, sort],
+  );
 
   // A loaded card takes this header's current CV; it stays while anything on it is open.
   const cardOf = useCallback((h: Header): JobCardData | null => {
@@ -234,8 +223,13 @@ export function JobCards({
   }, [slots, cardOf]);
 
   const alive = useMemo(() => headers.filter(live), [headers, live]);
+  // The chosen chip's jobs; "Other" holds no job (only New connections show from here).
+  const shown = useMemo(
+    () => (show === "all" ? alive : show === "other" ? [] : alive.filter((h) => jobChip(h) === show)),
+    [alive, show],
+  );
   // The shown jobs: a card that loads with nothing open drops out and the next job takes its place.
-  const page = useMemo(() => alive.slice(0, limit), [alive, limit]);
+  const page = useMemo(() => shown.slice(0, limit), [shown, limit]);
   // Load the full card of every job on a shown page, at most MAX_IN_FLIGHT at a time.
   useEffect(() => {
     const set = (id: number, slot: Slot, onlyIfAbsent = false) =>
@@ -258,12 +252,14 @@ export function JobCards({
   );
   const connections = useMemo(() => cold.filter((p) => !doneIds.has(p.contact.id)), [cold, doneIds]);
   const settled = people !== null && cvRows !== null && (ready !== null || readyFailed);
+  const dropped = useMemo(() => headers.filter((h) => !live(h)).map((h) => h.id), [headers, live]);
   useEffect(() => {
     onReport?.({
       cards, failed, total: alive.length, connections: connections.length, settled,
       readyTotal: ready ? ready.total : readyFailed ? 0 : null,
+      inputs: { ready: ready?.items ?? [], cvRows: cvRows ?? [], people: people ?? [], dropped },
     });
-  }, [onReport, cards, failed, alive.length, connections.length, settled, ready, readyFailed]);
+  }, [onReport, cards, failed, alive.length, connections.length, settled, ready, readyFailed, cvRows, people, dropped]);
 
   const { clean, held } = useMemo(() => {
     const asked = new Set(openQuestionAsks(open).map((a) => a.application_id));
@@ -280,23 +276,17 @@ export function JobCards({
       </button>
     </div>
   );
-  if (alive.length === 0 && connections.length === 0) return readyError || null;
+  const showPeople = show === "all" || show === "other";
+  if (shown.length === 0 && (connections.length === 0 || !showPeople)) return readyError || null;
   const paused = ready?.paused ?? false;
   const readyPart = (h: Header, embedded: boolean) =>
     h.ready && <ReadySection card={h.ready} asks={h.asks} paused={paused} embedded={embedded} onChanged={readyChanged} salaryFacts={salaryFacts} />;
-  const pending = alive.length - page.length;
+  const pending = shown.length - page.length;
   const next = Math.min(JOBS_PER_PAGE, pending);
-  const counted = [
-    alive.length > 0 && `${alive.length} ${alive.length === 1 ? "job" : "jobs"}`,
-    connections.length > 0 && `${connections.length} new ${connections.length === 1 ? "connection" : "connections"}`,
-  ].filter(Boolean);
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted-foreground" data-testid="jobs-count">
-        {counted.join(" and ")} waiting for you
-      </p>
       {readyError}
-      {clean.length >= 2 && <SendAllCard clean={clean} held={held} paused={paused} onChanged={readyChanged} />}
+      {clean.length >= 2 && (show === "all" || show === "ready") && <SendAllCard clean={clean} held={held} paused={paused} onChanged={readyChanged} />}
       {page.length > 0 && <ul className="flex flex-col gap-3" data-testid="job-cards">
         {page.map((h) => {
           const slot = slots.get(h.id);
@@ -328,8 +318,8 @@ export function JobCards({
           Show {next} more · {pending} left
         </button>
       )}
-      <NewConnections people={connections} onChanged={onChanged}
-        onDone={(id) => setDoneIds((s) => new Set(s).add(id))} />
+      {showPeople && <NewConnections people={connections} onChanged={onChanged}
+        onDone={(id) => setDoneIds((s) => new Set(s).add(id))} />}
     </div>
   );
 }

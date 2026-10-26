@@ -192,7 +192,8 @@ describe("Needs-you page", () => {
     const seen: number[] = [];
     const on = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("job360:asks-changed", on);
-    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    const q = (id: number) => ({ id, application_id: null, question: `Q${id}`, context: "", asked_by: "x", asked_at: "2026-10-20T10:00:00Z", status: "open" });
+    listAsks.mockImplementation(async (s: string) => ({ asks: s === "open" ? [q(1), q(2)] : [], open_count: 2 }));
     render(<NeedsYou />);
     // One Review row in the Other list; Review opens the full request card inline.
     expect(await screen.findByTestId("other-open-setting-11")).toHaveTextContent("Review");
