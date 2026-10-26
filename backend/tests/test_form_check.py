@@ -197,11 +197,11 @@ async def test_wording_match_ignores_case_and_punctuation(authenticated_async_co
         app_id = await _bring(client)
         await _seed_answers(client)
         body = (await _form_check(client, app_id, [{"question": "Notice period (In days)?"}])).json()
-        # Notice period is a sensitive question (gap audit #14): the saved answer is offered, and the
-        # user confirms it on this form.
+        # Notice period is a sensitive question (gap audit #14); this answer is the user's own approved one,
+        # so it is filled as it is (owner 2026-10-26: only an answer the user has not stood behind waits).
         assert body["answered"] == [{
             "question": "Notice period (In days)?", "required": True, "key": "notice period in days",
-            "value": "30", "source": "approved_text", "matched_by": "wording", "needs_confirmation": True,
+            "value": "30", "source": "approved_text", "matched_by": "wording",
         }]
         # The agent may also pass the saved approved_text question itself as the key.
         keyed = (await _form_check(client, app_id, [{"question": "Notice?", "key": "Notice Period in Days"}])).json()

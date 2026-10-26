@@ -1719,11 +1719,13 @@ def normalized_company_key(company: str) -> str:
 
 
 def _mark_sensitive(out: dict[str, list[dict[str, Any]]]) -> None:
-    """``state`` = sensitive for equality, sanctions and visa items, whoever wrote them
-    (``confirmed: false`` stays where it is, for older readers; ``confirmed_at`` is dropped)."""
+    """``state`` = sensitive for equality, sanctions and visa items the user has NOT confirmed
+    (``confirmed: false`` stays where it is, for older readers; ``confirmed_at`` is dropped). Owner
+    2026-10-26: an answer the user confirmed on Memory or the profile is filled like any other fact -
+    only an inferred or relayed one waits for the user on the form."""
     for block, items in out.items():
         for item in items:
-            if _is_sensitive(block, str(item["key"])):
+            if _is_sensitive(block, str(item["key"])) and item.get("state") != "confirmed":
                 item["state"] = "sensitive"
                 item.pop("confirmed_at", None)
 
@@ -1885,7 +1887,7 @@ def compute_answers(
             _mark_sensitive(out)
     for block, items in out.items():
         for item in items:
-            if item.get("state") == "sensitive" and consented.get(_SENSITIVE_PATH.get(block, "")):
+            if _is_sensitive(block, str(item["key"])) and consented.get(_SENSITIVE_PATH.get(block, "")):
                 item["remembered_at"] = consented[_SENSITIVE_PATH[block]]  # the user's OK to remember
     missing: list[dict[str, str]] = []
     for path in dropped:
@@ -2453,7 +2455,8 @@ def _over_limit(value: Any, limit: Any, unit: str) -> bool:
 
 
 def _record_item(rec: dict[str, Any]) -> dict[str, Any]:
-    return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text"}
+    # approved: true = the user stood behind this wording (the kit's approved_text reads "confirmed" too).
+    return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text", "state": "confirmed"}
 
 
 def _file_kind(text: str) -> Optional[str]:
@@ -2568,7 +2571,9 @@ def form_check(
             row["confirmed"] = False
         if _over_limit(item["value"], q.get("limit"), str(q.get("limit_unit") or "chars")):
             row["over_limit"] = True
-        if sensitive or item.get("confirmed") is False:
+        # A private question answered with the user's own confirmed answer is filled as it is (owner,
+        # 2026-10-26); only an answer the user has not stood behind waits for them on this form.
+        if (sensitive and item.get("state") != "confirmed") or item.get("confirmed") is False:
             row["needs_confirmation"] = True
             confirm.append(text)
         answered.append(row)
