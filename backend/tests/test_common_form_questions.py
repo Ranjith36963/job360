@@ -87,8 +87,8 @@ async def test_only_memory_or_guessed_and_the_assistant_is_told_what_to_draft(au
         assert saved.status_code == 200, saved.text
         rows = await _rows(client)
         assert (rows["email"]["label"], rows["how_heard"]["label"]) == ("memory", "guessed")
-        assert rows["how_heard"]["verified"] is False and rows["phone"]["label"] is None
-        assert {r["label"] for r in rows.values()} <= {"memory", "guessed", None}
+        assert rows["how_heard"]["verified"] is False and rows["phone"]["label"] == "not_known"
+        assert {r["label"] for r in rows.values()} <= {"memory", "guessed", "not_known"}
     profile = UserProfile(user_info=UserInfo(contact={"email": "a@b.c"}))
     open_ids = {o["id"]: o for o in cq.open_questions(profile)}
     assert "email" not in open_ids and open_ids["phone"]["save_to"] == "user_info.contact"

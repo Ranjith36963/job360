@@ -4548,7 +4548,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "profile" | "memory" | "cv" | "guess" | "draft";
+            source: "profile" | "memory" | "cv" | "guess" | "draft" | "not_known";
         };
         /** AskQuestionOut */
         AskQuestionOut: {
@@ -5121,8 +5121,12 @@ export interface components {
             id: string;
             /** Kit Key */
             kit_key?: string | null;
-            /** Label */
-            label?: ("memory" | "guessed") | null;
+            /**
+             * Label
+             * @default not_known
+             * @enum {string}
+             */
+            label: "memory" | "guessed" | "not_known";
             /** Question */
             question: string;
             /**

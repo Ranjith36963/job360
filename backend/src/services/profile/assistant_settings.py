@@ -899,6 +899,12 @@ class SubmitFacts:
     # (``ready.blank_unasked``; optional and consent fields too). Asks ``blank_unasked`` in EVERY mode;
     # a yes does NOT clear it - the blanks go in the job's ask (the user may answer "Leave blank").
     blank_unasked: tuple[str, ...] = ()
+    # Owner rule 2026-10-26 ("Don't leave any questions blank"): the newest ``form_filled``'s fields still
+    # empty (skipped, or typed with no text) that the user did not answer "Leave blank" - asked or not
+    # (``ready.blank_or_placeholder``), and its answers that are stand-in text (TBD, "[Company name]", the
+    # question repeated). Ask ``answer_blank`` / ``answer_placeholder`` in EVERY mode; a yes does NOT clear them.
+    answer_blank: tuple[str, ...] = ()
+    answer_placeholder: tuple[str, ...] = ()
     # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
     # part named here changed since the user said yes - ``expired`` (older than
     # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
@@ -934,7 +940,8 @@ REASONS: tuple[str, ...] = (
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
     "type_first_pending", "below_score_line", "answer_guessed", "answer_unapproved", "sensitive_unconfirmed",
     "approval_stale",
-    "required_unanswered", "grant_scope", "email_not_drafted", "blank_unasked",
+    "required_unanswered", "grant_scope", "email_not_drafted", "blank_unasked", "answer_blank",
+    "answer_placeholder",
 )
 
 # Owner 2026-10-24: check_submit tells the assistant plainly what to do next. A stop whose fix is the
@@ -1214,6 +1221,9 @@ def may_submit(
         ``fields_skipped`` field that no fill answer, no open or answered ask on this application and no
         saved answer of the user ("Leave blank" too) covers -> ask ``blank_unasked`` in every mode (owner
         rule 2026-10-26: ask ALL the blank questions, optional and consent ones included; a yes does NOT clear it)
+    4e3. the newest ``form_filled`` holds stand-in text (TBD, "[Company name]", the question repeated) -> ask
+        ``answer_placeholder``; then a field still empty that the user did not answer "Leave blank" (asked or
+        not) -> ask ``answer_blank`` (owner rule 2026-10-26: no question goes out blank; a yes does NOT clear them)
     5-role. same company + same title applied to inside ``DUPLICATE_ROLE_WINDOW_DAYS`` -> ask
         ``duplicate_role`` (inside ``_first_ask`` after the duplicate_job ask; ``duplicate_cleared`` or a yes clears it)
     5a. another assistant session read this application's kit inside
@@ -1354,6 +1364,10 @@ def may_submit(
         )
     if application.blank_unasked and not email:
         return blank_unasked_decision(application.blank_unasked)
+    if application.answer_placeholder and not email:
+        return answer_placeholder_decision(application.answer_placeholder)
+    if application.answer_blank and not email:
+        return answer_blank_decision(application.answer_blank)
     if application.other_session_hold is not None:
         held_by, session, since = application.other_session_hold
         who = f"{held_by}/{session}" if session else held_by
@@ -1415,12 +1429,38 @@ def may_submit(
 BLANK_UNASKED_SHOWN = 8
 
 
+def _named(items: tuple[str, ...]) -> str:
+    """The first :data:`BLANK_UNASKED_SHOWN` items, then how many more."""
+    shown = "; ".join(items[:BLANK_UNASKED_SHOWN])
+    if len(items) > BLANK_UNASKED_SHOWN:
+        shown += f" (and {len(items) - BLANK_UNASKED_SHOWN} more)"
+    return shown
+
+
+def answer_placeholder_decision(items: tuple[str, ...]) -> SubmitDecision:
+    """Rule 4e3: answers on the form are stand-in text, not answers."""
+    return SubmitDecision(
+        "ask", "answer_placeholder",
+        f"{len(items)} answer(s) on this form are placeholder text, not answers: {_named(items)}. Do not submit; "
+        "type the real answer (a fact from the profile or memory, or your best guess marked guessed), or put the "
+        "question in this job's ask_user; record a new form_filled and call check_submit again.",
+    )
+
+
+def answer_blank_decision(items: tuple[str, ...]) -> SubmitDecision:
+    """Rule 4e3: fields still empty that the user did not answer "Leave blank"."""
+    return SubmitDecision(
+        "ask", "answer_blank",
+        f"{len(items)} field(s) on this form are still blank: {_named(items)}. Do not submit; type the user's "
+        "answer from Needs you (an open ask is not an answer: wait for it), record a new form_filled and call "
+        'check_submit again. Only the user\'s own "Leave blank" lets a field stay empty.',
+    )
+
+
 def blank_unasked_decision(blanks: tuple[str, ...]) -> SubmitDecision:
     """Rule 4e2 (owner rule 2026-10-26): the form has blank fields nobody asked the user about; the detail
     names them (the first :data:`BLANK_UNASKED_SHOWN`, then how many more)."""
-    shown = "; ".join(blanks[:BLANK_UNASKED_SHOWN])
-    if len(blanks) > BLANK_UNASKED_SHOWN:
-        shown += f" (and {len(blanks) - BLANK_UNASKED_SHOWN} more)"
+    shown = _named(blanks)
     return SubmitDecision(
         "ask", "blank_unasked",
         f"{len(blanks)} field(s) on this form are blank and the user was never asked: {shown}. Do not submit; "

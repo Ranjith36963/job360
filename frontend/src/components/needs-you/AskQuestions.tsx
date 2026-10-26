@@ -51,6 +51,8 @@ export function AskQuestions({
         const open = editing.has(id);
         // No answer yet and nothing to pick from: not a guess. The assistant drafts it, or the owner writes it.
         const pending = !q.choices?.length && !open && row.value.trim() === "";
+        // Owner 2026-10-26: a question the assistant could not even guess reads "Not known" until you answer it.
+        const notKnown = q.source === "not_known" && !open && row.value.trim() === "";
         // A saved fact (profile/memory/cv) left as it is reads Verified even while a consent or personal
         // row waits for the owner's own click ("Needs your click" still shows); a guess reads Guessed until checked.
         const saved = isVerifiedSource(q.source) && q.answer.trim() !== "" && row.value === q.answer;
@@ -63,7 +65,12 @@ export function AskQuestions({
               <p className="whitespace-pre-wrap text-sm font-medium">{q.question}</p>
               <span className="flex flex-wrap gap-1">
                 {sensitive && !row.ok && <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${warn}`}>Needs your click</span>}
-                {!pending && !stub && (
+                {notKnown && (
+                  <span data-testid={`q-state-${askId}-${q.key}`} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${warn}`}>
+                    Not known
+                  </span>
+                )}
+                {!pending && !stub && !notKnown && (
                   <span data-testid={`q-state-${askId}-${q.key}`}
                     className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${state === "Verified" ? good : warn}`}>
                     {state}
@@ -110,7 +117,7 @@ export function AskQuestions({
             ) : pending ? (
               <>
                 <p className="text-sm text-muted-foreground" data-testid={`q-pending-${askId}-${q.key}`}>
-                  Your assistant will draft this on its next run
+                  {notKnown ? "Your assistant could not guess this. Please answer it." : "Your assistant will draft this on its next run"}
                 </p>
                 <div className="flex gap-2">
                   <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id, row)}>

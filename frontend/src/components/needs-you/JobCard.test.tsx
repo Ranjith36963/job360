@@ -192,6 +192,15 @@ describe("JobCard", () => {
     expect(answerAskQuestions).toHaveBeenCalledWith(a3.id, { city: "Berlin" });
   });
 
+  it("a question the assistant could not guess reads Not known until the owner answers it", () => {
+    const a = listing({}, [Q("postcode", "Postcode", "", "not_known")]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`q-state-${a.id}-postcode`)).toHaveTextContent("Not known");
+    expect(screen.getByTestId(`q-pending-${a.id}-postcode`)).toHaveTextContent("could not guess this");
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-postcode`));
+    expect(screen.getByTestId(`q-state-${a.id}-postcode`)).not.toHaveTextContent("Not known");
+  });
+
   it("a saved personal answer reads Verified but still waits for the owner's click", () => {
     const a = listing({}, [Q("gender", "Gender", "Female", "profile")]);
     render(<JobCard card={card([a])} onChanged={onChanged} />);

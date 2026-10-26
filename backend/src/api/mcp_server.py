@@ -2181,14 +2181,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         (`stop_run` true = end the run). `reason` = a code, `detail` = a sentence for the user. Reasons:
         paused, daily_cap_reached, weekly_cap_reached, outside_hours (`stop`, stop_run),
         already_applied, user_declined, company_cap_reached, pace_wait, company_avoided,
-        required_unanswered (ask for the answer), submit_unconfirmed (submit_attempted has no outcome) (`stop`),
+        required_unanswered (ask for the answer), submit_unconfirmed (no outcome) (`stop`),
         form_not_recorded, form_not_swept, form_count_mismatch, unreadable_fields, form_check_missing,
         form_pages_incomplete, email_not_drafted, type_first_pending (`fill`),
         duplicate_job (same job applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title),
-        new_site_first_time, cv_unsupported_claims,
-        answer_unapproved (`ask`: essay unapproved), blank_unasked (`ask`: blank fields never asked),
-        held_by_other_session,
+        new_site_first_time, cv_unsupported_claims, answer_unapproved (`ask`: essay unapproved),
+        blank_unasked, answer_blank, answer_placeholder (`ask`: blank/stand-in), held_by_other_session,
         unknown_site,
         form_host_mismatch / form_page_mismatch (not the site / page you filled),
         email_not_verified, ask_always_site, job_override_confirm,
@@ -2452,7 +2451,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `missing` (question, required, why; a saved value not among `options` is
         missing), `counts`, `needs_confirmation` (sensitive: confirm each with the
         user) and `knockouts` (years, degree, visa, salary: `stop_for_user`, tell
-        the user BEFORE drafting). Anything in `missing`: ask ONCE, in one message; never guess.
+        the user BEFORE drafting). Anything in `missing`: draft your best guess (source guessed); ask ONCE, in one
+        message; one you cannot even guess goes in the ask as not_known. Never submit a blank or stand-in answer.
         Read-only: it writes nothing, 404 if the application is not yours."""
         try:
             body = models.FormCheckRequest.model_validate({"questions": questions, "form_url": form_url})
@@ -2524,7 +2524,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         user to paste or copy question text.
         Every question carries an answer: source profile|memory|cv = the user said it or a saved fact;
         guess|draft = your best guess (consent = Yes, referred by an employee = No) or text you drafted
-        from profile facts. An empty answer or source none is refused; a guess is never memory. Type a
+        from profile facts. Only if you cannot even guess: source not_known, answer empty; any other empty or
+        stand-in answer ("owner to supply") and source none are refused; a guess is never memory. Type a
         draft only once approved; save approved written answers to user_info.answers with company and topic.
         `question` says exactly what the user must do, with the link. Set job facts yourself (update_job,
         e.g. country); never ask to confirm a fact the profile holds. `kind` = question, or

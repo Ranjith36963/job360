@@ -45,11 +45,13 @@ ASKS_WITHDRAW_REASON_MAX_CHARS = 200
 # a question, or a blocker only the user can clear on the form ("" = an ask from before 0087).
 ASK_KINDS = ("question", "captcha", "login", "upload", "safety")
 # Where an answer the assistant filled in came from (the web labels each row with it): profile/memory/cv
-# read as Verified, guess/draft as Guessed. Owner 2026-10-25: "not known yet" is banned, so every incoming
-# question carries an answer and `none` is refused on create. Rows stored before keep it (reads never
-# re-validate), and a merge still carries them (``merge_questions``, ``_sentence_row``).
+# read as Verified, guess/draft as Guessed. Owner 2026-10-26: draft nearly every answer; only when the
+# assistant cannot even guess is the row `not_known`, with an EMPTY answer (the web shows "Not known"). Stand-in
+# text ("unknown, owner to supply") is refused: that row is `not_known`. `none` stays refused on create; rows
+# stored before keep it (reads never re-validate), and a merge still carries them (``merge_questions``).
 # A guess is never `memory` - the recipes say so.
-ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft")
+NOT_KNOWN = "not_known"
+ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft", NOT_KNOWN)
 _UNANSWERED_EXAMPLE = {
     "key": "referred", "question": "Were you referred by an employee?", "answer": "No", "source": "guess",
     "choices": ["Yes", "No"],
@@ -114,12 +116,16 @@ def _item_text(where: str, raw: Any, limit: int, *, allow_empty: bool = False) -
 
 
 def unanswered_refusal(raw: Any) -> Optional[str]:
-    """The 422 text when any incoming question carries no answer (empty, or source ``none``), else None.
+    """The 422 text when any incoming question carries no answer (empty, stand-in text, or source ``none``)
+    and is not ``not_known``, or a ``not_known`` row carries an answer; else None.
 
-    Owner 2026-10-25: every form question in a new ask carries an answer. ALL the unanswered ones are
+    Owner 2026-10-26: every form question in a new ask carries an answer, except one the assistant cannot even
+    guess (source ``not_known``, answer empty). ALL the unanswered ones are
     named at once, then what to do and one valid example, so the assistant fixes the whole ask in one
     resend. Non-dict items are left to ``validate_questions``. Runs on the INCOMING rows only, before any
     merge: an older stored row with source none still merges and reads."""
+    from src.services.applications import kit  # noqa: PLC0415 - kit imports spine; keep this module light
+
     if not isinstance(raw, list):
         return None
     missing: list[str] = []
@@ -127,7 +133,13 @@ def unanswered_refusal(raw: Any) -> Optional[str]:
         if not isinstance(item, dict):
             continue
         answer = item.get("answer")
-        if item.get("source") == "none" or not clean_text(answer if isinstance(answer, str) else ""):
+        text = clean_text(answer if isinstance(answer, str) else "")
+        stand_in = bool(text) and kit.is_placeholder(str(item.get("question") or ""), text)
+        if item.get("source") == NOT_KNOWN:
+            bad = bool(text)
+        else:
+            bad = item.get("source") == "none" or not text or stand_in
+        if bad:
             key = item.get("key")
             missing.append(f"questions[{i}]" + (f" ({key})" if isinstance(key, str) and key else ""))
     if not missing:
@@ -135,11 +147,12 @@ def unanswered_refusal(raw: Any) -> Optional[str]:
     return "\n".join([
         f"Nothing was saved: {len(missing)} question{'s' if len(missing) != 1 else ''} with no answer: "
         f"{', '.join(missing)}.",
-        "Every question in an ask carries an answer; \"not known yet\" does not exist. Read the form yourself "
-        "and fill each answer: a fact the user said or saved = source profile|memory|cv; otherwise draft your "
-        "best guess, source guess (a choice or yes/no: data-processing consent = Yes, referred by an employee = "
-        "No) or draft (free text you wrote). Never leave an answer empty, never use source none, never ask the "
-        "user to paste or copy question text. Resend the whole ask in one call.",
+        "Every question in an ask carries an answer. Read the form yourself and fill each answer: a fact the "
+        "user said or saved = source profile|memory|cv; otherwise draft your best guess, source guess (a choice "
+        "or yes/no: data-processing consent = Yes, referred by an employee = No) or draft (free text you wrote). "
+        "Never leave an answer empty, never use source none, never type stand-in text like \"unknown, owner "
+        "to supply\"; only a question you cannot even guess is source not_known with an EMPTY answer. Never ask "
+        "the user to paste or copy question text. Resend the whole ask in one call.",
         f"Valid example question: {json.dumps(_UNANSWERED_EXAMPLE)}",
     ])
 
@@ -164,7 +177,9 @@ def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, An
         source = item.get("source")
         if source not in ASK_QUESTION_SOURCES:
             raise SpineError(422, f"{where}.source must be one of {', '.join(ASK_QUESTION_SOURCES)}")
-        answer = _item_text(f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS)
+        answer = _item_text(
+            f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS, allow_empty=source == NOT_KNOWN
+        )
         q: dict[str, Any] = {
             "key": key, "source": source, "answer": answer,
             "question": _item_text(f"{where}.question", item.get("question"), ASK_ITEM_QUESTION_MAX_CHARS),
@@ -209,8 +224,9 @@ def _fixed(rows: list[dict[str, Any]], keep: frozenset[str] | set[str] = frozens
 
 
 def merge_questions(older: list[dict[str, Any]], newer: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per fixed key, oldest first. A newer row replaces an older one, except a newer "not known
-    yet" row never drops an answer an older one proposed. At most ``ASKS_QUESTIONS_MAX`` rows (the newest).
+    """One row per fixed key, oldest first. A newer row replaces an older one, except a newer "not known"
+    row (``none`` / ``not_known``) never drops an answer an older one proposed. At most
+    ``ASKS_QUESTIONS_MAX`` rows (the newest).
     New asks can no longer carry "not known yet" (``unanswered_refusal``), but rows stored before
     2026-10-25 and a sentence-only ask's row (``_sentence_row``) can, so source none stays tolerated here."""
     rows: dict[str, dict[str, Any]] = {}
@@ -219,7 +235,8 @@ def merge_questions(older: list[dict[str, Any]], newer: list[dict[str, Any]]) ->
         key = q["key"]
         merged = q
         before = rows.get(key)
-        if before is not None and merged["source"] == "none" and before["source"] != "none":
+        unknown = ("none", NOT_KNOWN)
+        if before is not None and merged["source"] in unknown and before["source"] not in unknown:
             merged = {**merged, "source": before["source"], "answer": before["answer"]}
         rows.pop(key, None)
         rows[key] = merged

@@ -2592,7 +2592,8 @@
               "memory",
               "cv",
               "guess",
-              "draft"
+              "draft",
+              "not_known"
             ],
             "title": "Source",
             "type": "string"
@@ -4037,19 +4038,14 @@
             "title": "Kit Key"
           },
           "label": {
-            "anyOf": [
-              {
-                "enum": [
-                  "memory",
-                  "guessed"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "default": "not_known",
+            "enum": [
+              "memory",
+              "guessed",
+              "not_known"
             ],
-            "title": "Label"
+            "title": "Label",
+            "type": "string"
           },
           "question": {
             "title": "Question",
