@@ -456,7 +456,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             )}
             {ready && actions.includes("ready_card") && (
               <div className="w-full">
-                <ReadyCard card={ready.card} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} />
+                <ReadyCard card={ready.card} asks={detail.asks} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} />
               </div>
             )}
             {controls && (
@@ -466,6 +466,12 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 status={detail.status}
                 changesSinceApproved={cvChanges}
                 newFillWaiting={ready !== null}
+                handoff={(() => {
+                  const a = (detail.asks ?? []).find(
+                    (x) => x.status === "open" && !x.withdrawn_at && (x.kind === "captcha" || x.kind === "login"),
+                  ) as (typeof detail.asks)[number] & { can_refill?: boolean } | undefined;
+                  return a ? { finishHere: a.finish_here === true, canRefill: a.can_refill, heldSeconds: a.held_seconds } : undefined;
+                })()}
                 onChanged={(next) => {
                   setControls(next);
                   void load();

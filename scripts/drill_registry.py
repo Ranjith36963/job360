@@ -372,6 +372,17 @@ REGISTRY: dict[str, Guard] = {
         # NEGATIVE CONTROL: the comparison blinded, so the drill MUST fail.
         negative=[sys.executable, "scripts/check_api_types_drift.py", "--drill", "--break-checker"],
     ),
+    "scripts/ci_shards.py": Guard(
+        status="drilled",
+        # ci-offline.yml runs the backend suite in two shards (2026-10-26); a split
+        # that drops a file is a test that silently stops running. Drill plants a
+        # file in both shards, in none, an empty shard, a missing manifest, shards
+        # that collected differently and a test absent from the merged report, and
+        # demands each is named; the sound split passes.
+        drill=[sys.executable, "scripts/ci_shards.py", "--drill"],
+        # NEGATIVE CONTROL: the partition/report checks blinded, so the drill MUST fail.
+        negative=[sys.executable, "scripts/ci_shards.py", "--drill", "--break-checker"],
+    ),
     "scripts/check_lock_sync.py": Guard(
         status="drilled",
         # Says "Missing: X from lock file" before Linux `npm ci` does. #503

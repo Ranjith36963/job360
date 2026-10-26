@@ -8,7 +8,7 @@ import { toast } from "@/lib/toast";
 import { formatDate } from "@/lib/format-date";
 import { allowedActions } from "@/lib/application-actions";
 import { describeMark } from "@/components/applications/CvSeenButton";
-import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
+import { FormHandoff } from "@/components/applications/FormHandoff";
 
 const BTN =
   "rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50";
@@ -47,7 +47,11 @@ export function ApplicationDecisions({
   newFillWaiting = false,
   status = "considering",
   changesSinceApproved = 0,
+  handoff,
 }: {
+  /** From the open CAPTCHA / sign-in ask, when the page has it: whether Job360's browser still holds the
+   *  filled form and whether it can be refilled. Absent = the old behaviour (Finish it here). */
+  handoff?: { finishHere: boolean; canRefill?: boolean; heldSeconds?: number | null };
   applicationId: number;
   controls: ApplicationControls;
   onChanged: (next: ApplicationControls) => void;
@@ -58,7 +62,6 @@ export function ApplicationDecisions({
   changesSinceApproved?: number;
 }) {
   const [busy, setBusy] = useState(false);
-  const [finishing, setFinishing] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [receiptId, setReceiptId] = useState<number | null>(null);
 
@@ -115,17 +118,15 @@ export function ApplicationDecisions({
             </Link>
           )}
           {/* Job360's own browser met a human check: the person solves it on that same filled form. */}
-          {blocked.step === "Job360 browser" && blocked.reason === "captcha" && !finishing && (
-            <button
-              type="button"
-              data-testid="blocked-finish-here"
-              onClick={() => setFinishing(true)}
-              className={`${BTN} self-start`}
-            >
-              Finish it here
-            </button>
+          {blocked.step === "Job360 browser" && blocked.reason === "captcha" && (
+            <FormHandoff
+              applicationId={applicationId}
+              finishHere={handoff?.finishHere ?? true}
+              canRefill={handoff?.canRefill}
+              heldSeconds={handoff?.heldSeconds}
+              finishTestId="blocked-finish-here"
+            />
           )}
-          {finishing && <FinishInBrowser applicationId={applicationId} onDone={() => setFinishing(false)} />}
           <label className={`${NOTE} flex flex-col gap-1`}>
             Pressed Submit yourself? Paste the confirmation text (optional).
             <textarea

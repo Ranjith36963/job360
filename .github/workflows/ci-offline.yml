@@ -111,16 +111,39 @@ jobs:
           path: tested-tree.txt
           retention-days: 7
           overwrite: true
-  offline-suite:
+  # ─── The backend suite, in two shards, joined by `offline-suite` ──────────
+  # SHARDED 2026-10-26: one job ran the whole suite in ~13-16 min (median), most
+  # of it pytest. Two matrix jobs each run half the test FILES on their own
+  # runner and their own Postgres, so the wall time is one setup plus half the
+  # tests. The split is scripts/ci_shards.py: every test file pytest would
+  # consider, assigned by collected-test count (largest first, to the lighter
+  # shard, ties by name), proved disjoint and complete before a test runs, and
+  # proved again by `offline-suite` below across both shards' manifests and
+  # their merged junit report (every collected test id must be in it).
+  #
+  # These jobs are NOT the required check (they are named `offline-suite
+  # (shard k/2)`); `offline-suite` is, and it is red unless both shards
+  # succeeded. Same steps-skip rule as before: on a scope that is not `full`
+  # every step skips and the job reports success.
+  offline-suite-shard:
+    name: offline-suite (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
-    # Measured parallel wall time (pytest-xdist, below), 2026-10-25 audit of 84
-    # runs: median ~16 min, max ~25 min. 30 is the ceiling. (The 2026-10-19
-    # stopgap of 45 covered the old serial suite, which hit 24-30+ min.)
+    # Measured parallel wall time of the UNSHARDED job (pytest-xdist, below),
+    # 2026-10-25 audit of 84 runs: median ~16 min, max ~25 min. A shard runs
+    # half the tests, so 30 is a generous ceiling. (The 2026-10-19 stopgap of
+    # 45 covered the old serial suite, which hit 24-30+ min.)
     timeout-minutes: 30
     needs: [scope]
+    strategy:
+      # Both shards always finish: the skip ratchet and the "every collected
+      # test is in the report" proof need BOTH reports, and a red shard must
+      # not hide the other shard's failures by cancelling it.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # The backend is Postgres-backed now (pg shim); tests need a Postgres DB (no Redis: the rate-limit
     # tests use a fake client).
-    # This is the ONE backend job that runs pytest (ci.yml Backend is ruff +
+    # These are the ONE backend jobs that run pytest (ci.yml Backend is ruff +
     # mypy only) — without these, tests hit the dev-default :5433 and fail.
     services:
       postgres:
@@ -137,12 +160,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
       SESSION_SECRET: ci-test-secret-not-used-in-prod
-    # loop2-e2e-spotlight reads the lifecycle file's result from THIS run
-    # instead of running tests/test_e2e_lifecycle.py a second time.
-    outputs:
-      lifecycle: ${{ steps.lifecycle.outputs.lifecycle }}
-      lifecycle_counts: ${{ steps.lifecycle.outputs.counts }}
-      lifecycle_failed: ${{ steps.lifecycle.outputs.failed }}
+      SHARD: ${{ matrix.shard }}
+      SHARDS: "2"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.scope.outputs.scope == 'full'
@@ -169,15 +188,37 @@ jobs:
       # The Chromium build that the installed Python playwright expects, plus
       # its system libraries. Not cached: the download is the small part; the
       # apt step (--with-deps) is most of the time and an actions/cache entry
-      # would not cover it.
+      # would not cover it. Both shards install it: browser-agent test files
+      # can land in either.
       - name: Install Chromium for the browser-agent tests
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
-        run: python -m playwright install --with-deps chromium
+        # `--with-deps` went through the runner's Ubuntu apt mirror, which on
+        # 2026-10-26 crawled (3.7 MB in 2.5 min): one install took 14 min and
+        # cancelled #1258 at the 30-min timeout, and a timed-out attempt left
+        # apt holding the dpkg lock so a retry could not even start. The runner
+        # image already carries Chromium's libraries (that run's apt log listed
+        # every one "already the newest version"; only extra fonts were new).
+        # So: fetch only the browser (Playwright's CDN, seconds), PROVE it
+        # launches, and fall back to the apt deps only if that launch fails.
+        run: |
+          for attempt in 1 2; do
+            if timeout -k 10 300 python -m playwright install chromium; then break; fi
+            echo "::warning title=chromium::browser download attempt $attempt failed or took over 5 min"
+            if [ "$attempt" = 2 ]; then echo "::error title=chromium::Chromium download failed twice"; exit 1; fi
+          done
+          launch() {
+            python -c "from playwright.sync_api import sync_playwright as s
+          with s() as p: p.chromium.launch().close()"
+          }
+          if launch; then echo "Chromium launches with the runner's own libraries"; exit 0; fi
+          echo "::warning title=chromium::Chromium did not launch; installing its system libraries"
+          timeout -k 10 900 python -m playwright install-deps chromium
+          launch
       # Fail in seconds, not after the suite: the tests' own helper must now
       # see Chromium. If it ever does not, the suite would skip ~66 tests and
-      # the skip ratchet below goes red too ("Playwright + Chromium not
-      # installed" has a baseline of 0), so this only makes it fast and plain.
+      # the skip ratchet in `offline-suite` goes red too ("Playwright + Chromium
+      # not installed" has a baseline of 0), so this only makes it fast and plain.
       - name: The browser-agent tests can run (Chromium is visible to them)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
@@ -205,8 +246,23 @@ jobs:
           printf '#!/bin/sh\nexec docker exec -i %s pg_dump "$@"\n' "$PG_CONTAINER" > "$RUNNER_TEMP/pgbin/pg_dump"
           chmod +x "$RUNNER_TEMP/pgbin/pg_dump"
           echo "$RUNNER_TEMP/pgbin" >> "$GITHUB_PATH"
-      # THE FULL SUITE, UNFILTERED. `--junitxml` only adds a report file; it
-      # selects and deselects nothing.
+      # THIS SHARD'S FILES. The collection is the whole suite's, unfiltered;
+      # the split refuses (red) unless every test file lands in exactly one
+      # shard and none is empty (an empty list would make pytest run all).
+      - name: Pick this shard's test files (every file in exactly one shard)
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: |
+          if ! python -m pytest --collect-only -q -p no:randomly > /tmp/collected.txt 2>&1; then
+            tail -60 /tmp/collected.txt
+            echo "::error title=shards::pytest --collect-only failed; no shard can be picked"
+            exit 1
+          fi
+          python ../scripts/ci_shards.py split --collected /tmp/collected.txt \
+            --shards "$SHARDS" --shard "$SHARD" \
+            --files-out /tmp/shard-files.txt --manifest-out /tmp/shard-manifest.json
+      # THIS SHARD, UNFILTERED within its files. `--junitxml` only adds a report
+      # file; it selects and deselects nothing.
       # In parallel: pytest-xdist (a dev extra) runs one worker per vCPU
       # (`-n auto`, 4 on ubuntu-latest); the controller still writes ONE junit
       # report and the same `FAILED tests/...` lines. Every test owns its Postgres
@@ -214,57 +270,19 @@ jobs:
       # schema and copies it per test with pg_dump (tests/conftest.py
       # `_template_sql`; identity proved by tests/test_schema_template.py), so the
       # step prints the pg_dump it found.
-      - name: Run offline suite (full backend + automated Loop 2 E2E)
+      - name: Run offline suite (this shard of the full backend + automated Loop 2 E2E)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           set -o pipefail
           pg_dump --version
-          python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
-      # SKIP RATCHET (2026-10-20). A skipped test is a test that did not run, and
-      # the count only ever grew without anyone deciding it should. This fails
-      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py,
-      # in total or for any one reason, and prints each reason that is new or
-      # grew. "Playwright + Chromium not installed" has no allowance: Chromium is
-      # installed above, so one such skip is red. Raising the baseline is an
-      # edit to that file, which the `test-integrity` check (ci.yml) flags.
-      # `!cancelled()`: it still reports after a red suite; no report is red.
-      - name: Skipped tests do not grow (skip ratchet)
-        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
-        run: python scripts/test_integrity.py --skips /tmp/junit.xml
-      # Per-file verdict for tests/test_e2e_lifecycle.py, read from the report
-      # of the run above. `absent` (no report, or no lifecycle test in it) is
-      # NOT a pass: loop2-e2e-spotlight goes red on anything but `passed`.
-      - name: Lifecycle verdict for loop2-e2e-spotlight
-        id: lifecycle
-        if: always() && needs.scope.outputs.scope == 'full'
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import os
-          import xml.etree.ElementTree as ET
-          mod = "tests.test_e2e_lifecycle"
-          cases = []
-          if os.path.exists("/tmp/junit.xml"):
-              try:
-                  cases = [c for c in ET.parse("/tmp/junit.xml").getroot().iter("testcase")
-                           if c.get("classname", "") == mod
-                           or c.get("classname", "").startswith(mod + ".")]
-              except ET.ParseError:
-                  cases = []
-          bad = [c.get("name", "?") for c in cases
-                 if c.find("failure") is not None or c.find("error") is not None]
-          skipped = [c for c in cases if c.find("skipped") is not None]
-          ran = len(cases) - len(skipped)
-          verdict = "absent" if ran == 0 else ("failed" if bad else "passed")
-          print(f"lifecycle={verdict}")
-          print(f"counts={ran - len(bad)} passed, {len(bad)} failed, {len(skipped)} skipped")
-          print(f"failed={', '.join(bad)[:900]}")
-          PY
-      - name: Failed tests in job summary (offline suite)
+          mapfile -t files < /tmp/shard-files.txt
+          python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml "${files[@]}" | tee /tmp/pytest.out
+      - name: Failed tests in job summary (offline suite, this shard)
         if: failure() && needs.scope.outputs.scope == 'full'
         run: |
           {
-            echo "### Failed tests (offline suite)"
+            echo "### Failed tests (offline suite, shard $SHARD/$SHARDS)"
             echo '```'
             if [ ! -f /tmp/pytest.out ]; then
               echo 'pytest did not run (an earlier step failed)'
@@ -290,6 +308,160 @@ jobs:
             fi
           else
             echo "::error title=pytest::pytest did not run (an earlier step failed)"
+          fi
+      # What `offline-suite` joins: this shard's junit, its pytest output and
+      # its manifest (files, universe, collection). Pass or fail. A lost upload
+      # is red here, and its absence is red there.
+      - name: Hand this shard's report to offline-suite
+        if: always() && needs.scope.outputs.scope == 'full'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: offline-suite-shard-${{ matrix.shard }}
+          path: |
+            /tmp/junit.xml
+            /tmp/pytest.out
+            /tmp/shard-manifest.json
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: warn
+
+  # THE REQUIRED CHECK. Named exactly `offline-suite` (the ruleset on main and
+  # scripts/merge_cage.py TAG_CHECKS require it by name). Runs NO test: it is
+  # red unless `scope` and BOTH shards succeeded, and on a `full` scope it also
+  # proves the shards covered the whole suite exactly once, runs the skip
+  # ratchet over the merged report, and gives loop2-e2e-spotlight the lifecycle
+  # verdict.
+  #
+  # `always()`, not `!cancelled()`: a cancelled run must leave THIS check red
+  # (a shard result of `cancelled` is not `success`), never skipped -- a skipped
+  # required check reads as passed to the ruleset.
+  offline-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [scope, offline-suite-shard]
+    if: always()
+    # loop2-e2e-spotlight reads the lifecycle file's result from THIS run
+    # instead of running tests/test_e2e_lifecycle.py a second time.
+    outputs:
+      lifecycle: ${{ steps.lifecycle.outputs.lifecycle }}
+      lifecycle_counts: ${{ steps.lifecycle.outputs.counts }}
+      lifecycle_failed: ${{ steps.lifecycle.outputs.failed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.scope.outputs.scope == 'full'
+      # The join runs only stdlib Python (ci_shards.py, test_integrity.py and the
+      # lifecycle verdict), but on the same interpreter the shards used.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: needs.scope.outputs.scope == 'full'
+        with:
+          python-version: "3.12"
+      - name: Download both shards' reports
+        if: needs.scope.outputs.scope == 'full'
+        continue-on-error: true # a missing report is red in the next step
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: offline-suite-shard-*
+          path: ${{ runner.temp }}/shards
+      - name: Merge the shards' junit reports
+        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
+        run: |
+          shopt -s nullglob
+          reports=("$RUNNER_TEMP"/shards/*/junit.xml)
+          echo "shard reports: ${#reports[@]} of 2"
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "::error title=shards::no shard uploaded a junit report"
+            exit 1
+          fi
+          python scripts/ci_shards.py merge-junit /tmp/junit.xml "${reports[@]}"
+      # THE SPLIT, PROVED ACROSS JOBS: both shards collected the same suite, saw
+      # the same files, their file lists are disjoint and cover every file, and
+      # every collected test id is in the merged report.
+      - name: Every test ran in exactly one shard
+        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
+        run: |
+          shopt -s nullglob
+          python scripts/ci_shards.py verify --junit /tmp/junit.xml "$RUNNER_TEMP"/shards/*/shard-manifest.json
+      # SKIP RATCHET (2026-10-20). A skipped test is a test that did not run, and
+      # the count only ever grew without anyone deciding it should. This fails
+      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py,
+      # in total or for any one reason, and prints each reason that is new or
+      # grew. "Playwright + Chromium not installed" has no allowance: Chromium is
+      # installed in both shards, so one such skip is red. Raising the baseline
+      # is an edit to that file, which the `test-integrity` check (ci.yml) flags.
+      # It reads the MERGED report: both shards' skips, counted together.
+      # `!cancelled()`: it still reports after a red suite; no report is red.
+      - name: Skipped tests do not grow (skip ratchet)
+        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
+        run: python scripts/test_integrity.py --skips /tmp/junit.xml
+      # Per-file verdict for tests/test_e2e_lifecycle.py, read from the merged
+      # report (the file ran in exactly one shard). `absent` (no report, or no
+      # lifecycle test in it) is NOT a pass: loop2-e2e-spotlight goes red on
+      # anything but `passed`.
+      - name: Lifecycle verdict for loop2-e2e-spotlight
+        id: lifecycle
+        if: always() && needs.scope.outputs.scope == 'full'
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import xml.etree.ElementTree as ET
+          mod = "tests.test_e2e_lifecycle"
+          cases = []
+          if os.path.exists("/tmp/junit.xml"):
+              try:
+                  cases = [c for c in ET.parse("/tmp/junit.xml").getroot().iter("testcase")
+                           if c.get("classname", "") == mod
+                           or c.get("classname", "").startswith(mod + ".")]
+              except ET.ParseError:
+                  cases = []
+          bad = [c.get("name", "?") for c in cases
+                 if c.find("failure") is not None or c.find("error") is not None]
+          skipped = [c for c in cases if c.find("skipped") is not None]
+          ran = len(cases) - len(skipped)
+          verdict = "absent" if ran == 0 else ("failed" if bad else "passed")
+          print(f"lifecycle={verdict}")
+          print(f"counts={ran - len(bad)} passed, {len(bad)} failed, {len(skipped)} skipped")
+          print(f"failed={', '.join(bad)[:900]}")
+          PY
+      # The shards' FAILED/ERROR lines, again, on THIS check run: it is the
+      # required one, so it is where a reader of the annotations looks.
+      - name: Failed tests in job summary (offline suite, both shards)
+        if: always() && needs.scope.outputs.scope == 'full' && needs.offline-suite-shard.result != 'success'
+        run: |
+          shopt -s nullglob
+          outs=("$RUNNER_TEMP"/shards/*/pytest.out)
+          {
+            echo "### Failed tests (offline suite, both shards)"
+            echo '```'
+            if [ "${#outs[@]}" -eq 0 ]; then
+              echo 'no shard pytest output (an earlier step failed in each shard)'
+            else
+              for f in "${outs[@]}"; do
+                echo "--- $(basename "$(dirname "$f")")"
+                grep -E '^(FAILED|ERROR) ' "$f" | head -50 || true
+                grep -E '[0-9]+ (failed|passed|error)' "$f" | tail -1 || true
+              done
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for f in "${outs[@]}"; do
+            grep -E '^(FAILED|ERROR) ' "$f" | head -50 | while IFS= read -r line; do
+              echo "$line"
+              echo "::error title=pytest::${line//%/%25}"
+            done || true
+          done
+      # THE VERDICT. Last, and `always()`, so every step above still reports.
+      # Red unless scope and both shards succeeded: failure, cancelled and
+      # skipped are all red here.
+      - name: Both shards succeeded
+        if: always()
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SHARD_RESULT: ${{ needs.offline-suite-shard.result }}
+        run: |
+          echo "scope: $SCOPE_RESULT; shards: $SHARD_RESULT"
+          if [ "$SCOPE_RESULT" != "success" ] || [ "$SHARD_RESULT" != "success" ]; then
+            echo "::error title=offline-suite::scope=$SCOPE_RESULT, shards=$SHARD_RESULT -- offline-suite is green only when both shards succeeded"
+            exit 1
           fi
 
   frontend-e2e:
@@ -387,9 +559,9 @@ jobs:
     # REQUIRED check, so a lifecycle/log-fill regression is obvious in the
     # Actions summary without scanning the whole suite. THIS JOB RUNS NO TEST.
     #
-    # offline-suite already runs tests/test_e2e_lifecycle.py inside the full
-    # suite (never deselected there); this job reads that run's per-file verdict
-    # (the junit report) and reports it. Green
+    # offline-suite's shards already run tests/test_e2e_lifecycle.py inside the
+    # full suite (in exactly one shard, never deselected); this job reads the
+    # per-file verdict offline-suite takes from the merged junit report. Green
     # ONLY on `passed`; `failed`, `absent` (no report / no lifecycle case ran),
     # or an offline-suite that never got that far is red. Until 2026-10-19 it
     # booted its own Postgres + Redis and re-ran the file (~1 runner-min per PR).
@@ -414,7 +586,7 @@ jobs:
           {
             echo "### Lifecycle verdict — tests/test_e2e_lifecycle.py"
             echo ""
-            echo "Read from \`offline-suite\` (same run, same tree; the file ran once, inside the full suite)."
+            echo "Read from \`offline-suite\` (same run, same tree; the file ran once, in one shard of the full suite)."
             echo ""
             echo "- verdict: \`${LIFECYCLE:-absent}\` (${COUNTS:-no report})"
             echo "- offline-suite job result: \`$SUITE_RESULT\`"
