@@ -291,15 +291,31 @@ async def finish_here_ask_ids(
     if blocks is None:
         blocks = await open_blocks(db, user_id, open_app_ids(asks))
     out: set[int] = set()
-    for app_id in open_app_ids(asks):
+    live: dict[int, bool] = {}
+    for a in asks:
+        if a.get("status") != "open" or not a.get("application_id"):
+            continue
+        app_id = int(a["application_id"])
         p = blocks.get(app_id, {})
         by = p.get(BY_KEY)
         ours = by == BY_BROWSER or (by is None and p.get("step") == "Job360 browser")
-        if p.get("reason") == "captcha" and ours and isinstance(p.get("ask_id"), int) and browser_hold_live(
-            user_id, app_id
-        ):
-            out.add(int(p["ask_id"]))
+        if p.get("reason") not in FINISH_HERE_REASONS or not ours:
+            continue
+        # The block's own ask, OR any open CAPTCHA ask on that job: an ask_user (or the one-ask-per-
+        # job merge) supersedes the ask the block opened, and the block keeps the old id (2026-10-26, app 138).
+        if a["id"] != p.get("ask_id") and a.get("kind") not in FINISH_HERE_KINDS:
+            continue
+        if app_id not in live:
+            live[app_id] = browser_hold_live(user_id, app_id)
+        if live[app_id]:
+            out.add(int(a["id"]))
     return out
+
+
+# The open blocks a user can finish in the page Job360's browser holds, and the asks that stand for them. A
+# sign-in stays the own browser's (routing.py; passwords are typed on Settings, Job sites, never here).
+FINISH_HERE_REASONS = frozenset({"captcha", "bot_check"})
+FINISH_HERE_KINDS = frozenset({"captcha"})
 
 
 async def browser_for_asks(

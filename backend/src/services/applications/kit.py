@@ -109,6 +109,23 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def answers_sha256(payload: dict[str, Any]) -> Optional[str]:
+    """What a ``form_filled`` put on the form, as one hash: every (question, answer) pair, case and spacing
+    folded, order-free. Never the ``source`` labels, the field count or the event id (owner 2026-10-26: a
+    re-recorded fill with the same answers kept going stale). None when the fill lists no readable answers."""
+    typed = payload.get("answers")
+    if not isinstance(typed, list) or not typed:
+        return None
+    def fold(text: Any) -> str:
+        return " ".join(str(text).split()).casefold()
+
+    pairs = sorted(
+        (fold(a["question"]), fold(a["answer"])) for a in typed if isinstance(a, dict) and "question" in a
+        and "answer" in a
+    )
+    return sha256_text(json.dumps(pairs)) if len(pairs) == len(typed) else None
+
+
 def hash_token(token: str) -> str:
     """What is stored for a file-link token (the token itself never is)."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -453,6 +470,7 @@ async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: in
         "cover_letter_id": letter["id"] if letter else None,
         "cover_letter_sha256": sha256_text(letter["text"]) if letter else None,
         "form_filled_event_id": int(fills[0]["id"]) if fills else None,
+        "form_answers_sha256": answers_sha256(fills[0]["payload"]) if fills else None,
         "form_url": await latest_form_url(db, user_id, application_id),
         "profile_edit_id": await _assistant_edit_id(db, user_id),
     }
@@ -486,7 +504,10 @@ async def approval_stale(
         if stamp.get(key) != now_fp[key]:
             return "cover_letter"
     was_fill, fill = stamp.get("form_filled_event_id"), now_fp["form_filled_event_id"]
-    if isinstance(was_fill, int) and fill != was_fill:
+    # The content decides: a newer fill with the very same answers (a re-record, a refill) keeps the yes.
+    was_sum = stamp.get("form_answers_sha256")
+    same_answers = isinstance(was_sum, str) and was_sum == now_fp["form_answers_sha256"]
+    if isinstance(was_fill, int) and fill != was_fill and not same_answers:
         from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
         if fill is None or not await ready.refill_keeps_answers(db, user_id, app_row, was_fill, fill):
