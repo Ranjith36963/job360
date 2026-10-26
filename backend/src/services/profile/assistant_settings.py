@@ -30,6 +30,9 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   The user's own scheduled task reads it through MCP ``whats_due``; Job360 never runs a hunt itself.
 * ``people_hunt`` — ``True`` | ``False`` (default): may the user's scheduled task find people to reach
   for new applications (``whats_due`` duty ``reach``). It never sends (owner 2026-10-24).
+* ``pc_on_hours`` — ``{"days": [...], "from": "HH:MM", "to": "HH:MM"}`` in the user's timezone: when their
+  computer is usually on. Tasks Job360's own browser could not finish wait for it (the own-browser queue,
+  owner 2026-10-25); ``None`` = any time. Always a "safer" change: every send still needs the user's click.
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -60,7 +63,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -109,12 +112,14 @@ OUTREACH_SEND_AUTO = "auto"
 HUNT_EVERY_PATH = f"{HEAD}.hunt_every_hours"
 HUNT_EVERY_MAX = 168  # one week
 PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
+PC_ON_HOURS_PATH = f"{HEAD}.pc_on_hours"
+PC_ON_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
-    PEOPLE_HUNT_PATH,
+    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -254,6 +259,21 @@ def _validate_apply_hours(path: str, value: Any) -> dict[str, str]:
     return out
 
 
+def _validate_pc_on_hours(path: str, value: Any) -> dict[str, Any]:
+    """``{"days": ["mon", ...], "from": "HH:MM", "to": "HH:MM"}`` (24-hour, the user's own timezone): the days
+    are unique, non-empty and from mon..sun (stored in week order); ``from`` and ``to`` differ. ``from`` later
+    than ``to`` is an overnight window that belongs to its start day."""
+    if not isinstance(value, dict) or set(value) != {"days", "from", "to"}:
+        raise _bad(path, 'must be an object with exactly "days", "from" and "to"')
+    days = value["days"]
+    if not isinstance(days, list) or not days or any(not isinstance(d, str) for d in days):
+        raise _bad(path, '"days" must be a non-empty list of mon, tue, wed, thu, fri, sat, sun')
+    if any(d not in PC_ON_DAYS for d in days) or len(set(days)) != len(days):
+        raise _bad(path, '"days" must be unique and from mon, tue, wed, thu, fri, sat, sun')
+    times = _validate_apply_hours(path, {"from": value["from"], "to": value["to"]})
+    return {"days": [d for d in PC_ON_DAYS if d in days], **times}
+
+
 def _validate_grant_until(path: str, value: Any, now: datetime) -> str:
     """The end of a counted auto grant: an ISO-8601 time WITH an offset, in the future, at most
     ``ASSISTANT_AUTO_GRANT_MAX_DAYS`` ahead. No "until_resumed": a grant always ends."""
@@ -346,6 +366,8 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _gap_minutes(path, value)
     if path == APPLY_HOURS_PATH:
         return _validate_apply_hours(path, value)
+    if path == PC_ON_HOURS_PATH:
+        return _validate_pc_on_hours(path, value)
     if path == AUTO_GRANT_COUNT_PATH:
         return _int_in_range(path, value, 1, settings.ASSISTANT_AUTO_GRANT_MAX)
     if path == AUTO_GRANT_UNTIL_PATH:
@@ -392,6 +414,7 @@ class EffectiveSettings:
     outreach_send: str = DEFAULT_OUTREACH_SEND
     hunt_every_hours: Optional[int] = None  # None = no scheduled hunt
     people_hunt: bool = False
+    pc_on_hours: Optional[dict[str, Any]] = None  # None = any time
 
 
 def _hunt_every(raw: Any) -> Optional[int]:
@@ -399,6 +422,49 @@ def _hunt_every(raw: Any) -> Optional[int]:
     if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= HUNT_EVERY_MAX:
         return None
     return raw
+
+
+def _pc_on_hours(raw: Any) -> Optional[dict[str, Any]]:
+    """The stored PC-on window as ``{"days", "from", "to"}``; anything unreadable (a historical row) = any time."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("days"), list):
+        return None
+    days = raw["days"]
+    if not days or any(d not in PC_ON_DAYS for d in days) or len(set(days)) != len(days):
+        return None
+    times = _hours_tuple({"from": raw.get("from"), "to": raw.get("to")})
+    if times is None:
+        return None
+    return {"days": [d for d in PC_ON_DAYS if d in days], "from": times[0], "to": times[1]}
+
+
+def pc_on_state(hours: Optional[dict[str, Any]], now_local: datetime) -> tuple[bool, Optional[datetime]]:
+    """Is the user's computer expected to be on at ``now_local`` (a time in THEIR timezone)? Returns
+    ``(open, opens_at)``: ``opens_at`` is the next opening (in the same timezone) when closed, else ``None``.
+    No window (``None``) = any time = open. An overnight window belongs to its START day: ``fri 22:00-06:00``
+    is open Saturday 05:00 and closed Saturday 22:00. Pure."""
+    window = _pc_on_hours(hours)
+    if window is None:
+        return True, None
+    start, end = _hhmm_minutes(window["from"]), _hhmm_minutes(window["to"])
+    days = {PC_ON_DAYS.index(d) for d in window["days"]}
+    minute = now_local.hour * 60 + now_local.minute
+    today = now_local.weekday()
+    if start < end:
+        if today in days and start <= minute < end:
+            return True, None
+    else:  # overnight
+        if today in days and minute >= start:
+            return True, None
+        if (today - 1) % 7 in days and minute < end:
+            return True, None
+    for ahead in range(8):
+        day = now_local.date() + timedelta(days=ahead)
+        if day.weekday() not in days:
+            continue
+        opening = datetime.combine(day, time(start // 60, start % 60), tzinfo=now_local.tzinfo)
+        if opening > now_local:
+            return False, opening
+    return False, None  # unreachable: a non-empty day list always opens within a week
 
 
 def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
@@ -438,6 +504,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         outreach_send=_outreach_send(s.outreach_send),
         hunt_every_hours=_hunt_every(s.hunt_every_hours),
         people_hunt=bool(s.people_hunt),
+        pc_on_hours=_pc_on_hours(s.pc_on_hours),
     )
 
 
@@ -490,6 +557,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return _outreach_send(raw)
     if path == HUNT_EVERY_PATH:
         return _hunt_every(raw)
+    if path == PC_ON_HOURS_PATH:
+        return _pc_on_hours(raw)
     raise KeyError(path)
 
 
@@ -584,6 +653,8 @@ def classify_change(
                          outreach in the user's name)                  (applies at once)
     hunt_every_hours     off -> a number, or a SMALLER number (the      turned off, or a larger
                          assistant hunts on its own more often)         number
+    pc_on_hours          never (a window frees nothing: every send       always
+                         still needs the user's own click)
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -642,6 +713,8 @@ def classify_change(
         before_rank = float("inf") if not before else before
         after_rank = float("inf") if not after else after
         return "riskier" if after_rank < before_rank else "safer"
+    if path == PC_ON_HOURS_PATH:
+        return "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -2317,6 +2390,7 @@ def build_settings_view(
         "outreach_send": {"value": raw.outreach_send, "effective": eff.outreach_send},
         "hunt_every_hours": {"value": raw.hunt_every_hours, "effective": eff.hunt_every_hours},
         "people_hunt": {"value": raw.people_hunt, "effective": eff.people_hunt},
+        "pc_on_hours": {"value": raw.pc_on_hours, "effective": eff.pc_on_hours},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

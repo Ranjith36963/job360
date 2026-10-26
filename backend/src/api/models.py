@@ -296,6 +296,7 @@ class AssistantSettingsView(BaseModel):
     outreach_send: SettingFieldOut
     hunt_every_hours: SettingFieldOut
     people_hunt: SettingFieldOut
+    pc_on_hours: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""

@@ -180,6 +180,10 @@ SHAPES: dict[str, dict[str, Any]] = {
         "example": True,
         "note": "find people to reach for new applications on the schedule; never sends. On needs the user's OK",
     },
+    _settings.PC_ON_HOURS_PATH: {
+        "example": {"days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "18:00"},
+        "note": "when the user's PC is on, in their timezone; null = any time. A from later than to runs overnight",
+    },
     _settings.HUNT_EVERY_PATH: {
         "example": 6, "note": "hunt every N hours, 1-168; null or 0 = off. Turning it on needs the user's OK",
     },

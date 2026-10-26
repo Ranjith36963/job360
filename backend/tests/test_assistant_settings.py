@@ -49,6 +49,8 @@ SIX = (
     "assistant_settings.hunt_every_hours",
     # 2026-10-24 people_hunt (tests/test_people_hunt.py).
     "assistant_settings.people_hunt",
+    # 2026-10-25 pc_on_hours (tests/test_pc_on_hours.py).
+    "assistant_settings.pc_on_hours",
 )
 PROGRESS = "assistant_settings.setup_progress"
 

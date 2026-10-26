@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -115,6 +116,67 @@ def _bring(client, **overrides) -> dict:
     return r.json()
 
 
+_CV_TEXT = "Jane Doe\nML Engineer\nShipped RAG services in Python and PyTorch."
+_MCP_NOTE = "e2e: the agent read the tailored CV over MCP"
+
+
+def _artifact_row(db_path, application_id, artifact_id) -> dict:
+    con = pgsync.connect(db_path)
+    try:
+        cur = con.execute(
+            "SELECT kind, text, made_by, profile_version FROM application_artifacts "
+            "WHERE id=? AND application_id=?",
+            (artifact_id, application_id),
+        )
+        row = cur.fetchone()
+    finally:
+        con.close()
+    assert row is not None, "the tailor stored no artifact row"
+    return dict(zip(("kind", "text", "made_by", "profile_version"), row))
+
+
+def _event_rows(db_path, application_id) -> list[dict]:
+    con = pgsync.connect(db_path)
+    try:
+        cur = con.execute(
+            "SELECT id, event_type, detail FROM application_events WHERE application_id=? ORDER BY id",
+            (application_id,),
+        )
+        rows = cur.fetchall()
+    finally:
+        con.close()
+    return [dict(zip(("id", "event_type", "detail"), r)) for r in rows]
+
+
+async def _mcp_get_and_record(token: str, application_id: int) -> tuple[dict, dict]:
+    """get_application then record_event over the real /api/mcp endpoint, the
+    way the MCP tests drive it (bearer token, in-process ASGI transport)."""
+    import httpx2
+    from mcp.client import Client
+    from mcp.client.streamable_http import streamable_http_client
+
+    from src.api.main import app
+    from src.api.mcp_server import mcp_runtime
+
+    def _ok(result) -> dict:
+        assert not result.is_error, result.content[0].text
+        return json.loads(result.content[0].text)
+
+    http = httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    async with mcp_runtime():
+        async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
+            got = _ok(await mcp.call_tool(
+                "get_application", {"application_id": application_id, "with_artifact_text": True}
+            ))
+            recorded = _ok(await mcp.call_tool(
+                "record_event", {"application_id": application_id, "event_type": "note", "detail": _MCP_NOTE}
+            ))
+    return got, recorded
+
+
 class _LogCapture:
     """Capture every job360.* event (incl. the propagate=False audit logger)."""
 
@@ -188,6 +250,35 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
             json={"score": 72, "verdict": "worth applying", "score_source": "full_ad"},
         ).status_code == 200
 
+        # the tailor, as the now-VERIFIED user: a CV version saved on THIS
+        # application (M3 — a new artifact row stamped made_by/profile_version).
+        # Decision 28: the tailor calls no LLM, so there is nothing to mock.
+        assert client.get(f"/api/tailor/{job_id}").json()["documents"] == []
+        saved = client.patch(f"/api/tailor/{job_id}/cv", json={"text": _CV_TEXT})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["made_by"] == "human" and saved.json()["version_no"] == 1
+        bundle = client.get(f"/api/tailor/{job_id}")
+        assert bundle.status_code == 200, bundle.text
+        assert bundle.json()["application_id"] == application_id
+        assert [(d["doc_kind"], d["text"]) for d in bundle.json()["documents"]] == [("cv", _CV_TEXT)]
+        art = _artifact_row(app_db, application_id, saved.json()["artifact_id"])
+        assert art["kind"] == "cv" and art["text"] == _CV_TEXT, art
+        assert art["made_by"] == "human" and art["profile_version"] is not None, art
+
+        # MCP — the agent's door, over the same application (M5: tools call the
+        # route functions). Read it back, then append one event (M3).
+        token = client.post("/api/tokens", json={"name": "e2e-agent"})
+        assert token.status_code == 201, token.text
+        got, recorded = asyncio.run(_mcp_get_and_record(token.json()["token"], application_id))
+        assert got["id"] == application_id and got["job_id"] == job_id
+        cv_versions = [a for a in got["artifacts"] if a["kind"] == "cv"]
+        assert [(a["id"], a["text"], a["made_by"]) for a in cv_versions] == [
+            (saved.json()["artifact_id"], _CV_TEXT, "human")
+        ]
+        rows = _event_rows(app_db, application_id)
+        assert ("note", _MCP_NOTE) in [(r["event_type"], r["detail"]) for r in rows], rows
+        assert recorded["event_id"] in {r["id"] for r in rows if r["event_type"] == "note"}, recorded
+
         # a receipt
         assert client.post(
             f"/api/applications/{application_id}/receipt", json={"channel": "company site"}
@@ -214,6 +305,7 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         "session_created",       # K
         "session_revoked",       # K
         "job_brought",           # C — the product's front door
+        "mcp_tool_call",         # the agent's door (MCP audit)
         "client_event",          # D
         "http_error",            # 3b (the 404)
         "validation_error",      # 3b (the 422)
