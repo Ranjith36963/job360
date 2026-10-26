@@ -16,7 +16,7 @@ const success = vi.fn();
 const error = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => success(m), error: (m: string) => error(m) } }));
 
-import JobSitesPage from "../page";
+import { JobSitesPanel as JobSitesPage } from "./JobSitesPanel";
 
 const SHOT = {
   status: "ok", url: "https://jobs.acme.com/login", title: "Sign in - Acme",

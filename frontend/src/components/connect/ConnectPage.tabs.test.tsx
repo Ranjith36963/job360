@@ -5,9 +5,12 @@ let tabParam: string | null = null;
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
-  usePathname: () => "/settings/connect",
+  usePathname: () => "/connect",
   useSearchParams: () => new URLSearchParams(tabParam ? `tab=${tabParam}` : ""),
 }));
+vi.mock("@/components/settings/CalendarFeedSection", () => ({ CalendarFeedSection: () => null }));
+vi.mock("@/components/profile/AssistantTab", () => ({ AssistantTab: () => <p data-testid="assistant-tab-stub" /> }));
+vi.mock("@/components/connect/JobSitesPanel", () => ({ JobSitesPanel: () => <p data-testid="job-sites-stub" /> }));
 vi.mock("@/lib/api", () => ({
   createToken: vi.fn(),
   getProfile: vi.fn().mockResolvedValue({ preferences: {} }),
@@ -24,7 +27,7 @@ vi.mock("@/components/connect/SendStartsAssistantCard", () => ({
   SendStartsAssistantCard: () => <div data-testid="send-card" />,
 }));
 
-import ConnectAgentPage from "./page";
+import ConnectAgentPage from "./ConnectPage";
 
 describe("ConnectAgentPage tabs", () => {
   beforeEach(() => {
@@ -49,10 +52,32 @@ describe("ConnectAgentPage tabs", () => {
     expect(screen.queryByTestId("send-card")).toBeNull();
   });
 
+  it("has the six tabs in the owner's order", () => {
+    render(<ConnectAgentPage />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Setup",
+      "Assistant configure",
+      "Schedules & start links",
+      "Job sites",
+      "Connected apps",
+      "Developers",
+    ]);
+  });
+
+  it("?tab=assistant and ?tab=job-sites open those tabs", () => {
+    tabParam = "assistant";
+    const a = render(<ConnectAgentPage />);
+    expect(screen.getByTestId("assistant-tab-stub")).toBeInTheDocument();
+    a.unmount();
+    tabParam = "job-sites";
+    render(<ConnectAgentPage />);
+    expect(screen.getByTestId("job-sites-stub")).toBeInTheDocument();
+  });
+
   it("clicking a tab updates the URL", () => {
     render(<ConnectAgentPage />);
     fireEvent.click(screen.getByTestId("connect-tab-schedules"));
-    expect(replace).toHaveBeenCalledWith("/settings/connect?tab=schedules", { scroll: false });
+    expect(replace).toHaveBeenCalledWith("/connect?tab=schedules", { scroll: false });
     expect(screen.getByTestId("send-card")).toBeInTheDocument();
   });
 });

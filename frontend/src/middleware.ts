@@ -9,9 +9,12 @@ const PROTECTED_PATHS = [
   "/receipts",
   "/applications",
   "/people",
+  "/outreach",
   "/stats",
   "/needs-you",
   "/settings",
+  "/account",
+  "/connect",
   "/oauth",
 ];
 

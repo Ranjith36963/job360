@@ -382,7 +382,7 @@ export function CVUpload({
               <p className="text-muted-foreground mb-2">
                 Job360 stores the text and the parts it can read structurally.{" "}
                 <a
-                  href="/settings/connect"
+                  href="/connect"
                   className="underline underline-offset-2 hover:text-foreground"
                 >
                   Connect your assistant
@@ -661,7 +661,7 @@ export function CVUpload({
         <p className="text-xs text-muted-foreground mb-4">
           Optional. Job360 stores what it reads there;{" "}
           <a
-            href="/settings/connect"
+            href="/connect"
             className="underline underline-offset-2 hover:text-foreground"
           >
             your connected assistant
