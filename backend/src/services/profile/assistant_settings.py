@@ -894,6 +894,11 @@ class SubmitFacts:
     # (any country) the user has not confirmed (``ready.has_unconfirmed_sensitive``, the card's ``sensitive``
     # flag). Asks ``sensitive_unconfirmed`` in EVERY mode; a yes does NOT clear it - the user confirms the answer.
     sensitive_unconfirmed: bool = False
+    # Owner rule 2026-10-26 ("ask ALL the blank questions"): the newest ``form_filled``'s ``fields_skipped``
+    # that no fill answer, no ask on this application and no saved answer of the user covers
+    # (``ready.blank_unasked``; optional and consent fields too). Asks ``blank_unasked`` in EVERY mode;
+    # a yes does NOT clear it - the blanks go in the job's ask (the user may answer "Leave blank").
+    blank_unasked: tuple[str, ...] = ()
     # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
     # part named here changed since the user said yes - ``expired`` (older than
     # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
@@ -929,7 +934,7 @@ REASONS: tuple[str, ...] = (
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
     "type_first_pending", "below_score_line", "answer_guessed", "answer_unapproved", "sensitive_unconfirmed",
     "approval_stale",
-    "required_unanswered", "grant_scope", "email_not_drafted",
+    "required_unanswered", "grant_scope", "email_not_drafted", "blank_unasked",
 )
 
 # Owner 2026-10-24: check_submit tells the assistant plainly what to do next. A stop whose fix is the
@@ -1205,6 +1210,10 @@ def may_submit(
     4e. (after the auto duplicate stop) the newest ``form_filled`` has a ``guessed`` answer the user
         has not verified, or one the user EDITED that the form still holds -> ask ``answer_guessed`` in
         every mode (owner 2026-10-19; a yes does NOT clear it - the user verifies or edits the answer)
+    4e2. (after ``answer_unapproved`` / ``sensitive_unconfirmed``) the newest ``form_filled`` names a
+        ``fields_skipped`` field that no fill answer, no open or answered ask on this application and no
+        saved answer of the user ("Leave blank" too) covers -> ask ``blank_unasked`` in every mode (owner
+        rule 2026-10-26: ask ALL the blank questions, optional and consent ones included; a yes does NOT clear it)
     5-role. same company + same title applied to inside ``DUPLICATE_ROLE_WINDOW_DAYS`` -> ask
         ``duplicate_role`` (inside ``_first_ask`` after the duplicate_job ask; ``duplicate_cleared`` or a yes clears it)
     5a. another assistant session read this application's kit inside
@@ -1246,7 +1255,7 @@ def may_submit(
     Rules 1-4c (4a-4a3, 4b-email, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
     ``below_score_line`` (4a4), ``answer_guessed``, ``answer_unapproved`` and
-    ``sensitive_unconfirmed`` (4e) are NEVER cleared by a yes.
+    ``sensitive_unconfirmed`` (4e) and ``blank_unasked`` (4e2) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
@@ -1343,6 +1352,8 @@ def may_submit(
             "criminal record...) and the user has not confirmed the answer. Do not submit; raise it with "
             "ask_user, the user checks it on Needs you, then record a new form_filled.",
         )
+    if application.blank_unasked and not email:
+        return blank_unasked_decision(application.blank_unasked)
     if application.other_session_hold is not None:
         held_by, session, since = application.other_session_hold
         who = f"{held_by}/{session}" if session else held_by
@@ -1399,6 +1410,24 @@ def may_submit(
             f"ask yes again. {ask.detail}",
         )
     return ask
+
+
+BLANK_UNASKED_SHOWN = 8
+
+
+def blank_unasked_decision(blanks: tuple[str, ...]) -> SubmitDecision:
+    """Rule 4e2 (owner rule 2026-10-26): the form has blank fields nobody asked the user about; the detail
+    names them (the first :data:`BLANK_UNASKED_SHOWN`, then how many more)."""
+    shown = "; ".join(blanks[:BLANK_UNASKED_SHOWN])
+    if len(blanks) > BLANK_UNASKED_SHOWN:
+        shown += f" (and {len(blanks) - BLANK_UNASKED_SHOWN} more)"
+    return SubmitDecision(
+        "ask", "blank_unasked",
+        f"{len(blanks)} field(s) on this form are blank and the user was never asked: {shown}. Do not submit; "
+        "put EVERY blank field (optional, consent and file ones too) in this job's ONE ask_user, each with your "
+        'best answer and "Leave blank" in its choices; fill what the user answers, record a new form_filled, '
+        "and call check_submit again.",
+    )
 
 
 def _email_stop(application: SubmitFacts, site_host: Optional[str]) -> Optional[SubmitDecision]:
@@ -1465,7 +1494,8 @@ def _form_stop(application: SubmitFacts) -> Optional[SubmitDecision]:
             "The form has a required question with no saved answer. Never leave a required question blank "
             "and never guess: ask_user for every missing required answer (one message), save the answer, "
             "run check_form again, record a new form_checked (with missing_required), fill, sweep, and "
-            "call check_submit again. Optional questions may stay blank.",
+            "call check_submit again. Optional questions may stay blank only once the same ask put them "
+            "to the user.",
         )
     if application.form_pages_incomplete:
         return SubmitDecision(
