@@ -44,22 +44,11 @@ async def _second_user(email: str = "isolation-b@example.com") -> tuple[str, str
     from fastapi.testclient import TestClient
 
     from src.api.main import app
-    from src.core import settings
-    from src.repositories import pgsync
+    from tests._signin import sign_in
 
     sync_client = TestClient(app)
-    r = sync_client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
-    assert r.status_code == 201, r.text
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
-    conn.commit()
-    conn.close()
-    lr = sync_client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
-    assert lr.status_code == 200, lr.text
-    cookie = sync_client.cookies.get("job360_session")
-    user_id = sync_client.get("/api/auth/me").json()["id"]
+    cookie, user_id = sign_in(sync_client, email)
     sync_client.close()
-    assert cookie and user_id
     return cookie, user_id
 
 
