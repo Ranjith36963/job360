@@ -55,7 +55,7 @@ describe("MemoryTab", () => {
     await screen.findByTestId("memory-tab");
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(getProfileEditHistory.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "preferences.experience_levels", "preferences.experience_ranges",
+      "preferences.avoid_companies", "preferences.experience_levels", "preferences.experience_ranges",
       "preferences.salary_by_country", "preferences.target_job_titles",
       "user_info.answers", "user_info.contact", "user_info.equality",
       "user_info.languages", "user_info.logistics", "user_info.right_to_work",
@@ -118,6 +118,21 @@ describe("MemoryTab", () => {
       { path: "preferences.experience_ranges", value: [{ min: 1, max: 3 }] },
       { path: "preferences.experience_years_min", value: null },
       { path: "preferences.experience_years_max", value: null },
+    ]));
+  });
+
+  it("Never apply to sits in Job targets and saves one company per line", async () => {
+    const withList = { ...profile, preferences: { ...profile.preferences, avoid_companies: ["Evil Corp"] } };
+    getProfile.mockResolvedValue(withList);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const row = within(screen.getByTestId("memory-step-targets")).getByTestId("memory-row-preferences.avoid_companies");
+    expect(row).toHaveTextContent("Evil Corp");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit Never apply to" }));
+    fireEvent.change(within(row).getByLabelText("Never apply to"), { target: { value: "Evil Corp\n  Acme \n\n" } });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.avoid_companies", value: ["Evil Corp", "Acme"] },
     ]));
   });
 
