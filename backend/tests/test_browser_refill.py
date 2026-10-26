@@ -219,6 +219,24 @@ async def test_a_superseding_captcha_ask_still_offers_finish_it_here(authenticat
 
 
 @pytest.mark.asyncio
+async def test_the_application_page_offers_the_same_hand_off_as_needs_you(authenticated_async_context, fake_browser):
+    """Owner 2026-10-26: the application page never showed "Finish it here" or "Refill the form" on a CAPTCHA,
+    because the detail's asks carried only ``browser``. Both doors now read the same hand-off fields."""
+    keys = ("finish_here", "held_seconds", "can_refill", "browser")
+    async with authenticated_async_context() as client:
+        app_id = await _job(client)
+        await _filled_and_blocked(client, app_id)
+        (needs_you,) = [a for a in await _open_asks(client) if a["application_id"] == app_id]
+        detail = (await client.get(f"/api/applications/{app_id}")).json()
+        (page,) = [a for a in detail["asks"] if a["status"] == "open"]
+        assert page["id"] == needs_you["id"]
+        assert page["finish_here"] is True and page["held_seconds"] > 0 and page["can_refill"] is True, page
+        assert {k: page[k] is not None for k in keys} == {k: needs_you[k] is not None for k in keys}
+        assert (page["finish_here"], page["can_refill"], page["browser"]) == (
+            needs_you["finish_here"], needs_you["can_refill"], needs_you["browser"])
+
+
+@pytest.mark.asyncio
 async def test_refill_after_a_restart_replays_the_db_script_and_brings_finish_it_here_back(
     authenticated_async_context, fake_browser, monkeypatch
 ):
