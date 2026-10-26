@@ -481,6 +481,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/browser/refill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refill Form
+         * @description "Refill the form": Job360's own browser opens this job's form again and replays exactly what the user's
+         *     assistant did there last time (the same answers, the same CV upload, the same option clicks), never
+         *     anything new, never a submit, never a CAPTCHA; then keeps it open 30 minutes for Finish it here. Records
+         *     ``form_filled`` {by: refill}: identical answers keep the user's yes. 404 when the job is not the
+         *     caller's. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``.
+         */
+        post: operations["refill_form_api_applications__application_id__browser_refill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/calendar.ics": {
         parameters: {
             query?: never;
@@ -4438,6 +4462,11 @@ export interface components {
             /** Asked By */
             asked_by: string;
             browser?: components["schemas"]["BrowserLabelOut"] | null;
+            /**
+             * Can Refill
+             * @default false
+             */
+            can_refill: boolean;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -5291,6 +5320,11 @@ export interface components {
             at: string;
             /** By */
             by: string;
+            /**
+             * Can Refill
+             * @default false
+             */
+            can_refill: boolean;
             /** Detail */
             detail: string;
             /** Page Host */
@@ -5339,6 +5373,11 @@ export interface components {
             /** Asked By */
             asked_by: string;
             browser?: components["schemas"]["BrowserLabelOut"] | null;
+            /**
+             * Can Refill
+             * @default false
+             */
+            can_refill: boolean;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -11085,6 +11124,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BlockedSubmittedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refill_form_api_applications__application_id__browser_refill_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

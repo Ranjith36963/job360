@@ -228,6 +228,9 @@ async def browser_action(
                 user, body.application_id, {**refused, "url": exc.url},
             )
         return refused
+    steps = result.pop(browser_agent.STEPS_KEY, None)
+    if steps and body.application_id is not None:
+        await _keep_steps(user, body.application_id, steps)
     if result.get("status") == "needs_you" and body.application_id is not None:
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
     elif body.action in _FILL_ACTIONS and body.application_id is not None and result.get("status") == "ok":
@@ -299,6 +302,109 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
         except applications_spine.SpineError as exc:  # the same HTTP error record_event gave
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     return True
+
+
+async def _keep_steps(user: CurrentUser, application_id: int, steps: list[dict[str, Any]]) -> None:
+    """Store the action's form steps as the job's replayable fill script. The gate already proved the job is
+    the caller's on a gated action; an ungated one (type, fill) is checked here. Never stops the action."""
+    from src.services.applications import fill_script  # noqa: PLC0415
+
+    try:
+        async with _db() as db:
+            if await applications_spine.get_owned_application(db, user.id, application_id) is not None:
+                await fill_script.append(db, user.id, application_id, steps)
+    except Exception:  # noqa: BLE001 - the script is a convenience: the user's action already happened
+        get_audit_logger().warning(
+            "fill_steps_failed",
+            extra={"event": "fill_steps_failed", "user_id": safe_log_value(user.id),
+                   "application_id": int(application_id), "result": "error"},
+        )
+
+
+# ── Refill the form (owner decision 2026-10-26), on the website only ──────────
+
+REFILL_DETAIL = {
+    "browser_off": "Job360's browser is not turned on.",
+    "no_script": "Your assistant has not filled this form in Job360's browser yet, so there is nothing to refill.",
+    "host_mismatch": "The filled answers were typed on another site than this job's form. Ask your assistant.",
+    "busy": "Job360's browser is busy with this job right now. Try again in a minute.",
+}
+
+
+def _refill_refused(reason: str, detail: str = "") -> dict[str, Any]:
+    return {"status": "refused", "reason": reason, "detail": detail or REFILL_DETAIL.get(reason, ""),
+            "steps_ok": 0, "steps_failed": [], "held_seconds": None}
+
+
+@router.post("/applications/{application_id}/browser/refill")
+async def refill_form(
+    application_id: int,
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own click only, never a token
+) -> dict[str, Any]:
+    """"Refill the form": Job360's own browser opens this job's form again and replays exactly what the user's
+    assistant did there last time (the same answers, the same CV upload, the same option clicks), never
+    anything new, never a submit, never a CAPTCHA; then keeps it open 30 minutes for Finish it here. Records
+    ``form_filled`` {by: refill}: identical answers keep the user's yes. 404 when the job is not the
+    caller's. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``."""
+    from src.services.applications import fill_script  # noqa: PLC0415
+    from src.services.applications import kit as kit_service  # noqa: PLC0415
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
+    from src.services.browser_agent import refill  # noqa: PLC0415
+
+    async with _db() as db:
+        if await applications_spine.get_owned_application(db, user.id, application_id) is None:
+            raise HTTPException(status_code=404, detail="application not found")
+        steps, hosts = await fill_script.load(db, user.id, application_id)
+        form_url = await kit_service.latest_form_url(db, user.id, application_id)
+        last_fill = await fill_script.newest_fill(db, user.id, application_id)
+    if not settings.BROWSER_AGENT_ENABLED:
+        out = _refill_refused("browser_off")
+    elif not steps or not form_url:
+        out = _refill_refused("no_script")
+    elif refill.host_of(form_url) not in hosts:
+        out = _refill_refused("host_mismatch")
+    else:
+        host = refill.host_of(form_url)
+        _gate, files = _gate_and_files(user, application_id, "")
+        pool = browser_agent.get_pool()
+        try:
+            done = await refill.replay(
+                pool, user.id, application_id, form_url, [s for s in steps if s["host"] == host],
+                files=files, load_state=_loader(user),
+            )
+        except browser_agent.BrowserError as exc:
+            reason = {"busy": "busy", "off": "browser_off"}.get(exc.status, exc.reason)
+            done = _refill_refused(reason, REFILL_DETAIL.get(reason, exc.detail))
+        if done["status"] == "ok":
+            browser_agent.hold_for_user(pool, user.id, application_id, renew=True)
+            done["held_seconds"] = browser_agent.held_seconds(pool, user.id, application_id)
+            await _record_refill(user, application_id, last_fill, form_url, done, actor_for(user))
+        out = done
+    get_audit_logger().info(
+        "browser_refill",
+        extra={"event": "browser_refill", "user_id": safe_log_value(user.id), "application_id": int(application_id),
+               "result": safe_log_value(out["status"]), "reason": safe_log_value(out.get("reason", "")),
+               "steps_ok": int(out["steps_ok"]), "steps_failed": len(out["steps_failed"])},
+    )
+    return out
+
+
+async def _record_refill(
+    user: CurrentUser, application_id: int, last_fill: Optional[dict[str, Any]], form_url: str,
+    done: dict[str, Any], actor: str,
+) -> None:
+    """``form_filled`` {by: refill}: the newest fill's own record when every step held (the same answers, so the
+    user's yes stays good), else that record without its answers (a form the user has not seen: the yes is stale)."""
+    payload = {**(last_fill or {}), "form_url": form_url, "by": "refill"}
+    payload.setdefault("fields_count", int(done["steps_ok"]))
+    if done["steps_failed"]:
+        payload.pop("answers", None)
+        payload["refill_failed"] = len(done["steps_failed"])
+    async with _db() as db:
+        await applications_spine.append_event(
+            db, user_id=user.id, application_id=application_id, event_type="form_filled",
+            occurred_at=applications_spine.parse_occurred_at(None), recorded_by=actor, payload=payload,
+        )
 
 
 # ── Slice 2: the user's own sign-in, on the website only ──────────────────────

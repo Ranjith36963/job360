@@ -318,6 +318,20 @@ FINISH_HERE_REASONS = frozenset({"captcha", "bot_check"})
 FINISH_HERE_KINDS = frozenset({"captcha"})
 
 
+async def refill_ask_ids(db: JobDatabase, user_id: str, asks: list[dict[str, Any]]) -> set[int]:
+    """The open CAPTCHA asks whose job has a replayable fill script (``fill_script``): the web offers
+    "Refill the form" on them. Off while Job360's browser is off. Read-only."""
+    from src.core import settings as core_settings  # noqa: PLC0415
+    from src.services.applications import fill_script  # noqa: PLC0415
+
+    if not core_settings.BROWSER_AGENT_ENABLED:
+        return set()
+    mine = [a for a in asks if a.get("status") == "open" and a.get("application_id")
+            and a.get("kind") in FINISH_HERE_KINDS]
+    have = await fill_script.apps_with_script(db, user_id, sorted({int(a["application_id"]) for a in mine}))
+    return {int(a["id"]) for a in mine if int(a["application_id"]) in have}
+
+
 async def browser_for_asks(
     db: JobDatabase, user_id: str, asks: list[dict[str, Any]],
     blocks: Optional[dict[int, dict[str, Any]]] = None, finish: Optional[set[int]] = None,

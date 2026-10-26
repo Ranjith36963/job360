@@ -1381,8 +1381,9 @@ export type RefillResult = {
   reason?: string;
   detail?: string;
   steps_ok?: number;
-  steps_failed?: { label: string; reason: string }[];
-  held_seconds?: number;
+  steps_failed?: { step: number; action: string; field: string; reason: string }[];
+  held_seconds?: number | null;
+  stopped?: string;
 };
 
 /** Fill this application's form again in Job360's browser (about a minute), so "Finish it here" works again. */
