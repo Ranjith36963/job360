@@ -6,6 +6,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
 import { CountryPicker } from "@/components/profile/CountryPicker";
 import { MemoryRow } from "@/components/profile/MemoryRow";
+import { useSetupProgress } from "@/components/profile/SetupProgress";
+import { doneDate } from "@/lib/assistant-tab";
 import { getProfile, getProfileEditHistory, keepProfileEdit, updateProfileFields } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse } from "@/lib/types";
@@ -31,6 +33,49 @@ function codesIn(list: unknown): string[] {
     : [];
 }
 
+/** One setup step: a header that opens and closes it (dot, name, the date the
+ *  step was done, how many answers wait for the user's word) and, when open,
+ *  its facts plus one "Confirm all" for that step. */
+function Step({ id, title, doneAt, waiting, defaultOpen, confirming, onConfirmAll, children }: {
+  id: string; title: string; doneAt?: string; waiting: number; defaultOpen: boolean;
+  confirming: boolean; onConfirmAll: () => void; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const done = doneAt !== undefined;
+  const when = done ? doneDate(doneAt) : "";
+  return (
+    <section data-testid={`memory-step-${id}`} data-done={done} className="border-t border-border first:border-t-0">
+      <button type="button" aria-expanded={open} aria-controls={`memory-step-body-${id}`}
+        data-testid={`memory-step-toggle-${id}`} onClick={() => setOpen((o) => !o)}
+        className="flex min-h-11 w-full items-center gap-2.5 py-3 text-left">
+        <span aria-hidden="true" className={`inline-block h-2 w-2 flex-none rounded-full ${done ? "bg-primary" : "border border-faint"}`} />
+        <span className="text-[15px] font-medium">{title}</span>
+        {waiting > 0 && (
+          <span data-testid={`memory-step-waiting-${id}`} className="rounded-full bg-muted px-2 py-0.5 text-xs text-warning">
+            {waiting} to confirm
+          </span>
+        )}
+        <span className="ml-auto font-mono text-xs text-faint">{when || (done ? "" : "not done")}</span>
+        <span aria-hidden="true" className="text-faint">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div id={`memory-step-body-${id}`} className="flex flex-col pb-4">
+          {waiting > 0 && (
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-muted px-3.5 py-2.5">
+              <span className="text-[13px] text-muted-foreground">Your assistant saved these. Confirm them as yours, or change any first.</span>
+              <Button type="button" size="sm" className="min-h-11 md:min-h-8" data-testid={`memory-confirm-step-${id}`}
+                disabled={confirming} aria-busy={confirming} onClick={onConfirmAll}>
+                {confirming ? "Confirming…" : `Confirm all ${waiting}`}
+              </Button>
+            </div>
+          )}
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
 const Section = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
   <section className="flex flex-col">
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-2.5">
@@ -49,13 +94,14 @@ export function MemoryTab() {
   const [error, setError] = useState<string | null>(null);
   const [extra, setExtra] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
-  const [keepingAll, setKeepingAll] = useState(false);
+  const [keepingAll, setKeepingAll] = useState<string | null>(null);
   const [keepAllError, setKeepAllError] = useState<string | null>(null);
   // The block a save starts from is the LATEST one (not the render's copy),
   // and saves run one after another: two quick edits in the same block must
   // not each start from the old block and silently drop the other's change.
   const latest = useRef<ProfileResponse | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const { progress } = useSetupProgress();
 
   /** `null` means the history could NOT be read — which is not the same thing
    *  as "nothing is saved" (`[]`). Each caller decides what to do with it. */
@@ -148,14 +194,20 @@ export function MemoryTab() {
     return <MemoryRow key={spec.id} spec={spec} value={value} provenance={prov} onSave={(n) => save(spec, n)} onConfirm={() => confirm(spec)} {...opts} />;
   };
 
-  // Every row the page shows that an assistant saved and the user has not confirmed.
-  const unconfirmed = (() => {
-    const specs = [
-      ...contactRows(),
-      ...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]),
-      ...rtwTopRows(), ...logisticsRows(), ...equalityRows(),
-      ...[...new Set([...codesIn(blockOf(profile, SALARY)), ...codesIn((blockOf(profile, RTW) as Record<string, unknown> | undefined)?.countries)])].map(salaryRow),
-    ];
+  const salaryCodes = [...new Set([...codesIn(blockOf(profile, SALARY)), ...codesIn((blockOf(profile, RTW) as Record<string, unknown> | undefined)?.countries)])];
+
+  // The five setup steps and the rows each one holds. Assistant settings, the
+  // sixth setup round, lives on the Assistant tab (owner, 2026-10-26).
+  const steps: { id: string; title: string; specs: RowSpec[] }[] = [
+    { id: "targets", title: "Job targets", specs: salaryCodes.map(salaryRow) },
+    { id: "you", title: "About you", specs: contactRows() },
+    { id: "visa", title: "Right to work", specs: [...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
+    { id: "logistics", title: "Logistics", specs: logisticsRows() },
+    { id: "equality", title: "Equality (voluntary)", specs: equalityRows() },
+  ];
+
+  /** The rows of a step an assistant saved and the user has not confirmed. */
+  const unconfirmedIn = (specs: RowSpec[]) => {
     const seen = new Set<string>();
     return specs.filter((s) => {
       if (seen.has(s.id)) return false;
@@ -163,16 +215,16 @@ export function MemoryTab() {
       const { value, prov } = state(s);
       return !isEmpty(value) && !!prov?.unconfirmed;
     });
-  })();
+  };
 
-  /** Keep all: the same per-row confirm, one request at a time, stop at the first failure. */
-  const keepAll = async () => {
-    setKeepingAll(true);
+  /** Confirm all in one step: the same per-row confirm, one request at a time,
+   *  stop at the first failure. One confirm covers a whole block (spec.path). */
+  const confirmStep = async (stepId: string, specs: RowSpec[]) => {
+    setKeepingAll(stepId);
     setKeepAllError(null);
     try {
-      // One keep confirms a whole block (spec.path), so each path is kept once.
       const done = new Set<string>();
-      for (const spec of unconfirmed) {
+      for (const spec of unconfirmedIn(specs)) {
         if (done.has(spec.path)) continue;
         done.add(spec.path);
         await confirm(spec);
@@ -181,7 +233,7 @@ export function MemoryTab() {
       setKeepAllError(apiErrorMessage(err, "Could not confirm everything. Try again."));
     } finally {
       await load();
-      setKeepingAll(false);
+      setKeepingAll(null);
     }
   };
 
@@ -199,61 +251,82 @@ export function MemoryTab() {
   };
 
   const approved = (Array.isArray(blockOf(profile, ANSWERS)) ? (blockOf(profile, ANSWERS) as Record<string, unknown>[]) : []).filter((a) => a.approved === true);
-  const salaryCodes = [...new Set([...codesIn(blockOf(profile, SALARY)), ...codesIn((blockOf(profile, RTW) as Record<string, unknown> | undefined)?.countries)])];
+
+  const STEP_BODY: Record<string, React.ReactNode> = {
+    targets: (
+      <>
+              <p className="mb-1.5 text-[13px] text-muted-foreground">Salary, one line per country.</p>
+              {salaryCodes.map((code) => row(salaryRow(code), { amberEmpty: true }))}
+      </>
+    ),
+    you: (
+      <>
+              {contactRows().map((s) => row(s))}
+      </>
+    ),
+    visa: (
+      <>
+              {countries.map((code, i) => {
+                const sum = countrySummary(code);
+                return (
+                  <CountryCard key={code} code={code} total={sum.total} saved={sum.saved} firstFact={sum.firstFact}
+                    defaultOpen={i === 0 || extra.includes(code)}>
+                    {rtwCountryRows(code).map((s) => row(s))}
+                    {logisticsCountryRows(code).map((s) => row(s))}
+                  </CountryCard>
+                );
+              })}
+              <div className="mt-2.5">
+                {adding ? (
+                  <CountryPicker label="Add a country" tags={[]} onChange={(codes) => {
+                    setExtra((e) => [...new Set([...e, ...codes])]);
+                    setAdding(false);
+                  }} />
+                ) : (
+                  <Button type="button" variant="outline" size="sm" className="min-h-11 md:min-h-8" onClick={() => setAdding(true)}>
+                    Add a country
+                  </Button>
+                )}
+              </div>
+              <div className="mt-2.5">{rtwTopRows().map((s) => row(s, { emptyNote: s.id.endsWith("sanctions_country_citizen") ? "Your assistant will ask" : undefined }))}</div>
+      </>
+    ),
+    logistics: (
+      <>
+              {logisticsRows().map((s) => row(s))}
+      </>
+    ),
+    equality: (
+      <>
+              <p className="mb-1.5 rounded-xl border border-border bg-muted px-3.5 py-2.5 text-[13px] text-muted-foreground">
+                Voluntary. Forms ask, and you never have to answer. &quot;Prefer not to say&quot; is a full answer, not a blank. Nothing here is filled in for you.
+              </p>
+              {equalityRows().map((s) => row(s, { emptyNote: "Your assistant will ask" }))}
+      </>
+    ),
+  };
 
   return (
     <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="flex min-w-0 flex-col gap-8" data-testid="memory-tab">
-        {unconfirmed.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-muted px-3.5 py-2.5">
-            <span className="text-[13px] text-muted-foreground">
-              Marks every answer your assistant saved as yours, so it stops asking.
-            </span>
-            <Button type="button" size="sm" className="min-h-11 md:min-h-8" data-testid="memory-keep-all"
-              disabled={keepingAll} aria-busy={keepingAll} onClick={() => void keepAll()}>
-              {keepingAll ? "Keeping…" : `Keep all ${unconfirmed.length}`}
-            </Button>
-            {keepAllError && (
-              <p role="alert" data-testid="memory-keep-all-error" className="basis-full text-[13px] text-destructive">{keepAllError}</p>
-            )}
-          </div>
+        {keepAllError && (
+          <p role="alert" data-testid="memory-keep-all-error" className="text-[13px] text-destructive">{keepAllError}</p>
         )}
-        <Section title="Contact & identity">{contactRows().map((s) => row(s))}</Section>
-
-        <Section title="Right to work" hint="One card per country">
-          {countries.map((code, i) => {
-            const sum = countrySummary(code);
+        <div data-testid="memory-steps" className="flex flex-col">
+          {steps.map((st) => {
+            const doneAt = progress?.rounds?.[st.id]?.done_at;
+            const waiting = unconfirmedIn(st.specs).length;
             return (
-              <CountryCard key={code} code={code} total={sum.total} saved={sum.saved} firstFact={sum.firstFact}
-                defaultOpen={i === 0 || extra.includes(code)}>
-                {rtwCountryRows(code).map((s) => row(s))}
-                {logisticsCountryRows(code).map((s) => row(s))}
-              </CountryCard>
+              // Keyed on the done date: progress arrives after the profile, and a
+              // step it marks done must then start closed.
+              <Step key={`${st.id}-${doneAt ?? ""}`} id={st.id} title={st.title} doneAt={doneAt} waiting={waiting}
+                defaultOpen={doneAt === undefined || waiting > 0}
+                confirming={keepingAll === st.id} onConfirmAll={() => void confirmStep(st.id, st.specs)}>
+                {STEP_BODY[st.id]}
+              </Step>
             );
           })}
-          <div className="mt-2.5">
-            {adding ? (
-              <CountryPicker label="Add a country" tags={[]} onChange={(codes) => {
-                setExtra((e) => [...new Set([...e, ...codes])]);
-                setAdding(false);
-              }} />
-            ) : (
-              <Button type="button" variant="outline" size="sm" className="min-h-11 md:min-h-8" onClick={() => setAdding(true)}>
-                Add a country
-              </Button>
-            )}
-          </div>
-          <div className="mt-2.5">{rtwTopRows().map((s) => row(s, { emptyNote: s.id.endsWith("sanctions_country_citizen") ? "Your assistant will ask" : undefined }))}</div>
-        </Section>
-
-        <Section title="Logistics & languages">{logisticsRows().map((s) => row(s))}</Section>
-
-        <Section title="Equality">
-          <p className="mb-1.5 rounded-xl border border-border bg-muted px-3.5 py-2.5 text-[13px] text-muted-foreground">
-            Voluntary. Forms ask, and you never have to answer. &quot;Prefer not to say&quot; is a full answer, not a blank. Nothing here is filled in for you.
-          </p>
-          {equalityRows().map((s) => row(s, { emptyNote: "Your assistant will ask" }))}
-        </Section>
+        </div>
 
         <Section title="Approved answers" hint="Answers you approved once. Reused word for word.">
           {approved.length === 0 ? (
@@ -280,11 +353,6 @@ export function MemoryTab() {
           <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
             Visa, equality, salary, birth date and address ask before saving.
           </p>
-        </section>
-        <section>
-          <h2 className={`${LABEL} mb-1`}>Job targets</h2>
-          <p className="mb-1.5 text-[13px] text-muted-foreground">Salary lives in Preferences, one line per country.</p>
-          {salaryCodes.map((code) => row(salaryRow(code), { compact: true, amberEmpty: true }))}
         </section>
       </aside>
     </div>

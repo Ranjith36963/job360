@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SetupCard, SetupProgress, SetupTab } from "./SetupProgress";
+import { SetupCard, SetupProgress, useSetupProgress } from "./SetupProgress";
 import { doneDate } from "@/lib/assistant-tab";
 
 const getAssistantSettings = vi.fn();
@@ -47,21 +47,28 @@ describe("SetupProgress", () => {
   });
 });
 
-describe("SetupCard (Home) and SetupTab", () => {
+describe("SetupCard (Home)", () => {
   it("Home shows the compact card while rounds remain", async () => {
     withProgress(progress(["you", "visa", "logistics"], "equality"));
     render(<SetupCard />);
     expect(await screen.findByTestId("setup-card")).toHaveTextContent("Setup · 3 of 6 done");
   });
 
-  it("Home hides the card at 6 of 6 and when the read fails; the Setup tab stays", async () => {
+  it("Home hides the card at 6 of 6", async () => {
     withProgress(progress(["you", "visa", "logistics", "equality", "targets", "settings"]));
-    const { container, unmount } = render(<SetupCard />);
+    const { container } = render(<SetupCard />);
     await vi.waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
-    unmount();
-    render(<SetupTab />);
-    expect(await screen.findByTestId("setup-progress")).toHaveTextContent("All six done");
+  });
+
+  it("a failed read is reported as failed, not left loading (Memory shows its steps as not done)", async () => {
+    getAssistantSettings.mockImplementation(() => Promise.reject(new Error("down")));
+    function Probe() {
+      const { progress, failed } = useSetupProgress();
+      return <p data-testid="probe">{failed ? "failed" : progress ? "loaded" : "loading"}</p>;
+    }
+    render(<Probe />);
+    expect(await screen.findByText("failed")).toBeInTheDocument();
   });
 
   it("a failed read shows no card", async () => {
@@ -69,12 +76,6 @@ describe("SetupCard (Home) and SetupTab", () => {
     const { container } = render(<SetupCard />);
     await vi.waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
-  });
-
-  it("a failed read on the Setup tab says so instead of loading forever", async () => {
-    getAssistantSettings.mockImplementation(() => Promise.reject(new Error("down")));
-    render(<SetupTab />);
-    expect(await screen.findByTestId("setup-failed")).toHaveTextContent("Could not load your setup progress.");
   });
 
   it("dates read like the Memory tab ('4 Oct'), whatever the browser language", () => {

@@ -14,6 +14,9 @@ vi.mock("@/lib/api", () => ({
   keepProfileEdit: (...a: unknown[]) => keepProfileEdit(...a),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/profile" }));
+const fetchSettingsShared = vi.fn();
+vi.mock("@/lib/assistant-state", () => ({ fetchSettingsShared: (...a: unknown[]) => fetchSettingsShared(...a) }));
 
 const contact = { email: "alex@example.com", phone: "+44 1" };
 const profile = { user_info: { contact }, preferences: {} };
@@ -29,20 +32,31 @@ beforeEach(() => {
   getProfileEditHistory.mockReset();
   updateProfileFields.mockReset();
   keepProfileEdit.mockReset().mockResolvedValue(profile);
+  fetchSettingsShared.mockReset().mockResolvedValue(null);
 });
 
-describe("MemoryTab keep all", () => {
-  it("shows the count when two rows are unconfirmed", async () => {
+describe("MemoryTab confirm all, per step", () => {
+  it("shows the count on the step that holds the two unconfirmed rows, and only there", async () => {
     useHistory(agentHistory);
     render(<MemoryTab />);
-    expect(await screen.findByTestId("memory-keep-all")).toHaveTextContent("Keep all 2");
+    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("Confirm all 2");
+    expect(screen.getByTestId("memory-step-waiting-you")).toHaveTextContent("2 to confirm");
+    expect(screen.queryByTestId("memory-confirm-step-visa")).toBeNull();
+  });
+
+  it("a done step with answers to confirm still starts open", async () => {
+    useHistory(agentHistory);
+    fetchSettingsShared.mockResolvedValue({ setup_progress: { rounds: { you: { done_at: "2026-10-20T09:00:00Z" } } } });
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-confirm-step-you");
+    expect(screen.getByTestId("memory-step-toggle-you")).toHaveAttribute("aria-expanded", "true");
   });
 
   it("is hidden when nothing is unconfirmed", async () => {
     useHistory(webHistory);
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    expect(screen.queryByTestId("memory-keep-all")).toBeNull();
+    expect(screen.queryByTestId("memory-confirm-step-you")).toBeNull();
   });
 
   it("keeps each unconfirmed block once, one at a time, then re-reads", async () => {
@@ -58,7 +72,7 @@ describe("MemoryTab keep all", () => {
       return profile;
     });
     render(<MemoryTab />);
-    const btn = await screen.findByTestId("memory-keep-all");
+    const btn = await screen.findByTestId("memory-confirm-step-you");
     const readsBefore = getProfile.mock.calls.length;
     fireEvent.click(btn);
     expect(btn).toHaveAttribute("aria-busy", "true");
@@ -76,7 +90,7 @@ describe("MemoryTab keep all", () => {
     useHistory(agentHistory);
     keepProfileEdit.mockReset().mockRejectedValue(new Error("boom"));
     render(<MemoryTab />);
-    fireEvent.click(await screen.findByTestId("memory-keep-all"));
+    fireEvent.click(await screen.findByTestId("memory-confirm-step-you"));
     expect(await screen.findByTestId("memory-keep-all-error")).toBeInTheDocument();
     expect(keepProfileEdit).toHaveBeenCalledTimes(1);
   });
