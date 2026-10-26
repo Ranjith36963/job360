@@ -2051,6 +2051,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contacts/{contact_id}/own-browser-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Own Browser Send
+         * @description The user's per-card click "Send with my own browser" (approve) or "Don't send" (decline) for ONE
+         *     LinkedIn message. Session only; no MCP twin. 409 when the draft changed since they looked.
+         */
+        post: operations["own_browser_send_api_contacts__contact_id__own_browser_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cv-to-approve": {
         parameters: {
             query?: never;
@@ -2497,6 +2518,87 @@ export interface paths {
         put?: never;
         /** Token */
         post: operations["token_api_oauth_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/own-browser/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Queue
+         * @description What waits for the user's own browser, and whether it is open now. The website passes no ``session``;
+         *     an assistant's read passes its own, so an application another session holds is left out.
+         */
+        get: operations["queue_api_own_browser_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/own-browser/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release
+         * @description Give a claimed person back (409 unless this session holds the live claim).
+         */
+        post: operations["release_api_own_browser_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/own-browser/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Now
+         * @description The user's own "Run my own-browser tasks now": opens the queue for the next hour. Session only.
+         */
+        post: operations["run_now_api_own_browser_run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/own-browser/take": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take
+         * @description Hand ONE task to this assistant session (see ``own_browser.take`` for the statuses).
+         */
+        post: operations["take_api_own_browser_take_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7157,6 +7259,58 @@ export interface components {
             /** Version No */
             version_no: number | null;
         };
+        /** OwnBrowserTaskItemOut */
+        OwnBrowserTaskItemOut: {
+            /** Application Id */
+            application_id?: number | null;
+            browser: components["schemas"]["TaskBrowserOut"];
+            claim?: components["schemas"]["TaskClaimOut"] | null;
+            /** Contact Id */
+            contact_id?: number | null;
+            /**
+             * Draft Chars
+             * @default 0
+             */
+            draft_chars: number;
+            /**
+             * Draft Text
+             * @default
+             */
+            draft_text: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "linkedin_outreach" | "application";
+            /** Linkedin State */
+            linkedin_state?: string | null;
+            /** Message Id */
+            message_id?: number | null;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Owner Yes
+             * @default false
+             */
+            owner_yes: boolean;
+            /** Task Id */
+            task_id: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /** What */
+            what: string;
+            /**
+             * Why Own Browser
+             * @default
+             */
+            why_own_browser: string;
+        };
         /**
          * OwnBrowserTaskOut
          * @description Where this person's LinkedIn send stands (``services/applications/own_browser.py``).
@@ -7750,6 +7904,28 @@ export interface components {
             source: "profile" | "ad" | "none";
             /** Text */
             text: string;
+        };
+        /** QueueOut */
+        QueueOut: {
+            /** Count */
+            count: number;
+            /** Open Now */
+            open_now: boolean;
+            /** Opens At */
+            opens_at?: string | null;
+            /** Pc On Hours */
+            pc_on_hours?: {
+                [key: string]: unknown;
+            } | null;
+            /** Run Now Until */
+            run_now_until?: string | null;
+            /** Tasks */
+            tasks: components["schemas"]["OwnBrowserTaskItemOut"][];
+            /**
+             * Why
+             * @enum {string}
+             */
+            why: "any_time" | "pc_on_hours" | "run_now" | "closed" | "paused";
         };
         /** ReadyAnswer */
         ReadyAnswer: {
@@ -8386,6 +8562,27 @@ export interface components {
             /** Released */
             released: boolean;
         };
+        /** ReleaseIn */
+        ReleaseIn: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other";
+            /** Session */
+            session: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /** ReleaseOut */
+        ReleaseOut: {
+            /** Reason */
+            reason: string;
+            /** Released */
+            released: boolean;
+            /** Task Id */
+            task_id: string;
+        };
         /** ResolveInboxItemRequest */
         ResolveInboxItemRequest: {
             /** Application Id */
@@ -8395,6 +8592,13 @@ export interface components {
              * @default false
              */
             dismiss: boolean;
+        };
+        /** RunNowOut */
+        RunNowOut: {
+            /** Minutes */
+            minutes: number;
+            /** Run Now Until */
+            run_now_until: string;
         };
         /** RunProblemOut */
         RunProblemOut: {
@@ -8571,6 +8775,30 @@ export interface components {
             duties: components["schemas"]["DutyStatusOut"][];
             /** Last Tick At */
             last_tick_at?: string | null;
+        };
+        /** SendDecisionIn */
+        SendDecisionIn: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "decline";
+            /** Message Id */
+            message_id: number;
+        };
+        /** SendDecisionOut */
+        SendDecisionOut: {
+            /** Approved At */
+            approved_at?: string | null;
+            /** Claim Until */
+            claim_until?: string | null;
+            /** Message Id */
+            message_id: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "waiting_on_you" | "queued" | "in_progress" | "declined";
         };
         /**
          * SetVisaRequest
@@ -9501,6 +9729,37 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** TakeIn */
+        TakeIn: {
+            /**
+             * Session
+             * @default
+             */
+            session: string;
+        };
+        /** TakeOut */
+        TakeOut: {
+            /**
+             * Next
+             * @default
+             */
+            next: string;
+            /** Opens At */
+            opens_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "task" | "already_yours" | "empty" | "closed" | "paused" | "busy" | "wait" | "daily_limit";
+            task?: components["schemas"]["OwnBrowserTaskItemOut"] | null;
+            /** Wait Seconds */
+            wait_seconds?: number | null;
+            /**
+             * Why
+             * @default
+             */
+            why: string;
+        };
         /** TallyBucket */
         TallyBucket: {
             /** Count */
@@ -9527,6 +9786,25 @@ export interface components {
             receipt_id?: number | null;
             /** Title */
             title: string;
+        };
+        /** TaskBrowserOut */
+        TaskBrowserOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "job360" | "own_browser" | "human";
+            /** Label */
+            label: string;
+            /** Reason */
+            reason: string;
+        };
+        /** TaskClaimOut */
+        TaskClaimOut: {
+            /** Session */
+            session: string;
+            /** Until */
+            until?: string | null;
         };
         /** TemplateOut */
         TemplateOut: {
@@ -13449,6 +13727,45 @@ export interface operations {
             };
         };
     };
+    own_browser_send_api_contacts__contact_id__own_browser_send_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cv_to_approve_api_cv_to_approve_get: {
         parameters: {
             query?: never;
@@ -14097,6 +14414,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    queue_api_own_browser_queue_get: {
+        parameters: {
+            query?: {
+                session?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_api_own_browser_release_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_now_api_own_browser_run_now_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunNowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    take_api_own_browser_take_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TakeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

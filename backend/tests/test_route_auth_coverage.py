@@ -72,6 +72,7 @@ ROUTE_MODULES = [
     "calendar",
     "oauth",
     "hunt_kit",
+    "own_browser",
 ]
 
 # Route modules main.py mounts at the site ROOT (no "/api"). Only the OAuth
@@ -186,6 +187,8 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/auth/users/me"): "erases the account (GDPR Art. 17)",
     ("PATCH", "/api/auth/users/me/password"): "changes the sign-in credential",
     ("PATCH", "/api/auth/users/me/email"): "moves the account to another mailbox",
+    ("POST", "/api/own-browser/run-now"): "the user's own click: opens the queue for an hour",
+    ("POST", "/api/contacts/{contact_id}/own-browser-send"): "the user's own yes to one LinkedIn send",
     ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
 }
 

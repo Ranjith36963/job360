@@ -9487,6 +9487,121 @@
         "title": "OutreachEntryOut",
         "type": "object"
       },
+      "OwnBrowserTaskItemOut": {
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "browser": {
+            "$ref": "#/components/schemas/TaskBrowserOut"
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskClaimOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "draft_chars": {
+            "default": 0,
+            "title": "Draft Chars",
+            "type": "integer"
+          },
+          "draft_text": {
+            "default": "",
+            "title": "Draft Text",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "linkedin_outreach",
+              "application"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_yes": {
+            "default": false,
+            "title": "Owner Yes",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          },
+          "why_own_browser": {
+            "default": "",
+            "title": "Why Own Browser",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "what",
+          "browser"
+        ],
+        "title": "OwnBrowserTaskItemOut",
+        "type": "object"
+      },
       "OwnBrowserTaskOut": {
         "description": "Where this person's LinkedIn send stands (``services/applications/own_browser.py``).",
         "properties": {
@@ -10830,6 +10945,78 @@
           "grounded"
         ],
         "title": "ProvenanceSegment",
+        "type": "object"
+      },
+      "QueueOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "open_now": {
+            "title": "Open Now",
+            "type": "boolean"
+          },
+          "opens_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opens At"
+          },
+          "pc_on_hours": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pc On Hours"
+          },
+          "run_now_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Now Until"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/OwnBrowserTaskItemOut"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "why": {
+            "enum": [
+              "any_time",
+              "pc_on_hours",
+              "run_now",
+              "closed",
+              "paused"
+            ],
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "open_now",
+          "why",
+          "count",
+          "tasks"
+        ],
+        "title": "QueueOut",
         "type": "object"
       },
       "ReadyAnswer": {
@@ -12605,6 +12792,64 @@
         "title": "ReleaseHoldOut",
         "type": "object"
       },
+      "ReleaseIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "enum": [
+              "captcha",
+              "login_wall",
+              "weekly_limit",
+              "draft_rewritten",
+              "already_pending",
+              "profile_not_found",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "session": {
+            "maxLength": 200,
+            "title": "Session",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 40,
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "task_id",
+          "reason"
+        ],
+        "title": "ReleaseIn",
+        "type": "object"
+      },
+      "ReleaseOut": {
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "released": {
+            "title": "Released",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "released",
+          "task_id",
+          "reason"
+        ],
+        "title": "ReleaseOut",
+        "type": "object"
+      },
       "ResolveInboxItemRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12626,6 +12871,24 @@
           }
         },
         "title": "ResolveInboxItemRequest",
+        "type": "object"
+      },
+      "RunNowOut": {
+        "properties": {
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "run_now_until": {
+            "title": "Run Now Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_now_until",
+          "minutes"
+        ],
+        "title": "RunNowOut",
         "type": "object"
       },
       "RunProblemOut": {
@@ -13288,6 +13551,75 @@
           "duties"
         ],
         "title": "ScheduleStatusOut",
+        "type": "object"
+      },
+      "SendDecisionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "decline"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_id",
+          "decision"
+        ],
+        "title": "SendDecisionIn",
+        "type": "object"
+      },
+      "SendDecisionOut": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "claim_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Until"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "waiting_on_you",
+              "queued",
+              "in_progress",
+              "declined"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "message_id"
+        ],
+        "title": "SendDecisionOut",
         "type": "object"
       },
       "SetVisaRequest": {
@@ -16146,6 +16478,84 @@
         "title": "TakeBackRequest",
         "type": "object"
       },
+      "TakeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "title": "TakeIn",
+        "type": "object"
+      },
+      "TakeOut": {
+        "properties": {
+          "next": {
+            "default": "",
+            "title": "Next",
+            "type": "string"
+          },
+          "opens_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opens At"
+          },
+          "status": {
+            "enum": [
+              "task",
+              "already_yours",
+              "empty",
+              "closed",
+              "paused",
+              "busy",
+              "wait",
+              "daily_limit"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnBrowserTaskItemOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "wait_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait Seconds"
+          },
+          "why": {
+            "default": "",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TakeOut",
+        "type": "object"
+      },
       "TallyBucket": {
         "properties": {
           "count": {
@@ -16212,6 +16622,58 @@
           "at"
         ],
         "title": "TallyItem",
+        "type": "object"
+      },
+      "TaskBrowserOut": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "job360",
+              "own_browser",
+              "human"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "reason"
+        ],
+        "title": "TaskBrowserOut",
+        "type": "object"
+      },
+      "TaskClaimOut": {
+        "properties": {
+          "session": {
+            "title": "Session",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "title": "TaskClaimOut",
         "type": "object"
       },
       "TemplateOut": {
@@ -24649,6 +25111,91 @@
         ]
       }
     },
+    "/api/contacts/{contact_id}/own-browser-send": {
+      "post": {
+        "description": "The user's per-card click \"Send with my own browser\" (approve) or \"Don't send\" (decline) for ONE\nLinkedIn message. Session only; no MCP twin. 409 when the draft changed since they looked.",
+        "operationId": "own_browser_send_api_contacts__contact_id__own_browser_send_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Own Browser Send",
+        "tags": [
+          "own-browser"
+        ]
+      }
+    },
     "/api/cv-to-approve": {
       "get": {
         "description": "Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV\nthey have not seen yet, from chat or the web. \"CV OK\" is ``POST /applications/{id}/cv-seen``.",
@@ -25824,6 +26371,301 @@
         "summary": "Token",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/own-browser/queue": {
+      "get": {
+        "description": "What waits for the user's own browser, and whether it is open now. The website passes no ``session``;\nan assistant's read passes its own, so an application another session holds is left out.",
+        "operationId": "queue_api_own_browser_queue_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Session",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue",
+        "tags": [
+          "own-browser"
+        ]
+      }
+    },
+    "/api/own-browser/release": {
+      "post": {
+        "description": "Give a claimed person back (409 unless this session holds the live claim).",
+        "operationId": "release_api_own_browser_release_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release",
+        "tags": [
+          "own-browser"
+        ]
+      }
+    },
+    "/api/own-browser/run-now": {
+      "post": {
+        "description": "The user's own \"Run my own-browser tasks now\": opens the queue for the next hour. Session only.",
+        "operationId": "run_now_api_own_browser_run_now_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNowOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Now",
+        "tags": [
+          "own-browser"
+        ]
+      }
+    },
+    "/api/own-browser/take": {
+      "post": {
+        "description": "Hand ONE task to this assistant session (see ``own_browser.take`` for the statuses).",
+        "operationId": "take_api_own_browser_take_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Take",
+        "tags": [
+          "own-browser"
         ]
       }
     },

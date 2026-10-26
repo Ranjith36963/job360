@@ -46,6 +46,7 @@ from src.api.routes import (
     hunt_kit,
     morning_check,
     oauth,
+    own_browser,
     profile,
     proof,
     ready_to_send,
@@ -284,6 +285,7 @@ app.include_router(connectors.router, prefix="/api")  # the connector check (own
 app.include_router(browser.router, prefix="/api")  # the Job360 browser agent (decision 29), off by default
 app.include_router(assistant_trigger.router, prefix="/api")  # Send starts my assistant (session only)
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
+app.include_router(own_browser.router, prefix="/api")  # the own-browser queue (owner 2026-10-25)
 app.include_router(schedule.router, prefix="/api")  # what is due now (owner 2026-10-23, migration 0082)
 app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
 app.include_router(ready_to_send.router, prefix="/api")  # approval cards for Ready to send (S5d)
