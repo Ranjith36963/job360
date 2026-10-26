@@ -175,19 +175,32 @@ describe("MemoryTab", () => {
     );
   });
 
-  it("a country is added once, in Job targets; Right to work has no second Add a country", async () => {
+  it("Right to work can add a country or a region too: same list, so it shows in both steps", async () => {
+    const after = (code: string) => ({
+      ...profile, user_info: { ...profile.user_info, right_to_work: {
+        ...profile.user_info.right_to_work, countries: [...profile.user_info.right_to_work.countries, { country: code }],
+      } },
+    });
+    updateProfileFields.mockResolvedValueOnce(after("FR"));
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    expect(screen.getAllByRole("button", { name: "Add a country" })).toHaveLength(1);
-    expect(within(screen.getByTestId("memory-step-targets")).getByTestId("work-grid-add")).toBeInTheDocument();
-    expect(screen.getByTestId("visa-add-hint")).toHaveTextContent("A new country is added once, in Job targets");
-    fireEvent.click(screen.getByTestId("work-grid-add"));
-    fireEvent.change(screen.getByPlaceholderText("Search countries…"), { target: { value: "France" } });
-    fireEvent.click(await screen.findByText("France"));
+    const visa = screen.getByTestId("memory-step-visa");
+    fireEvent.click(within(visa).getByTestId("visa-add"));
+    fireEvent.change(within(visa).getByPlaceholderText("Search countries…"), { target: { value: "France" } });
+    fireEvent.click(await within(visa).findByText("France"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
     const [{ path, value }] = updateProfileFields.mock.calls[0][0];
     expect(path).toBe("user_info.right_to_work");
     expect(value.countries.at(-1)).toEqual({ country: "FR" });
+    // its visa card opens in Right to work, and its line is in Job targets
+    expect(await within(visa).findByTestId("country-card-FR")).toBeInTheDocument();
+    expect(within(screen.getByTestId("memory-step-targets")).getByTestId("work-grid-row-FR")).toBeInTheDocument();
+    // a region gets a card of its own
+    updateProfileFields.mockResolvedValueOnce({ ...after("FR"), user_info: { ...after("FR").user_info, right_to_work: {
+      ...after("FR").user_info.right_to_work, countries: [...after("FR").user_info.right_to_work.countries, { country: "EUROPE" }],
+    } } });
+    fireEvent.click(within(visa).getByTestId("visa-add-region-EUROPE"));
+    expect(await within(visa).findByTestId("country-card-EUROPE")).toHaveTextContent("Europe");
   });
 
   it("a done step with nothing to confirm starts closed and shows its date; a click opens it", async () => {
@@ -259,6 +272,20 @@ describe("MemoryTab", () => {
     expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("Country you live in");
     expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("United Kingdom");
     expect(screen.getByTestId("memory-row-user_info.contact.residence_city")).toHaveTextContent("London");
+  });
+
+  it("a region or all-other-countries card holds visa facts only (relocation, travel and licence are per real country)", async () => {
+    const withPlaces = { ...profile, user_info: { ...profile.user_info, right_to_work: {
+      ...profile.user_info.right_to_work,
+      countries: [...profile.user_info.right_to_work.countries, { country: "ANY" }, { country: "EUROPE" }],
+    } } };
+    getProfile.mockResolvedValue(withPlaces);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const cards = within(screen.getByTestId("memory-step-visa")).getAllByTestId(/^country-card-/).map((c) => c.getAttribute("data-testid"));
+    expect(cards).toEqual(["country-card-GB", "country-card-DE", "country-card-EUROPE", "country-card-ANY"]);
+    expect(screen.queryByTestId("memory-row-user_info.logistics.EUROPE.willing_to_relocate")).toBeNull();
+    expect(screen.queryByTestId("memory-row-user_info.logistics.ANY.willing_to_relocate")).toBeNull();
   });
 });
 

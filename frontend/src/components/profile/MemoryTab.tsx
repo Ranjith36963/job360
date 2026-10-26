@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
-import { JobPriority } from "@/components/profile/JobPriority";
+import { AddPlace, JobPriority, withPlace } from "@/components/profile/JobPriority";
 import { isRegion } from "@/lib/regions";
 import { MemoryRow } from "@/components/profile/MemoryRow";
 import { StepFacts } from "@/components/profile/StepFacts";
@@ -28,6 +28,10 @@ function blockOf(profile: ProfileResponse | null, path: string): unknown {
   if (path.startsWith("preferences.")) return (profile.preferences as Record<string, unknown>)?.[path.replace("preferences.", "")];
   return (profile.user_info as Record<string, unknown>)?.[path.replace("user_info.", "")];
 }
+
+// Relocation, travel and a driving licence are stored per real country only (the
+// logistics list takes ISO codes), so a region or "all other countries" card skips them.
+const placeLogisticsRows = (code: string) => (code === "ANY" || isRegion(code) ? [] : logisticsCountryRows(code));
 
 // Owner decision 2026-10-26: Job priority (the "Where you'll work" grid) lives
 // in Job targets, so these keys of a right-to-work record are edited there and
@@ -175,6 +179,23 @@ export function MemoryTab() {
     return done;
   }, [loadHistory]);
 
+  /** Add a place to the right-to-work list (Right to work's own "Add a country"), in the
+   *  same queue as every other write, from the list as last saved. Its card opens. */
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  const addPlace = useCallback((code: string): Promise<void> => {
+    const run = async () => {
+      const updated = await updateProfileFields([{ path: RTW, value: withPlace(blockOf(latest.current, RTW), code) }]);
+      latest.current = updated;
+      setProfile(updated);
+      setJustAdded(code);
+      const [, rows] = await loadHistory(RTW);
+      if (rows) setHistories((h) => ({ ...h, [RTW]: rows }));
+    };
+    const done = queue.current.then(run, run);
+    queue.current = done.catch(() => undefined);
+    return done;
+  }, [loadHistory]);
+
   /** Save the note list (the user's own facts live there), in the same queue
    *  as every other write. The change is applied to the list as last saved,
    *  inside the queue, so a second quick add never overwrites the first. */
@@ -223,9 +244,11 @@ export function MemoryTab() {
     const rtw = blockOf(profile, RTW) as Record<string, unknown> | undefined;
     const log = blockOf(profile, LOGISTICS) as Record<string, unknown> | undefined;
     const auth = Array.isArray(prefs.work_authorization_countries) ? prefs.work_authorization_countries.map(String) : [];
-    // Visa cards are per country: a region line (Europe) has no visa status of its own.
-    return [...new Set([...codesIn(rtw?.countries), ...codesIn(blockOf(profile, SALARY)), ...auth, ...codesIn(log?.countries)])]
-      .filter((c) => !isRegion(c));
+    // A region line (Europe) gets a visa card too: "Europe: needs sponsorship" (owner, 2026-10-26).
+    const all = [...new Set([...codesIn(rtw?.countries), ...codesIn(blockOf(profile, SALARY)), ...auth, ...codesIn(log?.countries)])];
+    // Countries, then regions, then all other countries: the same order as Where you'll work.
+    const rank = (c: string) => (c === "ANY" ? 2 : isRegion(c) ? 1 : 0);
+    return all.sort((a, b) => rank(a) - rank(b));
   }, [profile]);
 
   if (loading) return <div data-testid="memory-loading" className="space-y-3 pt-6"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>;
@@ -263,7 +286,7 @@ export function MemoryTab() {
   const steps: { id: string; title: string; fact: string; pinned?: boolean; specs: RowSpec[] }[] = [
     { id: "you", title: "Your details for forms", fact: "About you", pinned: true, specs: contactRows() },
     { id: "targets", title: "Job targets", fact: "Job targets", specs: [...targetRows(), ...salaryCodes.map(salaryRow)] },
-    { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...visaCardRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
+    { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...visaCardRows(c), ...placeLogisticsRows(c)]), ...rtwTopRows()] },
     { id: "logistics", title: "Logistics", fact: "Logistics", specs: logisticsRows() },
     { id: "equality", title: "Equality (voluntary)", fact: "Equality", specs: equalityRows() },
   ];
@@ -346,15 +369,17 @@ export function MemoryTab() {
                 const sum = countrySummary(code);
                 return (
                   <CountryCard key={code} code={code} total={sum.total} saved={sum.saved} firstFact={sum.firstFact}
-                    defaultOpen={i === 0}>
+                    defaultOpen={i === 0 || code === justAdded}>
                     {visaCardRows(code).map((s) => row(s))}
-                    {logisticsCountryRows(code).map((s) => row(s))}
+                    {placeLogisticsRows(code).map((s) => row(s))}
                   </CountryCard>
                 );
               })}
               <p data-testid="visa-add-hint" className="mt-2.5 text-[13px] text-muted-foreground">
-                A new country is added once, in Job targets (Where you&apos;ll work); its visa card shows up here.
+                Add a country or region here or in Job targets: it shows in both.
               </p>
+              <AddPlace testIdPrefix="visa" have={codesIn((blockOf(profile, RTW) as Record<string, unknown> | undefined)?.countries)}
+                onAdd={(c) => void addPlace(c)} />
       </>
     ),
     logistics: (
