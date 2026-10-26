@@ -94,6 +94,9 @@ describe("MemoryTab", () => {
     }
     expect(within(details).getByTestId("memory-row-user_info.right_to_work.citizenship")).toBeInTheDocument();
     expect(within(screen.getByTestId("memory-step-visa")).queryByTestId("memory-row-user_info.right_to_work.citizenship")).toBeNull();
+    // Owner, 2026-10-26: no "Citizen of a sanctioned country?" row anywhere in Memory.
+    expect(screen.queryByTestId("memory-row-user_info.right_to_work.sanctions_country_citizen")).toBeNull();
+    expect(screen.queryByText("Citizen of a sanctioned country?")).toBeNull();
     const steps = ["targets", "visa", "logistics", "equality"].map((id) => screen.getByTestId(`memory-step-toggle-${id}`));
     expect(steps.every((b) => b.getAttribute("aria-expanded") === "true")).toBe(true);
     expect(steps.map((b) => b.textContent)).toEqual([

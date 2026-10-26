@@ -4,6 +4,7 @@ import {
   isSensitive, parseLanguages, provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, salaryText,
   showRow, toInputs, writeRow, logisticsRows, countrySaved, answerApprover, approvalText,
 } from "./memory";
+import type { RowSpec } from "./memory";
 
 describe("country card count (ANY)", () => {
   const block = { countries: [{ country: "ANY", remote_ok: true, onsite: "only_if_sponsored" }] };
@@ -149,7 +150,11 @@ describe("readRow / writeRow", () => {
 
 describe("editor text", () => {
   it("round-trips yes / no / Prefer not to say", () => {
-    const sanctions = rtwTopRows()[1];
+    const sanctions: RowSpec = {
+      id: "user_info.right_to_work.sanctions_country_citizen", path: RTW, label: "Citizen of a sanctioned country?",
+      scope: { kind: "dict" }, sensitive: true,
+      parts: [{ key: "sanctions_country_citizen", label: "Citizen of a sanctioned country?", input: "yesno", pns: true }],
+    };
     expect(fromInputs(sanctions, { sanctions_country_citizen: "pns" })).toBe("Prefer not to say");
     expect(fromInputs(sanctions, { sanctions_country_citizen: "no" })).toBe(false);
     expect(toInputs(sanctions, "Prefer not to say")).toEqual({ sanctions_country_citizen: "pns" });
@@ -205,5 +210,12 @@ describe("job priority rows", () => {
   it("clearing a priority removes only that key", () => {
     const remote = rtwCountryRows("GB").find((s) => s.id.endsWith("remote_priority"))!;
     expect(writeRow(remote, block, undefined)).toEqual({ countries: [{ country: "GB", remote_ok: true }] });
+  });
+});
+
+describe("Memory rows", () => {
+  it("has no 'Citizen of a sanctioned country?' row (owner, 2026-10-26)", () => {
+    expect(rtwTopRows().map((r) => r.label)).toEqual(["Citizenship"]);
+    expect(rtwTopRows().some((r) => r.path.endsWith("sanctions_country_citizen") || r.id.endsWith("sanctions_country_citizen"))).toBe(false);
   });
 });

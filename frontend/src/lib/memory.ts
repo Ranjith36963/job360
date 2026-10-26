@@ -61,7 +61,6 @@ export const FIELD_LABEL: Record<string, string> = {
   visa_type: "Visa type",
   visa_expires: "Visa expires",
   citizenship: "Citizenship",
-  sanctions_country_citizen: "Citizen of a sanctioned country?",
   notice_period: "Notice period",
   earliest_start: "Earliest start",
   willing_to_relocate: "Willing to relocate",
@@ -202,8 +201,8 @@ export function rtwCountryRows(code: string): RowSpec[] {
 export function rtwTopRows(): RowSpec[] {
   const d = { kind: "dict" } as const;
   return [
+    // Owner, 2026-10-26: no "Citizen of a sanctioned country?" row in Memory.
     single(RTW, `${RTW}.citizenship`, "citizenship", "countries", d),
-    single(RTW, `${RTW}.sanctions_country_citizen`, "sanctions_country_citizen", "yesno", d, { pns: true }),
   ];
 }
 

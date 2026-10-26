@@ -326,16 +326,15 @@ export function MemoryTab() {
     you: (
       <>
               {(() => {
-                // Identity first, then where you belong: citizenship, the country
-                // and city you live in now, then the sanctions question.
+                // Identity first, then where you belong: citizenship, then the country
+                // and city you live in now. (No sanctions question: owner, 2026-10-26.)
                 const contact = contactRows();
                 const lives = contact.filter((r) => r.id.includes(".residence_"));
-                const [citizenship, sanctions] = rtwTopRows();
+                const [citizenship] = rtwTopRows();
                 return [
                   ...contact.filter((r) => !lives.includes(r)).map((r) => row(r)),
                   row(citizenship),
                   ...lives.map((r) => row(r)),
-                  row(sanctions, { emptyNote: "Your assistant will ask" }),
                 ];
               })()}
       </>
