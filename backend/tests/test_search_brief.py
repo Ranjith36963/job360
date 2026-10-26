@@ -291,3 +291,20 @@ def test_resolve_answer_narrower_wins_aliases_and_ambiguity_fail_closed():
         {"question": "B", "answer": "No", "approved": True, "topic": "work_from.IN"},
     ])["gaps"]
     assert [g["topic"] for g in gap] == ["work_from.IN"] and gap[0]["note"].startswith("ambiguous")
+
+
+def test_contract_answer_rides_on_each_place_and_is_never_guessed():
+    """Owner decision 2026-10-26 (job priority sketch): a Contract tick per place."""
+    brief = build_search_brief(_rtw(
+        {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes", "contract_ok": True},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no", "contract_ok": False},
+        {"country": "ANY", "needs_sponsorship": True, "remote_ok": True, "onsite": "no"},
+    ))
+    rows = {row["country"]: row for row in brief["rows"]}
+    assert rows["GB"]["contract_ok"] is True
+    assert all(line.endswith("contract roles are fine too") for line in rows["GB"]["counts_if"])
+    assert rows["IN"]["contract_ok"] is False
+    assert rows["IN"]["counts_if"][0].endswith("permanent roles only, no contract")
+    # not answered stays silent (rule #29): no tail, None, never a default
+    assert rows["ANY"]["contract_ok"] is None
+    assert "contract" not in " ".join(rows["ANY"]["counts_if"])

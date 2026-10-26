@@ -14,7 +14,6 @@ import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer"
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
-import { JobPriority } from "@/components/profile/JobPriority";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
   getProfile,
@@ -413,7 +412,7 @@ function CvTab() {
           <div className="space-y-6">
             {/* Two-column layout */}
             <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-              {/* Left column: CV + Enrichment, then Job priority in the space under it */}
+              {/* Left column: CV + Enrichment (Job priority is in Memory, Job targets) */}
               <div className="space-y-6">
                 <CVUpload
                   onUpload={handleCVUpload}
@@ -423,10 +422,6 @@ function CvTab() {
                   profile={profile?.summary ?? null}
                   cvDetail={profile?.cv_detail ?? null}
                   loading={loadingProfile}
-                />
-                <JobPriority
-                  rightToWork={(profile?.user_info as Record<string, unknown> | undefined)?.right_to_work}
-                  onSaved={setProfile}
                 />
               </div>
 

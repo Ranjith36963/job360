@@ -362,6 +362,16 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/check_alert_paths.py", "--drill"],
         no_negative="the gate expressions are brute-forced inline; nothing a flag can switch off",
     ),
+    "scripts/check_api_types_drift.py": Guard(
+        status="drilled",
+        # The frontend's generated API types must match the backend (2026-10-26):
+        # frontend-e2e mocks the backend, so nothing else notices a response-shape
+        # change nobody regenerated. Drill plants a changed api-types.ts in a
+        # throwaway git repo and demands it is named; the untouched copy passes.
+        drill=[sys.executable, "scripts/check_api_types_drift.py", "--drill"],
+        # NEGATIVE CONTROL: the comparison blinded, so the drill MUST fail.
+        negative=[sys.executable, "scripts/check_api_types_drift.py", "--drill", "--break-checker"],
+    ),
     "scripts/check_lock_sync.py": Guard(
         status="drilled",
         # Says "Missing: X from lock file" before Linux `npm ci` does. #503

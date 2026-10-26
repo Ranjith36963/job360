@@ -90,13 +90,20 @@ describe("MemoryTab", () => {
     expect(screen.getByText(/Voluntary\. Forms ask, and you never have to answer/)).toBeInTheDocument();
   });
 
-  it("Germany is a collapsed card with an amber chip; Job targets shows salary and the missing one", async () => {
+  it("Job targets holds the job priority grid (salary per country); Right to work cards keep only visa facts", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    expect(screen.getByTestId("country-missing-DE")).toHaveTextContent("5 not saved yet");
-    expect(screen.getByTestId("memory-step-targets")).toHaveTextContent("£80k–95k GBP");
+    const targets = screen.getByTestId("memory-step-targets");
+    expect(within(targets).getByTestId("work-grid")).toBeInTheDocument();
+    expect(within(targets).getByTestId("work-grid-salary-GB")).toHaveTextContent("£80k–95k GBP");
+    expect(within(targets).getByTestId("work-grid-salary-DE")).toHaveTextContent("Add salary");
     expect(screen.getByTestId("memory-rail")).not.toHaveTextContent("£80k–95k GBP");
-    expect(screen.getByTestId("memory-row-preferences.salary_by_country.DE")).toHaveTextContent("not saved yet");
+    // the card counts status, visa type and expiry only: remote, on-site, priority and visa need are in the grid
+    expect(screen.getByTestId("country-missing-DE")).toHaveTextContent("3 not saved yet");
+    const visa = screen.getByTestId("memory-step-visa");
+    expect(within(visa).queryByTestId("memory-row-user_info.right_to_work.GB.remote_ok")).toBeNull();
+    expect(within(visa).queryByTestId("memory-row-user_info.right_to_work.GB.needs_sponsorship")).toBeNull();
+    expect(within(visa).getByTestId("memory-row-user_info.right_to_work.GB.work_authorization")).toBeInTheDocument();
   });
 
   it("a web edit PATCHes the WHOLE block", async () => {
@@ -147,14 +154,19 @@ describe("MemoryTab", () => {
     );
   });
 
-  it("Add a country adds an empty card; nothing is saved", async () => {
+  it("a country is added once, in Job targets; Right to work has no second Add a country", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    fireEvent.click(screen.getByRole("button", { name: "Add a country" }));
+    expect(screen.getAllByRole("button", { name: "Add a country" })).toHaveLength(1);
+    expect(within(screen.getByTestId("memory-step-targets")).getByTestId("work-grid-add")).toBeInTheDocument();
+    expect(screen.getByTestId("visa-add-hint")).toHaveTextContent("A new country is added once, in Job targets");
+    fireEvent.click(screen.getByTestId("work-grid-add"));
     fireEvent.change(screen.getByPlaceholderText("Search countries…"), { target: { value: "France" } });
     fireEvent.click(await screen.findByText("France"));
-    expect(screen.getByTestId("country-missing-FR")).toHaveTextContent("6 not saved yet");
-    expect(updateProfileFields).not.toHaveBeenCalled();
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    const [{ path, value }] = updateProfileFields.mock.calls[0][0];
+    expect(path).toBe("user_info.right_to_work");
+    expect(value.countries.at(-1)).toEqual({ country: "FR" });
   });
 
   it("a done step with nothing to confirm starts closed and shows its date; a click opens it", async () => {

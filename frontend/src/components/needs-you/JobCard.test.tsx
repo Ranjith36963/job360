@@ -10,12 +10,14 @@ const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
 const answerAskQuestions = vi.fn();
 const rememberAnswers = vi.fn();
+const saveAskRowAnswers = vi.fn();
 vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   markOutreachSent: (...a: unknown[]) => markOutreachSent(...a),
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
   rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
+  saveAskRowAnswers: (...a: unknown[]) => saveAskRowAnswers(...a),
   downloadApplicationArtifact: vi.fn(),
   updateContact: vi.fn(),
 }));
@@ -47,6 +49,7 @@ beforeEach(() => {
   markOutreachSent.mockReset().mockResolvedValue({});
   answerAskQuestions.mockReset().mockResolvedValue({});
   rememberAnswers.mockReset().mockResolvedValue(undefined);
+  saveAskRowAnswers.mockReset().mockResolvedValue({});
   onChanged.mockClear();
 });
 
@@ -140,7 +143,9 @@ describe("JobCard", () => {
     expect(screen.getByTestId(`q-ok-${listed.id}-country`)).toHaveTextContent("Checked"); // Verified starts checked
     expect(screen.queryByTestId("approve-all-7")).toBeNull(); // one primary button at a time
     fireEvent.click(screen.getByRole("button", { name: "No" }));
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(listed.id, { visa: "No" })); // saved at once
     expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the guess is not checked yet
+    await waitFor(() => expect(screen.getByTestId(`q-edit-${listed.id}-salary`)).toBeEnabled());
     fireEvent.click(screen.getByTestId(`q-edit-${listed.id}-salary`));
     fireEvent.change(screen.getByTestId(`q-input-${listed.id}-salary`), { target: { value: "€55,000" } });
     expect(screen.queryByTestId("remember-7")).toBeNull(); // no checkbox any more
@@ -198,6 +203,8 @@ describe("JobCard", () => {
     expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Guessed");
     fireEvent.click(screen.getByTestId("approve-prefilled-7"));
     expect(screen.getByTestId(`q-ok-${a.id}-city`)).toHaveTextContent("Checked");
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { city: "Berlin" })); // persisted, not only shown
+    await waitFor(() => expect(screen.getByTestId(`q-edit-${a.id}-empty`)).toBeEnabled());
     expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Verified");
     expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Guessed");
     expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("Looks right");
@@ -210,10 +217,26 @@ describe("JobCard", () => {
     expect(screen.getByTestId("approve-prefilled-7")).toBeDisabled(); // nothing left it may check
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gdpr`));
     expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Verified");
+    await waitFor(() => expect(screen.getByTestId(`q-ok-${a.id}-gender`)).toBeEnabled());
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { gender: "Female" }));
+    await waitFor(() => expect(screen.getByTestId("approve-all-7")).toBeEnabled());
     fireEvent.click(screen.getByTestId("approve-all-7"));
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(a.id, { city: "Berlin", gdpr: "Yes", gender: "Female", empty: "No" }));
-    expect(rememberAnswers).toHaveBeenCalledTimes(1);
+    expect(rememberAnswers).toHaveBeenLastCalledWith(expect.arrayContaining([
+      { topic: "empty", question: "Anything else?", answer: "No" },
+    ]));
+  });
+
+  it("a personal answer the owner edits is saved at once, before Approve all (2026-10-26)", async () => {
+    const a = listing({}, [Q("gender", "Gender", "Male", "guess"), Q("city", "City?", "", "none")]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-gender`));
+    fireEvent.change(screen.getByTestId(`q-input-${a.id}-gender`), { target: { value: "Female" } });
+    expect(rememberAnswers).not.toHaveBeenCalled(); // nothing saved while typing
+    fireEvent.click(screen.getByTestId(`q-save-${a.id}-gender`));
+    await waitFor(() => expect(rememberAnswers).toHaveBeenCalledWith([{ topic: "gender", question: "Gender", answer: "Female" }]));
+    expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the card itself is not done yet
   });
 
   it("pre-guesses consent and referral rows as Guessed, and shows an empty free-text row as waiting for the assistant", () => {
@@ -413,5 +436,69 @@ describe("JobCard", () => {
     render(<JobCard card={card([listed])} onChanged={onChanged} />);
     expect(screen.getByText("Show all")).toBeInTheDocument();
     expect(screen.getByTestId(`answer-full-${listed.id}-x`).textContent).toBe(long);
+  });
+});
+
+// Owner bug 2026-10-26 (applications 113 / 127): an Edit on a "Needs your click" row was lost on reload -
+// nothing saved until EVERY row was checked, and a row waiting for the assistant kept that from happening.
+describe("JobCard saves each answer row on its own", () => {
+  const listing = (over: Partial<Ask>, questions: unknown[]) => ({ ...ask("Form answers"), kind: "question", questions, ...over }) as unknown as Ask;
+  const Q = (key: string, question: string, answer: string, source = "profile") => ({ key, question, answer, source });
+  const rows = () => [
+    Q("equality.ethnicity", "Use 'Indian' for ethnicity on this form?", "Indian", "memory"),
+    Q("cv_ok", "CV 87 OK to use?", "", "none"), // waits for the assistant: never blocks the others
+  ];
+
+  it("an edited sensitive row saves at once, and a fresh render from the saved data shows it Verified", async () => {
+    const a = listing({}, rows());
+    const { unmount } = render(<JobCard card={card([a])} onChanged={onChanged} />);
+    expect(screen.getByText("Needs your click")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-equality.ethnicity`));
+    fireEvent.change(screen.getByTestId(`q-input-${a.id}-equality.ethnicity`), { target: { value: " South Asian " } });
+    fireEvent.click(screen.getByTestId(`q-save-${a.id}-equality.ethnicity`));
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { "equality.ethnicity": "South Asian" }));
+    await waitFor(() => expect(rememberAnswers).toHaveBeenCalledWith([
+      { topic: "equality.ethnicity", question: "Use 'Indian' for ethnicity on this form?", answer: "South Asian" },
+    ]));
+    expect(answerAskQuestions).not.toHaveBeenCalled(); // the ask stays open for the waiting row
+    expect(onChanged).toHaveBeenCalled();
+    expect(screen.queryByTestId(`q-input-${a.id}-equality.ethnicity`)).toBeNull(); // Save closes the editor
+    unmount();
+
+    // The reload: the ask now carries the owner's saved word.
+    const saved = listing({ id: a.id, answers: { "equality.ethnicity": "South Asian" } } as Partial<Ask>, rows());
+    render(<JobCard card={card([saved])} onChanged={onChanged} />);
+    const row = screen.getByTestId(`q-${a.id}-equality.ethnicity`);
+    expect(within(row).getByText("South Asian")).toBeInTheDocument();
+    expect(screen.getByTestId(`q-state-${a.id}-equality.ethnicity`)).toHaveTextContent("Verified");
+    expect(screen.getByTestId(`q-changed-${a.id}-equality.ethnicity`)).toHaveTextContent("You changed");
+    expect(screen.queryByText("Needs your click")).toBeNull();
+  });
+
+  it("Looks right and a choice save their row at once; Cancel puts an edit back", async () => {
+    const a = listing({}, [
+      Q("gender", "Gender", "Male", "memory"),
+      { ...Q("demographic_consent", "Tick the demographic-data consent checkbox?", "", "none"), choices: ["Yes", "No"] },
+      Q("cv_ok", "CV 87 OK to use?", "", "none"),
+    ]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-gender`));
+    fireEvent.change(screen.getByTestId(`q-input-${a.id}-gender`), { target: { value: "Female" } });
+    fireEvent.click(screen.getByTestId(`q-cancel-${a.id}-gender`));
+    expect(within(screen.getByTestId(`q-${a.id}-gender`)).getByText("Male")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { gender: "Male" }));
+    expect(rememberAnswers).not.toHaveBeenCalled(); // the stored fact, unchanged: nothing new to remember
+    fireEvent.click(await screen.findByRole("button", { name: "No" }));
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { demographic_consent: "No" }));
+  });
+
+  it("a failed save puts the row back and says so", async () => {
+    saveAskRowAnswers.mockRejectedValueOnce(new Error("down"));
+    const a = listing({}, rows());
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`));
+    await waitFor(() => expect(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`)).toHaveTextContent("Looks right"));
+    expect(screen.getByText("Needs your click")).toBeInTheDocument();
   });
 });

@@ -54,6 +54,15 @@ def _remote_line(country: str, work_from: list[str]) -> str:
     return f"fully remote with an employer in {_name(country)}; the ad must let you work from {where}"
 
 
+def _contract_tail(contract_ok: Any) -> str:
+    """The user's contract answer for a place, as a tail on its counts-if lines; "" = not answered."""
+    if contract_ok is True:
+        return "; contract roles are fine too"
+    if contract_ok is False:
+        return "; permanent roles only, no contract"
+    return ""
+
+
 def _onsite_line(country: str, onsite: str, needs: bool) -> str:
     place = f"on-site or hybrid in {_name(country)}"
     if onsite == "only_if_sponsored":
@@ -143,8 +152,9 @@ def build_search_brief(
         needs = _needs_sponsorship(rec)
         counts_if: list[str] = []
         priorities: dict[str, Optional[str]] = {}
+        tail = _contract_tail(rec.get("contract_ok"))
         if remote is True:
-            line = _remote_line(country, work_from)
+            line = _remote_line(country, work_from) + tail
             lvl = job_priority.level_of(rec, job_priority.REMOTE)
             if lvl != job_priority.OFF:  # the user switched this place off: never searched
                 counts_if.append(line)
@@ -156,7 +166,7 @@ def build_search_brief(
                     "path": RIGHT_TO_WORK_PATH, "country": country,
                     "ask": f"Do you need visa sponsorship to work in {_name(country)}?",
                 })
-            line = _onsite_line(country, onsite, needs is not False)
+            line = _onsite_line(country, onsite, needs is not False) + tail
             lvl = job_priority.level_of(rec, job_priority.ONSITE)
             if lvl != job_priority.OFF:
                 counts_if.append(line)
@@ -171,6 +181,7 @@ def build_search_brief(
             continue  # every place of this record is switched off
         rows.append({
             "country": country, "remote_ok": remote is True, "onsite": onsite or "",
+            "contract_ok": rec.get("contract_ok") if isinstance(rec.get("contract_ok"), bool) else None,
             "needs_sponsorship": needs, "counts_if": counts_if, "priority": priorities,
         })
     if not rows:

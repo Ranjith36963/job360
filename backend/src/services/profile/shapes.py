@@ -62,13 +62,14 @@ SHAPES: dict[str, dict[str, Any]] = {
         "allowed_values": {
             "work_authorization": _sorted(VALID_WORK_AUTH_STATUSES), "onsite": list(_ui.ONSITE_VALUES),
             "sanctions_country_citizen": [True, False, _ui.PREFER_NOT_TO_SAY],
-            "needs_sponsorship": [True, False], "remote_ok": [True, False],
+            "needs_sponsorship": [True, False], "remote_ok": [True, False], "contract_ok": [True, False],
             "remote_priority": list(_ui.PRIORITY_LEVELS), "onsite_priority": list(_ui.PRIORITY_LEVELS),
         },
         "note": (
             "one record per country; country 'ANY' = every other country. citizenship = list of ISO alpha-2 "
             f"codes. sanctions_country_citizen = true, false or \"{_ui.PREFER_NOT_TO_SAY}\" (nothing else). "
-            "needs_sponsorship and remote_ok = true or false. visa_expires = YYYY-MM or YYYY-MM-DD. "
+            "needs_sponsorship, remote_ok and contract_ok (contract roles OK there) = true or false. "
+            "visa_expires = YYYY-MM or YYYY-MM-DD. "
             "visa_type and note = one short line. work_authorization citizen / permanent_resident cannot go with "
             "needs_sponsorship true, and needs_sponsorship cannot go with needs_sponsorship false. "
             "remote_priority / onsite_priority = the user's own job priority for that place "
