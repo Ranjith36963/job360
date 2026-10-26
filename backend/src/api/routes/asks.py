@@ -13,7 +13,7 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.routes.applications import AskOut, InboxItemOut
 from src.repositories.database import JobDatabase
@@ -177,6 +177,30 @@ async def _ignite_batch(db: JobDatabase, user: CurrentUser, ask: dict[str, Any])
 
     app_id = ask.get("application_id")
     await duty_trigger.ignite(user.id, ("batch",), "ask_answered", [int(app_id)] if app_id else None, db=db)
+
+
+class SaveRowAnswersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Some of the ask's question keys, each with the user's answer; the rest stay open.
+    answers: dict[str, str]
+
+
+@router.post("/asks/{ask_id}/answers/save", response_model=AskOut, dependencies=AUTH_FIRST)
+async def save_ask_row_answers(
+    ask_id: int,
+    body: SaveRowAnswersRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own click (session only)
+) -> dict[str, Any]:
+    """Save the rows the user edited or checked on a job card, at once, while the ask stays open
+    (owner bug 2026-10-26: an edit was lost on reload). Session only - an open ask's saved rows are
+    always the user's own word, so a personal or consent row may read as checked from them. No MCP twin."""
+    try:
+        return await asks_service.save_row_answers(db, user.id, ask_id, body.answers)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 @router.post("/asks/{ask_id}/confirm", response_model=AskOut, dependencies=AUTH_FIRST)

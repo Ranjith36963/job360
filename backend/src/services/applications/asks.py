@@ -317,9 +317,11 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
             keep, olds = asks_[-1], asks_[:-1]
             if family == "question":
                 merged = merge_questions([q for old in olds for q in _rows_of(old)], _rows_of(keep))
+                kept = carried_answers(olds, keep, merged)
                 await db._db.execute(
-                    "UPDATE application_asks SET questions = ? WHERE id = ? AND user_id = ? AND answered_at IS NULL",
-                    (json.dumps(merged) if merged else "", int(keep["id"]), user_id),
+                    "UPDATE application_asks SET questions = ?, answers = ? "
+                    "WHERE id = ? AND user_id = ? AND answered_at IS NULL",
+                    (json.dumps(merged) if merged else "", json.dumps(kept) if kept else "", int(keep["id"]), user_id),
                 )
             await supersede(db, user_id, olds, int(keep["id"]), now, TIDY_ACTOR)
             closed += len(olds)
@@ -575,11 +577,12 @@ async def create_ask(
                 # A sentence-only ask joins as a row too, or the merged card would hide what it asked.
                 mine = clean_qs or [_sentence_row(f"said_{zlib.crc32(clean_q.encode()):08x}", clean_q)]
                 clean_qs = merge_questions([q for old in family for q in _rows_of(old)], mine)
+        kept = carried_answers(family, None, clean_qs) if family else {}
         cur = await db._db.execute(
             "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at, "
-            "kind, questions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "kind, questions, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (user_id, application_id, clean_q, clean_ctx, asked_by, now, kind,
-             json.dumps(clean_qs) if clean_qs else ""),
+             json.dumps(clean_qs) if clean_qs else "", json.dumps(kept) if kept else ""),
         )
         ask_id = int(cur.lastrowid or 0)
         if family:
@@ -666,6 +669,59 @@ async def answer_ask(
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
     return ask
+
+
+async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: Any) -> dict[str, Any]:
+    """The user's own save of SOME rows of an open ask (owner bug 2026-10-26, application 113: an Edit
+    on a "Needs your click" row was lost on reload, because only the all-rows approve saved anything).
+    Merges ``answers`` (a subset of the ask's keys, each non-empty, a choice row one of its choices) into
+    the stored ``answers`` and leaves the ask OPEN: the rows still waiting stay on the card, and the full
+    answer (:func:`answer_ask`) closes it later. The caller is the user's web session only (the route is
+    session-only), so an open ask's ``answers`` are always the user's own word. 404 / 409 / 422 write nothing."""
+    existing = await _get_ask(db, user_id, ask_id)
+    if existing is None:
+        raise SpineError(404, "ask not found")
+    if existing["withdrawn_at"] or existing["answered_at"]:
+        raise SpineError(409, "this ask is no longer open")
+    if not isinstance(answers, dict) or not answers:
+        raise SpineError(422, "pass `answers` with at least one question key")
+    by_key = {q["key"]: q for q in existing["questions"]}
+    unknown = [k for k in answers if k not in by_key]
+    if unknown:
+        raise SpineError(422, f"no such question on this ask: {', '.join(map(str, unknown))}")
+    saved = dict(existing["answers"] or {})
+    for key, raw in answers.items():
+        text = _item_text(f"answers.{key}", raw, ASK_ITEM_ANSWER_MAX_CHARS)
+        if by_key[key].get("choices") and text not in by_key[key]["choices"]:
+            raise SpineError(422, f"answers.{key} must be one of its choices")
+        saved[key] = text
+    cur = await db._db.execute(
+        "UPDATE application_asks SET answers = ? "
+        "WHERE id = ? AND user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL",
+        (json.dumps(saved), ask_id, user_id),
+    )
+    if not cur.rowcount:
+        raise SpineError(409, "this ask is no longer open")
+    get_audit_logger().info(
+        "ask_rows_saved",
+        extra={"event": "ask_rows_saved", "user_id": user_id, "ask_id": safe_log_value(ask_id), "count": len(answers)},
+    )
+    ask = await _get_ask(db, user_id, ask_id)
+    assert ask is not None
+    return ask
+
+
+def carried_answers(
+    olds: list[dict[str, Any]], keep: Optional[dict[str, Any]], rows: list[dict[str, Any]]
+) -> dict[str, str]:
+    """The user's saved row answers (:func:`save_row_answers`) that survive a merge: oldest first, ``keep``'s
+    own last, limited to the merged ``rows``' keys - an assistant re-asking hourly never wipes the user's word."""
+    out: dict[str, str] = {}
+    for ask in [*olds, *([keep] if keep else [])]:
+        if not ask.get("answered_at") and isinstance(ask.get("answers"), dict):
+            out.update({str(k): str(v) for k, v in ask["answers"].items()})
+    keys = {q["key"] for q in rows}
+    return {k: v for k, v in out.items() if k in keys}
 
 
 async def confirm_ask(db: JobDatabase, user_id: str, ask_id: int) -> dict[str, Any]:
