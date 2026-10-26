@@ -47,7 +47,7 @@ describe("Send all unflagged", () => {
     const held = screen.getByTestId("held-row-4");
     expect(held).toHaveTextContent("Held out · DeepL · AI Engineer · Cologne");
     expect(held).toHaveTextContent("Salary for Germany not saved yet — answer it first");
-    expect(screen.getByTestId("held-answer-4")).toHaveAttribute("href", "/profile?tab=memory");
+    expect(screen.getByTestId("held-answer-4")).toHaveAttribute("href", "/profile/memory");
   });
 
   it("needs a confirm; Cancel sends nothing", async () => {

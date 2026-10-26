@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/layout/AuthProvider";
-import { NAV_LINKS, isNavActive, isSettingsActive } from "@/components/layout/nav-links";
+import { NAV_FLAT, isNavActive } from "@/components/layout/nav-links";
 import { askResume, usePause } from "@/lib/assistant-state";
 import { cn } from "@/lib/utils";
 
@@ -37,10 +37,9 @@ export function PauseButton({ className }: { className?: string }) {
   );
 }
 
-/** The crumb: the label of the page the user is on (Settings is not in NAV_LINKS). */
+/** The crumb: the label of the page the user is on. */
 function crumbFor(pathname: string): string {
-  if (isSettingsActive(pathname)) return "Settings";
-  const hit = [...NAV_LINKS]
+  const hit = [...NAV_FLAT]
     .filter((l) => (l.href === "/" ? pathname === "/" : isNavActive(pathname, l.href)))
     .sort((a, b) => b.href.length - a.href.length)[0];
   return hit?.label ?? "";

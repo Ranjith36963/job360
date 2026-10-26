@@ -110,7 +110,7 @@ export function ApplicationDecisions({
           )}
           {/* Job360's own cloud browser met a sign-in page: one sign-in on Job sites fixes it for next time. */}
           {blocked.step === "Job360 browser" && blocked.reason === "login_needed" && (
-            <Link data-testid="blocked-sign-in-link" href="/settings/job-sites" className={`${BTN} self-start`}>
+            <Link data-testid="blocked-sign-in-link" href="/connect?tab=job-sites" className={`${BTN} self-start`}>
               {`Sign in once${blocked.page_host ? ` to ${blocked.page_host}` : ""} on Job sites`}
             </Link>
           )}

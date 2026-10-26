@@ -62,7 +62,7 @@ function resultText(result: string): string {
 }
 
 /**
- * Settings → Connect your assistant: "Start my assistant when I press Send".
+ * Connect your assistant: "Start my assistant when I press Send".
  * The start link is saved as typed; its token is saved encrypted and never shown again. Only the website can
  * set, change or fire it (an assistant's token is refused), so no assistant can redirect Send.
  */

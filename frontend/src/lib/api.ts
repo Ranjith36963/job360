@@ -246,7 +246,7 @@ export type User = {
   id: string;
   email: string;
   timezone?: string;
-  /** "Help improve Job360" (Settings > Account). Gates Sentry session replay. */
+  /** "Help improve Job360" (Account). Gates Sentry session replay. */
   analytics_consent?: boolean;
   /** GET /api/auth/me only: false for an account only a magic link has ever
    * signed in; the account page then deletes without a password. */
