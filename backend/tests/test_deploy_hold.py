@@ -22,6 +22,7 @@ def _own_key(monkeypatch):
     # These tests read the lock state straight after changing it: no probe cache here.
     monkeypatch.setattr(deploy_hold, "_PROBE_TTL_S", 0.0)
     monkeypatch.setattr(deploy_hold, "_probe_cache", None)
+    monkeypatch.setattr(deploy_hold, "_serving", False)
 
 
 async def _deployz():
@@ -120,6 +121,22 @@ async def test_deployz_holds_while_busy_within_the_window(monkeypatch):
         assert resp.status_code == 200 and resp.json() == {"status": "ready"}
     finally:
         await b.close()
+
+
+@pytest.mark.asyncio
+async def test_once_ready_this_process_own_browsers_never_hold_its_healthcheck(monkeypatch):
+    """Boot restore (restore.py) opens browsers only after deployz said ready: they take this process's own
+    shared lock, which the exclusive probe would read as busy. The ready answer latches."""
+    monkeypatch.setattr(settings, "DEPLOY_HOLD_MAX_SECONDS", 600)
+    assert (await _deployz()).status_code == 200
+    own = deploy_hold.Beacon()
+    try:
+        await own.sync(True)  # a restored form in this process
+        assert await deploy_hold.others_busy() is True
+        resp = await _deployz()
+        assert resp.status_code == 200 and resp.json() == {"status": "ready"}
+    finally:
+        await own.close()
 
 
 @pytest.mark.asyncio
