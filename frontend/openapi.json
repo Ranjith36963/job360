@@ -1839,6 +1839,16 @@
             "title": "Artifacts",
             "type": "object"
           },
+          "browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "country": {
             "anyOf": [
               {

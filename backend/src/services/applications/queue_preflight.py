@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import kit, ready, spine
+from src.services.browser_agent import routing
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -189,16 +190,57 @@ async def _removed_today(db: JobDatabase, user_id: str, now: datetime) -> dict[s
     return counts
 
 
-async def queue_summary(db: JobDatabase, user_id: str, queued_ids: list[int], cfg: Any) -> dict[str, Any]:
+BROWSER_KINDS = ("job360", "own_browser", "human")
+
+
+async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -> dict[int, dict[str, str]]:
+    """Which browser runs each queued application, by application id: ``{kind, label, reason}``
+    (``routing.label``). The route of its apply link (``routing.browser_for``, the link Ready to send uses);
+    when Job360's own browser wrote the open block (``by: browser``) the block's reason moves it to the
+    user's own browser (the same mapping Needs you shows, ``routing.JOB360_FAILURES``), and a one-time code
+    is the user's alone. Two queries for the whole queue (links, then open blocks), never N+1; scoped by
+    ``user_id``. Read-only."""
+    ids = sorted(set(queued_ids))
+    if not ids:
+        return {}
+    cur = await db._db.execute(
+        f"SELECT id, job_url FROM applications WHERE user_id = ? AND id IN ({','.join('?' for _ in ids)})",  # noqa: S608
+        (user_id, *ids),
+    )
+    urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
+    blocks = await blocked_service.open_blocks(db, user_id, ids)
+    out: dict[int, dict[str, str]] = {}
+    for app_id in ids:
+        p = blocks.get(app_id, {})
+        reason = str(p.get("reason") or "")
+        by_browser = p.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
+        route = routing.browser_for(
+            url=urls.get(app_id, ""),
+            job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
+            page_stop="otp_needed" if reason == "otp_needed" else "",
+        )
+        out[app_id] = routing.label(route)
+    return out
+
+
+async def queue_summary(
+    db: JobDatabase, user_id: str, queued_ids: list[int], cfg: Any,
+    browsers: Optional[dict[int, dict[str, str]]] = None,
+) -> dict[str, Any]:
     """The whole open queue at a glance (Q2): ``queued``; ``ready_to_send`` (form filled, waiting
     for the user's yes); ``asked`` (an open Needs-you ask, not a block); ``blocked`` (an open
     ``blocked``); ``submitted_today`` / ``daily_cap`` / ``daily_left`` (null = no cap);
-    ``removed_today`` = ``unqueued`` events today by closed reason (M1)."""
+    ``removed_today`` = ``unqueued`` events today by closed reason (M1); ``by_browser`` = the whole queue
+    counted by which browser runs it (``job360`` / ``own_browser`` / ``human``; ``browsers`` is the
+    :func:`queue_browsers` map, read here when not given)."""
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
 
     now = datetime.now(timezone.utc)
     counts = await settings_rules.load_submit_counts(db, user_id, now)
     in_queue = set(queued_ids)
+    if browsers is None:
+        browsers = await queue_browsers(db, user_id, queued_ids)
+    by_browser = {k: sum(1 for v in browsers.values() if v["kind"] == k) for k in BROWSER_KINDS}
     ready_ids = {
         int(r["application_id"])
         for r in await ready.ready_rows(db, user_id, limit=settings.READY_TO_SEND_MAX)
@@ -214,6 +256,7 @@ async def queue_summary(db: JobDatabase, user_id: str, queued_ids: list[int], cf
         "daily_cap": cfg.daily_cap,
         "daily_left": settings_rules.daily_left(cfg, counts),
         "removed_today": await _removed_today(db, user_id, now),
+        "by_browser": by_browser,
     }
 
 
