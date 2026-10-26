@@ -1065,6 +1065,17 @@ FORM_CHECKED_ANSWER_KEYS = frozenset({"question", "key", "source", "needs_confir
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
 ANSWER_QUESTION_MAX = 300
 ANSWER_KEY_MAX = 120
+# Owner 2026-10-26 (AppZen on production): a form answer is the EXACT text typed into the field, so the
+# user can read what went out.
+# A short answer that only DESCRIBES the text ("drafted from profile facts", "see CV", "metrics from
+# CV") is refused: it is a note about the answer, not the answer. Only checked under this length -
+# a real paragraph may mention its CV.
+_DESCRIPTION_MAX_CHARS = 120
+_DESCRIBES_ITSELF = re.compile(
+    r"\b(drafted|placeholder|as typed|see (the |my )?(cv|profile|typed text|above|form)"
+    r"|(from|per|in) (the |my )?(cv|profile)( facts)?)\b",
+    re.IGNORECASE,
+)
 
 
 def _clean_answer(item: Any) -> dict[str, str]:
@@ -1086,6 +1097,7 @@ def _clean_answer(item: Any) -> dict[str, str]:
         raise SpineError(422, f"answer question must be 1 to {ANSWER_QUESTION_MAX} characters")
     if len(answer) > settings.USER_INFO_ANSWER_MAX_CHARS:
         raise SpineError(422, f"an answer is over {settings.USER_INFO_ANSWER_MAX_CHARS} characters")
+    _refuse_description(question, answer, str(item["source"]))
     clean = {"question": question, "answer": answer, "source": str(item["source"])}
     if "key" in texts:
         key = spine._strip_control_chars(texts["key"], keep="").strip()
@@ -1093,6 +1105,17 @@ def _clean_answer(item: Any) -> dict[str, str]:
             raise SpineError(422, f"answer key must be 1 to {ANSWER_KEY_MAX} characters")
         clean["key"] = key
     return clean
+
+
+def _refuse_description(question: str, answer: str, source: str) -> None:
+    """422 when a written or guessed answer is a note ABOUT the text, not the text itself."""
+    if source not in ("written", "guessed") or not answer:
+        return
+    if len(answer) <= _DESCRIPTION_MAX_CHARS and _DESCRIBES_ITSELF.search(answer):
+        raise SpineError(422, (
+            f'answer for "{question[:80]}" describes the text instead of giving it ("{answer[:60]}"): '
+            "send the exact text you typed into the field, word for word, so the user can read it"
+        ))
 
 
 def _answers_list(raw: Any) -> list[Any]:
