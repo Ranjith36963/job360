@@ -6,8 +6,6 @@ import {
   X,
   Plus,
   Briefcase,
-  MapPin,
-  DollarSign,
   Building2,
   AlertCircle,
 } from "lucide-react";
@@ -15,18 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { EditedMark } from "@/components/profile/EditedMark";
 import { FieldHistory } from "@/components/profile/FieldHistory";
-import { CountryPicker } from "@/components/profile/CountryPicker";
 import { findAgentEdit, type AgentEdit } from "@/lib/agent-edits";
 import type { PreferencesRequest } from "@/lib/types";
 
@@ -240,15 +230,6 @@ function TagInput({
 const asArr = (val: unknown): string[] =>
   Array.isArray(val) ? val.map(String) : [];
 
-// The Select can't display "nothing chosen" as a real selected option, so it
-// needs its OWN word for that state -- same trick work_arrangement plays with
-// "any" a few fields down. The difference: nothing on the backend translates
-// this back to "" the way `_normalize_work_arrangement` does for
-// work_arrangement -- `_apply_preferences` stores experience_level with a bare
-// `.get(pref_dict, "experience_level", "")`, no normalizer. So BOTH directions
-// of the "" <-> sentinel translation have to happen here, or the sentinel word
-// itself would be posted to the server as though the user had typed it.
-const EXPERIENCE_UNSET = "unspecified";
 
 export function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
   return {
@@ -315,6 +296,21 @@ function serializePrefs(p: PreferencesRequest): string {
   ]);
 }
 
+/** The keys THIS card sends. Everything else is left out of the save, and the
+ *  server keeps an omitted key as stored, so this card can never overwrite job
+ *  targets, salary, visa answers or notes edited elsewhere (Memory, Home, the
+ *  assistant) from a stale copy. excluded_skills has no control but is sent
+ *  back unchanged, as before. */
+function formPart(p: PreferencesRequest): PreferencesRequest {
+  return {
+    additional_skills: p.additional_skills,
+    excluded_skills: p.excluded_skills,
+    industries: p.industries,
+    negative_keywords: p.negative_keywords,
+    about_me: p.about_me,
+  };
+}
+
 // Debounce window for auto-save: long enough to batch fast typing, short
 // enough to feel instant.
 const AUTOSAVE_DELAY_MS = 800;
@@ -323,23 +319,12 @@ const AUTOSAVE_DELAY_MS = 800;
 // both by the combined "See history" view (one row per change, labelled by
 // field) and nowhere else — replaces the ~12 separate per-field FieldHistory
 // instances that used to sit under every input (owner decision, 2026-09-27).
+// Job targets, salary, visa and work arrangement moved to Memory -> Job
+// targets (owner, 2026-10-26); this card keeps what describes you and your CV.
 const ALL_PREFERENCE_FIELDS: { field: string; label: string }[] = [
-  { field: "target_job_titles", label: "Target Job Titles" },
   { field: "additional_skills", label: "Additional Skills" },
-  { field: "preferred_locations", label: "Preferred Locations" },
   { field: "industries", label: "Industries" },
-  { field: "salary_min", label: "Salary Min" },
-  { field: "salary_max", label: "Salary Max" },
-  { field: "work_arrangement", label: "Work Arrangement" },
-  { field: "experience_level", label: "Experience Level" },
-  { field: "needs_visa", label: "Visa sponsorship" },
-  { field: "work_authorization_countries", label: "Countries where I can already work" },
   { field: "negative_keywords", label: "Words to avoid in job titles" },
-  { field: "experience_years_min", label: "Years of experience (from)" },
-  { field: "experience_years_max", label: "Years of experience (to)" },
-  { field: "looking_for", label: "What you look for in a job" },
-  { field: "dealbreakers", label: "Dealbreakers" },
-  { field: "avoid_companies", label: "Companies to avoid" },
   { field: "about_me", label: "About Me" },
 ];
 
@@ -361,25 +346,11 @@ export function PreferencesForm({
   const markOf = (field: string) => (
     <EditedMark edit={editOf(field)} onTakeBack={onTakeBack} onKeep={onKeep} />
   );
-  const [targetTitles, setTargetTitles] = useState<string[]>([]);
   const [additionalSkills, setAdditionalSkills] = useState<string[]>([]);
   const [excludedSkills, setExcludedSkills] = useState<string[]>([]);
-  const [preferredLocations, setPreferredLocations] = useState<string[]>([]);
   const [industries, setIndustries] = useState<string[]>([]);
-  const [salaryMin, setSalaryMin] = useState("");
-  const [salaryMax, setSalaryMax] = useState("");
-  const [workArrangement, setWorkArrangement] = useState("any");
-  const [experienceLevel, setExperienceLevel] = useState(EXPERIENCE_UNSET);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
-  const [yearsMin, setYearsMin] = useState("");
-  const [yearsMax, setYearsMax] = useState("");
-  const [lookingFor, setLookingFor] = useState<string[]>([]);
-  const [dealbreakers, setDealbreakers] = useState<string[]>([]);
-  const [avoidCompanies, setAvoidCompanies] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
-  const [needsVisa, setNeedsVisa] = useState(false);
-  const [workAuthorizationCountries, setWorkAuthorizationCountries] = useState<string[]>([]);
-  const [assistantNotes, setAssistantNotes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   // Distinct from `saving`: a failed auto-save used to fall back to the same
   // green "Changes save automatically" line as a successful one, so once the
@@ -398,89 +369,25 @@ export function PreferencesForm({
     if (!preferences) return;
     const p = prefsFromRaw(preferences);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
-    setTargetTitles(p.target_job_titles ?? []);
     setAdditionalSkills(p.additional_skills ?? []);
     setExcludedSkills(p.excluded_skills ?? []);
-    setPreferredLocations(p.preferred_locations ?? []);
     setIndustries(p.industries ?? []);
-    setSalaryMin(p.salary_min != null ? String(p.salary_min) : "");
-    setSalaryMax(p.salary_max != null ? String(p.salary_max) : "");
-    // `||`, not `??`: the server now stores "I don't mind" as "" rather than the
-    // literal "any", because "any" was being stored on the profile as a stated
-    // constraint. `??` only falls back on null/undefined, so an empty string
-    // would leave this select showing nothing at all.
-    setWorkArrangement(p.work_arrangement || "any");
-    // See EXPERIENCE_UNSET above: `p.experience_level` is the server's wire
-    // word ("" for "not chosen"). The Select needs an actual item selected,
-    // so an empty value becomes the display sentinel here -- and buildPrefs
-    // mirrors this translation back to "" on the way out. Both read-points
-    // must agree, or the dirty-check reports unsaved changes on a freshly
-    // loaded, untouched form.
-    setExperienceLevel(p.experience_level || EXPERIENCE_UNSET);
-    setNeedsVisa(p.needs_visa === true);
-    setWorkAuthorizationCountries(p.work_authorization_countries ?? []);
     setNegativeKeywords(p.negative_keywords ?? []);
-    setYearsMin(p.experience_years_min != null ? String(p.experience_years_min) : "");
-    setYearsMax(p.experience_years_max != null ? String(p.experience_years_max) : "");
-    setLookingFor(p.looking_for ?? []);
-    setDealbreakers(p.dealbreakers ?? []);
-    setAvoidCompanies(p.avoid_companies ?? []);
     setAboutMe(p.about_me ?? "");
-    setAssistantNotes(p.assistant_notes ?? []);
-    baselineRef.current = serializePrefs(p);
+    baselineRef.current = serializePrefs(formPart(p));
   }, [preferences]);
 
   // Build a PreferencesRequest from the current form state. Memoized on every
   // field so the auto-save effect re-runs (and re-debounces) on each edit.
   const buildPrefs = useCallback(
     (): PreferencesRequest => ({
-      target_job_titles: targetTitles,
       additional_skills: additionalSkills,
       excluded_skills: excludedSkills,
-      preferred_locations: preferredLocations,
       industries: industries,
-      salary_min: salaryMin ? Number(salaryMin) : null,
-      salary_max: salaryMax ? Number(salaryMax) : null,
-      work_arrangement: workArrangement,
-      // Mirror the EXPERIENCE_UNSET translation back the other way: the
-      // Select's display sentinel is a form-only word and must never reach
-      // the wire, or "unspecified" would be stored as though it were a real
-      // typed answer.
-      experience_level:
-        experienceLevel === EXPERIENCE_UNSET ? "" : experienceLevel,
       negative_keywords: negativeKeywords,
-      // Empty box = null = "don't care" (rule #29); never a 0 the user did not type.
-      experience_years_min: yearsMin.trim() === "" ? null : Number(yearsMin),
-      experience_years_max: yearsMax.trim() === "" ? null : Number(yearsMax),
-      looking_for: lookingFor,
-      dealbreakers: dealbreakers,
-      avoid_companies: avoidCompanies,
       about_me: aboutMe,
-      needs_visa: needsVisa,
-      work_authorization_countries: workAuthorizationCountries,
-      assistant_notes: assistantNotes,
     }),
-    [
-      targetTitles,
-      additionalSkills,
-      excludedSkills,
-      preferredLocations,
-      industries,
-      salaryMin,
-      salaryMax,
-      workArrangement,
-      experienceLevel,
-      negativeKeywords,
-      yearsMin,
-      yearsMax,
-      lookingFor,
-      dealbreakers,
-      avoidCompanies,
-      aboutMe,
-      needsVisa,
-      workAuthorizationCountries,
-      assistantNotes,
-    ]
+    [additionalSkills, excludedSkills, industries, negativeKeywords, aboutMe]
   );
 
   // Auto-save: whenever the form differs from the last-saved baseline, save it
@@ -557,25 +464,6 @@ export function PreferencesForm({
       </div>
 
       <div className="space-y-6">
-        {/* ── Target Job Titles ────────────────────
-            `id="target-job-titles"` + `scroll-mt-24` keep this field ready as
-            a scroll target for any future deep link — Next.js skips
-            fixed/sticky elements when it picks a scroll target, so without
-            the margin the field would land underneath the sticky Navbar
-            (documented in node_modules/next/dist/docs/…/components/link.md).
-            No current caller deep-links here (the dashboard "Searching for…"
-            row that used to was deleted with the sourcing era, slice 5). */}
-        <div id="target-job-titles" className="scroll-mt-24">
-          <TagInput
-            label="Target Job Titles"
-            icon={<Briefcase className="h-3.5 w-3.5" />}
-            tags={targetTitles}
-            onChange={setTargetTitles}
-            placeholder="e.g. Data Scientist"
-            description="Roles you're targeting"
-            trailing={markOf("target_job_titles")}
-          />
-        </div>
 
         {/* ── Additional Skills ──────────────────── */}
         <TagInput
@@ -597,16 +485,6 @@ export function PreferencesForm({
 
         <Separator />
 
-        {/* ── Preferred Locations ─────────────────── */}
-        <TagInput
-          label="Preferred Locations"
-          icon={<MapPin className="h-3.5 w-3.5" />}
-          tags={preferredLocations}
-          onChange={setPreferredLocations}
-          placeholder="e.g. London, Manchester, Remote"
-          trailing={markOf("preferred_locations")}
-        />
-
         {/* ── Industries ─────────────────────────── */}
         <TagInput
           label="Industries"
@@ -616,131 +494,6 @@ export function PreferencesForm({
           placeholder="e.g. FinTech, Healthcare, AI"
           description="Context for your assistant — most jobs are not affected by this at all."
           trailing={markOf("industries")}
-        />
-
-        <Separator />
-
-        {/* ── Salary Range ───────────────────────── */}
-        <div className="space-y-2">
-          <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            <DollarSign className="h-3.5 w-3.5" />
-            Salary Range
-            <EditedMark
-              edit={editOf("salary_min") ?? editOf("salary_max")}
-              onTakeBack={onTakeBack}
-              onKeep={onKeep}
-            />
-          </Label>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-mono">
-                &pound;
-              </span>
-              <Input
-                type="number"
-                value={salaryMin}
-                onChange={(e) => setSalaryMin(e.target.value)}
-                placeholder="Min"
-                className="pl-7"
-              />
-            </div>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-mono">
-                &pound;
-              </span>
-              <Input
-                type="number"
-                value={salaryMax}
-                onChange={(e) => setSalaryMax(e.target.value)}
-                placeholder="Max"
-                className="pl-7"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ── Work Arrangement & Experience Level ── */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-              Work Arrangement
-              {markOf("work_arrangement")}
-            </Label>
-            <Select
-              value={workArrangement}
-              onValueChange={(v) => setWorkArrangement(v ?? "")}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">Any</SelectItem>
-                <SelectItem value="remote">Remote</SelectItem>
-                <SelectItem value="hybrid">Hybrid</SelectItem>
-                <SelectItem value="onsite">Onsite</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-              Experience Level
-              {markOf("experience_level")}
-            </Label>
-            <Select
-              value={experienceLevel}
-              onValueChange={(v) => setExperienceLevel(v ?? "")}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select..." />
-              </SelectTrigger>
-              <SelectContent>
-                {/* Form-only word for "not chosen" -- see EXPERIENCE_UNSET.
-                    Listed first since it is the actual starting state for
-                    every account until they pick one. */}
-                <SelectItem value={EXPERIENCE_UNSET}>No preference</SelectItem>
-                <SelectItem value="entry">Entry</SelectItem>
-                <SelectItem value="mid">Mid</SelectItem>
-                <SelectItem value="senior">Senior</SelectItem>
-                <SelectItem value="lead">Lead</SelectItem>
-                <SelectItem value="executive">Executive</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* ── Visa sponsorship ──────────────────────
-            Stored on the profile so the user's agent knows whether
-            sponsorship is required before it judges a job's fit. Before this
-            control existed the field was always the default False, so the
-            agent had no way to know a user needed one. Empty/unchecked is a
-            real answer ("I don't need sponsorship"), not a missing one. */}
-        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-input"
-            checked={needsVisa}
-            onChange={(e) => setNeedsVisa(e.target.checked)}
-          />
-          I need visa sponsorship
-          {markOf("needs_visa")}
-        </label>
-
-        {/* ── Work authorization countries (slice 7, #514) ──────────
-            Fact 2 of the visa-signal comparison — compared against each
-            job's visa_country, never a per-country rule Job360 knows
-            itself (docs/product/VISION.md decision 27: two facts + list
-            membership, no country rule of ours anywhere). Empty list =
-            "don't care" (rule #29), never a penalty. A searchable country
-            picker (owner-approved copy, 2026-09-27) replaces the old
-            free-typed ISO-code box; it still stores the same alpha-2 codes
-            the backend already validates — only the input UX changed. */}
-        <CountryPicker
-          testId="work-authorization-countries"
-          label="Countries where I can already work (no visa needed)"
-          tags={workAuthorizationCountries}
-          onChange={setWorkAuthorizationCountries}
-          description="Leave empty if you'd rather not compare."
-          trailing={markOf("work_authorization_countries")}
         />
 
         <Separator />
@@ -760,82 +513,6 @@ export function PreferencesForm({
           variant="destructive"
           trailing={markOf("negative_keywords")}
         />
-
-        <Separator />
-
-        {/* ── What you're looking for (owner decision 2026-10-10) ──
-            Stored on the profile; the user's assistant reads it when it
-            judges a job. Every field is optional: empty = "don't care"
-            (rule #29), never a default. */}
-        <section aria-labelledby="looking-for-heading" data-testid="looking-for" className="space-y-6">
-          <h4
-            id="looking-for-heading"
-            className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint"
-          >
-            What you&apos;re looking for
-          </h4>
-          <div className="space-y-2">
-            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-              Years of experience in the job
-              <EditedMark
-                edit={editOf("experience_years_min") ?? editOf("experience_years_max")}
-                onTakeBack={onTakeBack}
-                onKeep={onKeep}
-              />
-            </Label>
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                type="number"
-                min={0}
-                max={60}
-                aria-label="Years of experience, from"
-                data-testid="years-min"
-                value={yearsMin}
-                onChange={(e) => setYearsMin(e.target.value)}
-                placeholder="From"
-              />
-              <Input
-                type="number"
-                min={0}
-                max={60}
-                aria-label="Years of experience, to"
-                data-testid="years-max"
-                value={yearsMax}
-                onChange={(e) => setYearsMax(e.target.value)}
-                placeholder="To"
-              />
-            </div>
-          </div>
-          <TagInput
-            label="What you look for in a job"
-            tags={lookingFor}
-            onChange={setLookingFor}
-            placeholder="e.g. small team, ships often"
-            description="Things that make a job a good one for you."
-            trailing={markOf("looking_for")}
-            testId="looking-for-list"
-          />
-          <TagInput
-            label="Dealbreakers"
-            tags={dealbreakers}
-            onChange={setDealbreakers}
-            placeholder="e.g. on-call, relocation"
-            description="Anything that rules a job out."
-            variant="destructive"
-            trailing={markOf("dealbreakers")}
-            testId="dealbreakers-list"
-          />
-          <TagInput
-            label="Companies to avoid"
-            tags={avoidCompanies}
-            onChange={setAvoidCompanies}
-            placeholder="e.g. a company name"
-            description="Your assistant reads this when it judges a job."
-            variant="destructive"
-            trailing={markOf("avoid_companies")}
-            testId="avoid-companies-list"
-          />
-        </section>
 
         <Separator />
 
