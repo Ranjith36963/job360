@@ -18,6 +18,7 @@ import { ReadyCard, isMissingAnswer } from "./ReadyCard";
 import { SendAllCard } from "./SendAllCard";
 import { openQuestionAsks } from "./useReadyAsks";
 import { useSalaryFacts } from "./useSalaryFacts";
+import { useLiveJobs } from "./useLiveLists";
 
 // Every string here (company, role, asks) is untrusted text: rendered only as React text.
 
@@ -222,7 +223,9 @@ export function JobCards({
     return !c || c.asks.length > 0 || c.people.length > 0 || h.ready !== null || h.cv !== null;
   }, [slots, cardOf]);
 
-  const alive = useMemo(() => headers.filter(live), [headers, live]);
+  const current = useMemo(() => headers.filter(live), [headers, live]);
+  // Live (PR 6): the card the user is in never moves or closes on a refresh (counts use `current`).
+  const alive = useLiveJobs(current);
   // The chosen chip's jobs; "Other" holds no job (only New connections show from here).
   const shown = useMemo(
     () => (show === "all" ? alive : show === "other" ? [] : alive.filter((h) => jobChip(h) === show)),
@@ -255,11 +258,11 @@ export function JobCards({
   const dropped = useMemo(() => headers.filter((h) => !live(h)).map((h) => h.id), [headers, live]);
   useEffect(() => {
     onReport?.({
-      cards, failed, total: alive.length, connections: connections.length, settled,
+      cards, failed, total: current.length, connections: connections.length, settled,
       readyTotal: ready ? ready.total : readyFailed ? 0 : null,
       inputs: { ready: ready?.items ?? [], cvRows: cvRows ?? [], people: people ?? [], dropped },
     });
-  }, [onReport, cards, failed, alive.length, connections.length, settled, ready, readyFailed, cvRows, people, dropped]);
+  }, [onReport, cards, failed, current.length, connections.length, settled, ready, readyFailed, cvRows, people, dropped]);
 
   const { clean, held } = useMemo(() => {
     const asked = new Set(openQuestionAsks(open).map((a) => a.application_id));

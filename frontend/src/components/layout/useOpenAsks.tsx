@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ASKS_CHANGED_EVENT, getReadyToSend } from "@/lib/api";
 import { fetchSettingsShared } from "@/lib/assistant-state";
+import { onChanges } from "@/lib/live-changes";
 import { countNeedsYou, listAllOpenAsks } from "@/lib/needs-you-items";
 
 /**
@@ -94,6 +95,16 @@ export function useOpenAsks(signedIn: boolean, pathname: string): number {
     window.addEventListener(ASKS_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(ASKS_CHANGED_EVENT, onChanged);
   }, []);
+
+  // Live (PR 6): the assistant changed something; re-count quietly (a failure keeps the badge).
+  // On Needs you the page re-reads on the same event and announces its own full count.
+  const onNeedsYou = pathname.startsWith("/needs-you");
+  useEffect(() => {
+    if (!signedIn || onNeedsYou) return;
+    return onChanges((d) => {
+      fetchOpenCount(`live:${d.seq}`).then(setOpenAsks, () => {});
+    });
+  }, [signedIn, onNeedsYou]);
 
   return signedIn ? openAsks : 0;
 }

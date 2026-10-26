@@ -42,6 +42,7 @@ describe("assistant-neutral strings (owner 2026-10-25)", () => {
     "lib/browser-labels.ts",
     "lib/answer-status.ts",
     "components/needs-you/AnswerStatus.tsx",
+    "components/needs-you/LiveLine.tsx",
   ])("%s has no Chrome or Claude in any string", (file) => {
     expect(visibleStrings(file)).not.toMatch(BAD);
   });

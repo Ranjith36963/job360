@@ -7,6 +7,7 @@ import { STATUS_LABEL } from "@/lib/event-labels";
 import { OutcomeSuggestionCard, useOutcomeSuggestions } from "./OutcomeSuggestions";
 import { SettingRequestCard, describeSettingRequest, type WaitingRequest } from "./SettingRequestCard";
 import { InboxItemCard, useUnmatchedMail } from "./UnmatchedMail";
+import { useLiveRows } from "./useLiveLists";
 
 // Everything not tied to one job card, in ONE list with ONE row style (owner plan 3b): setting
 // requests, questions, outcome suggestions and unmatched mail. Every summary is untrusted text
@@ -66,10 +67,14 @@ export function OtherList({ waiting, questions, onChanged, renderQuestion, hidde
 }) {
   const outcomes = useOutcomeSuggestions();
   const mail = useUnmatchedMail();
+  // The page's one count reads what the server has; held rows (below) never add to it.
   const [nOutcomes, nMail] = [outcomes.items.length, mail.items.length];
   useEffect(() => onCount?.({ outcomes: nOutcomes, mail: nMail }), [onCount, nOutcomes, nMail]);
+  // Live (PR 6): a row the user has open keeps its place through a refresh.
+  const outcomeItems = useLiveRows(outcomes.items, "outcome", (s) => s.event_id);
+  const mailItems = useLiveRows(mail.items, "mail", (m) => m.id);
   // A real count: the section is hidden when nothing is in it.
-  const count = waiting.length + questions.length + outcomes.items.length + mail.items.length;
+  const count = waiting.length + questions.length + outcomeItems.length + mailItems.length;
   if (count === 0 || hidden) return null;
   return (
     <section aria-labelledby="other-heading" data-testid="other-list" className="flex flex-col gap-3">
@@ -91,13 +96,13 @@ export function OtherList({ waiting, questions, onChanged, renderQuestion, hidde
             <ul>{renderQuestion(a)}</ul>
           </OtherRow>
         ))}
-        {outcomes.items.map((s) => (
+        {outcomeItems.map((s) => (
           <OtherRow key={`o${s.event_id}`} kind="outcome" id={s.event_id} verb="Review"
             summary={`${s.job_company || s.job_title}: ${STATUS_LABEL[s.event_type] ?? s.event_type}?`}>
             <OutcomeSuggestionCard s={s} busy={outcomes.busy} onAct={(x, k) => void outcomes.act(x, k)} />
           </OtherRow>
         ))}
-        {mail.items.map((it) => (
+        {mailItems.map((it) => (
           <OtherRow key={`m${it.id}`} kind="mail" id={it.id} verb="Match" summary={`“${it.subject || "(no subject)"}” · ${it.sender}`}>
             <InboxItemCard it={it} apps={mail.apps} onResolve={mail.resolve} />
           </OtherRow>

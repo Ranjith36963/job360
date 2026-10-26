@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { listOutcomeSuggestions, recordApplicationEvent, type OutcomeSuggestion } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
+import { onChanges } from "@/lib/live-changes";
 
 /** Outcome suggestions for the Other list on Needs you (feature 9). The assistant read an email and
  *  was not sure what it means; nothing changes until the user accepts. Accept records exactly the
@@ -31,6 +32,11 @@ export function useOutcomeSuggestions() {
       cancelled = true;
     };
   }, [load]);
+
+  // Live (PR 6): re-read quietly when an email or an event moved; a failed read keeps the rows.
+  useEffect(() => onChanges((d) => {
+    if (d.full || d.areas.includes("other")) listOutcomeSuggestions().then((r) => setItems(r.suggestions), () => {});
+  }), []);
 
   async function act(s: OutcomeSuggestion, kind: "accept" | "ignore") {
     setBusy(true);

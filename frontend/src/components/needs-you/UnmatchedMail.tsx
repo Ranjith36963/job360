@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { listApplications, listInboxItems, resolveInboxItem } from "@/lib/api";
 import type { InboxItem } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
+import { onChanges } from "@/lib/live-changes";
 
 export type AppOption = { id: number; label: string };
 
@@ -40,6 +41,15 @@ export function useUnmatchedMail() {
       cancelled = true;
     };
   }, [fetchAll]);
+
+  // Live (PR 6): re-read quietly when unmatched mail moved; a failed read keeps the rows.
+  useEffect(() => onChanges((d) => {
+    if (!d.full && !d.areas.includes("other")) return;
+    Promise.all([listInboxItems("open"), listApplications({ limit: 200 })]).then(([inbox, list]) => {
+      setItems(inbox.items);
+      setApps(list.applications.map((a) => ({ id: a.id, label: [a.job_title, a.job_company].filter(Boolean).join(" · ") })));
+    }, () => {});
+  }), []);
 
   const resolve = async (id: number, body: { application_id: number } | { dismiss: true }, ok?: string) => {
     try {
