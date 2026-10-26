@@ -118,7 +118,8 @@ async def _ask_browser(client: AsyncClient, app_id: int) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_asks_carry_browser(authenticated_async_context):
+async def test_asks_carry_browser(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(blocked_service, "browser_hold_live", lambda *_: True)  # Job360's browser holds the page
     async with authenticated_async_context() as client:
         # Four jobs: the same ad is the same application, so vary the title.
         ids = []
@@ -192,7 +193,8 @@ async def test_ready_card_browser(authenticated_async_context):
 
 
 @pytest.mark.asyncio
-async def test_one_open_block_map_serves_finish_here_and_the_label(authenticated_async_context):
+async def test_one_open_block_map_serves_finish_here_and_the_label(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(blocked_service, "browser_hold_live", lambda *_: True)  # Job360's browser holds the page
     """`open_blocks` is read once and shared: it agrees with `_open_block_event` for every application,
     and `finish_here_ask_ids` / `browser_for_asks` read the same map to the same answer."""
     async with authenticated_async_context() as client:
@@ -262,3 +264,22 @@ async def test_contact_send_browser(authenticated_async_context):
         contacts = {c["id"]: c for c in (await client.get(f"/api/applications/{app_id}")).json()["contacts"]}
         assert contacts[views["linkedin"]]["send_browser"] == JOB360
         assert contacts[views["email"]]["send_browser"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_captcha_is_the_users_only_while_job360s_browser_holds_the_page(authenticated_async_context, monkeypatch):
+    """P1 (review of B2a): after the 30-minute hold ran out nothing keeps the page, so the CAPTCHA moves to the
+    own browser; with a live hold it stays the user's, to finish on Needs you."""
+    held = {"live": True}
+    monkeypatch.setattr(blocked_service, "browser_hold_live", lambda *_: held["live"])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _browser_block(authenticated_async_context, app_id, "captcha")
+        ask = await _ask_browser(client, app_id)
+        assert ask["finish_here"] is True and ask["browser"]["kind"] == "human"
+        held["live"] = False
+        ask = await _ask_browser(client, app_id)
+        assert ask["finish_here"] is False
+        assert ask["browser"] == {
+            "kind": "own_browser", "label": "Needs your own browser: turn your PC on", "reason": "job360_bot_check",
+        }
