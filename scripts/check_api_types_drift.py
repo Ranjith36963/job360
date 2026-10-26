@@ -32,7 +32,7 @@ def drifted(repo: Path, paths: tuple[str, ...], blind: bool = False) -> list[str
     if blind:  # --break-checker: a guard that never sees drift
         return []
     out = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", "--", *paths],  # noqa: S603, S607
-                         capture_output=True, text=True, check=True)
+                         capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
     return [line for line in out.stdout.splitlines() if line]
 
 
