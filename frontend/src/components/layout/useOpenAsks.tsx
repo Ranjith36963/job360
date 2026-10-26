@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, getReadyToSend, listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, getCvToApprove, getReadyToSend, listAsks, listPeople } from "@/lib/api";
 import { fetchSettingsShared } from "@/lib/assistant-state";
-import { isSimulation } from "@/lib/job-cards";
+import { isSimulation, unsentMessageJobs } from "@/lib/job-cards";
 import type { Ask } from "@/lib/api";
 
 /**
- * Count of things waiting on the user (the Needs-you badge): jobs with an open ask plus
- * the setting changes an assistant asked for that wait for the user's OK (S2)
- * plus the applications ready to send (S5d).
+ * Count of things waiting on the user (the Needs-you badge), the same count as the Needs-you
+ * page: every job on it once (an open ask, ready to send, a CV to approve or someone to reach),
+ * plus each open ask that belongs to no job, plus the setting changes waiting for the user's OK.
  * The settings read is best-effort: if it fails the badge still counts the asks.
  * A light fetch
  * after mount when signed in, re-fetched on every navigation. It never blocks
@@ -21,28 +21,30 @@ import type { Ask } from "@/lib/api";
  * mounted at once for a signed-in user (the Navbar only hides with CSS), so
  * the request is shared: one call per navigation, not one per caller.
  */
-/** Applications ready to send (S5d). Best-effort: a failed read counts 0. */
-async function readyTotal(): Promise<number> {
-  try {
-    return (await getReadyToSend({ limit: 0 })).total;
-  } catch {
-    return 0;
-  }
+/** Jobs that need the owner for something other than an ask. Each read is best-effort: a failed one adds none. */
+async function otherJobs(): Promise<number[]> {
+  const ids = (p: Promise<number[]>) => p.catch(() => [] as number[]);
+  const all = await Promise.all([
+    ids(getReadyToSend().then((r) => r.items.map((c) => c.application_id))),
+    ids(getCvToApprove().then((r) => r.items.map((c) => c.application_id))),
+    ids(listPeople().then((r) => unsentMessageJobs(r.people).map((j) => j.application_id))),
+  ]);
+  return all.flat();
 }
 
 const ASKS_PAGE = 50; // the server's default page size
 const MAX_ASK_PAGES = 10;
 
-/** Jobs that need the owner, not asks: one per job with an open ask (practice asks left out), plus
- *  each open ask that belongs to no job. Reads every page of open asks (capped). */
-async function openJobCount(): Promise<number> {
+/** Jobs that need the owner, not asks: one per job with an open ask (practice asks left out) or in
+ *  `more`, plus each open ask that belongs to no job. Reads every page of open asks (capped). */
+async function openJobCount(more: Promise<number[]>): Promise<number> {
   const open: Ask[] = [];
   for (let page = 0; page < MAX_ASK_PAGES; page++) {
     const { asks } = await (open.length ? listAsks("open", open.length) : listAsks("open"));
     open.push(...asks);
     if (asks.length < ASKS_PAGE) break;
   }
-  const jobs = new Set<number>();
+  const jobs = new Set<number>(await more);
   let general = 0;
   for (const ask of open) {
     if (isSimulation(ask)) continue;
@@ -57,13 +59,12 @@ let inFlight: { key: string; count: Promise<number> } | null = null;
 function fetchOpenCount(key: string): Promise<number> {
   if (inFlight?.key === key) return inFlight.count;
   const count = Promise.all([
-    openJobCount(),
+    openJobCount(otherJobs()),
     fetchSettingsShared(key).then(
       (view) => view.waiting.length,
       () => 0,
     ),
-    readyTotal(),
-  ]).then(([jobs, waiting, ready]) => jobs + waiting + ready);
+  ]).then(([jobs, waiting]) => jobs + waiting);
   const entry = { key, count };
   inFlight = entry;
   const clear = () => {
@@ -76,8 +77,8 @@ function fetchOpenCount(key: string): Promise<number> {
 let announceSeq = 0;
 
 /**
- * Re-count everything the badge counts (questions + waiting setting changes +
- * ready to send) and tell the badge. For pages that change one part of it (an
+ * Re-count everything the badge counts (jobs + no-job questions + waiting
+ * setting changes) and tell the badge. For pages that change one part of it (an
  * answer on Home or an application page) so the badge never drops the rest.
  * Best-effort: a failed count leaves the badge as it is.
  */

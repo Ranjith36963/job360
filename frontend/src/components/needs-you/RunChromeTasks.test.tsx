@@ -22,12 +22,8 @@ vi.mock("./JobCards", async () => {
     },
   };
 });
-vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
-vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
 vi.mock("./UnmatchedMail", () => ({ UnmatchedMail: () => null }));
-vi.mock("./ReadyToSend", () => ({ ReadyToSend: () => null }));
 const toastSuccess = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: vi.fn() } }));
 

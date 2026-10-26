@@ -6,11 +6,7 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
-import { MorningCheck } from "./MorningCheck";
 import { OutcomeSuggestions } from "./OutcomeSuggestions";
-import { ReadyToSend } from "./ReadyToSend";
-import { CvToApprove } from "./CvToApprove";
-import { BatchApplyPanel } from "./BatchApplyPanel";
 import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
@@ -42,6 +38,7 @@ const cancelBtn =
   "rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50";
 const linkBtn =
   "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
+const sectionLabel = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const confirmBox =
   "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs";
 
@@ -320,12 +317,8 @@ export function NeedsYou() {
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [showAnswered, setShowAnswered] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The badge counts the questions, the changes waiting for an OK AND what is ready to send.
-  const [askCount, setAskCount] = useState(0);
-  // null until Ready to send has answered (0 if its read failed): announcing
-  // before then would drop the ready count from the badge for a moment.
-  const [readyTotal, setReadyTotal] = useState<number | null>(null);
   // Tasks waiting for the user's own browser (null: unknown or none).
   const [queue, setQueue] = useState<OwnBrowserQueue | null>(null);
 
@@ -340,7 +333,6 @@ export function NeedsYou() {
       setWaiting(w);
       setMoreAnswered(a.asks.length >= PAGE);
       setError(null);
-      setAskCount(o.open_count + w.length);
     },
     [],
   );
@@ -380,9 +372,12 @@ export function NeedsYou() {
     return () => window.removeEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
   }, [load]);
 
+  // The badge (useOpenAsks) counts the same: every job on this page plus each item in Other that waits
+  // on an answer (a question with no job, a setting change). Only once the job list has settled.
+  const badge = open !== null && jobs.settled ? jobs.total + general.length + waiting.length : null;
   useEffect(() => {
-    if (open !== null && readyTotal !== null) announce(askCount + readyTotal);
-  }, [open, askCount, readyTotal]);
+    if (badge !== null) announce(badge);
+  }, [badge]);
 
   async function loadOlder() {
     setLoadingMore(true);
@@ -412,13 +407,9 @@ export function NeedsYou() {
     );
   }
 
+  const hasJobs = !(jobs.settled && jobs.total === 0);
   return (
-    <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
-    <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
-      <MorningCheck />
-      <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
-      <ReadyToSend onTotal={setReadyTotal} asks={open} />
-      <OutcomeSuggestions />
+    <div className="flex min-w-0 max-w-3xl flex-col gap-8" data-testid="needs-you-main">
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -427,57 +418,59 @@ export function NeedsYou() {
           </button>
         </div>
       )}
-      {waiting.length > 0 && (
-        <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
-          <h2 id="waiting-ok" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            Waiting for your OK
-          </h2>
-          <ul className="flex flex-col gap-3" data-testid="waiting-for-ok">
-            {waiting.map((r) => (
-              <SettingRequestCard key={r.id} request={r} onChanged={load} />
-            ))}
-          </ul>
-        </section>
-      )}
-      <section aria-labelledby="open-asks" className="flex flex-col gap-3">
-        <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-          Waiting for you
-        </h2>
+      <section aria-label="Jobs that need you" className="flex flex-col gap-3">
         {queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
-        {jobs.settled && jobs.total === 0 && general.length === 0 ? (
+        {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
+        <JobCards open={open} onChanged={load} onReport={setJobs} />
+        {!hasJobs && general.length === 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
             {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
-        ) : (
-          <>
-            {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
-            <JobCards open={open} onChanged={load} onReport={setJobs} />
-            {general.length > 0 && (
-              <>
-                <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
-                <ul className="flex flex-col gap-3">
-                  {general.map((a) => (
-                    <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
-                  ))}
-                </ul>
-              </>
-            )}
-          </>
         )}
       </section>
-      <UnmatchedMail />
+
+      {/* Everything not tied to one job, in ONE card at the end; hidden while it holds nothing. */}
+      <section aria-labelledby="needs-you-other-h" data-testid="needs-you-other"
+        className="hidden flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card [&:has(li)]:flex">
+        <h2 id="needs-you-other-h" className={sectionLabel}>Other</h2>
+        {waiting.length > 0 && (
+          <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
+            <h3 id="waiting-ok" className="text-sm font-medium">Waiting for your OK</h3>
+            <ul className="flex flex-col gap-3" data-testid="waiting-for-ok">
+              {waiting.map((r) => (
+                <SettingRequestCard key={r.id} request={r} onChanged={load} />
+              ))}
+            </ul>
+          </section>
+        )}
+        {general.length > 0 && (
+          <>
+            <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
+            <ul className="flex flex-col gap-3">
+              {general.map((a) => (
+                <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
+              ))}
+            </ul>
+          </>
+        )}
+        <OutcomeSuggestions />
+        <UnmatchedMail />
+      </section>
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
-          <h2 id="answered-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            Answered
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {answered.map((a) => (
-              <AnsweredRow key={a.id} ask={a} onChanged={load} />
-            ))}
-          </ul>
-          {moreAnswered && (
+          <button type="button" id="answered-asks" data-testid="see-answered" aria-expanded={showAnswered}
+            onClick={() => setShowAnswered((v) => !v)} className={`${linkBtn} self-start`}>
+            {showAnswered ? "Hide answered" : `See answered (${answered.length}${moreAnswered ? "+" : ""})`}
+          </button>
+          {showAnswered && (
+            <ul className="flex flex-col gap-2">
+              {answered.map((a) => (
+                <AnsweredRow key={a.id} ask={a} onChanged={load} />
+              ))}
+            </ul>
+          )}
+          {showAnswered && moreAnswered && (
             <div>
               <button
                 type="button"
@@ -492,8 +485,6 @@ export function NeedsYou() {
           )}
         </section>
       )}
-    </div>
-    <BatchApplyPanel />
     </div>
   );
 }

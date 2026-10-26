@@ -48,7 +48,10 @@ export function ReadyCard({
   changes,
   asks,
   salaryFacts,
+  embedded = false,
 }: {
+  /** Inside a Needs-you job card, whose header already names the job. */
+  embedded?: boolean;
   /** The user's saved salary facts (from Memory), read once by the page: they feed the suggested salary answers. */
   salaryFacts?: SalaryFacts;
   /** This job's open asks: the ones with form questions show inline and must be answered before Send. */
@@ -110,19 +113,22 @@ export function ReadyCard({
     <article
       data-testid={`ready-card-${card.application_id}`}
       className={cn(
-        "flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card",
+        "flex flex-col gap-4",
+        !embedded && "rounded-xl border border-border bg-card p-5 shadow-card",
         paused && "opacity-60",
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <p className="font-mono text-xs text-faint">{readyEyebrow(card)}</p>
-          <h3 className="font-heading text-2xl leading-tight">
-            <Link href={`/applications/${card.application_id}`} data-testid={`title-link-${card.application_id}`}
-              className="underline-offset-2 hover:underline">
-              {card.job_title || "Untitled role"}
-            </Link>
-          </h3>
+          {!embedded && (
+            <h3 className="font-heading text-2xl leading-tight">
+              <Link href={`/applications/${card.application_id}`} data-testid={`title-link-${card.application_id}`}
+                className="underline-offset-2 hover:underline">
+                {card.job_title || "Untitled role"}
+              </Link>
+            </h3>
+          )}
           <p className="text-sm text-muted-foreground">
             {card.job_company ? (
               <Link href={`/applications/${card.application_id}`} data-testid={`company-link-${card.application_id}`}

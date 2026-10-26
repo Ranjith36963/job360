@@ -17,21 +17,11 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
+  getReadyToSend: async () => ({ paused: false, total: 0, unflagged: 0, items: [] }),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
 }));
-vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
-vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) } }));
 
 const evil = "<img src=x onerror=alert(1)>";
@@ -187,11 +177,15 @@ describe("Needs-you page", () => {
     const seen: number[] = [];
     const on = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("job360:asks-changed", on);
-    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    const q = (id: number) => ({
+      id, application_id: null, question: `Q${id}?`, context: "", asked_by: "x", asked_at: new Date().toISOString(),
+      status: "open", answer: null, withdrawn_at: null,
+    });
+    listAsks.mockImplementation(async (st: string) => (st === "open" ? { asks: [q(1), q(2)], open_count: 2 } : { asks: [], open_count: 2 }));
     render(<NeedsYou />);
     expect(await screen.findByTestId("setting-request-11")).toBeInTheDocument();
     expect(screen.getByText("Waiting for your OK")).toBeInTheDocument();
-    await waitFor(() => expect(seen).toEqual([3])); // 2 open asks + 1 waiting
+    await waitFor(() => expect(seen).toEqual([3])); // 2 open questions with no job + 1 waiting
     // after the user confirms, the reload comes back empty and the badge follows
     getAssistantSettings.mockResolvedValue({ waiting: [] });
     fireEvent.click(screen.getByTestId("setting-request-confirm"));

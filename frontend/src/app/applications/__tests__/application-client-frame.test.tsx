@@ -16,9 +16,10 @@ vi.mock("@/lib/api", () => ({
   listAsks: (...args: unknown[]) => listAsks(...args),
   answerAsk: (...args: unknown[]) => answerAsk(...args),
   withdrawAsk: vi.fn(),
-  // The badge counts asks + waiting setting changes + ready to send (S5d).
+  // The badge counts jobs (an ask, ready to send, a CV, someone to reach) + waiting setting changes.
   getAssistantSettings: vi.fn().mockResolvedValue({ waiting: [{ id: 1 }], paused: false }),
-  getReadyToSend: vi.fn().mockResolvedValue({ paused: false, total: 2, unflagged: 2, items: [] }),
+  getReadyToSend: vi.fn().mockResolvedValue({ paused: false, total: 2, unflagged: 2, items: [{ application_id: 50 }, { application_id: 51 }] }),
+  listPeople: vi.fn().mockResolvedValue({ people: [] }),
   recordApplicationReceipt: vi.fn(),
   setApplicationVisa: vi.fn(),
   addContact: vi.fn(),

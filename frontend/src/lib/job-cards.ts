@@ -335,3 +335,8 @@ export function splitAskText(text: string): { head: string; rest: string } {
   }
   return { head, rest: t.slice(cut).trim() };
 }
+
+/** The jobs of people with a drafted message nobody marked sent (a Needs-you card each). */
+export function unsentMessageJobs<J>(people: { message_count: number; last_sent?: unknown; jobs: J[] }[] | null | undefined): J[] {
+  return (people ?? []).filter((p) => p.message_count > 0 && !p.last_sent).flatMap((p) => p.jobs);
+}

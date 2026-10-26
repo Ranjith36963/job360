@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { NeedsYou } from "./NeedsYou";
+import { card } from "./ready-fixtures";
 
 const listAsks = vi.fn();
 const answerAsk = vi.fn();
 const withdrawAsk = vi.fn();
 const confirmAsk = vi.fn();
 const getAssistantSettings = vi.fn();
+const getReadyToSend = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
@@ -22,27 +24,13 @@ vi.mock("@/lib/api", () => ({
   getApplication: () => Promise.reject(new Error("no job record in this test")),
   getCvToApprove: async () => ({ items: [] }),
   listPeople: async () => ({ people: [] }),
+  getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
 }));
-// The morning check has its own tests (MorningCheck.test.tsx).
-// The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
+// The morning check and Batch apply moved to Home (owner 2026-10-26); these stand-ins prove they are gone here.
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
-vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
+vi.mock("./MorningCheck", () => ({ MorningCheck: () => <div data-testid="morning-check" /> }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Approve CV has its own tests (CvToApprove.test.tsx).
-vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
 vi.mock("./UnmatchedMail", () => ({ UnmatchedMail: () => null }));
-// Ready to send has its own tests (ReadyToSend.test.tsx).
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
 // The live view is tested in ApplicationDecisions.test.tsx; this stand-in only offers Done.
 vi.mock("@/components/applications/FinishInBrowser", () => ({
   FinishInBrowser: ({ onDone }: { onDone: () => void }) => (
@@ -83,6 +71,7 @@ function setup(open: unknown[], answered: unknown[] = []) {
 
 // An answered ask shows as one line; "Change" opens the full card these tests check.
 async function openAnswered() {
+  fireEvent.click(await screen.findByTestId("see-answered"));
   for (const b of await screen.findAllByTestId(/^answered-change-/)) fireEvent.click(b);
 }
 
@@ -91,6 +80,7 @@ beforeEach(() => {
   answerAsk.mockReset().mockResolvedValue({});
   withdrawAsk.mockReset().mockResolvedValue({});
   getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
+  getReadyToSend.mockReset().mockResolvedValue({ paused: false, total: 0, unflagged: 0, items: [] });
 });
 
 describe("NeedsYou", () => {
@@ -234,18 +224,52 @@ describe("NeedsYou", () => {
   });
 
   it("the badge count includes Ready to send, and never announces without it first", async () => {
-    readyMock.total = 2;
+    getReadyToSend.mockResolvedValue({ paused: false, total: 2, unflagged: 2, items: [card(8), card(9)] });
     const seen: number[] = [];
     const on = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("job360:asks-changed", on);
     try {
       setup([openAsk]);
       render(<NeedsYou />);
-      await waitFor(() => expect(seen).toEqual([3]));
+      // Two ready jobs + the job-7 question (its record fails, so it waits under Other).
+      await waitFor(() => expect(seen.at(-1)).toBe(3));
+      expect(seen).not.toContain(1);
+      expect(screen.getByTestId("jobs-count")).toHaveTextContent("2 jobs need you");
     } finally {
-      readyMock.total = 0;
       window.removeEventListener("job360:asks-changed", on);
     }
+  });
+
+  it("MorningCheck and Batch apply are not on Needs you (they live on Home)", async () => {
+    setup([openAsk]);
+    render(<NeedsYou />);
+    await screen.findByTestId("ask-input-1");
+    expect(screen.queryByTestId("morning-check")).toBeNull();
+    expect(screen.queryByTestId("batch-apply-panel")).toBeNull();
+  });
+
+  it("Answered sits collapsed behind See answered (N)", async () => {
+    setup([], [{ ...base, id: 2, question: "Q2", status: "answered", answer: "A2" }]);
+    render(<NeedsYou />);
+    const toggle = await screen.findByTestId("see-answered");
+    expect(toggle).toHaveTextContent("See answered (1)");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("answered-2")).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("answered-2")).toHaveTextContent("Q2");
+  });
+
+  it("the Other card holds setting requests and questions with no job", async () => {
+    getAssistantSettings.mockResolvedValue({ apply_min_score: { value: null, effective: null }, waiting: [{
+      id: 11, path: "assistant_settings.above_line", value: "auto", requested_by: "agent:X",
+      requested_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86_400_000).toISOString(), status: "waiting",
+    }] });
+    setup([{ ...openAsk, application_id: null, job_title: null, job_company: null }]);
+    render(<NeedsYou />);
+    const other = await screen.findByTestId("needs-you-other");
+    await waitFor(() => expect(other).toContainElement(screen.getByTestId("waiting-for-ok")));
+    expect(other).toContainElement(screen.getByTestId("ask-1"));
+    expect(other).toHaveTextContent("Other");
   });
 
   it("a changed answer goes back to the read-only view after saving", async () => {
@@ -289,6 +313,7 @@ describe("NeedsYou", () => {
         : { asks: offset === 0 ? page(0, 50) : page(50, 1), open_count: 0 }
     );
     render(<NeedsYou />);
+    fireEvent.click(await screen.findByTestId("see-answered"));
     fireEvent.click(await screen.findByTestId("needs-you-older"));
     expect(await screen.findByText("Q50")).toBeInTheDocument();
     expect(listAsks).toHaveBeenCalledWith("answered", 50);

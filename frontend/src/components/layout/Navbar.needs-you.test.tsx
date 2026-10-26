@@ -6,6 +6,8 @@ import { Sidebar } from "./Sidebar";
 const listAsks = vi.fn();
 const getAssistantSettings = vi.fn();
 const getReadyToSend = vi.fn();
+const getCvToApprove = vi.fn();
+const listPeople = vi.fn();
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("next-themes", () => ({
@@ -19,6 +21,8 @@ vi.mock("@/lib/api", () => ({
   listAsks: (...a: unknown[]) => listAsks(...a),
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
+  getCvToApprove: (...a: unknown[]) => getCvToApprove(...a),
+  listPeople: (...a: unknown[]) => listPeople(...a),
 }));
 
 // n open asks, each on its own job (the badge counts jobs, not asks).
@@ -30,7 +34,9 @@ const jobs = (n: number) => Array.from({ length: n }, (_, i) => ask(i + 1, 100 +
 beforeEach(() => {
   listAsks.mockReset();
   getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
-  getReadyToSend.mockReset().mockResolvedValue({ total: 0 });
+  getReadyToSend.mockReset().mockResolvedValue({ total: 0, items: [] });
+  getCvToApprove.mockReset().mockResolvedValue({ items: [] });
+  listPeople.mockReset().mockResolvedValue({ people: [] });
 });
 
 // Redesign slice 1: on desktop the Sidebar owns the nav, below md the Navbar's
@@ -60,13 +66,16 @@ describe("Navbar drawer — Needs you badge", () => {
     expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
   });
 
-  it("counts the applications ready to send (a counts-only read) with the rest", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(1) });
-    getReadyToSend.mockResolvedValue({ total: 3 });
+  it("counts jobs as the Needs-you page does: ready to send, a CV to approve, someone to reach, each job once", async () => {
+    listAsks.mockResolvedValue({ asks: jobs(1) }); // job 100
+    const ready = (id: number) => ({ application_id: id });
+    getReadyToSend.mockResolvedValue({ total: 3, items: [ready(100), ready(200), ready(201)] });
+    getCvToApprove.mockResolvedValue({ items: [{ application_id: 200 }, { application_id: 300 }] });
+    listPeople.mockResolvedValue({ people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 400 }] }] });
     render(<Navbar />);
-    await waitFor(() => expect(getReadyToSend).toHaveBeenCalledWith({ limit: 0 }));
+    await waitFor(() => expect(listPeople).toHaveBeenCalled());
     openDrawer();
-    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("5"); // 100, 200, 201, 300, 400
   });
 
   it("a failed settings read still shows the open asks", async () => {

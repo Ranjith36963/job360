@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import type { ReactNode } from "react";
 import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
@@ -51,21 +52,24 @@ function cardBrowser(asks: { ask: Ask; kind: RowKind }[]): BrowserLabel | null {
 const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
 
-/** `showHeader` false: the application page, whose own title already names the job. */
+/** `showHeader` false: the application page, whose own title already names the job. `ready`: the job's
+ *  ready-to-send form (Needs you); its card answers the form questions, so they are not listed twice here. */
 export function JobCard({
   card,
   onChanged,
   showHeader = true,
+  ready,
 }: {
   card: JobCardData;
   onChanged: () => Promise<void>;
   showHeader?: boolean;
+  ready?: ReactNode;
 }) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
-  const structured = card.asks.filter((a) => a.kind === "structured");
+  const structured = ready ? [] : card.asks.filter((a) => a.kind === "structured");
   // Each question is shown once, however many open asks listed it; its answer as it stands and
   // whether the user checked it, per merged row.
   const merged = mergeQuestions(structured.map((s) => s.ask));
@@ -233,7 +237,7 @@ export function JobCard({
       <div className="flex flex-wrap gap-2">
         {(kind !== "captcha" && kind !== "login") || !card.formUrl ? rowLink(ask.id) : null}
         {kind === "upload" && card.latestCv && (
-          <button type="button" className={btn} onClick={() => void downloadCv(card)}>
+          <button type="button" className={btn} onClick={() => void downloadCv(card, card.latestCv!)}>
             Download CV
           </button>
         )}
@@ -292,6 +296,7 @@ export function JobCard({
         </section>
       )}
 
+      {ready}
       {hasAnswers && (
         <section className="flex flex-col gap-2" data-testid="form-answers">
           <h3 className={label}>Form answers · {questions.length + rowCount}</h3>
@@ -332,6 +337,9 @@ export function JobCard({
             <Link href={`/applications/${card.applicationId}`} className={btn}>
               View CV
             </Link>
+            <button type="button" className={btn} onClick={() => void downloadCv(card, card.cv!)}>
+              PDF
+            </button>
             <button type="button" className={btn} disabled={busy} data-testid={`cv-ok-${card.applicationId}`}
               onClick={() => void run(() => markCvSeen(card.applicationId, card.cv!.artifactId), "Couldn't save that you checked this CV")}>
               Approve
@@ -429,10 +437,9 @@ export function JobCard({
   );
 }
 
-async function downloadCv(card: JobCardData) {
-  if (!card.latestCv) return;
+async function downloadCv(card: JobCardData, cv: { artifactId: number; version: number }) {
   try {
-    await downloadApplicationArtifact(card.applicationId, card.latestCv.artifactId, "pdf", `CV_v${card.latestCv.version}`);
+    await downloadApplicationArtifact(card.applicationId, cv.artifactId, "pdf", `CV_v${cv.version}`);
   } catch (err) {
     toast.apiError(err, "Couldn't download this CV");
   }

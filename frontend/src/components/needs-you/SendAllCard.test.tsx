@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { ReadyToSend } from "./ReadyToSend";
+import { JobCards } from "./JobCards";
+import type { JobCardsReport } from "./JobCards";
+
+// Ready to send lives on each job's card now; with no job record here each ready card shows alone.
+function ReadyToSend({ onTotal }: { onTotal?: (n: number) => void }) {
+  return <JobCards open={[]} onChanged={async () => {}} onReport={(r: JobCardsReport) => r.settled && onTotal?.(r.total)} />;
+}
 import { canCheck, guardSend, splitReady } from "@/lib/ready-to-send";
 import type { ReadyAnswer } from "@/lib/api";
 import { card } from "./ready-fixtures";
@@ -10,6 +16,9 @@ const getReadyToSend = vi.fn();
 const approveSend = vi.fn();
 const fireAssistant = vi.fn();
 vi.mock("@/lib/api", () => ({
+  getApplication: () => Promise.reject(new Error("no job record in this test")),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: vi.fn(),

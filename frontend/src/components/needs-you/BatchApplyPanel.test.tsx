@@ -23,11 +23,13 @@ vi.mock("@/lib/api", () => ({
   recordApplicationReceipt: (...a: unknown[]) => recordApplicationReceipt(...a),
   resolveSubmit: (...a: unknown[]) => resolveSubmit(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
+  getReadyToSend: async () => ({ paused: false, total: 0, unflagged: 0, items: [] }),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
 }));
 vi.mock("@/lib/home-fetch", () => ({ fetchWhatsNewPages: (...a: unknown[]) => fetchWhatsNewPages(...a) }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-vi.mock("./ReadyToSend", () => ({ ReadyToSend: () => null }));
 const toastSuccess = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: vi.fn() } }));
 
@@ -90,13 +92,11 @@ describe("BatchApplyPanel", () => {
     expect(html.indexOf("batch-queue")).toBeLessThan(html.indexOf("batch-rules"));
   });
 
-  it("is placed beside the main column on the Needs-you page", async () => {
+  it("is not on the Needs-you page any more (it moved to Home, owner 2026-10-26)", async () => {
     listAsks.mockResolvedValue({ asks: [], open_count: 0 });
     render(<NeedsYou />);
-    const layout = await screen.findByTestId("needs-you-layout");
-    expect(layout.className).toContain("xl:grid-cols-");
-    expect(within(layout).getByTestId("needs-you-main")).toBeInTheDocument();
-    expect(within(layout).getByTestId("batch-apply-panel")).toBeInTheDocument();
+    await screen.findByTestId("needs-you-main");
+    expect(screen.queryByTestId("batch-apply-panel")).toBeNull();
   });
 
   describe("Your rules", () => {
@@ -135,9 +135,8 @@ describe("BatchApplyPanel", () => {
       expect(screen.getByTestId("batch-rules-link")).toBeInTheDocument();
     });
 
-    it("Needs you renders no rule inputs and links to /connect?tab=assistant", async () => {
-      listAsks.mockResolvedValue({ asks: [], open_count: 0 });
-      render(<NeedsYou />);
+    it("renders no rule inputs and links to /connect?tab=assistant", async () => {
+      render(<BatchApplyPanel />);
       const panel = await screen.findByTestId("batch-apply-panel");
       await screen.findByTestId("batch-row-11");
       expect(within(panel).getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=assistant");
