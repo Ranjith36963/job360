@@ -434,6 +434,37 @@ async def record(
     return result
 
 
+def _site(value: Any) -> str:
+    """The lower-case host of a link or a bare host, without a leading ``www.``; "" when unreadable."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    text = str(value or "").strip().lower()
+    host = (urlsplit(text).hostname or "") if "://" in text else text.rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+async def release_on_new_link(
+    db: JobDatabase, user: CurrentUser, application_id: int, old_url: str, new_url: str
+) -> Optional[dict[str, Any]]:
+    """Owner 2026-10-26: the job's link moved to another site (``update_job`` apply_url), so a block
+    recorded on the OLD link's site no longer stands between the user and the form: close it with
+    ``unblocked`` {resolution: skipped} and a note naming both sites. A block on the new link's site,
+    or on any site that was not the old link's, stays: only the user clears those. Returns the event,
+    or None when nothing was closed."""
+    old_site, new_site = _site(old_url), _site(new_url)
+    if not old_site or not new_site or old_site == new_site:
+        return None
+    ev = await _open_block_event(db, user.id, application_id)
+    if ev is None or _site(ev["payload"].get("page_host")) != old_site:
+        return None
+    note = f"the job's link moved from {old_site} to {new_site}"[:NOTE_MAX_CHARS]
+    stored = {"resolution": "skipped", "note": note, "assistant": actor_for(user)}
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    return await record(db, user, application_id, "unblocked", stored,
+                        occurred_at=datetime.now(timezone.utc).isoformat())
+
+
 async def record_browser_block(
     db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]
 ) -> dict[str, Any]:

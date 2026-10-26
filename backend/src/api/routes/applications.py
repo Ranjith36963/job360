@@ -3102,7 +3102,15 @@ async def update_job_facts(
 
     given = {k: getattr(body, k) for k in body.model_fields_set}
     try:
-        return await job_facts.set_job_facts(db, user_id=user.id, application_id=application_id, given=given)
+        before = await spine.get_owned_application(db, user.id, application_id) if "apply_url" in given else None
+        out = await job_facts.set_job_facts(db, user_id=user.id, application_id=application_id, given=given)
+        if before is not None:  # a block on the old link's site no longer stands (owner, 2026-10-26)
+            after = await spine.get_owned_application(db, user.id, application_id) or {}
+            await blocked_service.release_on_new_link(
+                db, user, application_id,
+                str(before.get("job_url") or ""), str(after.get("job_url") or ""),
+            )
+        return out
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
