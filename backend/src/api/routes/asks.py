@@ -41,7 +41,7 @@ class AskQuestionIn(BaseModel):
     key: str
     question: str
     answer: str = ""
-    source: Literal["profile", "memory", "cv", "guess", "draft"]
+    source: Literal["profile", "memory", "cv", "guess", "draft", "not_known"]
     choices: Optional[list[str]] = None
     remembered_on: Optional[str] = None
 

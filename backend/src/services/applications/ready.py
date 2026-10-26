@@ -480,6 +480,47 @@ async def blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) 
     return out
 
 
+async def blank_or_placeholder(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """The strict gate (owner 2026-10-26: "Don't leave any questions blank"), read off the NEWEST
+    ``form_filled``: ``(blank, placeholder)``. ``blank`` = every field the fill left empty (a
+    ``fields_skipped`` label or a typed answer with no text) unless the user's own answer for it is
+    "Leave blank" - an open ask is not an answer, and an answer the user gave must be typed in.
+    ``placeholder`` = every typed answer :func:`kit.is_placeholder` flags. A hashed answer is neither."""
+    from src.services.applications import asks as asks_service  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    fills = await kit._events(db, user_id, int(app_row["id"]), ("form_filled",))
+    if not fills:
+        return [], []
+    payload = fills[0]["payload"]
+    typed = [a for a in payload.get("answers") or [] if isinstance(a, dict) and not a.get("redacted")]
+    empty = [str(a.get("question") or "") for a in typed if not str(a.get("answer") or "").strip()]
+    skipped = payload.get("fields_skipped")
+    labels = [str(s) for s in skipped] if isinstance(skipped, list) else []
+    placeholder = [
+        str(a.get("question") or "") for a in typed
+        if kit.is_placeholder(str(a.get("question") or ""), str(a.get("answer") or ""))
+    ]
+    if not labels and not empty:
+        return [], placeholder
+    loaded, _overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    company_key = _company_key(str(app_row.get("job_company") or ""))
+    blank: list[str] = []
+    seen: set[str] = set()
+    for label in labels + empty:
+        norm = kit._norm_question(label)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        if not asks_service.is_leave_blank(_approved_for(profile, label, company_key)):
+            blank.append(label)
+    return blank, placeholder
+
+
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
     """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
     on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill

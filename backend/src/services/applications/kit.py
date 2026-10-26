@@ -856,6 +856,7 @@ async def gate_facts(
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),
         blank_unasked=await _blank_unasked(db, user_id, app_row),
+        **await _blank_or_placeholder(db, user_id, app_row),
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
@@ -873,6 +874,14 @@ async def _written_unapproved(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unapproved_written(db, user_id, app_row)
+
+
+async def _blank_or_placeholder(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> dict[str, Any]:
+    """``answer_blank`` / ``answer_placeholder``: the newest form's empty and stand-in answers (``ready``)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    blank, placeholder = await ready.blank_or_placeholder(db, user_id, app_row)
+    return {"answer_blank": tuple(blank), "answer_placeholder": tuple(placeholder)}
 
 
 async def _blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> tuple[str, ...]:
@@ -1041,6 +1050,7 @@ async def submit_verdict(
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
             guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False, blank_unasked=(),
+            answer_blank=(), answer_placeholder=(),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -1107,6 +1117,33 @@ _DESCRIBES_ITSELF = re.compile(
     r"|(from|per|in) (the |my )?(cv|profile)( facts)?)\b",
     re.IGNORECASE,
 )
+
+
+# Owner 2026-10-26 ("Don't leave any questions blank"): text that stands in for an answer. The WHOLE answer is
+# one of these, or it holds a template slot ("[Company name]", "{{role}}", "<insert ...>"). "N/A" is a real
+# answer (a field that does not apply) and is not here.
+_PLACEHOLDER_WHOLE = re.compile(
+    r"^(?:tbd|tbc|todo|to do|to be (?:confirmed|decided|added)|x{3,}|\?+|unknown|not known|not sure"
+    r"|(?:i )?don'?t know|lorem ipsum\b.*|placeholder\b.*|(?:your|enter|type) (?:answer|text)\b.*"
+    r"|answer here|fill (?:me|this) in\b.*|not found\b.*|.*\b(?:owner|user) (?:to (?:supply|provide|confirm|answer)"
+    r"|action needed)\b.*)[.!]?$",
+    re.IGNORECASE,
+)
+# A slot: "[Company name]" (a capital or a fill-in verb first, so "[sic]" or "[an]" in real prose is not one).
+_PLACEHOLDER_SLOT = re.compile(
+    r"\[(?:[A-Z]|(?i:insert|your|add|enter)\b)[^\]\n]{0,60}\]|\{\{[^}\n]{1,60}\}\}|<(?i:insert|your|add)\b[^>\n]{0,60}>"
+)
+
+
+def is_placeholder(question: str, answer: str) -> bool:
+    """True when ``answer`` is not an answer: a stand-in (TBD, "Your answer", "[Company name]") or the
+    question repeated back. A blank answer is not a placeholder (``blank_or_placeholder`` names it blank)."""
+    text = " ".join(answer.split())
+    if not text:
+        return False
+    if _PLACEHOLDER_WHOLE.match(text) or _PLACEHOLDER_SLOT.search(text):
+        return True
+    return _norm_question(text) == _norm_question(question)
 
 
 def _clean_answer(item: Any) -> dict[str, str]:

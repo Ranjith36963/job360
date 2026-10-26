@@ -266,14 +266,19 @@ An ask can also be answered by the user on the Job360 Needs-you page.
 ONE ASK PER JOB: Needs you shows one card per job. Read the job's open asks first (get_application
 `asks`, whats_new `open_asks`) and never re-ask what one holds. Put every open question for a job in
 ONE `ask_user` (`application_id`, `kind` question) as `questions`: [{key, question, answer, source,
-choices?, remembered_on?}]. Every question carries an answer; there is no "not known yet" (an empty
-answer or source none is refused, nothing saved). `source` says where YOUR answer came from,
+choices?, remembered_on?}]. Draft nearly every answer. Only a question you cannot even guess is
+source not_known with an EMPTY answer ("Not known" on the page); any other empty answer, stand-in
+text ("unknown, owner to supply", TBD, "[Company name]") or source none is refused, nothing saved. `source` says where YOUR answer came from,
 honestly: profile, memory (a saved answer; `remembered_on` its date) or cv = Verified; guess (your
 best guess; data-processing consent = Yes, referred by an employee = No) or draft (text you wrote
 from profile facts) = Guessed. A guess is never memory. Yes/no or a closed list: give `choices`.
 Every field you leave blank goes into the ONE ask for that job, optional and consent ones included,
 each with a pre-filled best answer or "Leave blank" (any row may be answered "Leave blank"; Job360
 saves it as the user's answer for that employer, and the next form leaves that field empty).
+STRICT GATE (owner 2026-10-26: "Don't leave any questions blank"): check_submit asks `answer_blank`
+while any field is still empty that the user did not answer "Leave blank" (an open ask is not an
+answer: wait, then type the user's answer and record a new form_filled), and `answer_placeholder` for
+stand-in text typed into the form. A yes never clears either.
 Read the form yourself (another reader if the page is cut off); never ask the user to paste or copy
 question text. Set job facts yourself (`update_job`, e.g. country); never ask the user to confirm a
 fact the profile already holds. An ask is only for what you may not do yourself: a CAPTCHA, a
@@ -689,7 +694,7 @@ apply to agencies"), one line each; they win over anything you would
 otherwise assume. Empty means the user has none. They are also in
 `fields["preferences.assistant_notes"]`.
 
-Common form questions (owner, 2026-10-26: "only two things, from memory and guessed; there is no not known"):
+Common form questions (owner, 2026-10-26: labels "from memory", "guessed", and "not known" until drafted):
 get_profile `common_questions_open` lists the ones with no answer yet. Draft each from the profile and save it
 to its `save_to` - a `topic` row as `user_info.answers` {question, answer, approved: false, topic}, a field row
 with `source: "agent_inferred"` - so Memory shows it as Guessed for the user to verify. Never leave one blank.

@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "common_form_questions.json"
-# Owner 2026-10-26: "There are only two things, from memory and guessed. There is no not known."
-LABELS: tuple[str, ...] = ("memory", "guessed")
+# Owner 2026-10-26: "from memory" (the user's own), "guessed" (an assistant's draft), and "not known" when
+# not even a guess is saved yet. The user can edit every one.
+LABELS: tuple[str, ...] = ("memory", "guessed", "not_known")
 # Where an answer to a kit_key row is saved (update_profile path), by the key's first part.
 _SAVE_PATH = {
     "contact": "user_info.contact", "logistics": "user_info.logistics", "equality": "user_info.equality",
@@ -93,9 +94,9 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         # Verified = the USER stood behind it: an approved answer an assistant saved itself is not (review
         # of #1263: an assistant can write approved: true).
         "verified": verified,
-        # Owner 2026-10-26: one of two labels - "memory" (the user's own) or "guessed" (anything else the
-        # assistant drafted). None only until the assistant drafts it (get_profile common_questions_open).
-        "label": None if item is None else ("memory" if verified else "guessed"),
+        # Owner 2026-10-26: "memory" (the user's own), "guessed" (anything else the assistant drafted), or
+        # "not_known" until the assistant drafts it (get_profile common_questions_open).
+        "label": "not_known" if item is None else ("memory" if verified else "guessed"),
         "seen": int(q.get("seen") or 0),
     }
 

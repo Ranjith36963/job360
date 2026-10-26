@@ -30,8 +30,8 @@ class CommonQuestionOut(BaseModel):
     source: Optional[str] = None
     state: Literal["confirmed", "relayed", "inferred", "sensitive", "guessed", "missing"]
     verified: bool
-    # Owner 2026-10-26: only two labels, "memory" or "guessed"; None until the assistant drafts it.
-    label: Optional[Literal["memory", "guessed"]] = None
+    # Owner 2026-10-26: "memory", "guessed", or "not_known" until the assistant drafts it.
+    label: Literal["memory", "guessed", "not_known"] = "not_known"
     seen: int = 0
 
 
