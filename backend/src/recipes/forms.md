@@ -59,7 +59,7 @@ Facts a form asks:
 - Consent and marketing boxes: the privacy-safe choice (No), unless the user approved that employer. Never tick an
   attestation for the user.
 - Salary: use the hiring country's record, in its currency. Pick the band that holds the number (lower bound
-  inclusive) and show it in step 6.
+  inclusive) and show it in step 6. No record for that country: guess from the ad's own pay band (`source` guessed) for the user to check.
 - A fact the kit lacks (city, years, over-18): a row in the job's one ask with your best guess (`source` guess) for the user to approve; never typed unapproved.
 
 Browser handover (from the built-in-browser skill):

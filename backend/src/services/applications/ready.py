@@ -320,6 +320,17 @@ def answer_check(answer: dict[str, Any]) -> str:
     return "confirm" if answer.get("source") == "written" else "verify"
 
 
+def _hashed_row(a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]],
+                company_key: Optional[str]) -> dict[str, Any]:
+    """A row stored as a hash (G023, before 2026-10-26). The user's own saved answer is offered as their
+    ``draft`` (owner: "a drafted answer to edit, not a placeholder"); when its hash matches what was
+    typed, it IS the typed value, so the row reads as typed again."""
+    draft = _users_word(profile, saved, a, company_key) if profile is not None else None
+    if draft and kit.sha256_text(str(draft)) == a.get("value_sha256"):
+        return {k: v for k, v in a.items() if k not in ("redacted", "value_sha256")} | {"answer": str(draft)}
+    return {**a, "answer": "", "redacted": True, "draft": str(draft) if draft else None}
+
+
 def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
     profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
@@ -330,7 +341,7 @@ def _answer_rows(
     flags: list[dict[str, Any]] = []
     for a in typed:
         if a.get("redacted"):
-            a = {**a, "answer": "", "redacted": True}  # G023: no value kept, only its hash
+            a = _hashed_row(a, profile, saved, company_key)
         key, src = a.get("key"), a["source"]
         by = at = None
         if src in ("memory", "approved", "profile") and key in have:

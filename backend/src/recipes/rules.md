@@ -250,7 +250,7 @@ and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
 Leave `answers` out and the receipt freezes the newest form_filled / form_swept answers (`answers_from`);
-an empty `channel` reads the form's host. A sensitive answer the user did not agree to remember is kept as its hash only.
+an empty `channel` reads the form's host. Every answer is kept as typed (salary and equality included), so the user can read it.
 Leave cv_artifact_id / cover_letter_artifact_id out when the browser uploaded the files: the receipt names exactly what was uploaded (`files`).
 
 Write tools take an optional `client_key` the same way: `save_artifact`,
