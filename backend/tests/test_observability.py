@@ -33,6 +33,34 @@ async def test_security_headers_present_on_health():
 
 
 @pytest.mark.asyncio
+async def test_json_api_gets_strict_csp_and_permissions_policy():
+    """JSON routes get a strict CSP (no CDN script origin) and a Permissions-Policy."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/health")
+    csp = resp.headers["content-security-policy"]
+    assert csp == "default-src 'none'; frame-ancestors 'none'"
+    assert "cdn.jsdelivr.net" not in csp
+    pp = resp.headers.get("permissions-policy", "")
+    for feature in ("camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()"):
+        assert feature in pp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/docs", "/redoc"])
+async def test_docs_pages_keep_relaxed_csp_for_swagger(path):
+    """Swagger/ReDoc (dev/CI only) still load their CDN assets."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(path)
+    assert resp.status_code == 200, f"{path} not mounted in the test env"
+    csp = resp.headers["content-security-policy"]
+    assert "cdn.jsdelivr.net" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "permissions-policy" in resp.headers
+
+
+@pytest.mark.asyncio
 async def test_hsts_absent_in_non_prod():
     """HSTS must NOT be set in dev/test (no HTTPS, would break local dev)."""
     import os
