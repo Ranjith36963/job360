@@ -1423,7 +1423,7 @@ TAGS_PROVED_BY_CAGE = {"review": "REVIEW", "ratchets": "RATCHET"}
 
 
 def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANCH,
-               author: str = "") -> list[str]:
+               author: str = "", workflows_pending: bool = False) -> list[str]:
     """Pure half of the TAGS cage, so a drill can feed it real shapes.
 
     SKIPPED is not a pass here, for the same reason it is not a pass for a
@@ -1440,6 +1440,12 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
                 "nothing. FIX: give the lane a `requires:` list in "
                 ".github/merge-policy.yml (that is the owner's decision)."]
     by_name = {r.get("name", ""): r for r in runs}
+    # Same early-`neutral` rule as judge_check_runs (2026-10-26): on 12 of the
+    # last 30 PRs this cage alone posted a red "concluded `neutral`" for CodeQL
+    # while an Analyze job still ran, then went green minutes later.
+    analyses_running = sorted(str(r.get("name")) for r in runs
+                              if str(r.get("name") or "").startswith("Analyze (")
+                              and r.get("status") != "completed")
     for tag in requires:
         if tag in TAGS_PROVED_BY_CAGE:
             continue  # the named cage's own verdict carries it
@@ -1457,9 +1463,13 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             if base_ref != MAIN_BRANCH and name in MAIN_ONLY_CHECKS:
                 continue
             run = by_name.get(name)
-            if run is None and any(r.get("status") != "completed" for r in runs):
+            if run is None and (workflows_pending
+                                or any(r.get("status") != "completed" for r in runs)):
                 # Not posted yet while other checks still run (2026-10-20, #1029:
                 # judged at 21:40, `Backend (Python 3.12)` passed at 21:51). A wait.
+                # Also when every POSTED run is done but a workflow run on this
+                # commit has not posted its jobs yet (#1248, 2026-10-26: red
+                # "never ran" for `offline-suite` while ci-offline.yml was queued).
                 reasons.append(
                     f"tag `{tag}` needs `{name}`, which has not started yet — other checks on "
                     f"this commit are still running. FIX: wait; the next run re-judges.")
@@ -1471,6 +1481,12 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             elif run.get("status") != "completed":
                 reasons.append(f"tag `{tag}` needs `{name}` and it has not finished "
                                f"({run.get('status')}). FIX: wait for it, then re-judge.")
+            elif (name == "CodeQL" and run.get("conclusion") == "neutral"
+                  and analyses_running):
+                reasons.append(
+                    f"tag `{tag}` needs `{name}`, which has not finished: it reads neutral "
+                    f"while {', '.join(analyses_running)} still run, and it is rewritten when "
+                    f"they finish. FIX: wait for it, then re-judge.")
             elif (run.get("conclusion") == "skipped" and author == DEPENDABOT
                   and name in DEPENDABOT_SKIPPED_REVIEWERS):
                 continue  # the designed skip; see DEPENDABOT above
@@ -1493,7 +1509,13 @@ def check_tags(pr: int, lane: dict, base_ref: str = MAIN_BRANCH) -> Verdict:
         author = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".user.login"]).strip()
     except Exception:  # noqa: BLE001
         author = ""
-    reasons = judge_tags(requires, runs, base_ref, author)
+    try:  # unreadable = "nothing pending": the strict side ("never ran" refuses)
+        wf = json.loads(gh(["api", f"repos/{REPO}/actions/runs?head_sha={sha}&per_page={PER_PAGE}"]))
+        workflows_pending = any(r.get("status") != "completed"
+                                for r in wf.get("workflow_runs", []))
+    except Exception:  # noqa: BLE001
+        workflows_pending = False
+    reasons = judge_tags(requires, runs, base_ref, author, workflows_pending)
     return Verdict("TAGS", "fail" if reasons else "pass", reasons,
                    claim=f"every tag the `{lane.get('lane', '?')}` lane demands "
                          f"({', '.join(requires) or 'none'}) really ran and really passed")
@@ -3461,6 +3483,27 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...but a tag check absent after everything finished still says it never ran",
        any("never ran" in r for r in judge_tags(_prod_req, _ci_gone)),
        f"got {judge_tags(_prod_req, _ci_gone)}", T)
+
+    ok("...and absent while a workflow run on the commit has not posted its jobs is a WAIT",
+       all(any(m in r for m in _WAIT_MARKERS)
+           for r in judge_tags(_prod_req, _ci_gone, workflows_pending=True))
+       and bool(judge_tags(_prod_req, _ci_gone, workflows_pending=True)),
+       f"got {judge_tags(_prod_req, _ci_gone, workflows_pending=True)}", T)
+    _sec_req = ["security"]
+    _sec_full = [{"name": n, "status": "completed", "conclusion": "success"}
+                 for n in TAG_CHECKS["security"]]
+    _neutral_early = [({**r, "conclusion": "neutral"} if r["name"] == "CodeQL" else r)
+                      for r in _sec_full] + \
+        [{"name": "Analyze (python)", "status": "in_progress", "conclusion": None}]
+    _ne = judge_tags(_sec_req, _neutral_early)
+    ok("an early `neutral` CodeQL while an Analyze job still runs is a WAIT for the tag",
+       bool(_ne) and all(any(m in r for m in _WAIT_MARKERS) for r in _ne), f"got {_ne}", T)
+    _neutral_late = [({**r, "conclusion": "neutral"} if r["name"] == "CodeQL" else r)
+                     for r in _sec_full] + \
+        [{"name": "Analyze (python)", "status": "completed", "conclusion": "success"}]
+    _nl = judge_tags(_sec_req, _neutral_late)
+    ok("...but a `neutral` CodeQL after every Analyze job finished still refuses the tag",
+       any("concluded `neutral`" in r for r in _nl), f"got {_nl}", T)
 
     _verify_pending = [r for r in _full if not r["name"].startswith("verify")] + \
         [{"name": TAG_CHECKS["verify"][0], "status": "in_progress", "conclusion": None}]
