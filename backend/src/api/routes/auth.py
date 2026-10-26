@@ -88,6 +88,19 @@ async def _safe_request_email_verification(
         )
 
 
+async def _safe_request_password_reset(
+    *, db_path: str, email: str, frontend_origin: str
+) -> None:
+    """Background wrapper for request_password_reset: errors are logged (no
+    address) and swallowed, since the caller already got its 204."""
+    try:
+        await auth_password_reset.request_password_reset(
+            db_path=db_path, email=email, frontend_origin=frontend_origin
+        )
+    except Exception as exc:  # noqa: BLE001 — intentionally broad
+        logger.warning("background password-reset failed: %s", type(exc).__name__)
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=256)
@@ -788,6 +801,7 @@ class PasswordResetConfirmRequest(BaseModel):
 async def password_reset_request(
     req: PasswordResetRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
 ) -> Response:
     """Initiate a password-reset email.
 
@@ -822,7 +836,10 @@ async def password_reset_request(
         logger.info("password-reset rate-limited ip_hash=%s", ip_hash)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    await auth_password_reset.request_password_reset(
+    # The user lookup, token insert and email send all run AFTER the response, so
+    # known and unknown addresses answer in the same time (no timing oracle).
+    background_tasks.add_task(
+        _safe_request_password_reset,
         db_path=str(DB_PATH),
         email=str(req.email),
         frontend_origin=_frontend_origin(),
