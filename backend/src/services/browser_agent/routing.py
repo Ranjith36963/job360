@@ -122,6 +122,10 @@ def _web_url(url: str) -> str | None:
         if scheme and "." not in scheme:
             return None  # mailto:, tel:, about: - no web host to open
         text = "https://" + text.removeprefix("//")  # "www.linkedin.com/x" or "host:443/x": scheme-less
+        try:
+            urlsplit(text)  # "foo.com[/x" splits bare but not once prefixed: fail closed, never raise
+        except ValueError:
+            return "\0"
     return text
 
 
