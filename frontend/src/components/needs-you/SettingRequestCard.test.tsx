@@ -108,6 +108,13 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("assistant_settings.people_hunt", false).change).toBe("Stop the people hunt");
   });
 
+  it("standing instructions: shows every line, so a note is never confirmed blind", () => {
+    const notes = describeSettingRequest("preferences.assistant_notes", ["Be brief", "No agencies"]);
+    expect(notes.title).toBe("Standing instructions for your assistants");
+    expect(notes.change).toBe("Save these instructions:\n• Be brief\n• No agencies");
+    expect(describeSettingRequest("preferences.assistant_notes", null).change).toBe("Clear all your instructions");
+  });
+
   it("says EVERY job plainly when the auto side covers all of them", () => {
     expect(describeSettingRequest("assistant_settings.above_line", "auto", 0).change).toBe(
       "Apply on its own for EVERY job (your score line is 0)",
