@@ -15,7 +15,7 @@ from typing import AsyncIterator, Optional
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import Route
 
@@ -29,6 +29,7 @@ from src.api.middleware import (
     SecurityHeadersMiddleware,
     _is_production,
 )
+from src.api.pause_gate import rest_pause_gate
 from src.api.routes import (
     applications,
     asks,
@@ -240,6 +241,8 @@ _docs = _docs_urls(_is_prod_env())
 app = FastAPI(
     title="Job360 API", version="1.0.0", lifespan=lifespan,
     docs_url=_docs["docs_url"], redoc_url=_docs["redoc_url"], openapi_url=_docs["openapi_url"],
+    # Pause stops the assistant on REST too: one table (mcp_server.PAUSE_REFUSED_ROUTES), bearer calls only.
+    dependencies=[Depends(rest_pause_gate)],
 )
 if _is_prod_env():
     logging.getLogger(__name__).info("api docs/openapi endpoints disabled (production)")
