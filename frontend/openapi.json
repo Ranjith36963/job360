@@ -9492,6 +9492,29 @@
         "title": "MorningTally",
         "type": "object"
       },
+      "NeedsYouCountOut": {
+        "properties": {
+          "jobs": {
+            "title": "Jobs",
+            "type": "integer"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "other": {
+            "title": "Other",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n",
+          "jobs",
+          "other"
+        ],
+        "title": "NeedsYouCountOut",
+        "type": "object"
+      },
       "NextStepOut": {
         "description": "What to do next on this application \u2014 a state machine over the stored\nrecord (status, fit, CV versions, receipt, interview date, lesson), never\na judgement of the job. ``code`` is the closed vocabulary an agent\nbranches on; ``label`` is the sentence the web shows.",
         "properties": {
@@ -26698,6 +26721,72 @@
         "summary": "Morning Check",
         "tags": [
           "morning-check"
+        ]
+      }
+    },
+    "/api/needs-you-count": {
+      "get": {
+        "description": "The number \"N things need you\" shows, for the menu badge on every page. Read-only: no audit\nline is written, so a navigation never moves ``/api/changes``.",
+        "operationId": "needs_you_count_route_api_needs_you_count_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedsYouCountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Needs You Count Route",
+        "tags": [
+          "changes"
         ]
       }
     },

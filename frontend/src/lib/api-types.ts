@@ -2458,6 +2458,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/needs-you-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Needs You Count Route
+         * @description The number "N things need you" shows, for the menu badge on every page. Read-only: no audit
+         *     line is written, so a navigation never moves ``/api/changes``.
+         */
+        get: operations["needs_you_count_route_api_needs_you_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/oauth/authorize": {
         parameters: {
             query?: never;
@@ -7323,6 +7344,15 @@ export interface components {
             failed: components["schemas"]["TallyBucket"];
             sent: components["schemas"]["TallyBucket"];
             waiting: components["schemas"]["TallyBucket"];
+        };
+        /** NeedsYouCountOut */
+        NeedsYouCountOut: {
+            /** Jobs */
+            jobs: number;
+            /** N */
+            n: number;
+            /** Other */
+            other: number;
         };
         /**
          * NextStepOut
@@ -14558,6 +14588,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MorningCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    needs_you_count_route_api_needs_you_count_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedsYouCountOut"];
                 };
             };
             /** @description Validation Error */

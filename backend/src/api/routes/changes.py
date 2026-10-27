@@ -21,6 +21,9 @@ The parts, all scoped by ``user.id`` (rules #12/#25):
 Known miss: a row saved on another device that only updates a row in place with no timestamp
 (``answers/save``) is not seen here; the page refetches everything on focus for that.
 
+``GET /api/needs-you-count`` (below) is the menu badge's exact total, so the badge matches the
+Needs-you page on every route (``services/applications/needs_you_count.py``).
+
 A WEB read only (``require_session_user``): no MCP twin (agents have ``whats_new``), so the gate
 parity table has no row for it. It writes nothing: no audit line, so polling never moves it.
 """
@@ -35,6 +38,7 @@ from pydantic import BaseModel
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
+from src.services.applications.needs_you_count import needs_you_count
 
 router = APIRouter(tags=["changes"])
 
@@ -160,3 +164,21 @@ async def changes(
         return Response(status_code=304, headers=headers)
     response.headers.update(headers)
     return out
+
+
+class NeedsYouCountOut(BaseModel):
+    n: int  # the Needs-you page's total: jobs + other
+    jobs: int  # distinct jobs with anything open (an ask, a ready card, a CV to approve, a person to reach)
+    other: int  # asks with no job, waiting setting requests, outcome suggestions, unmatched mail, new connections
+
+
+@router.get("/needs-you-count", response_model=NeedsYouCountOut, dependencies=AUTH_FIRST)
+async def needs_you_count_route(
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the web badge's own read (session only)
+) -> Any:
+    """The number "N things need you" shows, for the menu badge on every page. Read-only: no audit
+    line is written, so a navigation never moves ``/api/changes``."""
+    response.headers["Cache-Control"] = "no-store"
+    return NeedsYouCountOut(**await needs_you_count(db, user.id))

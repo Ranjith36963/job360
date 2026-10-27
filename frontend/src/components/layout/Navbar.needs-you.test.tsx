@@ -2,10 +2,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Navbar } from "./Navbar";
 import { Sidebar } from "./Sidebar";
+import { countNeedsYou, listAllOpenAsks } from "@/lib/needs-you-items";
 
+// The badge is the server's exact total (GET /api/needs-you-count, owner 2026-10-27): the hook shows the
+// number as given and reads nothing else, so it can never differ from the Needs-you page's own total.
+const getNeedsYouCount = vi.fn();
 const listAsks = vi.fn();
-const getAssistantSettings = vi.fn();
-const getReadyToSend = vi.fn();
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("next-themes", () => ({
@@ -16,21 +18,23 @@ vi.mock("@/components/layout/AuthProvider", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
+  getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
-  getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
-  getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
+  // The setup strip in the same shell reads these; the badge no longer does.
+  getAssistantSettings: async () => ({ waiting: [] }),
 }));
 
-// n open asks, each on its own job (the badge counts jobs, not asks).
-const ask = (id: number, application_id: number | null, over: Record<string, unknown> = {}) => ({
-  id, application_id, question: "Q?", context: "", job_title: "Dev", job_company: "Acme", ...over,
-});
-const jobs = (n: number) => Array.from({ length: n }, (_, i) => ask(i + 1, 100 + i));
+const total = (n: number) => ({ n, jobs: n, other: 0 });
 
 beforeEach(() => {
+  getNeedsYouCount.mockReset();
   listAsks.mockReset();
-  getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
-  getReadyToSend.mockReset().mockResolvedValue({ total: 0 });
+});
+
+// n open asks, each on its own job. The server counts these by the page's rules (backend
+// services/applications/needs_you_count.py); the two tests below pin the page's side of those rules.
+const ask = (id: number, application_id: number | null, over: Record<string, unknown> = {}) => ({
+  id, application_id, question: "Q?", context: "", job_title: "Dev", job_company: "Acme", ...over,
 });
 
 // Redesign slice 1: on desktop the Sidebar owns the nav, below md the Navbar's
@@ -40,10 +44,10 @@ const openDrawer = () =>
   fireEvent.click(screen.getByRole("button", { name: /open navigation menu/i }));
 
 describe("Navbar drawer — Needs you badge", () => {
-  it("shows the open count when there are open asks", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(3) });
+  it("shows the server's total in the badge", async () => {
+    getNeedsYouCount.mockResolvedValue(total(3));
     render(<Navbar />);
-    await waitFor(() => expect(listAsks).toHaveBeenCalled());
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
     const badge = await screen.findByTestId("needs-you-badge");
     expect(badge).toHaveTextContent("3");
@@ -51,70 +55,77 @@ describe("Navbar drawer — Needs you badge", () => {
     expect(screen.getByRole("link", { name: /Needs you/ })).toHaveAttribute("href", "/needs-you");
   });
 
-  it("counts the setting changes waiting for the user's OK with the open asks", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(2) });
-    getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }, { id: 2 }] });
+  it("shows the number as given, with the jobs and the other items already added up", async () => {
+    getNeedsYouCount.mockResolvedValue({ n: 9, jobs: 4, other: 5 });
     render(<Navbar />);
-    await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalledTimes(1));
     openDrawer();
-    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("9");
   });
 
-  it("counts the applications ready to send (a counts-only read) with the rest", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(1) });
-    getReadyToSend.mockResolvedValue({ total: 3 });
-    render(<Navbar />);
-    await waitFor(() => expect(getReadyToSend).toHaveBeenCalledWith({ limit: 0 }));
-    openDrawer();
-    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+  it("makes one request for the Sidebar and the drawer together", async () => {
+    getNeedsYouCount.mockResolvedValue(total(2));
+    render(
+      <>
+        <Sidebar />
+        <Navbar />
+      </>,
+    );
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(getNeedsYouCount).toHaveBeenCalledTimes(1);
   });
 
-  it("a failed settings read still shows the open asks", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(2) });
-    getAssistantSettings.mockRejectedValue(new Error("down"));
+  it("a failed read shows no badge", async () => {
+    getNeedsYouCount.mockRejectedValue(new Error("down"));
     render(<Navbar />);
-    await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
-    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("2");
+    expect(screen.getByRole("link", { name: /Needs you/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("needs-you-badge")).toBeNull();
   });
 
   it("counts jobs, not asks: many asks on one job are one, practice asks are left out, no-job asks count each", async () => {
-    listAsks.mockResolvedValue({
-      asks: [
-        ask(1, 7), ask(2, 7), ask(3, 7), ask(4, 8),
-        ask(5, 9, { question: "SIMULATION: do not apply" }),
-        ask(6, null), ask(7, null),
-      ],
-    });
+    const asks = [
+      ask(1, 7), ask(2, 7), ask(3, 7), ask(4, 8),
+      ask(5, 9, { question: "SIMULATION: do not apply" }),
+      ask(6, null), ask(7, null),
+    ] as never[];
+    // The page's rule (what the server mirrors) gives 4, and the badge shows exactly the server's number.
+    const rule = countNeedsYou({ open: asks, ready: [], waiting: 0 });
+    expect(rule).toMatchObject({ n: 4, jobs: 2, other: 2 });
+    getNeedsYouCount.mockResolvedValue({ n: rule.n, jobs: rule.jobs, other: rule.other });
     render(<Navbar />);
-    await waitFor(() => expect(listAsks).toHaveBeenCalled());
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
     expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
   });
 
   it("reads every page of open asks", async () => {
+    // The page (which announces its own total on Needs you) reads every page, not only the first.
     const page1 = Array.from({ length: 50 }, (_, i) => ask(i + 1, 1000 + i));
     listAsks.mockResolvedValueOnce({ asks: page1 }).mockResolvedValueOnce({ asks: [ask(99, 5000)] });
-    render(<Navbar />);
-    await waitFor(() => expect(listAsks).toHaveBeenCalledTimes(2));
+    const all = await listAllOpenAsks();
+    expect(listAsks).toHaveBeenCalledTimes(2);
     expect(listAsks).toHaveBeenNthCalledWith(2, "open", 50);
-    openDrawer();
-    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("51");
+    expect(countNeedsYou({ open: all, ready: [], waiting: 0 }).n).toBe(51);
   });
 
   it("shows no badge at zero", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(0) });
+    getNeedsYouCount.mockResolvedValue(total(0));
     render(<Navbar />);
-    await waitFor(() => expect(listAsks).toHaveBeenCalled());
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
     expect(screen.getByRole("link", { name: /Needs you/ })).toBeInTheDocument();
     expect(screen.queryByTestId("needs-you-badge")).toBeNull();
   });
 
   it("clears while the user answers on the same page (no navigation)", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(3) });
+    getNeedsYouCount.mockResolvedValue(total(3));
     render(<Navbar />);
-    await waitFor(() => expect(listAsks).toHaveBeenCalled());
+    await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
     expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("3");
     act(() => {
@@ -126,7 +137,7 @@ describe("Navbar drawer — Needs you badge", () => {
 
 describe("Sidebar — Needs you badge", () => {
   it("shows the same badge, and clears it on the same event", async () => {
-    listAsks.mockResolvedValue({ asks: jobs(2) });
+    getNeedsYouCount.mockResolvedValue(total(2));
     render(<Sidebar />);
     const badge = await screen.findByTestId("needs-you-badge");
     expect(badge).toHaveTextContent("2");
