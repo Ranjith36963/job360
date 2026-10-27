@@ -18,7 +18,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
          (thinks + acts)               (stores)
 ```
 
-1. **Connect your assistant** once — Settings → Connect gives the address `https://job360.uk/api/mcp`. Connector apps (Claude.ai is proven end to end; ChatGPT-style connectors use the same flow) sign in with OAuth 2.1; CLI clients like Claude Code use a personal token (`j360_…`, shown once, stored hashed).
+1. **Connect your assistant** once — the address is `https://job360.uk/api/mcp`. Connector apps (Claude.ai is proven end to end; ChatGPT-style connectors use the same flow) sign in with OAuth 2.1; CLI clients like Claude Code use a personal token (`j360_…`, shown once, stored hashed).
 2. **Type `run 360`.** The assistant fetches the setup recipe from Job360, reads your CV, fills your profile, asks to connect Gmail, and offers the inbox check.
 3. **Hunt and apply.** The assistant searches with its own tools, brings each job it judges a fit, writes a tailored CV + cover letter, and stops before Submit. You say yes; it records the application and Job360 freezes a receipt.
 4. **Follow up.** On its schedule the assistant reads Gmail, records replies, interviews and rejections against the right application, sends the outreach emails it wrote (Auto mode only), and tells you what is due and what has gone quiet.
