@@ -1318,6 +1318,14 @@ export async function getMorningCheck(since: string): Promise<MorningCheck> {
   return request<MorningCheck>(`/api/morning-check${qs({ since })}`);
 }
 
+// ---- Needs-you total for the menu badge (owner 2026-10-27) ----
+export type NeedsYouCount = _Schemas["NeedsYouCountOut"];
+
+/** The number "N things need you" shows, computed by the server with the page's own rules. */
+export async function getNeedsYouCount(): Promise<NeedsYouCount> {
+  return request<NeedsYouCount>("/api/needs-you-count");
+}
+
 // ---- Approve CV on Needs you (2026-10-23) ----
 export type CvToApproveRow = _Schemas["CvToApproveRow"];
 

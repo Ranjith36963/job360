@@ -1,6 +1,7 @@
 // The Needs-you page's items, in one place (owner plan §2.4-§2.6): the jobs it lists (one per
-// application), the sort, the filter chips and ONE count. The page, the chips and the nav badge all
-// count through `countNeedsYou`, so "N things need you", the All chip and the chips' sum agree.
+// application), the sort, the filter chips and ONE count. The page and the chips count through
+// `countNeedsYou`, so "N things need you", the All chip and the chips' sum agree; the nav badge reads the
+// server's count of the same rules (GET /api/needs-you-count, backend services/applications/needs_you_count.py).
 // Pure except `listAllOpenAsks`. Every string here was written by an assistant: never rendered here.
 
 import { listAsks } from "@/lib/api";
@@ -118,7 +119,8 @@ export const jobChip = (j: JobRankInput) => chipOfTier(jobTier(j));
 export type NeedsYouInputs = {
   /** Every open ask (all pages). Practice asks are left out here. */
   open: Ask[];
-  /** The ready cards, or only their total when the cards were not read (the badge's cheap read). */
+  /** The ready cards, or only their total when the cards were not read. The badge no longer counts here
+   *  (it reads GET /api/needs-you-count, which applies these same rules on the server). */
   ready: ReadyCardData[] | number;
   /** The ready total when `ready` holds the cards: cards past the page still count, as Ready. */
   readyTotal?: number;
@@ -145,8 +147,8 @@ export function countNeedsYou(i: NeedsYouInputs): NeedsYouCount {
   const byChip: Record<Chip, number> = { all: 0, ready: 0, waiting: 0, checks: 0, other: 0 };
   for (const h of jobHeaders(i.open, cards, i.cvRows ?? [], i.people ?? []))
     if (!dropped.has(h.id)) byChip[jobChip(h)]++;
-  // Ready jobs the cards did not carry (a counts-only read, or past the page). The badge cannot see
-  // which of these also have an open ask, so it may count such a job twice; the page never does.
+  // Ready jobs the cards did not carry (a counts-only read, or past the page); a counts-only read cannot
+  // see which of them also have an open ask, so only a caller that holds the cards counts exactly.
   byChip.ready += typeof i.ready === "number" ? i.ready : Math.max(0, (i.readyTotal ?? cards.length) - cards.length);
   const jobs = byChip.ready + byChip.waiting + byChip.checks;
   byChip.other = groupAsks(i.open).general.length + (i.failedAsks ?? 0) + i.waiting + (i.outcomes ?? 0) + (i.mail ?? 0) + (i.connections ?? 0);

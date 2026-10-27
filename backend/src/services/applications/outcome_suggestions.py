@@ -203,6 +203,8 @@ async def open_suggestions(db: JobDatabase, user_id: Any, limit: int) -> tuple[l
         (user_id, user_id),
     )
     rows = [dict(r) for r in await cur.fetchall()]
+    if not rows:  # most users have none: skip the two reads below (every page's badge asks)
+        return [], False
     dismissed = await _dismissed_ids(db, user_id)
     cur = await db._db.execute(
         "SELECT application_id, source_message_id FROM application_events "
