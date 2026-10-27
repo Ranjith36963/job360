@@ -26,6 +26,7 @@ import { FormHandoff } from "@/components/applications/FormHandoff";
 import { countNeedsYou, listAllOpenAsks, readSort, saveSort } from "@/lib/needs-you-items";
 import type { Chip, SortKey } from "@/lib/needs-you-items";
 import { NeedsYouControls, readShow, writeShow } from "./NeedsYouControls";
+import { useFoldSet } from "@/components/fold/FoldRow";
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
 // a React text node, never as HTML or markdown.
@@ -333,6 +334,8 @@ export function NeedsYou() {
   const readyTotal = jobs.readyTotal;
   // Tasks waiting for the user's own browser (null: unknown or none).
   const [queue, setQueue] = useState<OwnBrowserQueue | null>(null);
+  // Which job rows are unfolded: all folded at first, in memory only (owner 2026-10-27).
+  const fold = useFoldSet();
 
   const apply = useCallback(
     (o: Ask[], a: Awaited<ReturnType<typeof listAsks>>, w: WaitingRequest[]) => {
@@ -436,7 +439,7 @@ export function NeedsYou() {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
+    <div className="flex min-w-0 flex-col gap-6" data-testid="needs-you-main">
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -458,18 +461,19 @@ export function NeedsYou() {
           setSort(k);
           saveSort(k);
         }}
+        gauges={jobs.gauges}
+        onFoldAll={jobs.total > 0 ? fold.setAll : undefined}
       />
       {/* One card per job (owner 2026-10-26): its ready form, CV, questions and people, most urgent first. */}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
-        <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-          Waiting for you
-        </h2>
-        {active === "all" && queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
+        <h2 id="open-asks" className="sr-only">Waiting for you</h2>
         {active === "all" && jobs.settled && jobs.total === 0 && !jobs.connections && general.length === 0 && waiting.length > 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}
+        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} />
+        {/* The own-browser queue sits BELOW the jobs, one slim strip (owner 2026-10-27: "put that down there"). */}
+        {active === "all" && queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
         {active === "all" && !(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
-        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} />
       </section>
       <OtherList
         hidden={active !== "all" && active !== "other"}

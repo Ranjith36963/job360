@@ -53,18 +53,22 @@ const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
 
 /** `showHeader` false: the application page, whose own title already names the job. `ready`: the job's
- *  ready-to-send form (Needs you); its card answers the form questions, so they are not listed twice here. */
+ *  ready-to-send form (Needs you); its card answers the form questions, so they are not listed twice here.
+ *  `bare`: the card sits inside a folded row (Needs you), which draws the frame and names the job. */
 export function JobCard({
   card,
   onChanged,
   showHeader = true,
   ready,
+  bare = false,
 }: {
   card: JobCardData;
   onChanged: () => Promise<void>;
   showHeader?: boolean;
   ready?: ReactNode;
+  bare?: boolean;
 }) {
+  const Root = bare ? "div" : "li";
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -250,7 +254,8 @@ export function JobCard({
   );
 
   return (
-    <li data-testid={`job-card-${card.applicationId}`} className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card">
+    <Root data-testid={`job-card-${card.applicationId}`}
+      className={bare ? "flex flex-col gap-4 p-4 sm:p-5" : "flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card"}>
       {showHeader && (
       <div className="flex flex-col gap-0.5">
         <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
@@ -434,7 +439,7 @@ export function JobCard({
             </button>
           ))}
       </div>
-    </li>
+    </Root>
   );
 }
 
