@@ -84,6 +84,28 @@ async def test_bring_with_queue_puts_it_in_the_batch_and_tags_the_origin(authent
 
 
 @pytest.mark.asyncio
+async def test_a_job_from_the_users_mail_is_tagged_your_mail_and_starts_the_batch(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    """Owner 2026-10-27: a job-alert email is a third source beside the hunt and the user's own link;
+    its jobs carry the tag "Your mail" and, queued, start the batch like a hunted job."""
+    from src.services.browser_agent import duty_trigger
+
+    lit: list[tuple[str, ...]] = []
+
+    async def _ignite(user_id, duties, reason, ids, db=None):
+        lit.append(tuple(duties))
+
+    monkeypatch.setattr(duty_trigger, "ignite", _ignite)
+    async with authenticated_async_context() as client:
+        mailed = await _bring(client, _ad(1, origin="your_mail", queue=True))
+        assert (mailed["queued"], mailed["queue_note"]) == (True, None)
+        assert lit == [("reach", "batch")]
+        rows = await _rows(client, queued=True)
+        assert rows[mailed["application_id"]]["origin"] == "your_mail"
+
+
+@pytest.mark.asyncio
 async def test_a_closed_application_is_not_queued_by_a_bring(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         first = await _bring(client, _ad(1))

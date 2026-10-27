@@ -58,6 +58,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   ai_hunt: "AI hunt",
   user_link: "Your link",
   user_paste: "Pasted ad",
+  your_mail: "Your mail",
   user: "You brought it",
   ai: "Your AI brought it",
 };

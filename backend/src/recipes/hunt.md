@@ -4,8 +4,7 @@
 Print this checklist and tick each step:
 [ ] 1 Targets  [ ] 2 Plan  [ ] 3 Search  [ ] 4 Judge  [ ] 5 Bring  [ ] 6 Report
 
-Job360 never searches, ranks or recommends jobs. YOU search, then bring only the good ones into Job360. Use EVERY tool
-you have, at full strength: code (the hunt kit), web search and fetch, a browser, connectors, parallel helpers (one per source). Go WIDE: thousands of ads, not twenty.
+Job360 never searches, ranks or recommends jobs. YOU search, then bring only the good ones into Job360. Use EVERY tool you have, at full strength: code (the hunt kit), web search and fetch, a browser, connectors, parallel helpers (one per source). Go WIDE: thousands of ads, not twenty.
 **A scheduled run** (the user's task woke you): call `whats_due` first and run only what it lists. After the hunt, `mark_done` hunt and call `whats_due` again: a `batch` there = `get_recipe("batch")`.
 
 1. **Read the targets.** Call `get_profile`: target titles, level, `search_brief`, `assistant_notes`. Call
@@ -20,6 +19,8 @@ you have, at full strength: code (the hunt kit), web search and fetch, a browser
    Agentic / Applied AI / Forward Deployed / Founding / AI Solutions / AI Product Engineer, Member of Technical
    Staff). **Done when** every row has a line.
 3. **Search** row by row, widest sources first, all with NO login:
+   0. **Your mail first** (owner 2026-10-27; no web search): search the user's Gmail for job alerts from the last 3 days (first run: 30) - boards (LinkedIn, Indeed, Naukri, Seek, findwork...) and company career alerts (jobs2web, Teamtailor, Workday...). Open every job link in them (alerts go stale), follow it to the employer's posting, judge it like any ad (step 4) and bring each fit with `origin` "your_mail" (the job's tag "Your mail").
+      A recruiter email is not an ad: no company named, a fee, or "illustrative" pay = likely a scam; tell the user, never reply or send details.
    a. **The hunt kit** (if you can run Python, e.g. Claude Code or Codex): download every file listed at
       `https://job360.uk/api/hunt-kit` into one folder, read its README.md, and run `hunt_kit.py` with
       the user's titles and rows (`--work-countries`, `--remote`, `--visa-onsite`). It reads thousands of
@@ -33,7 +34,7 @@ you have, at full strength: code (the hunt kit), web search and fetch, a browser
       `boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`, Lever `api.lever.co/v0/postings/<token>`,
       Ashby `api.ashbyhq.com/posting-api/job-board/<token>` (token from the careers link); `target_companies` first.
    d. **Web search:** the kit README's "Search every source" queries (`site:` per board, HN, the country's job
-      service). **Job alerts:** suggest LinkedIn, Indeed, freehire, Himalayas; the daily check reads them from Gmail.
+      service). **Job alerts:** suggest LinkedIn, Indeed, freehire, Himalayas, and company career-page alerts; step 0 reads them.
    e. **LinkedIn, Glassdoor, Google Jobs, Indeed (owner, 2026-10-19):** the hunt kit now reads LinkedIn, Glassdoor and Google
       Jobs itself at low volume (README "LinkedIn, Glassdoor, Google Jobs and Indeed"). You open Indeed search and job pages
       yourself, slowly, and read LinkedIn's search and logged-out job pages at very low volume only without the kit and
@@ -53,14 +54,13 @@ you have, at full strength: code (the hunt kit), web search and fetch, a browser
    and ask the user. Never guess - "not mentioned" is an answer. A minimum of years far above the profile is a
    stretch: say so. Duplicate hard stop: a job already in `list_applications`, or with the application kit's
    `duplicate.flag`, is not brought again. Check the posting is still open.
-5. **Bring only the fits.** For each one: `bring_job` (`origin` "ai_hunt", `queue` true: the batch; title, company, location, ad, URL,
+5. **Bring only the fits.** For each one: `bring_job` (`origin` "ai_hunt", or "your_mail" from step 0; `queue` true: the batch; title, company, location, ad, URL,
    and `posted_at` / `employer_published_at` as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you
    know: `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on` (`indeed`, `linkedin`,
    `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`); people the ad
    names (hiring team): `listed_people`. Leave out what you do not know (fix later: `update_job`). Then `save_fit`: your score, `score_source` and
    your one-line reason as `verdict` (140 chars max; no score = unscored, never low), gaps marked hard or soft.
-   Skip the rest - never bring a job just to reject it - and keep a `url | reason` line for each skip in
-   `skipped.txt` beside the kit's `seen_jobs.json` (never edit that file). **Done when** each fit is saved.
+   Skip the rest - never bring a job just to reject it - and keep a `url | reason` line for each skip in `skipped.txt` beside the kit's `seen_jobs.json` (never edit that file). **Done when** each fit is saved.
    Blocked (a site will not open, a tool is missing): `ask_user`, a Needs-you note, then continue with the next job.
 6. **Report.** First the coverage table, one line per row and source: place | source | search used | ads seen |
    ads brought | why none. A row with no line means the hunt is not done. More than 7 in 10 finds from one place
