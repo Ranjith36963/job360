@@ -70,8 +70,8 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 
 ## Where things are
 
-- `src/app/`, `src/components/`, `src/lib/` — `ls` them; the one thing `ls` cannot
-  tell you is that `/settings` redirects to `/settings/account`.
+- `src/app/`, `src/components/`, `src/lib/` — `ls` them. There is no Settings page;
+  `src/app/__tests__/redirects.test.tsx` pins where each old `/settings/*` URL lands.
 - `src/middleware.ts` — session-cookie auth guard; `PROTECTED_PATHS` there is the
   gated list, and an unauthed hit bounces to `/login?next=…`.
 
