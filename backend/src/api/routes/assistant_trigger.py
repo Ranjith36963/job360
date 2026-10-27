@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,7 @@ from src.core import settings
 from src.services.browser_agent import duty_trigger as duty_service
 from src.services.browser_agent import trigger as trigger_service
 from src.services.browser_agent.sign_ins import SignInKeyMissingError
+from src.services.profile import schedule as schedule_service
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["assistant-trigger"])
@@ -171,6 +173,8 @@ async def run_duty(
     _duty_or_404(duty)
     cause = "test" if body is not None and body.test else "run_now"
     async with _db() as db:
+        if cause == "run_now":  # the press itself is what whats_due then honours (never for Test)
+            await schedule_service.press_run_now(db, user.id, duty, datetime.now(timezone.utc))
         result = await duty_service.fire(db, user.id, duty, cause=cause, resolve=DEFAULT_RESOLVE)
     _audit(user, f"{cause}_{duty}", "started" if result.get("fired") else str(result.get("reason")))
     return result

@@ -5703,7 +5703,8 @@
               "never_done",
               "interval_elapsed",
               "queue_waiting",
-              "new_applications"
+              "new_applications",
+              "run_now"
             ],
             "title": "Reason",
             "type": "string"
@@ -17928,6 +17929,19 @@
           "nothing_due": {
             "title": "Nothing Due",
             "type": "boolean"
+          },
+          "run_now": {
+            "items": {
+              "enum": [
+                "hunt",
+                "inbox",
+                "batch",
+                "reach"
+              ],
+              "type": "string"
+            },
+            "title": "Run Now",
+            "type": "array"
           },
           "running": {
             "additionalProperties": {
