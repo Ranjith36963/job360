@@ -1,50 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, getReadyToSend } from "@/lib/api";
-import { fetchSettingsShared } from "@/lib/assistant-state";
+import { ASKS_CHANGED_EVENT, getNeedsYouCount } from "@/lib/api";
 import { onChanges } from "@/lib/live-changes";
-import { countNeedsYou, listAllOpenAsks } from "@/lib/needs-you-items";
 
 /**
- * Count of things waiting on the user (the Needs-you badge): jobs with an open ask plus
- * the setting changes an assistant asked for that wait for the user's OK (S2)
- * plus the applications ready to send (S5d).
- * The settings read is best-effort: if it fails the badge still counts the asks.
- * A light fetch
- * after mount when signed in, re-fetched on every navigation. It never blocks
- * render, and a failure just means no badge. The Needs-you page announces the
- * fresh count after every reload (ASKS_CHANGED_EVENT), so the badge clears
- * while the user answers there, with no navigation needed.
+ * The Needs-you badge: the same total the Needs-you page shows ("N things need you"), from ONE cheap
+ * read, GET /api/needs-you-count (owner 2026-10-27). The server applies the page's own rules (distinct
+ * jobs with an open ask, a ready card, a CV to approve or a person to reach, plus the Other items), so
+ * the badge is exact on every page, with no full cards read. A light fetch after mount when signed in,
+ * re-fetched on every navigation and on every live change. It never blocks render, and a failure just
+ * means no badge. On Needs you the page announces its own total after every reload (ASKS_CHANGED_EVENT),
+ * so the badge clears while the user answers there, with no navigation needed.
  *
  * One hook, used by both the Sidebar and the mobile drawer in Navbar. Both are
  * mounted at once for a signed-in user (the Navbar only hides with CSS), so
  * the request is shared: one call per navigation, not one per caller.
  */
-/** Applications ready to send (S5d). Best-effort: a failed read counts 0. */
-async function readyTotal(): Promise<number> {
-  try {
-    return (await getReadyToSend({ limit: 0 })).total;
-  } catch {
-    return 0;
-  }
-}
-
 let inFlight: { key: string; count: Promise<number> } | null = null;
 
 function fetchOpenCount(key: string): Promise<number> {
   if (inFlight?.key === key) return inFlight.count;
-  // The same count as the page (countNeedsYou), from cheap reads only: every open ask, the waiting
-  // changes and the ready TOTAL (limit=0, never the full cards). CVs, people, outcomes and mail are
-  // not read here; while Needs you is open, the page announces its own full count.
-  const count = Promise.all([
-    listAllOpenAsks(),
-    fetchSettingsShared(key).then(
-      (view) => view.waiting.length,
-      () => 0,
-    ),
-    readyTotal(),
-  ]).then(([open, waiting, ready]) => countNeedsYou({ open, waiting, ready }).n);
+  const count = getNeedsYouCount().then((c) => c.n);
   const entry = { key, count };
   inFlight = entry;
   const clear = () => {
@@ -57,9 +34,8 @@ function fetchOpenCount(key: string): Promise<number> {
 let announceSeq = 0;
 
 /**
- * Re-count everything the badge counts (questions + waiting setting changes +
- * ready to send) and tell the badge. For pages that change one part of it (an
- * answer on Home or an application page) so the badge never drops the rest.
+ * Re-count the badge (the server's exact total) and tell the badge. For pages that change one part of
+ * it (an answer on Home or an application page) so the badge never drops the rest.
  * Best-effort: a failed count leaves the badge as it is.
  */
 export async function announceOpenCount(): Promise<void> {
@@ -75,7 +51,7 @@ export function useOpenAsks(signedIn: boolean, pathname: string): number {
   const [openAsks, setOpenAsks] = useState(0);
 
   useEffect(() => {
-    // On Needs you the page announces its own full count; a cheaper count here would make the badge jump.
+    // On Needs you the page announces its own total (the same number), so there is no fetch here.
     if (!signedIn || pathname.startsWith("/needs-you")) return;
     let cancelled = false;
     fetchOpenCount(pathname)
