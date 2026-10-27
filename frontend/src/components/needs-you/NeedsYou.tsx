@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
@@ -19,9 +19,6 @@ import { JobCards } from "./JobCards";
 import { useLiveAsks, useLiveRefresh, useLiveRequests } from "./useLiveLists";
 import type { JobCardsReport } from "./JobCards";
 import { groupAsks } from "@/lib/job-cards";
-import { RunChromeTasks } from "./RunChromeTasks";
-import { OwnBrowserQueueCard } from "./OwnBrowserQueueCard";
-import { getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
 import { FormHandoff } from "@/components/applications/FormHandoff";
 import { countNeedsYou, listAllOpenAsks, readSort, saveSort } from "@/lib/needs-you-items";
 import type { Chip, SortKey } from "@/lib/needs-you-items";
@@ -312,7 +309,8 @@ function announce(openCount: number) {
   window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
 }
 
-export function NeedsYou() {
+/** `aside` sits right of the summary on wide screens, below it on narrow ones (the page passes RunNowPanel). */
+export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
   const [open, setOpen] = useState<Ask[] | null>(null);
   // What the job list reports: its loaded cards, the asks it could not place, how many jobs it lists.
   const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false, readyTotal: null });
@@ -332,8 +330,6 @@ export function NeedsYou() {
   // null until the job list's Ready to send read has answered (0 if it failed): announcing
   // before then would drop the ready count from the badge for a moment.
   const readyTotal = jobs.readyTotal;
-  // Tasks waiting for the user's own browser (null: unknown or none).
-  const [queue, setQueue] = useState<OwnBrowserQueue | null>(null);
   // Which job rows are unfolded: all folded at first, in memory only (owner 2026-10-27).
   const fold = useFoldSet();
 
@@ -356,7 +352,6 @@ export function NeedsYou() {
   const general = useMemo(() => (open ? [...groupAsks(shown).general, ...jobs.failed] : []), [open, shown, jobs.failed]);
 
   const load = useCallback(async () => {
-    void getOwnBrowserQueue().then(setQueue);
     try {
       apply(...(await fetchAll()));
     } catch {
@@ -366,7 +361,6 @@ export function NeedsYou() {
 
   useEffect(() => {
     let cancelled = false;
-    void getOwnBrowserQueue().then((q) => !cancelled && setQueue(q));
     fetchAll()
       .then((all) => {
         if (!cancelled) apply(...all);
@@ -382,7 +376,6 @@ export function NeedsYou() {
   // The user's own Apply in "Finish it here" was seen confirmed: its asks are closed now, re-read.
   // The assistant changed something: re-read quietly (a failed read keeps what is on screen).
   useLiveRefresh(() => {
-    void getOwnBrowserQueue().then(setQueue);
     fetchAll().then((all) => apply(...all), () => {});
   });
 
@@ -448,22 +441,27 @@ export function NeedsYou() {
           </button>
         </div>
       )}
-      <NeedsYouControls
-        count={count}
-        settled={jobs.settled}
-        show={active}
-        onShow={(c) => {
-          setShow(c);
-          writeShow(c);
-        }}
-        sort={sort}
-        onSort={(k) => {
-          setSort(k);
-          saveSort(k);
-        }}
-        gauges={jobs.gauges}
-        onFoldAll={jobs.total > 0 ? fold.setAll : undefined}
-      />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <NeedsYouControls
+            count={count}
+            settled={jobs.settled}
+            show={active}
+            onShow={(c) => {
+              setShow(c);
+              writeShow(c);
+            }}
+            sort={sort}
+            onSort={(k) => {
+              setSort(k);
+              saveSort(k);
+            }}
+            gauges={jobs.gauges}
+            onFoldAll={jobs.total > 0 ? fold.setAll : undefined}
+          />
+        </div>
+        {aside}
+      </div>
       {/* One card per job (owner 2026-10-26): its ready form, CV, questions and people, most urgent first. */}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
         <h2 id="open-asks" className="sr-only">Waiting for you</h2>
@@ -471,9 +469,7 @@ export function NeedsYou() {
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}
         <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} />
-        {/* The own-browser queue sits BELOW the jobs, one slim strip (owner 2026-10-27: "put that down there"). */}
-        {active === "all" && queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
-        {active === "all" && !(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
+        {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>
       <OtherList
         hidden={active !== "all" && active !== "other"}

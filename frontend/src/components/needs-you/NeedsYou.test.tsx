@@ -442,14 +442,13 @@ describe("NeedsYou", () => {
       setup([]);
     }
 
-    it("puts the own-browser strip BELOW the job list, with no Waiting for you label on screen", async () => {
+    it("shows no own-browser strip in the list (its Run now sits beside the summary), with no Waiting for you label on screen", async () => {
       withJob();
       render(<NeedsYou />);
-      const strip = await screen.findByTestId("own-browser-queue");
-      const row = await screen.findByTestId("job-row-5");
-      expect(row.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(strip).toHaveTextContent("7 waiting for your own browser");
-      expect(screen.getByTestId("own-browser-run-now")).toHaveTextContent("Run my own-browser tasks now");
+      await screen.findByTestId("job-row-5");
+      expect(screen.queryByTestId("own-browser-queue")).toBeNull();
+      expect(screen.queryByText("Run my own-browser tasks now")).toBeNull();
+      expect(requestJson).not.toHaveBeenCalledWith("/api/own-browser/queue", "GET");
       expect(screen.getByText("Waiting for you")).toHaveClass("sr-only");
     });
 
