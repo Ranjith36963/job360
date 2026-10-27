@@ -275,7 +275,9 @@ async def test_closed_outside_the_pc_on_hours_unless_run_now_and_paused_closes(a
                 "/api/profile", json={"edits": [{"path": "assistant_settings.paused_until", "value": "until_resumed"}]}
             )
             assert paused.status_code == 200, paused.text
-            assert (await _take(agent, "other"))["status"] == "paused"
+            # The REST pause gate (src/api/pause_gate.py) answers a token's take before the queue does.
+            refused = await agent.post("/api/own-browser/take", json={"session": "other"})
+            assert refused.status_code == 423 and refused.json()["detail"]["status"] == "paused", refused.text
             assert (await client.get("/api/own-browser/queue")).json()["why"] == "paused"
 
 
