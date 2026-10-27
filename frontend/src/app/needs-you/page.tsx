@@ -5,7 +5,8 @@ import { LiveLine } from "@/components/needs-you/LiveLine";
 // Protected by middleware.ts (`/needs-you` is in PROTECTED_PATHS).
 export default function NeedsYouPage() {
   return (
-    <PageContainer className="flex flex-col gap-6 py-8">
+    // Wide screens use the width, but lines stay readable (owner 2026-10-27: at most about 80rem).
+    <PageContainer className="flex max-w-[80rem] flex-col gap-4 py-6">
       <h1 className="font-heading text-3xl font-normal tracking-tight">Needs you</h1>
       <LiveLine />
       <NeedsYou />

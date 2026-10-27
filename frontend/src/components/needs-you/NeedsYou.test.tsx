@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { NeedsYou } from "./NeedsYou";
+import { card as readyCard } from "./ready-fixtures";
 
 const listAsks = vi.fn();
 const answerAsk = vi.fn();
 const withdrawAsk = vi.fn();
 const confirmAsk = vi.fn();
 const getAssistantSettings = vi.fn();
+const requestJson = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
@@ -15,6 +17,8 @@ vi.mock("@/lib/api", () => ({
   withdrawAsk: (...a: unknown[]) => withdrawAsk(...a),
   confirmAsk: (...a: unknown[]) => confirmAsk(...a),
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
+  // The own-browser queue (lib/browser-contract) reads through requestJson.
+  requestJson: (...a: unknown[]) => requestJson(...a),
   confirmSettingRequest: vi.fn(),
   declineSettingRequest: vi.fn(),
   // The job cards have their own tests (JobCard.test.tsx). A job record that fails to load drops
@@ -23,9 +27,9 @@ vi.mock("@/lib/api", () => ({
   getCvToApprove: async () => ({ items: [] }),
   listPeople: async () => ({ people: [] }),
   // Ready to send has its own tests (ReadyToSend.test.tsx); here only its total, for the badge.
-  getReadyToSend: async () => ({ paused: false, total: readyMock.total, unflagged: 0, items: [] }),
+  getReadyToSend: async () => ({ paused: false, total: readyMock.total, unflagged: 0, items: readyMock.items }),
 }));
-const readyMock = vi.hoisted(() => ({ total: 0 }));
+const readyMock = vi.hoisted(() => ({ total: 0, items: [] as unknown[] }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
@@ -90,6 +94,9 @@ beforeEach(() => {
   answerAsk.mockReset().mockResolvedValue({});
   withdrawAsk.mockReset().mockResolvedValue({});
   getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
+  requestJson.mockReset().mockRejectedValue(new Error("no queue in this test"));
+  readyMock.total = 0;
+  readyMock.items = [];
 });
 
 describe("NeedsYou", () => {
@@ -424,5 +431,46 @@ describe("NeedsYou", () => {
     expect(await screen.findByText("Q50")).toBeInTheDocument();
     expect(listAsks).toHaveBeenCalledWith("answered", 50);
     expect(screen.queryByTestId("needs-you-older")).toBeNull(); // last page was short
+  });
+
+  describe("the cockpit layout (owner 2026-10-27)", () => {
+    const queue = { count: 7, open_now: true, opens_at: null, why: "any_time", tasks: [], pc_on_hours: null, run_now_until: null };
+    function withJob() {
+      readyMock.total = 1;
+      readyMock.items = [readyCard(5)];
+      requestJson.mockResolvedValue(queue);
+      setup([]);
+    }
+
+    it("puts the own-browser strip BELOW the job list, with no Waiting for you label on screen", async () => {
+      withJob();
+      render(<NeedsYou />);
+      const strip = await screen.findByTestId("own-browser-queue");
+      const row = await screen.findByTestId("job-row-5");
+      expect(row.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(strip).toHaveTextContent("7 waiting for your own browser");
+      expect(screen.getByTestId("own-browser-run-now")).toHaveTextContent("Run my own-browser tasks now");
+      expect(screen.getByText("Waiting for you")).toHaveClass("sr-only");
+    });
+
+    it("Expand all unfolds every job row and Fold all folds them again", async () => {
+      withJob();
+      render(<NeedsYou />);
+      const toggle = await screen.findByTestId("job-row-5-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      // The controls row renders once the page has counted; wait for it rather than racing the load.
+      fireEvent.click(await screen.findByTestId("expand-all"));
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(await screen.findByTestId("fold-all"));
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("shows quiet gauges under the summary: the groups and the oldest wait", async () => {
+      withJob();
+      render(<NeedsYou />);
+      const gauges = await screen.findByTestId("needs-you-gauges");
+      expect(gauges).toHaveTextContent(/Oldest waiting \d+ (d|mo)/);
+      expect(gauges.textContent).not.toMatch(/APP-/);
+    });
   });
 });

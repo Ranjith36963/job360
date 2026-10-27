@@ -44,9 +44,12 @@ describe("CvToApprove", () => {
     getCvToApprove.mockResolvedValue({ items: [row(1), row(2, { job_title: "Analyst", job_company: "Beta" })] });
     render(<CvToApprove />);
     const first = await screen.findByTestId("job-card-1");
-    expect(first).toHaveTextContent("ElevenLabs");
+    // The folded row names the job; the card inside it holds the CV.
+    expect(screen.getByTestId("job-row-1")).toHaveTextContent("ElevenLabs");
     expect(first).toHaveTextContent("CV version 2, not checked yet");
-    expect(await screen.findByTestId("job-card-2")).toHaveTextContent("Beta");
+    await screen.findByTestId("job-card-2");
+    expect(screen.getByTestId("job-row-2")).toHaveTextContent("Beta");
+    fireEvent.click(screen.getByTestId("job-row-1-toggle")); // every job row starts folded
     expect(screen.getAllByRole("link", { name: "View CV" })[0]).toHaveAttribute("href", "/applications/1");
   });
 
@@ -78,6 +81,7 @@ describe("CvToApprove", () => {
     downloadApplicationArtifact.mockResolvedValue(undefined);
     render(<CvToApprove />);
     await screen.findByTestId("job-card-3");
+    fireEvent.click(screen.getByTestId("job-row-3-toggle")); // every job row starts folded
     fireEvent.click(screen.getByRole("button", { name: "PDF" }));
     await waitFor(() => expect(downloadApplicationArtifact).toHaveBeenCalledWith(3, 30, "pdf", "CV_v2"));
   });
