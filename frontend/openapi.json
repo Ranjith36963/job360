@@ -4637,6 +4637,11 @@
             },
             "title": "Sent",
             "type": "array"
+          },
+          "skipped": {
+            "default": false,
+            "title": "Skipped",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10437,6 +10442,11 @@
               }
             ],
             "title": "Shared"
+          },
+          "skipped": {
+            "default": false,
+            "title": "Skipped",
+            "type": "boolean"
           },
           "source_url": {
             "anyOf": [
