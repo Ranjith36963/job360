@@ -4823,7 +4823,7 @@ export interface components {
              */
             location: string;
             /** Origin */
-            origin?: ("ai_hunt" | "user_link" | "user_paste") | null;
+            origin?: ("ai_hunt" | "user_link" | "user_paste" | "your_mail") | null;
             /** Posted At */
             posted_at?: string | null;
             /**

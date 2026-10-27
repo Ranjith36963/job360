@@ -1013,8 +1013,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
-        the application id to work against. It does NOT judge the fit — that is your
-        job; record your own verdict with `save_fit`. Bringing the same title+company
+        the application id to work against. It never judges fit: record your verdict
+        with `save_fit`. Bringing the same title+company
         again returns the existing job (existing=true); a different link/location/country
         is a 409 saying what to do. Never use this to search.
 
@@ -1039,7 +1039,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         full ad first; if the host is unknown, tell the user. They never block a bring.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
-        `origin`: "ai_hunt" (you found it), "user_link" or "user_paste"; `queue`=true puts it in the batch.
+        `origin`: "ai_hunt" (you found it), "your_mail" (a job-alert email), "user_link" or
+        "user_paste"; `queue`=true puts it in the batch.
         `listed_people` (max 10): people the ad names (hiring team), each {"name", "role",
         "linkedin_url"}; saved as this job's contacts, found_via "job_ad".
         `known_people`: see rules. `client_key`: retry = first reply."""

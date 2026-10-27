@@ -2075,7 +2075,7 @@ async def submit_override(db: JobDatabase, user_id: str, application_id: int) ->
 
 async def origin_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, str]:
     """Where each application's job came from (owner ask 2026-10-18), for the tag on every job:
-    the ``origin`` its ``brought`` event carries (ai_hunt / user_link / user_paste); without one,
+    the ``origin`` its ``brought`` event carries (ai_hunt / user_link / user_paste / your_mail); without one,
     ``user`` when the web brought it, ``ai`` when an assistant did. ONE query for the page."""
     if not app_ids:
         return {}
@@ -2098,7 +2098,7 @@ async def origin_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) -> di
         except ValueError:
             payload = {}
         origin = payload.get("origin") if isinstance(payload, dict) else None
-        if origin not in ("ai_hunt", "user_link", "user_paste"):
+        if origin not in ("ai_hunt", "user_link", "user_paste", "your_mail"):
             origin = "user" if d.get("recorded_by") == profile_edits.WEB_ACTOR else "ai"
         out[int(d["application_id"])] = origin
     return out
