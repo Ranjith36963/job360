@@ -1307,6 +1307,15 @@ export async function markOutreachSent(contactId: number, channel: "linkedin" | 
   });
 }
 
+/** Save that the user skipped a person's newest drafted note: it stays stored, the person leaves Needs you,
+ *  and a newer draft brings them back. Not a send. */
+export async function markOutreachSkipped(contactId: number, channel: "linkedin" | "email" | "other" = "linkedin"): Promise<unknown> {
+  return request(`/api/contacts/${contactId}/outreach`, {
+    method: "POST",
+    body: JSON.stringify({ entry: "skipped", channel }),
+  });
+}
+
 export async function confirmContact(contactId: number): Promise<Contact> {
   return request(`/api/contacts/${contactId}/confirm`, { method: "POST" });
 }

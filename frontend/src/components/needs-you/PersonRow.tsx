@@ -194,7 +194,7 @@ export function PersonRow({
         <button type="button" className={btn} disabled={busy} data-testid={`sent-${c.id}`} onClick={onSent}>
           I sent it
         </button>
-        <button type="button" className={btn} onClick={onSkip}>
+        <button type="button" className={btn} disabled={busy} data-testid={`skip-${c.id}`} onClick={onSkip}>
           Skip
         </button>
       </div>

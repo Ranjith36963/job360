@@ -25,10 +25,11 @@ function full(id: number, application_id: number | null, over: Record<string, un
 
 const listed = (id: number, jobs: { application_id: number; job_company: string; job_title: string }[] = []) => ({
   contact_ids: [id], name: `Person ${id}`, role: "Recruiter", email: "", linkedin_url: "", notes: "", jobs,
-  message_count: 1, last_sent: null, replied: false, last_reply: null,
+  message_count: 1, skipped: false, last_sent: null, replied: false, last_reply: null,
 });
 
 let people: unknown[] = [];
+let failSkip = false;
 let records: Record<number, unknown> = {};
 
 const json = (body: unknown, status = 200) =>
@@ -36,6 +37,7 @@ const json = (body: unknown, status = 200) =>
 
 beforeEach(() => {
   calls = [];
+  failSkip = false;
   people = [];
   records = {};
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -57,6 +59,7 @@ beforeEach(() => {
         job: { job_company: `Co${id}`, job_title: `Role${id}`, job_url: "https://x.example/" },
       });
     }
+    if (failSkip && method === "POST") return json({ detail: "nope" }, 500);
     return json({}, method === "POST" ? 201 : 200);
   }));
 });
@@ -109,13 +112,33 @@ describe("New connections", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it("Skip hides the person and writes nothing", async () => {
+  it("Skip saves a skipped entry (not a sent mark), then hides the person", async () => {
     people = [listed(1)];
     records = { 1: full(1, null) };
     render(<JobCards open={[]} onChanged={async () => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(screen.queryByTestId("new-connections")).not.toBeInTheDocument());
+    expect(posts()).toEqual([{ url: "/api/contacts/1/outreach", method: "POST", body: { entry: "skipped", channel: "linkedin" } }]);
+  });
+
+  it("keeps the row when saving the skip fails", async () => {
+    failSkip = true;
+    people = [listed(1)];
+    records = { 1: full(1, null) };
+    render(<JobCards open={[]} onChanged={async () => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(await screen.findByTestId("person-1")).toBeInTheDocument();
+  });
+
+  it("does not list a person already saved as skipped (a reload keeps them gone)", async () => {
+    people = [{ ...listed(1), skipped: true }];
+    records = { 1: full(1, null) };
+    const onReport = vi.fn();
+    render(<JobCards open={[]} onChanged={async () => {}} onReport={onReport} />);
+    await waitFor(() => expect(onReport).toHaveBeenLastCalledWith(expect.objectContaining({ settled: true, connections: 0 })));
     expect(screen.queryByTestId("new-connections")).not.toBeInTheDocument();
-    expect(posts()).toEqual([]);
+    expect(calls.some((c) => c.url.includes("contact_id=1"))).toBe(false);
   });
 
   it("Copy copies the note and Open profile links to the person's LinkedIn", async () => {

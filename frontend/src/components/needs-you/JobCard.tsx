@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Ask } from "@/lib/api";
-import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers, saveAskRowAnswers } from "@/lib/api";
+import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, rememberAnswers, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
 import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
@@ -362,10 +362,11 @@ export function JobCard({
                 setHidden((prev) => new Set(prev).add(p.contact.id)); // sent: handled, before the reload
                 await resolveReminders(p.contact.id, "I sent it myself.");
               }, "Couldn't save that you sent it")}
-              onSkip={() => {
+              onSkip={() => void run(async () => {
+                await markOutreachSkipped(p.contact.id); // saved first: a failure keeps the row
                 setHidden((prev) => new Set(prev).add(p.contact.id));
-                void run(() => resolveReminders(p.contact.id, "Skip: do not send it."), "Couldn't save that");
-              }} />
+                await resolveReminders(p.contact.id, "Skip: do not send it.");
+              }, "Couldn't save the skip")} />
           ))}
           {morePeople > 0 && (
             <button type="button" className={btn} data-testid={`people-more-${card.applicationId}`}

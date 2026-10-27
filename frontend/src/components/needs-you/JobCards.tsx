@@ -32,7 +32,7 @@ const MAX_IN_FLIGHT = 8;
 async function unsentMessages(): Promise<{ jobs: PersonJob[]; cold: PersonToReach[] }> {
   try {
     const { people } = await listPeople();
-    const unsent = (people ?? []).filter((p) => p.message_count > 0 && !p.last_sent);
+    const unsent = (people ?? []).filter((p) => p.message_count > 0 && !p.last_sent && !p.skipped);
     return { jobs: unsent.flatMap((p) => p.jobs), cold: await newConnections(unsent) };
   } catch {
     return { jobs: [], cold: [] };
@@ -144,7 +144,7 @@ export function JobCards({
   const gen = useMemo(() => ({}), [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [people, setPeople] = useState<PersonJob[] | null>(null);
   const [cold, setCold] = useState<PersonToReach[]>([]);
-  // New connections sent or skipped here: hidden at once and across reloads (Skip is not saved anywhere).
+  // New connections sent or skipped here: hidden at once (both are saved, so a reload keeps them gone).
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [cvRows, setCvRows] = useState<CvToApproveRow[] | null>(null);
   const [ready, setReady] = useState<ReadyData | null>(null);
