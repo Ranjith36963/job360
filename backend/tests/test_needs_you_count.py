@@ -194,6 +194,26 @@ async def test_a_sent_note_does_not_count_but_a_newer_draft_does(authenticated_a
 
 
 @pytest.mark.asyncio
+async def test_a_skipped_note_does_not_count_until_a_newer_draft(authenticated_async_context):
+    """#1342 saves a skip as a `skipped` ledger row; the badge must agree with the page that hides them."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        on_job = await _person(client, "Skip Sam", app_id)
+        cold = await _person(client, "Skip Cold", None)
+        assert await _count(client) == {"n": 2, "jobs": 1, "other": 1}
+        for cid in (on_job, cold):
+            done = await client.post(f"/api/contacts/{cid}/outreach", json={"entry": "skipped", "channel": "linkedin"})
+            assert done.status_code == 201, done.text
+        assert await _count(client) == {"n": 0, "jobs": 0, "other": 0}
+        # A newer draft for the same person brings them back, as on the page.
+        again = await client.post(
+            f"/api/contacts/{cold}/outreach", json={"entry": "message", "channel": "linkedin", "text": "A new note"}
+        )
+        assert again.status_code == 201, again.text
+        assert await _count(client) == {"n": 1, "jobs": 0, "other": 1}
+
+
+@pytest.mark.asyncio
 async def test_another_users_rows_are_not_counted(authenticated_async_context):
     from fastapi.testclient import TestClient
 

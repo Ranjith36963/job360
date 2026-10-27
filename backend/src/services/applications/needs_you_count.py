@@ -54,7 +54,10 @@ _UNSENT_SQL = (
     "AND c.id IN (SELECT n.id FROM application_contacts n WHERE n.user_id = ? ORDER BY n.id DESC LIMIT ?) "
     "AND NOT EXISTS (SELECT 1 FROM contact_outreach s WHERE s.user_id = c.user_id "
     "AND s.id = (SELECT MAX(y.id) FROM contact_outreach y WHERE y.contact_id = c.id "
-    "AND y.user_id = c.user_id AND y.entry = 'sent') AND s.occurred_at >= m.occurred_at)"
+    "AND y.user_id = c.user_id AND y.entry = 'sent') AND s.occurred_at >= m.occurred_at) "
+    # Skipped (#1342): the user skipped the NEWEST drafted note (a `skipped` row newer than it).
+    "AND NOT EXISTS (SELECT 1 FROM contact_outreach k WHERE k.contact_id = c.id "
+    "AND k.user_id = c.user_id AND k.entry = 'skipped' AND k.id > m.id)"
 )
 
 
