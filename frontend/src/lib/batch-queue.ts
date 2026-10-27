@@ -156,3 +156,83 @@ export function mergeQueue<A extends { id: number; browser?: Chip }, O extends {
   }
   return [...out, ...all.values()];
 }
+
+/** When the own-browser window is open (moved from Needs you, owner 2026-10-27): "Open now",
+ *  "Opens Mon 09:00" in the viewer's own clock, else "Any time your PC is on" or "Closed". */
+export function windowText(q: { open_now: boolean; opens_at?: string | null; why: string }): string {
+  if (q.open_now) return "Open now";
+  const d = q.opens_at ? new Date(q.opens_at) : null;
+  if (d && !Number.isNaN(d.getTime())) {
+    const day = d.toLocaleDateString("en-GB", { weekday: "short" });
+    return `Opens ${day} ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  return q.why === "any_time" ? "Any time your PC is on" : "Closed";
+}
+
+/** Whole minutes until `iso`; 0 when it is past, missing or bad. */
+export function minutesLeft(iso: string | null | undefined, now = Date.now()): number {
+  const ms = iso ? Date.parse(iso) - now : NaN;
+  return Number.isNaN(ms) ? 0 : Math.max(0, Math.round(ms / 60000));
+}
+
+/** One task of `GET /api/own-browser/queue`, as far as the queue card reads it. */
+export type OwnTask = {
+  kind: string;
+  task_id: string;
+  what: string;
+  name?: string;
+  application_id?: number | null;
+  contact_id?: number | null;
+  message_id?: number | null;
+  linkedin_state?: string | null;
+  claim?: unknown;
+  browser?: { kind?: string; label?: string; reason?: string } | null;
+};
+
+const ownChip = (b: OwnTask["browser"]) => ({
+  kind: "own_browser",
+  label: typeof b?.label === "string" && b.label ? b.label : BROWSER_FILTER_WORDS.own_browser,
+  reason: b?.reason ?? "",
+});
+
+/** The own-browser tasks the batch list does not hold yet, shaped as batch rows (one queue, owner
+ *  2026-10-27). Dedupe: an application by its id, a person by their contact id. A blocked application
+ *  that was never batch-queued has no Remove (there is nothing to unqueue); `extra` marks it. */
+export function ownBrowserExtras(
+  apps: { id: number }[],
+  outreach: { contact_id: number }[],
+  tasks: OwnTask[] | null | undefined,
+) {
+  const haveApp = new Set(apps.map((a) => a.id));
+  const havePerson = new Set(outreach.map((o) => o.contact_id));
+  const extraApps = [];
+  const extraOutreach = [];
+  for (const t of tasks ?? []) {
+    if (t.kind === "application" && typeof t.application_id === "number" && !haveApp.has(t.application_id)) {
+      haveApp.add(t.application_id);
+      extraApps.push({ id: t.application_id, job_title: t.what, job_company: null, browser: ownChip(t.browser), extra: true });
+    } else if (t.kind === "linkedin_outreach" && typeof t.contact_id === "number" && typeof t.message_id === "number"
+      && !havePerson.has(t.contact_id)) {
+      havePerson.add(t.contact_id);
+      const note = t.linkedin_state === "connected" ? "linkedin_message" : "linkedin_note";
+      extraOutreach.push({
+        task_id: `contact:${t.contact_id}`, outreach_kind: note, contact_id: t.contact_id,
+        title: `LinkedIn ${note === "linkedin_message" ? "message" : "note"} to ${t.name ?? ""}`.trim(),
+        application_id: t.application_id ?? null, message_id: t.message_id,
+        state: t.claim ? "in_progress" : "queued", browser: ownChip(t.browser),
+      });
+    }
+  }
+  return { apps: extraApps, outreach: extraOutreach };
+}
+
+/** The summary with the extras counted in (All, and "Your own browser"), so the filter row and the
+ *  own-browser line read one number. Unchanged when there are no extras or no summary. */
+export function withExtras(s: QueueSummary | null, apps: number, outreach: number): QueueSummary | null {
+  if (!s || apps + outreach === 0) return s;
+  const by = s.by_browser ?? {};
+  return {
+    ...s, queued: num(s.queued) + apps, outreach: num(s.outreach) + outreach,
+    by_browser: { ...by, own_browser: num(by.own_browser) + apps + outreach },
+  };
+}

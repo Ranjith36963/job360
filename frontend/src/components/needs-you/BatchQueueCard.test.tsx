@@ -8,11 +8,21 @@ vi.mock("@/lib/api", () => ({
   listApplications: (...a: unknown[]) => listApplications(...a),
   recordApplicationEvent: vi.fn(),
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toastSuccess = vi.fn();
+const toastError = vi.fn();
+vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }));
 const decideOwnBrowserSend = vi.fn();
+const getOwnBrowserQueue = vi.fn();
 vi.mock("@/lib/browser-contract", () => ({
   decideOwnBrowserSend: (...a: unknown[]) => decideOwnBrowserSend(...a),
+  getOwnBrowserQueue: () => getOwnBrowserQueue(),
 }));
+
+beforeEach(() => {
+  getOwnBrowserQueue.mockReset().mockResolvedValue(null);
+  toastSuccess.mockReset();
+  toastError.mockReset();
+});
 
 const chip = (kind: string, label: string, reason = "default") => ({ kind, label, reason });
 
@@ -152,5 +162,54 @@ describe("BatchQueueCard one queue with outreach", () => {
     fireEvent.click(await screen.findByTestId("batch-dont-send-7"));
     await waitFor(() => expect(decideOwnBrowserSend).toHaveBeenCalledWith(7, 70, "decline"));
     await waitFor(() => expect(listApplications).toHaveBeenCalledTimes(2));
+  });
+});
+
+// Moved from Needs you (owner 2026-10-27): the own-browser line lives on Home's one queue.
+const queue = (over: Record<string, unknown> = {}) => ({
+  count: 2, open_now: false, opens_at: null, why: "any_time", tasks: [], pc_on_hours: null, run_now_until: null, ...over,
+});
+const task = (over: Record<string, unknown>) => ({
+  kind: "application", what: "", name: "", application_id: null, contact_id: null, message_id: null, claim: null,
+  browser: chip("own_browser", "Needs your own browser: turn your PC on", "job360_login_required"), ...over,
+});
+
+describe("BatchQueueCard own-browser tasks", () => {
+  beforeEach(() => listApplications.mockReset());
+
+  it("lists every own-browser task once: deduped by application and contact id, the rest merged in", async () => {
+    respondMixed(); // applications 1, 2 and people 7, 8 already queued
+    getOwnBrowserQueue.mockResolvedValue(queue({
+      count: 4,
+      tasks: [
+        task({ kind: "linkedin_outreach", task_id: "contact:7", contact_id: 7, message_id: 70, name: "Priya" }),
+        task({ kind: "linkedin_outreach", task_id: "contact:9", contact_id: 9, message_id: 90, name: "<i>Lee</i>", linkedin_state: "connected" }),
+        task({ task_id: "application:2", application_id: 2, what: "Finish the application for Second Job at X" }),
+        task({ task_id: "application:5", application_id: 5, what: "Finish the application for <b>Ops</b> at Y" }),
+      ],
+    }));
+    render(<BatchQueueCard />);
+    expect(await screen.findByTestId("batch-row-5")).toHaveTextContent("Finish the application for <b>Ops</b> at Y");
+    const ids = Array.from(screen.getByTestId("batch-queue-list").children).map((li) => li.getAttribute("data-testid"));
+    expect(ids).toEqual(["batch-row-1", "batch-outreach-7", "batch-row-2", "batch-outreach-8", "batch-row-5", "batch-outreach-9"]);
+    expect(screen.getByTestId("batch-outreach-9")).toHaveTextContent("LinkedIn message to <i>Lee</i>");
+    expect(screen.getByTestId("batch-queue-list").querySelector("b, i")).toBeNull();
+    expect(screen.getByTestId("queue-browser-5")).toHaveAttribute("data-kind", "own_browser");
+    // A blocked job that was never batch-queued has nothing to remove; its person still has Don't send.
+    expect(screen.queryByTestId("batch-remove-5")).toBeNull();
+    expect(screen.getByTestId("batch-remove-2")).toBeInTheDocument();
+    expect(screen.getByTestId("batch-dont-send-9")).toBeInTheDocument();
+    // One number: the filter chip counts 2 + 2 extras.
+    expect(screen.getByTestId("queue-filter-own_browser")).toHaveTextContent("Your own browser 4");
+    expect(screen.getByTestId("queue-filter-all")).toHaveTextContent("All 6");
+  });
+
+  it("re-reads the queue when the assistant moves anything", async () => {
+    respond({ job360: 1, own_browser: 2, human: 0 });
+    render(<BatchQueueCard />);
+    await screen.findByTestId("batch-row-1");
+    const before = listApplications.mock.calls.length;
+    window.dispatchEvent(new CustomEvent("job360:changes", { detail: { areas: ["applications"], full: false, seq: 1 } }));
+    await waitFor(() => expect(listApplications.mock.calls.length).toBe(before + 1));
   });
 });
