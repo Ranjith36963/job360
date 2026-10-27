@@ -375,3 +375,46 @@ def test_reset_confirm_revokes_agent_tokens_and_oauth_grants(client, monkeypatch
 
     assert asyncio.run(api_tokens.resolve(temp_db, token)) is None, "agent token survived the reset"
     assert asyncio.run(_live_grants(temp_db, user_id)) == 0, "OAuth grant survived the reset"
+
+
+# ─── AUTH-5: response time must not reveal whether the account exists ───────
+
+
+@pytest.mark.parametrize("email", ["alice@example.com", "nobody@example.com"])
+def test_reset_request_does_no_lookup_or_send_before_responding(
+    temp_db, monkeypatch, email
+):
+    """The route must return 204 before any user lookup, token insert or email
+    send runs, so known and unknown addresses take the same time. The work is
+    deferred to a BackgroundTask and runs only after the response."""
+    from fastapi import BackgroundTasks
+    from starlette.requests import Request
+
+    from src.api.routes import auth as auth_route
+    from src.api.routes.auth import PasswordResetRequest
+
+    order: list[str] = []
+
+    async def _spy(**kwargs):
+        order.append("service")
+        return True
+
+    monkeypatch.setattr(
+        auth_route.auth_password_reset, "request_password_reset", _spy
+    )
+    request = Request(
+        {"type": "http", "method": "POST", "headers": [], "client": ("127.0.0.1", 1)}
+    )
+    tasks = BackgroundTasks()
+
+    async def _run():
+        resp = await auth_route.password_reset_request(
+            PasswordResetRequest(email=email), request, tasks
+        )
+        order.append("response")
+        await tasks()
+        return resp
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 204
+    assert order == ["response", "service"]
