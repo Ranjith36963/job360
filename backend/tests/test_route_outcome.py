@@ -233,3 +233,42 @@ async def test_a_200_open_records_nothing(authenticated_async_context, monkeypat
         out = (await client.post("/api/browser", json={"action": "open", "url": JOB, "application_id": app_id})).json()
         assert "blocked_recorded" not in out
         assert await _blocked_rows(authenticated_async_context.fixture_user_id, app_id) == []
+
+
+async def _open_without_application(client_ctx, monkeypatch, transport, text="Welcome"):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+
+    async def fake_run(p, user_id, action, **kw):
+        return {"status": "ok", "url": JOB, "text": text, "transport": transport}
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    async with client_ctx() as client:
+        resp = await client.post("/api/browser", json={"action": "open", "url": JOB})
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_an_open_with_no_application_on_a_403_is_needs_you_bot_check(authenticated_async_context, monkeypatch):
+    from src.api.routes.browser import BOT_CHECK_DETAIL
+
+    out = await _open_without_application(authenticated_async_context, monkeypatch, _t(403), "Access Denied")
+    assert (out["status"], out["reason"], out["detail"]) == ("needs_you", "bot_check", BOT_CHECK_DETAIL)
+    assert out["transport"]["status"] == 403 and out["text"] == "Access Denied"
+    assert "blocked_recorded" not in out
+
+
+@pytest.mark.asyncio
+async def test_an_open_with_no_application_on_a_200_stays_ok(authenticated_async_context, monkeypatch):
+    out = await _open_without_application(authenticated_async_context, monkeypatch, _t(200))
+    assert out["status"] == "ok" and "reason" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_200_page_whose_text_says_blocked_stays_ok_with_no_application(authenticated_async_context, monkeypatch):
+    out = await _open_without_application(
+        authenticated_async_context, monkeypatch, _t(200), "You have been blocked",
+    )
+    assert out["status"] == "ok" and "reason" not in out

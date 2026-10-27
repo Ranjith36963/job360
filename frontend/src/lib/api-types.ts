@@ -5347,6 +5347,11 @@ export interface components {
             replies: components["schemas"]["OutreachEntryOut"][];
             /** Sent */
             sent: components["schemas"]["OutreachEntryOut"][];
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
         };
         /** ControlsAutofillOut */
         ControlsAutofillOut: {
@@ -7688,6 +7693,11 @@ export interface components {
             role: string;
             /** Shared */
             shared?: string | null;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
             /** Source Url */
             source_url?: string | null;
         };

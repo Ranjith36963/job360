@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { ApiError } from "./api-error";
+import { noteUserWrite } from "./live-writes";
 import type { components } from "./api-types";
 import type {
   BringJobRequest,
@@ -107,6 +108,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     throw err;
   }
+
+  // A saved change: a live refresh may now drop the card it came from (lib/live-hold.ts).
+  if ((init?.method ?? "GET").toUpperCase() !== "GET") noteUserWrite();
 
   // 204 No Content — logout returns empty body
   if (res.status === 204) return undefined as T;
@@ -1300,6 +1304,15 @@ export async function markOutreachSent(contactId: number, channel: "linkedin" | 
   return request(`/api/contacts/${contactId}/outreach`, {
     method: "POST",
     body: JSON.stringify({ entry: "sent", channel }),
+  });
+}
+
+/** Save that the user skipped a person's newest drafted note: it stays stored, the person leaves Needs you,
+ *  and a newer draft brings them back. Not a send. */
+export async function markOutreachSkipped(contactId: number, channel: "linkedin" | "email" | "other" = "linkedin"): Promise<unknown> {
+  return request(`/api/contacts/${contactId}/outreach`, {
+    method: "POST",
+    body: JSON.stringify({ entry: "skipped", channel }),
   });
 }
 

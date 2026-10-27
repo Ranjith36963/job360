@@ -64,14 +64,18 @@ beforeEach(() => {
 
 describe("JobCards", () => {
   it("renders every header at once but loads only the first 8 jobs", async () => {
-    render(<JobCards open={twenty} onChanged={async () => {}} />);
-    for (let i = 1; i <= 20; i++) expect(screen.getByTestId(`job-header-${i}`)).toBeInTheDocument();
-    expect(screen.getByTestId("job-skeleton-20")).toBeInTheDocument(); // newest first
-    expect(screen.getByTestId("jobs-count")).toHaveTextContent("20 jobs waiting for you");
+    const onReport = vi.fn();
+    render(<JobCards open={twenty} onChanged={async () => {}} onReport={onReport} />);
+    // Only the first page shows, each as a placeholder while its card loads (newest first).
+    for (let i = 13; i <= 20; i++) expect(screen.getByTestId(`job-header-${i}`)).toBeInTheDocument();
+    expect(screen.queryByTestId("job-header-12")).toBeNull();
+    expect(screen.getByTestId("job-skeleton-20")).toBeInTheDocument();
+    expect(onReport.mock.calls.at(-1)![0].total).toBe(20);
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
     expect(getApplication).toHaveBeenCalledTimes(8);
     expect(peak).toBeLessThanOrEqual(8);
-    expect(screen.getAllByTestId(/^job-header-/)).toHaveLength(12);
+    expect(screen.queryAllByTestId(/^job-header-/)).toHaveLength(0); // no header-only rows
+    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 8 more · 12 left");
   });
 
   it("Show 8 more jobs loads the next 8, then the rest", async () => {
@@ -80,7 +84,7 @@ describe("JobCards", () => {
     fireEvent.click(screen.getByTestId("more-jobs"));
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(16));
     expect(getApplication).toHaveBeenCalledTimes(16);
-    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 4 more jobs");
+    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 4 more · 4 left");
     fireEvent.click(screen.getByTestId("more-jobs"));
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(20));
     expect(screen.queryByTestId("more-jobs")).toBeNull();
@@ -147,7 +151,7 @@ describe("JobCards", () => {
     listPeople.mockResolvedValue({
       people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 500, job_company: "Reach Co", job_title: "Dev" }] }],
     });
-    render(<JobCards open={twenty.slice(0, 8)} onChanged={async () => {}} />);
+    render(<JobCards open={twenty.slice(0, 7)} onChanged={async () => {}} />);
     expect(await screen.findByTestId("job-header-500")).toHaveTextContent("Send notes");
   });
 
@@ -156,9 +160,23 @@ describe("JobCards", () => {
       people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 500, job_company: "Reach Co", job_title: "Dev" }] }],
     });
     render(<JobCards open={twenty.slice(0, 8)} onChanged={async () => {}} />);
-    expect(await screen.findByTestId("job-header-500")).toHaveTextContent("Reach Co · Dev");
-    await waitFor(() => expect(screen.getAllByTestId(/^card-/).length).toBeGreaterThan(0));
+    expect(await screen.findByTestId("more-jobs")).toHaveTextContent("Show 1 more · 1 left");
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
+    expect(screen.queryByTestId("job-header-500")).toBeNull(); // no header-only row for it
     expect(getApplication).not.toHaveBeenCalledWith(500);
+    fireEvent.click(screen.getByTestId("more-jobs"));
+    await waitFor(() => expect(getApplication).toHaveBeenCalledWith(500));
+  });
+
+  it("52 jobs show 8 full cards, one Show more button and zero header-only rows", async () => {
+    const many = Array.from({ length: 52 }, (_, i) => ask(i + 1, i + 1));
+    const onReport = vi.fn();
+    render(<JobCards open={many} onChanged={async () => {}} onReport={onReport} />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
+    expect(screen.queryAllByTestId(/^job-header-/)).toHaveLength(0);
+    expect(screen.getAllByTestId("more-jobs")).toHaveLength(1);
+    expect(screen.getByTestId("more-jobs")).toHaveTextContent("Show 8 more · 44 left");
+    expect(onReport.mock.calls.at(-1)![0].total).toBe(52);
   });
 
   it("a job whose record fails drops its header and reports its asks", async () => {
@@ -193,8 +211,9 @@ describe("one card per job (owner 2026-10-26)", () => {
   it("the summary line counts every job once: asks, ready to send, CV to approve", async () => {
     getReadyToSend.mockResolvedValue(readyList([readyCard(1), readyCard(30)]));
     getCvToApprove.mockResolvedValue({ items: [cvRow(2), cvRow(31)] });
-    render(<JobCards open={[ask(1, 1), ask(2, 2), ask(3, 3)]} onChanged={async () => {}} />);
-    await waitFor(() => expect(screen.getByTestId("jobs-count")).toHaveTextContent("5 jobs waiting for you"));
+    const onReport = vi.fn();
+    render(<JobCards open={[ask(1, 1), ask(2, 2), ask(3, 3)]} onChanged={async () => {}} onReport={onReport} />);
+    await waitFor(() => expect(onReport.mock.calls.at(-1)![0]).toMatchObject({ total: 5, settled: true }));
   });
 
   it("a job with a CV, a ready-to-send form and questions renders ONE card holding all three", async () => {
@@ -220,5 +239,17 @@ describe("one card per job (owner 2026-10-26)", () => {
     expect(screen.getAllByTestId(/^card-|^job-header-/).map((e) => e.dataset.testid)).toEqual(
       ["card-10", "card-20", "card-30", "card-40", "card-31"],
     );
+  });
+
+  it("a chip shows only its jobs, and Oldest first reverses the dates", async () => {
+    getReadyToSend.mockResolvedValue(readyList([readyCard(20, { answers: [readyAnswer()] })]));
+    getCvToApprove.mockResolvedValue({ items: [cvRow(40, "2026-10-21T09:00:00+00:00")] });
+    const asks = [ask(1, 10), ask(2, 30)];
+    const { rerender } = render(<JobCards open={asks} onChanged={async () => {}} show="checks" />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-40"]));
+    rerender(<JobCards open={asks} onChanged={async () => {}} sort="oldest" />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(4));
+    // Asks at 10:01 and 10:02, the fill on 10-08, the CV on 10-21.
+    expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-20", "card-10", "card-30", "card-40"]);
   });
 });

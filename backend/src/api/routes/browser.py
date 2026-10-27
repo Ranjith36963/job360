@@ -248,6 +248,11 @@ async def browser_action(
     elif body.action == "open" and body.application_id is not None and _bot_blocked(result, stop_source):
         # A bot wall answered the open (transport facts only, C3): the job waits on Needs you as a bot check.
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result, reason="bot_check")
+    elif body.action == "open" and body.application_id is None and _bot_blocked(result, stop_source):
+        # No application (a hunt or a read): nothing to record on Needs you, but the page must not look fine.
+        result["status"] = "needs_you"
+        result["reason"] = "bot_check"
+        result["detail"] = BOT_CHECK_DETAIL
     elif body.action in _FILL_ACTIONS and body.application_id is not None and result.get("status") == "ok":
         result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
@@ -307,6 +312,11 @@ async def _book_attempt(
                 "route attempt not booked",
                 extra={"event": "route_attempt_failed", "outcome": outcome, "error": type(exc).__name__},
             )
+
+
+BOT_CHECK_DETAIL = (
+    "This site blocked Job360's cloud browser (a bot wall, not your login). Open it in your own browser instead."
+)
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."

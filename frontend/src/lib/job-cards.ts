@@ -71,17 +71,19 @@ export function linkedinFor(contact: Contact, company: string): string {
   return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(words)}`;
 }
 
+/** One contact's newest drafted message, unless it is empty or was marked sent since. */
+export function personToReach(c: Contact, company: string): PersonToReach | null {
+  const messages = c.outreach.messages;
+  const last = messages[messages.length - 1];
+  if (!last || !last.text.trim()) return null;
+  const sent = c.outreach.last_sent;
+  if (sent && sent.occurred_at >= last.occurred_at) return null;
+  if (c.outreach.skipped) return null; // the user skipped this newest note (a newer draft clears it)
+  return { contact: c, message: last.text, linkedinUrl: linkedinFor(c, company) };
+}
+
 export function peopleToReach(detail: ApplicationDetail): PersonToReach[] {
-  const out: PersonToReach[] = [];
-  for (const c of detail.contacts) {
-    const messages = c.outreach.messages;
-    const last = messages[messages.length - 1];
-    if (!last || !last.text.trim()) continue;
-    const sent = c.outreach.last_sent;
-    if (sent && sent.occurred_at >= last.occurred_at) continue;
-    out.push({ contact: c, message: last.text, linkedinUrl: linkedinFor(c, detail.job.job_company) });
-  }
-  return out;
+  return detail.contacts.flatMap((c) => personToReach(c, detail.job.job_company) ?? []);
 }
 
 // The browser fields live behind one adapter (the Browser agent owns their names).

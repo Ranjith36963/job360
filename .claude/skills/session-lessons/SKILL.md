@@ -46,6 +46,12 @@ delete a lesson; if one stops being true, say so on its line and why.
   from 2026-10-20 (#1306). The worker brief never named either trap. **Rule:** a worker brief names
   the CodeQL traps. Scan caller text word by word, with no backtracking regex. Tests compare exact
   hosts or tokens.
+- 2026-10-26: after merging main into #1303 I ran tests, then the gate, piped to `tail -1`, and
+  committed and pushed the merge without reading the result. The gate had failed with `vitest: not
+  found`: the agent worktree had no `frontend/node_modules`, and the merge brought frontend files into
+  the diff. A re-run with the shared install linked passed, so nothing broke. **Rule:** link
+  `node_modules` into a fresh worktree before gating. Read the gate's last line, and commit only on
+  `PASS`.
 - 2026-10-23: a deploy watcher grepped main for a commit subject that did not exist (`merge=` came
   back empty), so its loop could never finish. **Rule:** a watcher checks that its grep found a
   commit (non-empty sha) before it starts looping, and fails loudly otherwise.

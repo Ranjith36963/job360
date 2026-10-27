@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { OutcomeSuggestions } from "./OutcomeSuggestions";
+import { OtherList } from "./OtherList";
 
 const listOutcomeSuggestions = vi.fn();
 const recordApplicationEvent = vi.fn();
@@ -10,7 +10,12 @@ const toastError = vi.fn();
 vi.mock("@/lib/api", () => ({
   listOutcomeSuggestions: (...a: unknown[]) => listOutcomeSuggestions(...a),
   recordApplicationEvent: (...a: unknown[]) => recordApplicationEvent(...a),
+  listInboxItems: async () => ({ items: [], open_count: 0 }),
+  listApplications: async () => ({ applications: [] }),
 }));
+
+// Suggestions now live as rows of the one Other list (owner plan 3b): Review opens the card inline.
+const OutcomeSuggestions = () => <OtherList waiting={[]} questions={[]} onChanged={async () => {}} renderQuestion={() => null} />;
 vi.mock("sonner", () => ({
   toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) },
 }));
@@ -48,7 +53,8 @@ describe("OutcomeSuggestions", () => {
     listOutcomeSuggestions.mockResolvedValueOnce({ suggestions: [suggestion], truncated: false });
     listOutcomeSuggestions.mockResolvedValue({ suggestions: [], truncated: false });
     render(<OutcomeSuggestions />);
-    expect(await screen.findByText("Suggested outcomes")).toBeInTheDocument();
+    expect(await screen.findByTestId("other-row-outcome-41")).toHaveTextContent("Northwind Ltd: Rejected?");
+    fireEvent.click(screen.getByTestId("other-open-outcome-41"));
     expect(screen.getByTestId("outcome-suggestion-type")).toHaveTextContent("Suggested: Rejected");
     expect(screen.getByTestId("outcome-suggestion-quote")).toHaveTextContent("We have decided not to proceed.");
     expect(screen.getByTestId("outcome-suggestion-why")).toHaveTextContent("Might be about the other Northwind role");
@@ -65,7 +71,7 @@ describe("OutcomeSuggestions", () => {
         }),
       ),
     );
-    await waitFor(() => expect(screen.queryByTestId("outcome-suggestions")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("other-list")).toBeNull());
     expect(toastSuccess).toHaveBeenCalledWith("Recorded.");
   });
 
@@ -73,7 +79,8 @@ describe("OutcomeSuggestions", () => {
     listOutcomeSuggestions.mockResolvedValueOnce({ suggestions: [suggestion], truncated: false });
     listOutcomeSuggestions.mockResolvedValue({ suggestions: [], truncated: false });
     render(<OutcomeSuggestions />);
-    fireEvent.click(await screen.findByTestId("outcome-suggestion-ignore"));
+    fireEvent.click(await screen.findByTestId("other-open-outcome-41"));
+    fireEvent.click(screen.getByTestId("outcome-suggestion-ignore"));
     await waitFor(() =>
       expect(recordApplicationEvent).toHaveBeenCalledWith(7, {
         event_type: "outcome_dismissed",

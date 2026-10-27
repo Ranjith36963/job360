@@ -28,7 +28,7 @@ Built and merged: #882, #891, #895, #916 (the one "Batch auto apply" switch).
 | Claude Code (your PC) | yes | yes (Playwright MCP) | CLI: macOS only; Windows: desktop app | yes | yes |
 | Claude desktop app | yes (connector) | yes (Playwright MCP) | yes (macOS, Windows; Pro or Max) | yes, via Claude in Chrome | yes |
 | Claude.ai in a web tab | yes (extension) | no | no | yes | yes |
-| Cloud session / routine | no | server browser only (Job360's `browser` tool) | no | only sites saved on Settings → Job sites | no |
+| Cloud session / routine | no | server browser only (Job360's `browser` tool) | no | only sites saved on Job sites | no |
 
 **Each assistant's own browser works only for that assistant** (Opera Neon's MCP connector is the exception). Our ranking for
 applying to jobs with real logins, from review articles (not tested by us):
@@ -142,7 +142,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
 
 **Slice 2 (built 2026-10-19, off by default): sign in once.**
-- **Where:** Settings → **Job sites** on the Job360 website. Type the job site's sign-in page and press Start.
+- **Where:** the **Job sites** tab (`components/connect.JobSitesPanel`). Type the job site's sign-in page and press Start.
 - **How:** a live picture of your own cloud browser. Click on the picture to click there; type in the box below
   (hidden by default, because it may be a password), Enter / Tab / Backspace / Escape and scroll buttons.
   When you are signed in, press **"I'm signed in: keep me signed in"**.
@@ -293,7 +293,7 @@ It needs the open internet, so run it on Railway (the switch is on there), with 
 From #966 (seen live after the deploy, 2026-10-20): an Ashby job board is not read as a form; Workday's sign-in step is caught.
 
 **Send starts my assistant (merged 2026-10-20, #913).** Before this, Send / Send all on Needs you only saved the yes,
-and the work waited for "run 360". Now, if you saved a start link on **Settings → Connect your assistant**, the
+and the work waited for "run 360". Now, if you saved a start link on **Connect your assistant**, the
 website calls `POST /api/assistant-trigger/fire` once after Send (or once after all of Send all), and Job360 starts your
 assistant with the list of every still-open job whose newest send decision is your yes. **One start per click, never one per job**.
 A 60-second cool-down, claimed in the database before the call, means two presses at once start one session. A yes

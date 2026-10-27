@@ -652,6 +652,8 @@ class ContactOutreachOut(BaseModel):
     sent: list[OutreachEntryOut]
     replies: list[OutreachEntryOut]
     bounced: list[OutreachEntryOut] = Field(default_factory=list)
+    # True when the user skipped the newest drafted note (a newer draft clears it). Not a send.
+    skipped: bool = False
     message_count: int
     last_sent: Optional[OutreachEntryOut]
     replied: bool
@@ -1713,6 +1715,7 @@ class PersonOut(BaseModel):
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
+    skipped: bool = False  # the user skipped this person's newest drafted note
     last_sent: Optional[OutreachEntryOut]
     replied: bool
     last_reply: Optional[OutreachEntryOut]
