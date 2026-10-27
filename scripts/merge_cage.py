@@ -2629,7 +2629,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             check_paths([judge]), "cage is escaped", P)
 
     claude_stuck = [f for f in (".claude/skills/hard-rules/SKILL.md",
-                                ".claude/skills/verify-job360/references/methodology.md",
+                                ".claude/skills/run-job360/references/methodology.md",
                                 ".claude/skills/debug/SKILL.md")
                     if check_paths([f]).status != "pass"]
     ok("the words an agent READS take the fast lane (owner's call, 2026-09-17)",

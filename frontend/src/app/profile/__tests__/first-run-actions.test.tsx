@@ -12,7 +12,7 @@
  *
  * getProfile rejects with a 404 here because that is exactly what the backend
  * returns for a user with no profile yet (documented as benign in
- * .claude/skills/verify-job360).
+ * .claude/skills/run-job360).
  */
 
 import { describe, it, expect, vi } from "vitest";

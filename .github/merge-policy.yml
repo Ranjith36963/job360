@@ -274,7 +274,7 @@ lanes:
       # `.claude/agents/**` WAS HERE FOR ONE COMMIT AND IT WAS WRONG.
       # reviewer-bugs raised it as a P0 on PR #582 and it was right: that
       # directory holds `reviewer-bugs.md`, `reviewer-conventions.md` and
-      # `verifier.md` — the definitions of the reviewers the gates rely on. A
+      # (once) `verifier.md`, since deleted — the definitions of the reviewers the gates rely on. A
       # machine-mergeable edit to them lets a PR weaken its own reviewer and
       # then be merged by it. That is the "cage may not edit the cage" rule with
       # the judge in the role of the cage, and it does not stop being true
@@ -567,8 +567,8 @@ lanes:
       # EDIT ITS OWN JUDGE.
       #
       # `.claude/agents/` holds `reviewer-bugs.md`, `reviewer-conventions.md`
-      # and `verifier.md`. The `bugs` tag in THIS file is the `reviewer-bugs`
-      # check; the R1/R3 lenses and the verifier are what "reviewed" means here.
+      # and (once) `verifier.md`, deleted 2026-10-27 for Anthropic's `/run` + `/verify` (`run-job360`). The `bugs` tag in THIS file is the `reviewer-bugs`
+      # check; the R1/R3 lenses are what "reviewed" means here.
       # Ship `.claude/agents/**` in a fast lane and a PR can soften the reviewer
       # in the same diff the reviewer is judging, then be merged by the softened
       # reviewer. It is the "cage may not edit the cage" rule with the judge in

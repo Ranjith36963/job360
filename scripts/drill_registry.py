@@ -372,6 +372,17 @@ REGISTRY: dict[str, Guard] = {
         # NEGATIVE CONTROL: the comparison blinded, so the drill MUST fail.
         negative=[sys.executable, "scripts/check_api_types_drift.py", "--drill", "--break-checker"],
     ),
+    "scripts/hook_drill.sh": Guard(
+        status="drilled",
+        # The local Stop gate + verify-stamp.sh (2026-10-27): app code needs the gate,
+        # review and verify stamps, other backend/frontend changes gate + review, the
+        # 9th consecutive block lets the turn end saying NOT proven, thin or stale
+        # evidence is refused. Each case runs in a throwaway git repo.
+        drill=["bash", "scripts/hook_drill.sh"],
+        # NEGATIVE CONTROL: the gate swapped for a stub that allows everything, so
+        # the drill MUST fail.
+        negative=["bash", "scripts/hook_drill.sh", "--blind"],
+    ),
     "scripts/ci_shards.py": Guard(
         status="drilled",
         # ci-offline.yml runs the backend suite in two shards (2026-10-26); a split

@@ -972,7 +972,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     JUDGING parts do not. Widen `.claude/skills/**` to `.claude/**` and the
     #     second group goes red instantly.
     for readable in (".claude/skills/hard-rules/SKILL.md",
-                     ".claude/skills/verify-job360/references/methodology.md",
+                     ".claude/skills/run-job360/references/methodology.md",
                      ".claude/skills/debug/SKILL.md"):
         v_read = classify([readable], policy)
         check(f"the words an agent reads take the fast lane: {readable}",

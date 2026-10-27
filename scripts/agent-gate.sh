@@ -165,6 +165,34 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
           ;;
       esac
     done
+    # Non-.py app files the name mapping above cannot see (2026-10-27). They used to
+    # read as "docs/config only — no pytest", so a migration, a recipe or a data file
+    # reached CI untested here, and the MCP text budget (2,000 chars) was never run
+    # locally (mistakes.md). Only these specific tests, never the full suite.
+    MCP_BUDGET=0
+    for f in $(echo "$CHANGED" | grep '^backend/' || true); do
+      case "$f" in
+        backend/migrations/*.sql)
+          TARGETS="$TARGETS tests/test_migration_numbering.py tests/test_migrations.py"
+          TARGETS="$TARGETS tests/test_migration_safety.py tests/test_migration_down_atomic.py"
+          for cand in backend/tests/test_migration_"$(basename "$f" | cut -c1-4)"*.py; do
+            [ -f "$cand" ] && TARGETS="$TARGETS ${cand#backend/}"
+          done ;;
+        backend/src/data/*|backend/src/recipes/*)
+          # Every test that names the file or is named after it, plus the two that hold
+          # every recipe/state.
+          stem="$(basename "$f")"; stem="${stem%.*}"
+          TARGETS="$TARGETS tests/test_recipes.py tests/test_tools_states_recipes.py tests/test_${stem}.py"
+          for cand in $(grep -rlF --include='*.py' -- "$(basename "$f")" backend/tests || true); do
+            TARGETS="$TARGETS ${cand#backend/}"
+          done ;;
+      esac
+      case "$f" in
+        backend/src/api/mcp_server.py|backend/src/recipes/*)
+          TARGETS="$TARGETS tests/test_outreach_people.py tests/test_tools_states_recipes.py"  # tool count, recipes
+          MCP_BUDGET=1 ;;
+      esac
+    done
     # `|| true` is load-bearing: grep exits 1 on no match, and under `set -o
     # pipefail` that killed the whole gate — silently, exit 1 with NO output —
     # whenever a backend change mapped to zero test files (e.g. a pyproject.toml
@@ -172,7 +200,8 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
     # therefore unreachable in exactly the case it exists for, making any
     # non-.py backend change impossible to commit. Found via H7 (bumping
     # aiohttp in backend/pyproject.toml).
-    TARGETS="$(echo "$TARGETS" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)"
+    TARGETS="$(echo "$TARGETS" | tr ' ' '\n' | grep -v '^$' | sort -u \
+               | while read -r t; do [ -f "backend/$t" ] && echo "$t"; done | tr '\n' ' ' || true)"
     # Same `|| true` requirement as TARGETS above — no changed .py files means
     # grep exits 1, which under `set -o pipefail` killed the gate outright.
     LINT_FILES="$(echo "$CHANGED" | grep '^backend/.*\.py$' | sed 's|^backend/||' | while read -r p; do [ -f "backend/$p" ] && echo "$p"; done | tr '\n' ' ' || true)"
@@ -185,6 +214,10 @@ if [ "$BACKEND_CHANGED" -gt 0 ]; then
         # from deps entirely — PR #33 drained 329 findings it had been hiding).
         echo "[gate] ruff on changed files..."
         (cd backend && python -m ruff check $LINT_FILES 2>&1 | tee -a "$GATE_LOG")
+      fi
+      if [ "$MCP_BUDGET" = 1 ]; then
+        echo "[gate] MCP text budget (2,000 chars per tool description)..."
+        python scripts/mcp_text_budget.py 2>&1 | tee -a "$GATE_LOG"
       fi
     elif [ "${SCRIPT_ONLY_SEEN:-0}" = "1" ]; then
       # Every backend change was a helper script — lint them, skip the suite.

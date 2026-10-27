@@ -404,6 +404,12 @@ jobs:
         env:
           BASE_DIR: ${{ steps.base.outputs.dir }}
         run: python scripts/ruleset_gate.py --check --scope ruleset ${BASE_DIR:+--baseline "$BASE_DIR"}
+      # The local Stop gate (.claude/hooks/stop-quality-gate.sh) and verify-stamp.sh only
+      # run in Claude Code sessions, so nothing else would ever notice them rotting.
+      # The drill builds throwaway git repos and demands each rule blocks or allows.
+      - name: The local stop gate can still block
+        if: needs.scope.outputs.scope == 'full'
+        run: bash scripts/hook_drill.sh
       # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
       # from commented-out example lines, so `drill_registry.discover()` counted
       # them as invoked and certified two guards that NOTHING RAN. #362 taught

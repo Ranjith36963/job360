@@ -1,6 +1,6 @@
 """Automated end-to-end lifecycle test — "Loop 2" as a committed guardrail.
 
-This is the automated, repeatable form of the manual /verify-job360 run. It drives
+This is the automated, repeatable form of the manual /verify run (see .claude/skills/run-job360). It drives
 the FULL Job360 journey through the real API with deterministic mocks (LLM + search
 stubbed → no network, no quota dependence) and asserts BOTH:
   1. behaviour — every step returns the right status / DB row, AND

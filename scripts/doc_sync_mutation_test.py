@@ -156,7 +156,7 @@ CASES: list[tuple[str, str, str, str]] = [
     # fully-qualified route claim and this drill watching nothing. The new
     # anchor is the verify sweep's checklist, which an agent EXECUTES nightly:
     # a wrong route there is run, not merely read.
-    (".claude/skills/verify-job360/CHECKLIST.md",
+    (".claude/skills/run-job360/CHECKLIST.md",
      r"`GET (/api/auth/me)`", "`GET /api/auth/definitely-not-a-route`",
      "route-not-found"),
     # The stamp guard. A KIND outside the five is as unreadable as no stamp at

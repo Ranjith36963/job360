@@ -1,7 +1,7 @@
 # Job360 — Full End-to-End Sweep Checklist (the loop's contract)
 <!-- doc: LIVING -->
 
-**Purpose:** the itemised checkpoints a complete `/verify-job360` run must cover, from
+**Purpose:** the itemised checkpoints a complete Anthropic `/verify` run (launch facts: `run-job360`) must cover, from
 landing on the site to closing it. A "full sweep" is not done until every item below is
 exercised (or explicitly marked gated, with the reason) **and** every endpoint in the
 route the routers declare (`grep -n '@router\.' backend/src/api/routes/*.py`; separately

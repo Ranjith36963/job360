@@ -326,7 +326,7 @@ async function capture(route, viewport, theme) {
   return record;
 }
 
-// Noise that is CORRECT behaviour, documented in .claude/skills/verify-job360.
+// Noise that is CORRECT behaviour, documented in .claude/skills/run-job360.
 // Filtering it here keeps the report's error count meaningful; anything not on
 // this list is reported verbatim.
 function isBenign(text) {
