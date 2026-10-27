@@ -1,11 +1,9 @@
-// Pure helpers for "Ready to send" (S5d): the words on a card, the chip for
-// where each answer came from, and the guard that decides which rows "Send all
+// Pure helpers for "Ready to send" (S5d): the words on a card (each answer's label is
+// lib/answer-status), and the guard that decides which rows "Send all
 // unflagged" may still send. No fetching, no React.
 
 import type { ReadyAnswer, ReadyCardData, ReadyFlag } from "@/lib/api";
 import { whoLabel } from "@/lib/event-labels";
-
-export type ChipTone = "memory" | "plain" | "new" | "guess";
 
 /** Assistant names exactly as signed; the web user reads as "you" inside a sentence. */
 function nameOf(by: string): string {
@@ -38,25 +36,7 @@ export function heldText(seconds: number | null | undefined): string {
   return ` · kept open ${n} more minute${n === 1 ? "" : "s"}`;
 }
 
-/** The chip under every answer: where it came from, who saved it, when. */
-export function sourceChip(a: ReadyAnswer, filledBy: string): { text: string; tone: ChipTone } {
-  const saved = a.saved_by ? `saved by ${nameOf(a.saved_by)}` : "";
-  const when = dayMonth(a.saved_at);
-  switch (a.source) {
-    case "memory":
-      return { text: ["Memory", [saved, when].filter(Boolean).join(", ")].filter(Boolean).join(" · "), tone: "memory" };
-    case "profile":
-      return { text: "Profile", tone: "plain" };
-    case "approved":
-      return { text: when ? `Approved · ${when}` : "Approved", tone: "plain" };
-    case "written":
-      return { text: `Written new · by ${nameOf(filledBy)}`, tone: "new" };
-    default:
-      return { text: `Guessed · by ${nameOf(filledBy)}`, tone: "guess" };
-  }
-}
-
-/** Verify / Edit sit on the answers the user should vouch for: memory, guesses and written answers. */
+/** OK / Edit sit on the answers the user should vouch for: memory, guesses and written answers. */
 export function canCheck(a: ReadyAnswer): boolean {
   return a.source === "memory" || a.source === "guessed" || a.source === "written";
 }

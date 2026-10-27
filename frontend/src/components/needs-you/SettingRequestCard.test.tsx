@@ -17,21 +17,13 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
+  getReadyToSend: async () => ({ paused: false, total: 0, unflagged: 0, items: [] }),
 }));
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
-vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
+vi.mock("./OutcomeSuggestions", () => ({
+  useOutcomeSuggestions: () => ({ items: [], busy: false, act: async () => {} }), OutcomeSuggestionCard: () => null,
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) } }));
 
 const evil = "<img src=x onerror=alert(1)>";
@@ -145,6 +137,12 @@ describe("SettingRequestCard", () => {
     expect(confirmSettingRequest).not.toHaveBeenCalled();
   });
 
+  it("says who asked by name, never the raw author id", () => {
+    render(<SettingRequestCard request={{ ...request, requested_by: "agent:Claude" }} onChanged={async () => {}} />);
+    expect(screen.getByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
+  });
+
   it("Confirm applies the request and reloads", async () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     render(<SettingRequestCard request={request} onChanged={onChanged} />);
@@ -194,10 +192,13 @@ describe("Needs-you page", () => {
     const seen: number[] = [];
     const on = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("job360:asks-changed", on);
-    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    const q = (id: number) => ({ id, application_id: null, question: `Q${id}`, context: "", asked_by: "x", asked_at: "2026-10-20T10:00:00Z", status: "open" });
+    listAsks.mockImplementation(async (s: string) => ({ asks: s === "open" ? [q(1), q(2)] : [], open_count: 2 }));
     render(<NeedsYou />);
+    // One Review row in the Other list; Review opens the full request card inline.
+    expect(await screen.findByTestId("other-open-setting-11")).toHaveTextContent("Review");
+    fireEvent.click(screen.getByTestId("other-open-setting-11"));
     expect(await screen.findByTestId("setting-request-11")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for your OK")).toBeInTheDocument();
     await waitFor(() => expect(seen).toEqual([3])); // 2 open asks + 1 waiting
     // after the user confirms, the reload comes back empty and the badge follows
     getAssistantSettings.mockResolvedValue({ waiting: [] });
@@ -211,7 +212,7 @@ describe("Needs-you page", () => {
     getAssistantSettings.mockRejectedValue(new Error("down"));
     render(<NeedsYou />);
     expect(await screen.findByText("Nothing needs you right now.")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for your OK")).toBeNull();
+    expect(screen.queryByTestId("other-list")).toBeNull();
   });
 });
 

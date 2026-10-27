@@ -9,8 +9,9 @@ import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { PRIORITY_LABEL, PRIORITY_OPTIONS } from "@/lib/memory";
-import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
-import type { QueueSummary } from "@/lib/batch-queue";
+import { filterByBrowser, originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import type { QueueBrowserFilter, QueueSummary } from "@/lib/batch-queue";
+import { QueueBrowserChip, QueueBrowserFilterRow } from "@/components/needs-you/QueueBrowser";
 
 
 // The status vocabulary is closed in the backend (src/core/settings.py
@@ -128,6 +129,11 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                     #{app.queue_position} in batch
                   </p>
                 )}
+                {typeof app.queue_position === "number" && app.browser && (
+                  <p className="mt-1">
+                    <QueueBrowserChip id={app.id} browser={app.browser} />
+                  </p>
+                )}
                 {preflightProblems(app.preflight).length > 0 && (
                   <ul data-testid="row-preflight" className="mt-1 flex flex-col gap-0.5 text-xs text-warning">
                     {preflightProblems(app.preflight).map((p) => (
@@ -237,6 +243,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   // Batch queue: server-side too (`queued=true` gives queue order, preflight and the summary).
   const [queuedOnly, setQueuedOnly] = useState(false);
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
+  const [browserFilter, setBrowserFilter] = useState<QueueBrowserFilter>("all");
   // A server-filter switch shows "Loading…" in place of the rows (never the old list under the new
   // filter), while the filter bar itself stays on screen.
   const [switching, setSwitching] = useState(false);
@@ -286,8 +293,9 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     let out = applications;
     if (statusFilter !== "all") out = out.filter((app) => app.status === statusFilter);
     if (dueOnly) out = out.filter((app) => app.follow_up_due);
+    if (queuedOnly) out = filterByBrowser(out, browserFilter);
     return out;
-  }, [applications, statusFilter, dueOnly]);
+  }, [applications, statusFilter, dueOnly, queuedOnly, browserFilter]);
 
   if (error) {
     return <p className="text-sm text-destructive">{error}</p>;
@@ -416,6 +424,15 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
         <p data-testid="queue-summary" className="font-mono text-xs text-muted-foreground">
           {queueSummaryLine(queueSummary)}
         </p>
+      )}
+
+      {queuedOnly && !switching && (
+        <QueueBrowserFilterRow
+          summary={queueSummary}
+          total={applications.length}
+          value={browserFilter}
+          onChange={setBrowserFilter}
+        />
       )}
 
       {switching ? (

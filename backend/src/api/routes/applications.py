@@ -946,6 +946,25 @@ class ApplicationSummaryOut(BaseModel):
     origin: str = ""
     # Bulk-apply Q1: derived problems of a queued row (queued=true only; null otherwise).
     preflight: Optional[dict[str, Any]] = None
+    # Which browser runs a queued row (queued=true only; null otherwise): the chip on the queue.
+    browser: Optional[BrowserLabelOut] = None
+
+
+class QueuedOutreachOut(BaseModel):
+    """One approved, unsent LinkedIn send on the one batch queue (owner 2026-10-26). Read-only: the name is
+    untrusted text; no draft text is carried."""
+
+    task_id: str
+    kind: Literal["outreach"]
+    outreach_kind: Literal["linkedin_note", "linkedin_message"]
+    title: str
+    name: str
+    contact_id: int
+    application_id: Optional[int] = None
+    message_id: int
+    approved_at: Optional[str] = None
+    state: Literal["queued", "in_progress"]
+    browser: BrowserLabelOut
 
 
 class ListApplicationsResponse(BaseModel):
@@ -953,6 +972,10 @@ class ListApplicationsResponse(BaseModel):
     total: int
     # Bulk-apply Q2: the whole open queue at a glance (queued=true only; null otherwise).
     queue_summary: Optional[dict[str, Any]] = None
+    # One queue (owner 2026-10-26; queued=true only, null otherwise): the approved, unsent LinkedIn sends, and
+    # the whole queue's order as task ids (application:<id> / contact:<id>), oldest yes first.
+    outreach: Optional[list[QueuedOutreachOut]] = None
+    queue_order: Optional[list[str]] = None
 
 
 class InboxCheckedIn(BaseModel):

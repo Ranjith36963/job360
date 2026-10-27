@@ -60,6 +60,8 @@ async def record(
     if not isinstance(user_id, str) or not user_id:
         raise RouteBookValueError("user_id is required")
     site_kind, site_key, tenant_host = routing.site_of(url)
+    if site_kind == routing.UNNAMED:
+        return False  # a host that cannot be named is not a site (#1325): nothing to book
     _closed("site_kind", site_kind, routing.SITE_KINDS)
     if not _HOST.match(tenant_host):
         return False  # no host (or none that is a host name): nothing to book

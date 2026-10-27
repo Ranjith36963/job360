@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.repositories import pgsync
+from tests._signin import sign_in
 
 _PW = "Correct-Horse-9"
 
@@ -80,12 +81,16 @@ def client(app_db):
 
 
 def _register(client, email) -> str:
-    r = client.post("/api/auth/register", json={"email": email, "password": _PW})
-    assert r.status_code == 201, r.text
-    # M2 — register no longer auto-logs-in or returns the id; sign in for both.
-    lr = client.post("/api/auth/login", json={"email": email, "password": _PW})
-    assert lr.status_code == 200, lr.text
-    return lr.json()["id"]
+    _, user_id = sign_in(client, email)
+    return user_id
+
+
+def _unverify(db_path, email):
+    # A magic-link sign-in verifies the address; tests of the unverified gate undo that.
+    con = pgsync.connect(db_path)
+    con.execute("UPDATE users SET email_verified_at = NULL WHERE email = ?", (email,))
+    con.commit()
+    con.close()
 
 
 def _mark_verified(db_path, email):
@@ -217,7 +222,9 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
 
     with _LogCapture(caplog) as logs:
         email = "e2e@example.com"
-        _register(client, email)
+        # This test asserts the `register` log stream fills, so it keeps the password sign-up.
+        assert client.post("/api/auth/register", json={"email": email, "password": _PW}).status_code == 201
+        assert client.post("/api/auth/login", json={"email": email, "password": _PW}).status_code == 200
         assert client.get("/api/auth/me").status_code == 200
         # the tailor is gated until verified (it hands out a finished document)
         assert client.get("/api/tailor/1").status_code == 403
@@ -317,15 +324,18 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
 # ─── edge cases ──────────────────────────────────────────────────────────────
 
 
-def test_edge_unverified_user_blocked_from_the_tailor(client):
+def test_edge_unverified_user_blocked_from_the_tailor(client, app_db):
     """The one remaining `require_verified_user` gate: the tailor hands the user
     a finished PDF / DOCX. Bringing a job does not, so it is `require_user` only."""
     _register(client, "unverified@example.com")
+    _unverify(app_db, "unverified@example.com")
     assert client.get("/api/tailor/1").status_code == 403  # email_not_verified
 
 
 def test_edge_login_lockout_after_five_failures(client):
-    _register(client, "lockme@example.com")
+    # Password behaviour is this test's subject, so it keeps a real password account.
+    r = client.post("/api/auth/register", json={"email": "lockme@example.com", "password": _PW})
+    assert r.status_code == 201, r.text
     for _ in range(5):
         client.post("/api/auth/login", json={"email": "lockme@example.com", "password": "wrong"})
     r = client.post("/api/auth/login", json={"email": "lockme@example.com", "password": _PW})

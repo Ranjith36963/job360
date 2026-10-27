@@ -229,6 +229,37 @@ async def test_easy_apply_stops_at_ten_a_day_and_other_applications_still_go(aut
 
 
 @pytest.mark.asyncio
+async def test_an_unnamed_link_is_listed_as_link_unclear_and_never_counts_toward_the_cap(authenticated_async_context):
+    from datetime import datetime, timezone
+
+    user_id = authenticated_async_context.fixture_user_id
+    unclear = {"kind": "own_browser", "reason": "link_unclear",
+               "label": "This link looks broken or disguised: your own browser checks it"}
+    async with authenticated_async_context() as client:
+        real = [await _bring(client, n, f"https://www.linkedin.com/jobs/view/{n}") for n in range(10)]
+        odd = await _bring(client, 30, "https://www.ⓛinkedin.com/jobs/view/30")
+        async with browser_routes._db() as db:  # noqa: SLF001
+            for app_id in (*real, odd):  # the odd one has a submit mark too: it must still not count
+                await spine.append_event(
+                    db, user_id=user_id, application_id=app_id, event_type="submit_attempted", payload={},
+                    occurred_at=spine.parse_occurred_at(None), recorded_by="web",
+                )
+            await db._db.commit()  # noqa: SLF001
+            assert await own_browser.easy_apply_today(db, user_id, datetime.now(timezone.utc)) == 10  # not 11
+        extra = await _bring(client, 31, "https://www.linkedin.com/jobs/view/31")
+        for app_id in (odd, extra):
+            await _event(client, app_id, "queued")
+        tasks = {t["application_id"]: t for t in (await client.get("/api/own-browser/queue")).json()["tasks"]}
+        assert tasks[odd]["kind"] == "application" and tasks[odd]["browser"] == unclear
+        assert tasks[odd]["why_own_browser"] == own_browser.WHY_WORDS["link_unclear"]
+        assert tasks[extra]["browser"] == LINKEDIN
+        async with await _agent(client) as agent:
+            got = await _take(agent)  # real Easy Apply is capped at 10, the unclear link is still handed out
+            assert got["status"] == "task" and got["task"]["application_id"] == odd, got
+            assert got["task"]["browser"] == unclear
+
+
+@pytest.mark.asyncio
 async def test_a_submit_on_another_site_never_counts_toward_easy_apply(authenticated_async_context):
     user_id = authenticated_async_context.fixture_user_id
     async with authenticated_async_context() as client:

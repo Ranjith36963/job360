@@ -6,6 +6,7 @@ import { confirmSettingRequest, declineSettingRequest } from "@/lib/api";
 import type { SettingRequest } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT } from "@/lib/assistant-state";
 import { type GrantScopeCount, scopeText } from "@/lib/assistant-tab";
+import { askerName } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 
 // "Waiting for your OK" (S2, owner decision 2026-10-08). An assistant asked for a
@@ -233,7 +234,7 @@ export function SettingRequestCard({
           </p>
         )}
         <p className="text-[12.5px] text-muted-foreground">
-          asked by {request.requested_by} ·{" "}
+          asked by {askerName(request.requested_by)} ·{" "}
           <span className="font-mono">{relativeTime(request.requested_at)}</span>
         </p>
         <p className="text-sm text-muted-foreground">

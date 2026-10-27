@@ -32,16 +32,22 @@ TRICKS = [
     "https://linkedin.com:443/feed",
 ]
 NOT_LINKEDIN = ["https://notlinkedin.com", "https://linkedin.com.evil.io", "https://evil.io/?u=linkedin.com"]
-LINKEDIN_CHIP = {"kind": "own_browser", "label": "Your own browser: runs when your PC is on", "reason": "linkedin_own_browser"}
 
 
 # ── the pure host test ───────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("url", TRICKS)
-def test_every_trick_is_linkedin(url):
-    assert routing.is_linkedin(url) is True
+@pytest.mark.parametrize("url", TRICKS[4:])
+def test_a_real_linkedin_host_keeps_the_linkedin_reason(url):
+    assert routing.names_linkedin(url) is True
     assert routing.browser_for(url=url) == routing.Route("own_browser", "linkedin_own_browser")
+
+
+@pytest.mark.parametrize("url", TRICKS[:4])
+def test_every_trick_fails_closed_to_the_own_browser_as_link_unclear(url):
+    assert routing.is_linkedin(url) is True  # the safety test still fails closed
+    assert routing.names_linkedin(url) is False  # but it is not called LinkedIn
+    assert routing.browser_for(url=url) == routing.Route("own_browser", "link_unclear")
 
 
 @pytest.mark.parametrize("url", NOT_LINKEDIN)
@@ -177,7 +183,7 @@ async def test_a_host_that_only_looks_like_linkedin_still_goes_out():
 
 
 @pytest.mark.asyncio
-async def test_a_trick_job_link_waits_in_the_own_browser_and_counts_toward_easy_apply(authenticated_async_context):
+async def test_a_trick_job_link_waits_in_the_own_browser_as_link_unclear_and_is_not_easy_apply(authenticated_async_context):
     from datetime import datetime, timezone
 
     from src.api.main import app
@@ -195,7 +201,8 @@ async def test_a_trick_job_link_waits_in_the_own_browser_and_counts_toward_easy_
         async with browser_routes._db() as db:  # noqa: SLF001
             cur = await db._db.execute("SELECT job_url FROM applications WHERE id = ?", (app_id,))  # noqa: SLF001
             stored = str(dict(await cur.fetchone())["job_url"])
-        assert routing.is_linkedin(stored), stored  # whatever bring kept, it is still LinkedIn
+        assert routing.is_linkedin(stored), stored  # whatever bring kept, it still fails closed
+        assert not routing.names_linkedin(stored), stored  # ...but it is not LinkedIn
         queued = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "queued"})
         assert queued.status_code == 201, queued.text
         token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
@@ -206,14 +213,17 @@ async def test_a_trick_job_link_waits_in_the_own_browser_and_counts_toward_easy_
         assert got.status_code == 200, got.text
         task = got.json()["task"]
         assert got.json()["status"] == "task" and task["application_id"] == app_id
-        assert task["browser"] == LINKEDIN_CHIP
+        assert task["browser"] == {
+            "kind": "own_browser", "reason": "link_unclear",
+            "label": "This link looks broken or disguised: your own browser checks it",
+        }
         async with browser_routes._db() as db:  # noqa: SLF001
             await spine.append_event(
                 db, user_id=user_id, application_id=app_id, event_type="submit_attempted", payload={},
                 occurred_at=spine.parse_occurred_at(None), recorded_by="web",
             )
             await db._db.commit()  # noqa: SLF001
-            assert await own_browser.easy_apply_today(db, user_id, datetime.now(timezone.utc)) == 1
+            assert await own_browser.easy_apply_today(db, user_id, datetime.now(timezone.utc)) == 0  # not LinkedIn: no cap
 
 
 @pytest.mark.parametrize("url", ["https://not a link", "https://a b.com/x", "https://bad_host.com/", "https://-x.com/"])

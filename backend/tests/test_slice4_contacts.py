@@ -424,18 +424,41 @@ async def test_audit_log_never_carries_contact_pii(authenticated_async_context, 
     )
 
 
+def _enclosing_function(text: str, offset: int) -> str:
+    """The innermost function holding character ``offset`` of ``text`` ("" at module level)."""
+    import ast
+
+    line = text.count("\n", 0, offset) + 1
+    best = ("", 0)
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno <= line <= (node.end_lineno or 0):
+            if node.lineno >= best[1]:
+                best = (node.name, node.lineno)
+    return best[0]
+
+
+# The erasure exceptions to append-only profile_edits, besides account deletion
+# (hard_delete_user, through JobDatabase._PER_USER_TABLES): exactly one, the
+# "Clear memory" erase (owner decision 2026-10-26). DELETE only; never an UPDATE.
+_PROFILE_EDITS_ERASURE = {("services/profile/edits.py", "erase_then_clear")}
+
+
 def test_contacts_are_append_only():
     import re
     from pathlib import Path
 
     src = Path(__file__).resolve().parent.parent / "src"
     offenders = []
+    erasures = []
     for py in src.rglob("*.py"):
         text = py.read_text(encoding="utf-8")
         if re.search(r"(UPDATE|DELETE\s+FROM)\s+application_contacts", text, re.IGNORECASE):
             offenders.append(str(py))
-        if re.search(r"(UPDATE|DELETE\s+FROM)\s+profile_edits", text, re.IGNORECASE):
+        if re.search(r"UPDATE\s+profile_edits", text, re.IGNORECASE):
             offenders.append(str(py))
+        for hit in re.finditer(r"DELETE\s+FROM\s+profile_edits", text, re.IGNORECASE):
+            where = (py.relative_to(src).as_posix(), _enclosing_function(text, hit.start()))
+            (erasures if where in _PROFILE_EDITS_ERASURE else offenders).append(str(where))
         # 0046 (2026-09-25) — the outreach ledger and the contact-edit overlay
         # are append-only for the same reason: the current value/state is
         # always the newest row, never a rewrite of an old one.
@@ -446,6 +469,7 @@ def test_contacts_are_append_only():
     assert offenders == [], (
         f"application_contacts/profile_edits/contact_outreach/contact_edits must be append-only: {offenders}"
     )
+    assert len(erasures) == 1, f"exactly one profile_edits erasure DELETE (Clear memory), found {erasures}"
 
     from src.api.main import app
     from tests._routes import route_table

@@ -1890,6 +1890,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Changes
+         * @description What changed for the signed-in user: a cursor (also the ETag) and one marker per page area.
+         *     Send the last cursor as ``If-None-Match``; an unchanged cursor answers 304 with no body.
+         */
+        get: operations["changes_api_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/client-log": {
         parameters: {
             query?: never;
@@ -2760,8 +2781,8 @@ export interface paths {
          *     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
          *     (``user_info.*``: contact, right to work, logistics, languages, equality
          *     answers, saved answers): the base column and the assistant's overlay rows.
-         *     It takes no version snapshot (it copies the memory into ``profile_edits``
-         *     first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+         *     It takes no version snapshot and ERASES the user's earlier ``user_info.*``
+         *     history rows (``_erase_memory_then_clear``), and leaves the CV, the
          *     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
          *     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
          *     ``github`` leave it alone; only ``all`` resets it.
@@ -4261,6 +4282,7 @@ export interface components {
             artifacts: {
                 [key: string]: number;
             };
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Country */
             country?: string | null;
             /**
@@ -5090,6 +5112,32 @@ export interface components {
             title: string;
             /** Unlocks */
             unlocks: string;
+        };
+        /**
+         * ChangeAreas
+         * @description One short marker per area of the page; a marker that moved = refetch that area.
+         */
+        ChangeAreas: {
+            /** Applications */
+            applications: string;
+            /** Asks */
+            asks: string;
+            /** Assistant */
+            assistant: string;
+            /** Other */
+            other: string;
+            /** Ready */
+            ready: string;
+            /** Settings */
+            settings: string;
+        };
+        /** ChangesOut */
+        ChangesOut: {
+            areas: components["schemas"]["ChangeAreas"];
+            /** Assistant Last Active At */
+            assistant_last_active_at?: string | null;
+            /** Cursor */
+            cursor: string;
         };
         /** ClientLogRequest */
         ClientLogRequest: {
@@ -6947,6 +6995,10 @@ export interface components {
         ListApplicationsResponse: {
             /** Applications */
             applications: components["schemas"]["ApplicationSummaryOut"][];
+            /** Outreach */
+            outreach?: components["schemas"]["QueuedOutreachOut"][] | null;
+            /** Queue Order */
+            queue_order?: string[] | null;
             /** Queue Summary */
             queue_summary?: {
                 [key: string]: unknown;
@@ -8065,6 +8117,43 @@ export interface components {
              * @enum {string}
              */
             why: "any_time" | "pc_on_hours" | "run_now" | "closed" | "paused";
+        };
+        /**
+         * QueuedOutreachOut
+         * @description One approved, unsent LinkedIn send on the one batch queue (owner 2026-10-26). Read-only: the name is
+         *     untrusted text; no draft text is carried.
+         */
+        QueuedOutreachOut: {
+            /** Application Id */
+            application_id?: number | null;
+            /** Approved At */
+            approved_at?: string | null;
+            browser: components["schemas"]["BrowserLabelOut"];
+            /** Contact Id */
+            contact_id: number;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "outreach";
+            /** Message Id */
+            message_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Outreach Kind
+             * @enum {string}
+             */
+            outreach_kind: "linkedin_note" | "linkedin_message";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "in_progress";
+            /** Task Id */
+            task_id: string;
+            /** Title */
+            title: string;
         };
         /** ReadyAnswer */
         ReadyAnswer: {
@@ -13602,6 +13691,47 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CapabilitiesOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    changes_api_changes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-none-match"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangesOut"];
+                };
+            };
+            /** @description Nothing changed since the cursor sent in If-None-Match */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

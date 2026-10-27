@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { ApiError } from "./api-error";
+import { noteUserWrite } from "./live-writes";
 import type { components } from "./api-types";
 import type {
   BringJobRequest,
@@ -107,6 +108,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     throw err;
   }
+
+  // A saved change: a live refresh may now drop the card it came from (lib/live-hold.ts).
+  if ((init?.method ?? "GET").toUpperCase() !== "GET") noteUserWrite();
 
   // 204 No Content — logout returns empty body
   if (res.status === 204) return undefined as T;
@@ -851,7 +855,7 @@ export async function answerAskQuestions(id: number, answers: Record<string, str
   });
 }
 
-/** Save SOME rows of an open ask at once (the user's Edit / Looks right / choice click). The ask stays
+/** Save SOME rows of an open ask at once (the user's Edit / OK / choice click). The ask stays
  *  open; a reload reads the rows back from its `answers`. Web session only. */
 export async function saveAskRowAnswers(id: number, answers: Record<string, string>): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/answers/save`, {

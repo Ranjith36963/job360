@@ -8,6 +8,7 @@ import { PausedBanner } from "@/components/layout/PausedBanner";
 import { TopBar } from "@/components/layout/TopBar";
 import { useAuth } from "@/components/layout/AuthProvider";
 import { isProtectedPath } from "@/components/layout/nav-links";
+import { useLiveChanges } from "@/lib/live-changes";
 
 /**
  * The page frame around every route.
@@ -25,6 +26,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const pathname = usePathname();
   const withSidebar = Boolean(user) || (loading && isProtectedPath(pathname));
+  // The one live poller (lib/live-changes.ts): pages refetch on its job360:changes events.
+  useLiveChanges(user?.id);
 
   return (
     <div className={withSidebar ? "flex min-h-dvh flex-col md:flex-row" : "flex min-h-dvh flex-col"}>

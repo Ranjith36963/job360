@@ -213,23 +213,14 @@ async def test_release_other_users_app_is_404(authenticated_async_context, fixtu
     from fastapi.testclient import TestClient
 
     from src.api.main import app
-    from src.repositories import pgsync
+    from tests._signin import sign_in
 
     async with authenticated_async_context() as web:
         a, _b, token = await _setup(web, fixture_user_id)
         async with _bearer_client(token) as agent:
             await _kit(agent, a, "s1")
-    email = "release-intruder@example.com"
     sync_client = TestClient(app)
-    reg = sync_client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
-    assert reg.status_code == 201, reg.text
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
-    conn.commit()
-    conn.close()
-    login = sync_client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
-    assert login.status_code == 200, login.text
-    cookie = str(login.cookies.get("job360_session"))
+    cookie, _ = sign_in(sync_client, "release-intruder@example.com")
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", cookies={"job360_session": cookie}
     ) as intruder:

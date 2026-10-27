@@ -170,10 +170,18 @@ async def confirm_email_verification(
             )
             return None
 
-        await db.execute(
-            "UPDATE email_verifications SET used_at = ? WHERE id = ?",
-            (now, row["ver_id"]),
+        # Single-use claim: the guard makes a concurrent second confirm match
+        # zero rows.
+        claim = await db.execute(
+            "UPDATE email_verifications SET used_at = ? "
+            "WHERE id = ? AND used_at IS NULL AND expires_at > ?",
+            (now, row["ver_id"], now),
         )
+        if not claim.rowcount:
+            logger.info(
+                "email verification confirm: lost the race for the token user=%s", row["user_id"]
+            )
+            return None
         await db.execute(
             "UPDATE users SET email_verified_at = ? WHERE id = ?",
             (now, row["user_id"]),
