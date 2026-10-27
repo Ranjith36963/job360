@@ -33,7 +33,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - A stacked worker's first step merges its base branch: worktree agents start from origin/main.
 - TOOLS_REV is derived from the tool-schema hash (#1093): never hand-edit or re-pin it.
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
-  GitHub merges it when the required checks (13; 14 once `merge-cage` is added) are green. Never leave finished work unpushed.
+  GitHub merges it when the 13 required checks (merge-cage included) are green. Never leave finished work unpushed.
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
   every `**/CLAUDE.md` is human-only, so a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.

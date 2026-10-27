@@ -391,7 +391,8 @@ DENY_REASONS: dict[str, str] = {
         ".github/workflows/finding-watch.yml",
         ".github/workflows/security-watch.yml",
     )},
-    # The six workflows behind the 13 required contexts of `main-production-gate`.
+    # The six workflows behind 12 of the 13 required contexts of `main-production-gate`
+    # (the 13th, `merge-cage`, is the commit status this cage posts).
     **{p: _CHECK_FACTORY for p in (
         ".github/workflows/ci.yml",
         ".github/workflows/ci-offline.yml",

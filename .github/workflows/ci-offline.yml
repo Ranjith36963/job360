@@ -329,8 +329,7 @@ jobs:
   # scripts/merge_cage.py TAG_CHECKS require it by name). Runs NO test: it is
   # red unless `scope` and BOTH shards succeeded, and on a `full` scope it also
   # proves the shards covered the whole suite exactly once, runs the skip
-  # ratchet over the merged report, and gives loop2-e2e-spotlight the lifecycle
-  # verdict.
+  # ratchet over the merged report.
   #
   # `always()`, not `!cancelled()`: a cancelled run must leave THIS check red
   # (a shard result of `cancelled` is not `success`), never skipped -- a skipped
@@ -340,17 +339,11 @@ jobs:
     timeout-minutes: 10
     needs: [scope, offline-suite-shard]
     if: always()
-    # loop2-e2e-spotlight reads the lifecycle file's result from THIS run
-    # instead of running tests/test_e2e_lifecycle.py a second time.
-    outputs:
-      lifecycle: ${{ steps.lifecycle.outputs.lifecycle }}
-      lifecycle_counts: ${{ steps.lifecycle.outputs.counts }}
-      lifecycle_failed: ${{ steps.lifecycle.outputs.failed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.scope.outputs.scope == 'full'
-      # The join runs only stdlib Python (ci_shards.py, test_integrity.py and the
-      # lifecycle verdict), but on the same interpreter the shards used.
+      # The join runs only stdlib Python (ci_shards.py and test_integrity.py),
+      # but on the same interpreter the shards used.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         if: needs.scope.outputs.scope == 'full'
         with:
@@ -393,35 +386,6 @@ jobs:
       - name: Skipped tests do not grow (skip ratchet)
         if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
         run: python scripts/test_integrity.py --skips /tmp/junit.xml
-      # Per-file verdict for tests/test_e2e_lifecycle.py, read from the merged
-      # report (the file ran in exactly one shard). `absent` (no report, or no
-      # lifecycle test in it) is NOT a pass: loop2-e2e-spotlight goes red on
-      # anything but `passed`.
-      - name: Lifecycle verdict for loop2-e2e-spotlight
-        id: lifecycle
-        if: always() && needs.scope.outputs.scope == 'full'
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import os
-          import xml.etree.ElementTree as ET
-          mod = "tests.test_e2e_lifecycle"
-          cases = []
-          if os.path.exists("/tmp/junit.xml"):
-              try:
-                  cases = [c for c in ET.parse("/tmp/junit.xml").getroot().iter("testcase")
-                           if c.get("classname", "") == mod
-                           or c.get("classname", "").startswith(mod + ".")]
-              except ET.ParseError:
-                  cases = []
-          bad = [c.get("name", "?") for c in cases
-                 if c.find("failure") is not None or c.find("error") is not None]
-          skipped = [c for c in cases if c.find("skipped") is not None]
-          ran = len(cases) - len(skipped)
-          verdict = "absent" if ran == 0 else ("failed" if bad else "passed")
-          print(f"lifecycle={verdict}")
-          print(f"counts={ran - len(bad)} passed, {len(bad)} failed, {len(skipped)} skipped")
-          print(f"failed={', '.join(bad)[:900]}")
-          PY
       # The shards' FAILED/ERROR lines, again, on THIS check run: it is the
       # required one, so it is where a reader of the annotations looks.
       - name: Failed tests in job summary (offline suite, both shards)
@@ -565,6 +529,9 @@ jobs:
     # Offline apart from installs: no mailer is configured (register's verification
     # mail goes nowhere), no LLM key, and the spec pastes the ad instead of fetching
     # a URL.
+    #
+    # Runs on scope `full` AND `frontend`, i.e. whenever app code ships: a
+    # frontend-only PR is exactly where a UI change can break against the real API.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [scope]
@@ -596,15 +563,15 @@ jobs:
       FULLSTACK_BACKEND_URL: http://127.0.0.1:8000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           python-version: "3.12"
       # From the hashed lock, then the app with --no-deps (as the shard jobs do).
       # The browser is the frontend's Node Playwright, not the Python one.
       - name: Install backend
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
@@ -612,11 +579,11 @@ jobs:
           python -m pip install --no-deps -e .
           python -m pip check
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           node-version: "22"
       - name: Install frontend deps
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm ci
       # Same pattern as the offline-suite shards' Chromium step (2026-10-26: a
@@ -624,7 +591,7 @@ jobs:
       # browser from Playwright's CDN, PROVE it launches, and fall back to the apt
       # deps only if that launch fails.
       - name: Install Chromium
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: |
           for attempt in 1 2; do
@@ -641,7 +608,7 @@ jobs:
           launch
       # Migrations auto-apply on boot (api.main.lifespan -> init_db).
       - name: Start the backend
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: backend
         run: |
           nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/backend.log" 2>&1 &
@@ -655,7 +622,7 @@ jobs:
       # BACKEND_ORIGIN is read at BUILD time by the rewrites in next.config.ts, so
       # the job env carries it through the build as well as the server.
       - name: Build and start the frontend
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: |
           npm run build
@@ -669,11 +636,11 @@ jobs:
           tail -60 "$RUNNER_TEMP/frontend.log"
           exit 1
       - name: Run the full-stack journey
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npx playwright test -c tests/fullstack/playwright.config.ts --reporter=list,html
       - name: Keep the evidence (report, traces, backend and frontend logs)
-        if: always() && needs.scope.outputs.scope == 'full'
+        if: always() && (needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fullstack-e2e-${{ github.event.pull_request.number || github.run_id }}
@@ -684,58 +651,6 @@ jobs:
             ${{ runner.temp }}/frontend.log
           retention-days: 14
           if-no-files-found: ignore
-
-  loop2-e2e-spotlight:
-    # Reports the lifecycle file's verdict from offline-suite, as its own
-    # REQUIRED check, so a lifecycle/log-fill regression is obvious in the
-    # Actions summary without scanning the whole suite. THIS JOB RUNS NO TEST.
-    #
-    # offline-suite's shards already run tests/test_e2e_lifecycle.py inside the
-    # full suite (in exactly one shard, never deselected); this job reads the
-    # per-file verdict offline-suite takes from the merged junit report. Green
-    # ONLY on `passed`; `failed`, `absent` (no report / no lifecycle case ran),
-    # or an offline-suite that never got that far is red. Until 2026-10-19 it
-    # booted its own Postgres + Redis and re-ran the file (~1 runner-min per PR).
-    #
-    # `!cancelled()`, not `always()`: it must report even when offline-suite
-    # FAILED (another test red, the lifecycle may still be green) — but a run
-    # superseded by a newer push is cancelled and says nothing. A failed
-    # `scope` job skips this, exactly as before.
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [scope, offline-suite]
-    if: ${{ !cancelled() && needs.scope.result == 'success' }}
-    steps:
-      - name: Report the lifecycle verdict (read from offline-suite; runs no test)
-        if: needs.scope.outputs.scope == 'full'
-        env:
-          SUITE_RESULT: ${{ needs.offline-suite.result }}
-          LIFECYCLE: ${{ needs.offline-suite.outputs.lifecycle }}
-          COUNTS: ${{ needs.offline-suite.outputs.lifecycle_counts }}
-          FAILED: ${{ needs.offline-suite.outputs.lifecycle_failed }}
-        run: |
-          {
-            echo "### Lifecycle verdict — tests/test_e2e_lifecycle.py"
-            echo ""
-            echo "Read from \`offline-suite\` (same run, same tree; the file ran once, in one shard of the full suite)."
-            echo ""
-            echo "- verdict: \`${LIFECYCLE:-absent}\` (${COUNTS:-no report})"
-            echo "- offline-suite job result: \`$SUITE_RESULT\`"
-            if [ -n "$FAILED" ]; then echo "- failed: $FAILED"; fi
-          } >> "$GITHUB_STEP_SUMMARY"
-          case "$LIFECYCLE" in
-            passed)
-              echo "lifecycle passed: $COUNTS"
-              ;;
-            failed)
-              echo "::error title=pytest::test_e2e_lifecycle.py failed in offline-suite: $FAILED"
-              exit 1
-              ;;
-            *)
-              echo "::error title=pytest::no lifecycle verdict from offline-suite (job result: $SUITE_RESULT) -- it did not get as far as the report"
-              exit 1
-              ;;
-          esac
 
   # Failures on main / on the schedule are reported as an issue by loop-red.yml
   # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).
@@ -751,7 +666,7 @@ jobs:
   # and the CodeRabbit status event cover a check that finishes later.
   wake-cage:
     name: Wake the merge cage
-    needs: [scope, offline-suite, frontend-e2e, loop2-e2e-spotlight]
+    needs: [scope, offline-suite, frontend-e2e]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5

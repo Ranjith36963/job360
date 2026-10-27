@@ -518,10 +518,11 @@ lanes:
       # THE CHECK FACTORIES (added 2026-10-18 with that move). The ruleset
       # requires checks by NAME, not by content. With `.github/**` machine-
       # mergeable, a PR could hollow out the job behind a required name and
-      # then pass its own hollowed check. These six workflows produce all 13
-      # required contexts of `main-production-gate`, so they stay yours.
+      # then pass its own hollowed check. These six workflows produce 12 of the
+      # 13 required contexts of `main-production-gate` (the 13th, `merge-cage`,
+      # is the cage's own commit status), so they stay yours.
       - ".github/workflows/ci.yml"             # Backend (Python 3.12), Frontend (Node 20)
-      - ".github/workflows/ci-offline.yml"     # offline-suite, frontend-e2e, loop2-e2e-spotlight
+      - ".github/workflows/ci-offline.yml"     # offline-suite, frontend-e2e
       - ".github/workflows/security.yml"       # pip-audit, npm audit, gitleaks, bandit
       - ".github/workflows/codeql.yml"         # Analyze (python), Analyze (javascript-typescript)
       - ".github/workflows/review-bugs.yml"    # reviewer-bugs

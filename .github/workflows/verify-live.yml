@@ -32,6 +32,10 @@ name: Verify (the eyes)
 #   │  No such test = write it. Test exists = connect it and open the door│
 #   └─────────────────────────────────────────────────────────────────────┘
 #
+# REAL BROWSER-TO-BACKEND JOURNEY
+# That is the `fullstack-e2e` job in ci-offline.yml (runs on scope `full` and
+# `frontend`). `verify` itself does not run it.
+#
 # HONESTY
 # No model participates in this workflow. There is nothing here to persuade.
 # Every tag is an exit code from a process that ran the real thing. The verdict
@@ -100,7 +104,8 @@ jobs:
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
 
   # ───────────────────────────────────────────────────────────────────────
-  # BACKEND EYES — boot the real app against a real Postgres and ask it
+  # BACKEND EYES — run existing pytest files against a real Postgres (the app is
+  # called in-process via TestClient, not booted as a server) and ask them
   # questions a filename cannot answer.
   # ───────────────────────────────────────────────────────────────────────
   backend-eyes:
@@ -203,7 +208,8 @@ jobs:
   # PRODUCTION build (`playwright.config.ts` deliberately does not use `npm run
   # dev` — dev-mode per-route compilation blew the 30s timeout on CI runners).
   #
-  # 14 specs already exist. They cover auth, profile + extraction, bring a job
+  # Every spec in frontend/tests/e2e/ runs (they mock the API with page.route; the
+  # real-backend journey is `fullstack-e2e`, see the top of this file). They cover auth, profile + extraction, bring a job
   # (paste and URL), the applications spine, tailoring, receipts, contacts,
   # sharing, connecting an agent, and OAuth consent.
   #
@@ -323,7 +329,7 @@ jobs:
             echo "| eye | result | where the tests ran |"
             echo "|---|---|---|"
             echo "| backend (routes, IDOR, journey) | \`$be\` | $be_where |"
-            echo "| frontend (14 specs, real Chromium) | \`$fe\` | $fe_where |"
+            echo "| frontend (every spec in frontend/tests/e2e, real Chromium) | \`$fe\` | $fe_where |"
             echo ""
             echo "A deferred eye is green only as a record; the merge cage's \`verify\` tag"
             echo "also requires \`offline-suite\` and \`frontend-e2e\` green by name (TAG_CHECKS)."
@@ -348,7 +354,7 @@ jobs:
           if [ "$be_where" != "ran here" ] && [ "$fe_where" != "ran here" ]; then
             echo "verify deferred: offline-suite and frontend-e2e cover this diff (neither eye ran the app here)."
           elif [ "$fe_where" != "ran here" ]; then
-            echo "verify is GREEN — the backend eye actually ran the app; the frontend eye deferred to frontend-e2e."
+            echo "verify is GREEN — the backend eye ran its pytest files here; the frontend eye deferred to frontend-e2e."
           else
             echo "verify is GREEN — the app was actually run."
           fi
