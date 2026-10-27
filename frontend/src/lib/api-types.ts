@@ -5858,7 +5858,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "never_done" | "interval_elapsed" | "queue_waiting" | "new_applications";
+            reason: "never_done" | "interval_elapsed" | "queue_waiting" | "new_applications" | "run_now";
             /**
              * Recipe
              * @enum {string}
@@ -10362,6 +10362,8 @@ export interface components {
             };
             /** Nothing Due */
             nothing_due: boolean;
+            /** Run Now */
+            run_now?: ("hunt" | "inbox" | "batch" | "reach")[];
             /** Running */
             running?: {
                 [key: string]: string | null;
