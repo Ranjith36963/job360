@@ -60,7 +60,7 @@ def test_is_linkedin_compares_the_exact_hostname(url, want):
 
 
 def test_linkedin_routes_to_the_own_browser_and_nothing_else_moves():
-    route = routing.browser_for(url="https://www.linkedin.com/jobs/view/100")
+    route = routing.browser_for(url="https://www.linkedin.com/jobs/view/100", queue_kind="application")
     assert route == routing.Route("own_browser", "linkedin_own_browser") == routing.browser_for(linkedin=True)
     assert route.reason in routing.ROUTE_REASONS
     assert routing.label(route) == LINKEDIN
@@ -98,16 +98,18 @@ def test_the_linkedin_label_names_no_assistant():
 
 @pytest.mark.asyncio
 async def test_job360s_browser_refuses_to_open_linkedin():
-    """Checked before the screen, the pool or any page is touched: no browser is needed to prove it."""
+    """Checked before the screen, the pool or any page is touched: no browser is needed to prove it. A job page
+    too: the browser route reads that on the server (PR D, test_linkedin_guest.py); Chromium never loads it."""
     from src.services.browser_agent.agent import BrowserError, _act, _refuse_linkedin
 
-    with pytest.raises(BrowserError) as exc:
-        await _act(
-            None, None, "open", url="https://www.linkedin.com/in/ada", ref="", text="", on=False,  # type: ignore[arg-type]
-            doc_kind="", gate=None, files=None,
-        )
-    assert (exc.value.status, exc.value.reason) == ("refused", "linkedin_own_browser")
-    assert "own browser" in exc.value.detail
+    for url in ("https://www.linkedin.com/in/ada", "https://www.linkedin.com/jobs/view/100"):
+        with pytest.raises(BrowserError) as exc:
+            await _act(
+                None, None, "open", url=url, ref="", text="", on=False,  # type: ignore[arg-type]
+                doc_kind="", gate=None, files=None,
+            )
+        assert (exc.value.status, exc.value.reason) == ("refused", "linkedin_own_browser")
+        assert "own browser" in exc.value.detail
     _refuse_linkedin("https://boards.greenhouse.io/acme/jobs/1")  # any other site: no refusal
 
 

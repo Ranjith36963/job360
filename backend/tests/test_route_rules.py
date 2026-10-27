@@ -64,7 +64,7 @@ def test_every_linkedin_queue_kind_is_own_either_way(queue_kind, guest, monkeypa
 
 
 def test_linkedin_read_follows_the_named_constant(monkeypatch):
-    assert routing.LINKEDIN_GUEST_READS is False  # the stricter choice until the owner answers
+    assert routing.LINKEDIN_GUEST_READS is True  # owner decision 2026-10-26 (PR D)
     monkeypatch.setattr(routing, "LINKEDIN_GUEST_READS", False)
     assert routing.browser_for(url=JOB) == OWN
     monkeypatch.setattr(routing, "LINKEDIN_GUEST_READS", True)
@@ -125,7 +125,7 @@ def test_an_unnameable_link_is_unnamed_and_link_unclear_not_linkedin(url):
 def test_a_real_linkedin_job_still_gives_the_linkedin_reason():
     for url in (JOB, "https://lnkd.in/abc", "www.linkedin.com/jobs/view/2"):
         assert routing.names_linkedin(url) is True
-        assert routing.browser_for(url=url) == Route("own_browser", "linkedin_own_browser")
+        assert routing.browser_for(url=url, queue_kind="application") == Route("own_browser", "linkedin_own_browser")
         assert routing.ask_route("", url=url) == Route("own_browser", "linkedin_own_browser")
 
 

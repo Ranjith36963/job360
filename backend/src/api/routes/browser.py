@@ -212,6 +212,13 @@ async def browser_action(
     if not settings.BROWSER_AGENT_ENABLED:
         _audit(user, body.action, "off")
         return dict(OFF)
+    if body.action == "open" and _guest_read(body):
+        from src.services.browser_agent import linkedin_guest  # noqa: PLC0415
+
+        async with _db() as db:
+            result = await linkedin_guest.read_job(db, user.id, body.url)
+        _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
+        return result
     gate: Optional[browser_agent.Gate] = None
     files: Optional[browser_agent.FileFn] = None
     if body.application_id is not None:
@@ -250,6 +257,15 @@ async def browser_action(
         result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
+
+
+def _guest_read(body: BrowserActionRequest) -> bool:
+    """Routes PR D (S6): an ``open`` of a public LinkedIn job page that ``strict`` calls a read (no
+    application: Easy Apply is the own browser) is read by Job360's server, signed out. Chromium never sees it."""
+    from src.services.browser_agent import routing  # noqa: PLC0415
+
+    queue_kind = "application" if body.application_id is not None else ""
+    return routing.browser_for(url=body.url, queue_kind=queue_kind).reason == "linkedin_guest_read"
 
 
 # Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).

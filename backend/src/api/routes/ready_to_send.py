@@ -143,7 +143,7 @@ def _browser(apply_url: str) -> BrowserLabelOut:
     """A ready card's form is filled in Job360's browser first, unless its apply link is on linkedin.com
     (Easy Apply: the user's own browser only, owner 2026-10-26). A form whose browser stopped has an open
     block and is never listed here (``_READY_SQL``); no read."""
-    route = routing.browser_for(url=apply_url)
+    route = routing.browser_for(url=apply_url, queue_kind="application")
     return BrowserLabelOut(kind=route.kind, label=routing.label(route)["label"], reason=route.reason)
 
 
