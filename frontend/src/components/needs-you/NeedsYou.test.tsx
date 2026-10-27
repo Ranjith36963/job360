@@ -458,9 +458,10 @@ describe("NeedsYou", () => {
       render(<NeedsYou />);
       const toggle = await screen.findByTestId("job-row-5-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      fireEvent.click(screen.getByTestId("expand-all"));
+      // The controls row renders once the page has counted; wait for it rather than racing the load.
+      fireEvent.click(await screen.findByTestId("expand-all"));
       expect(toggle).toHaveAttribute("aria-expanded", "true");
-      fireEvent.click(screen.getByTestId("fold-all"));
+      fireEvent.click(await screen.findByTestId("fold-all"));
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
