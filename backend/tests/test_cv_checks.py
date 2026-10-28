@@ -271,6 +271,15 @@ def test_entry_employer_not_in_profile():
     assert "Job360" not in issue["detail"]
 
 
+def test_employer_only_on_linkedin_is_not_unknown():
+    cv = CVData(
+        raw_text="x", name="A B", cv_positions=_ENTRY_PROFILE_POSITIONS,
+        linkedin_positions=[{"company": "Initech Ltd", "title": "Engineer", "start": "2019", "end": "2020"}],
+    )
+    text = _entry("Initech | Engineer | Leeds | 2019 - 2020", "Job360 | Founder | London | 2021 - 2023")
+    assert cc.cv_entry_mismatch(text, UserProfile(cv_data=cv, preferences=UserPreferences())) is None
+
+
 def test_fuzzy_company_suffix_case_and_month_names_match():
     text = _entry(
         "CALNEX SOLUTIONS INC. | senior software engineer | Stevenage | March 2023 - Current",

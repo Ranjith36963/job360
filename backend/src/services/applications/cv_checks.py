@@ -569,7 +569,7 @@ def _compare_position(entry: list[str], cv_dates: str, pos: dict[str, Any]) -> l
 
 def cv_entry_mismatch(text: str, profile: Any) -> Optional[dict[str, str]]:
     """Advisory: a CV entry line whose dates or title differ from the profile's position at the
-    same employer, or whose employer is in no cv_positions record. Warn only; check_submit does
+    same employer, or whose employer is in no cv_positions or linkedin_positions record. Warn only; check_submit does
     not read it. No cv_positions (or none with a company): silent."""
     cv = getattr(profile, "cv_data", None)
     positions = [
@@ -579,6 +579,11 @@ def cv_entry_mismatch(text: str, profile: Any) -> Optional[dict[str, str]]:
     ]
     if not positions:
         return None
+    linkedin_companies = [
+        str(p.get("company") or "").strip()
+        for p in (getattr(cv, "linkedin_positions", None) or [])
+        if isinstance(p, dict) and str(p.get("company") or "").strip()
+    ]
     found: list[str] = []
     for line in _experience_lines(text):
         parsed = _entry_parts(line)
@@ -588,7 +593,9 @@ def cv_entry_mismatch(text: str, profile: Any) -> Optional[dict[str, str]]:
         head = entry[:2]  # the company is the first part (rules.md shape) or, in older CVs, the second
         matched = [p for p in positions if any(_same_company(h, str(p["company"])) for h in head)]
         if not matched:
-            found.append(f"{_quoted(entry[0])}: employer is in none of the profile's positions")
+            # A job that is only on the user's LinkedIn is still theirs: not an unknown employer.
+            if not any(_same_company(h, c) for h in head for c in linkedin_companies):
+                found.append(f"{_quoted(entry[0])}: employer is in none of the profile's positions")
             continue
         options = [_compare_position(entry, cv_dates, p) for p in matched]
         if all(options):
