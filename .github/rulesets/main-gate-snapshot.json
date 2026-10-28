@@ -63,10 +63,6 @@
        "integration_id": 15368
       },
       {
-       "context": "loop2-e2e-spotlight",
-       "integration_id": 15368
-      },
-      {
        "context": "npm audit (frontend deps)",
        "integration_id": 15368
       },
@@ -137,11 +133,6 @@
     },
     {
      "name": "verify",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -289,11 +280,6 @@
    "number": 927,
    "author": "Ranjith36963",
    "runs": [
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
     {
      "name": "CodeQL",
      "app_id": 57789,
@@ -469,11 +455,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -602,11 +583,6 @@
    "number": 920,
    "author": "Ranjith36963",
    "runs": [
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
     {
      "name": "CodeQL",
      "app_id": 57789,
@@ -761,11 +737,6 @@
    "number": 919,
    "author": "Ranjith36963",
    "runs": [
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
     {
      "name": "frontend-e2e",
      "app_id": 15368,
@@ -946,11 +917,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "offline-suite",
      "app_id": 15368,
      "conclusion": "success"
@@ -1116,11 +1082,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -1304,11 +1265,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "pip-audit (backend deps)",
      "app_id": 15368,
      "conclusion": "success"
@@ -1434,11 +1390,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -1593,11 +1544,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -1757,11 +1703,6 @@
     },
     {
      "name": "Frontend (Node 20)",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -1940,11 +1881,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "Which lane (advisory)",
      "app_id": 15368,
      "conclusion": "success"
@@ -2080,11 +2016,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -2303,11 +2234,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "Scope (which checks this diff needs)",
      "app_id": 15368,
      "conclusion": "success"
@@ -2448,11 +2374,6 @@
     },
     {
      "name": "offline-suite",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -2636,11 +2557,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "offline-suite",
      "app_id": 15368,
      "conclusion": "success"
@@ -2756,11 +2672,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -2934,11 +2845,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -3106,11 +3012,6 @@
      "name": "Report failure as an issue",
      "app_id": 15368,
      "conclusion": "skipped"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
     },
     {
      "name": "offline-suite",
@@ -3288,11 +3189,6 @@
     },
     {
      "name": "offline-suite",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -3476,11 +3372,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "Advise (never merges)",
      "app_id": 15368,
      "conclusion": "success"
@@ -3618,11 +3509,6 @@
      "name": "Report failure as an issue",
      "app_id": 15368,
      "conclusion": "skipped"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
     },
     {
      "name": "Scope (which checks this diff needs)",
@@ -3855,11 +3741,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -4479,11 +4360,6 @@
    "author": "Ranjith36963",
    "runs": [
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "cancelled"
-    },
-    {
      "name": "Judge, and queue only inside the lane",
      "app_id": 15368,
      "conclusion": "skipped"
@@ -4811,11 +4687,6 @@
      "name": "Which PRs",
      "app_id": 15368,
      "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "cancelled"
     },
     {
      "name": "wake-the-fixer",
@@ -5205,11 +5076,6 @@
      "name": "Judge, and queue only inside the lane",
      "app_id": 15368,
      "conclusion": "skipped"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "cancelled"
     },
     {
      "name": "frontend-e2e",
@@ -7352,11 +7218,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "Which PRs",
      "app_id": 15368,
      "conclusion": "success"
@@ -7587,11 +7448,6 @@
     },
     {
      "name": "Which PRs",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -7975,11 +7831,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -8305,11 +8156,6 @@
     },
     {
      "name": "Watch prod after the merge",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -8748,11 +8594,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -9158,11 +8999,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -10084,11 +9920,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -10369,11 +10200,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -10733,11 +10559,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -11237,11 +11058,6 @@
     },
     {
      "name": "offline-suite",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -12249,11 +12065,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "Scope (which checks this diff needs)",
      "app_id": 15368,
      "conclusion": "success"
@@ -12509,11 +12320,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -12927,11 +12733,6 @@
      "conclusion": "cancelled"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "Scope (which checks this diff needs)",
      "app_id": 15368,
      "conclusion": "success"
@@ -13186,11 +12987,6 @@
      "conclusion": "cancelled"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "cancelled"
-    },
-    {
      "name": "Which PRs",
      "app_id": 15368,
      "conclusion": "success"
@@ -13440,11 +13236,6 @@
     },
     {
      "name": "frontend-e2e",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
-     "name": "loop2-e2e-spotlight",
      "app_id": 15368,
      "conclusion": "success"
     },
@@ -14392,11 +14183,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -15151,11 +14937,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "CodeQL",
      "app_id": 57789,
      "conclusion": "success"
@@ -15474,11 +15255,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -15617,11 +15393,6 @@
    "number": 902,
    "author": "Ranjith36963",
    "runs": [
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
     {
      "name": "CodeQL",
      "app_id": 57789,
@@ -15827,11 +15598,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -15976,11 +15742,6 @@
      "conclusion": "success"
     },
     {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
-    {
      "name": "frontend-e2e",
      "app_id": 15368,
      "conclusion": "success"
@@ -16084,11 +15845,6 @@
    "number": 887,
    "author": "dependabot[bot]",
    "runs": [
-    {
-     "name": "loop2-e2e-spotlight",
-     "app_id": 15368,
-     "conclusion": "success"
-    },
     {
      "name": "CodeQL",
      "app_id": 57789,

@@ -267,7 +267,7 @@ jobs:
                "auto-rollback REFUSES without it (post-merge-watch, synthetic-live)",
                "a bad deploy is NOT rolled back automatically; the rollback step refuses"),
               (["SLACK_BOT_TOKEN"], "REQUIRED",
-               "every alert reaches Slack through it; slack-drill fails without it",
+               "every alert reaches Slack through it; the daily watchers fail without it",
                "the harness is mute on Slack: alerts are raised on GitHub only"),
               (["SENTRY_API_TOKEN"], "REQUIRED",
                "scripts/sentry_poll.py reads ONLY this name; it fails loud without it",

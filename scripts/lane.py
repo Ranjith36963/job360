@@ -552,7 +552,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #
     # The narrower rule is still available and is the owner's to take:
     # `harness_owner` names the caged workflows individually (auto-merge.yml,
-    # verify-live.yml, revert-main.yml, ...), and deleting the three blanket
+    # revert-main.yml, ...), and deleting the three blanket
     # lines in merge-policy.yml hands the rest back to this fast lane.
     #
     # TAKEN 2026-10-18, owner: "let PRs touching .claude/**, .github/** or
@@ -644,8 +644,10 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
           classify([".github/merge-policy.yml"], policy)["lane"], "harness_owner")
     check("recursion: editing merge_cage.py is owner-only",
           classify(["scripts/merge_cage.py"], policy)["lane"], "harness_owner")
+    # The verifier is ci-offline.yml (offline-suite + frontend-e2e) since
+    # verify-live.yml, which only deferred to it, was deleted 2026-10-28.
     check("recursion: editing the verifier is owner-only",
-          classify([".github/workflows/verify-live.yml"], policy)["lane"], "harness_owner")
+          classify([".github/workflows/ci-offline.yml"], policy)["lane"], "harness_owner")
 
     # 5. An UNKNOWN path must escalate, never fall through to fast — and since
     #    2026-09-17 "escalate" means `harness_owner`, the only lane a machine may

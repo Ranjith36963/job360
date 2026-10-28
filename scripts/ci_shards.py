@@ -21,8 +21,7 @@ across the shards' own manifests and their merged junit report.
                none is empty, and their union is the universe; every collected
                test id is in the merged junit report.
   merge-junit  joins the shards' junit files into one <testsuites> report, for
-               the skip ratchet (scripts/test_integrity.py --skips) and the
-               lifecycle verdict.
+               the skip ratchet (scripts/test_integrity.py --skips).
 
 Exit 0 = ok · 1 = a check failed (each finding printed as ::error).
 Usage:

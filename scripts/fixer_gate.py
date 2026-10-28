@@ -328,9 +328,9 @@ def drill(blind: bool = False) -> int:
                                          + ("" if ok else f"  WANTED {'duplicate' if want else 'start'}")))
 
     # fingerprint: order-free, and it moves when a finding is added.
-    t1 = {"threads": {"fixable_ids": ["T2", "T1"]}, "checks": {"fixable": ["verify / backend"]}}
-    t2 = {"threads": {"fixable_ids": ["T1", "T2"]}, "checks": {"fixable": ["verify / backend"]}}
-    t3 = {"threads": {"fixable_ids": ["T1", "T2", "T3"]}, "checks": {"fixable": ["verify / backend"]}}
+    t1 = {"threads": {"fixable_ids": ["T2", "T1"]}, "checks": {"fixable": ["offline-suite"]}}
+    t2 = {"threads": {"fixable_ids": ["T1", "T2"]}, "checks": {"fixable": ["offline-suite"]}}
+    t3 = {"threads": {"fixable_ids": ["T1", "T2", "T3"]}, "checks": {"fixable": ["offline-suite"]}}
     fp_ok = bool(fingerprint(t1) == fingerprint(t2) != fingerprint(t3)
                  and fingerprint({}) == "none" and _FP.match(fingerprint(t1)))
     bad += 0 if fp_ok else 1

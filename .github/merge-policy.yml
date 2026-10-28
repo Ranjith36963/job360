@@ -121,7 +121,8 @@ version: 1
 #             a review it has started must finish, but the cage never waits for it.
 #   security  gitleaks + pip-audit + npm audit + CodeQL green (security.yml)
 #             + reviewer-security (review-security.yml, no P0/P1), 2026-10-02
-#   verify    THE APP WAS ACTUALLY RUN AND WATCHED            (verify-live.yml)
+#   verify    THE APP WAS ACTUALLY RUN AND WATCHED            (ci-offline.yml:
+#             offline-suite + frontend-e2e; verify-live.yml deleted 2026-10-28)
 #   drill     every guard in the harness was proven able to fail
 #             (scripts/drill_registry.py — a guard that cannot go red is decoration)
 #   ratchets  no quality number went backwards (see RATCHETS below)
@@ -518,10 +519,11 @@ lanes:
       # THE CHECK FACTORIES (added 2026-10-18 with that move). The ruleset
       # requires checks by NAME, not by content. With `.github/**` machine-
       # mergeable, a PR could hollow out the job behind a required name and
-      # then pass its own hollowed check. These six workflows produce all 13
-      # required contexts of `main-production-gate`, so they stay yours.
+      # then pass its own hollowed check. These six workflows produce 12 of the
+      # 13 required contexts of `main-production-gate` (the 13th, `merge-cage`,
+      # is the cage's own commit status), so they stay yours.
       - ".github/workflows/ci.yml"             # Backend (Python 3.12), Frontend (Node 20)
-      - ".github/workflows/ci-offline.yml"     # offline-suite, frontend-e2e, loop2-e2e-spotlight
+      - ".github/workflows/ci-offline.yml"     # offline-suite, frontend-e2e
       - ".github/workflows/security.yml"       # pip-audit, npm audit, gitleaks, bandit
       - ".github/workflows/codeql.yml"         # Analyze (python), Analyze (javascript-typescript)
       - ".github/workflows/review-bugs.yml"    # reviewer-bugs
@@ -635,7 +637,6 @@ lanes:
       # merging a weakened copy that every later PR would then be judged by.
       - "scripts/test_integrity.py"
       - ".github/workflows/auto-merge.yml"
-      - ".github/workflows/verify-live.yml"
       # THE WORKFLOW THAT RUNS THE UNDO, not just the script it runs. I locked
       # scripts/revert_gear.py and left the workflow that executes it under the
       # blanket `.github/workflows/**` fast-lane rule -- so an agent could not

@@ -149,8 +149,8 @@ jobs:
       # live rehearsal after the squash fix posted a :rotating_light: into the
       # incident channel for a missing git identity on the runner; that is
       # exactly the message that teaches an owner to stop reading the channel.
-      # Same voice as every other watcher (the composite action, proven live
-      # by slack-drill.yml), so the wiring checker covers it too.
+      # Same voice as every other watcher (the composite action, which the
+      # daily watchers post through), so the wiring checker covers it too.
       - name: Say so if the rehearsal failed
         if: failure()
         uses: ./.github/actions/slack
