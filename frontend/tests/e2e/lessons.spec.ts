@@ -198,7 +198,7 @@ test.describe("Flag for next time (slice 9)", () => {
     });
   });
 
-  test("home page lists a mocked lesson linking to its application", async ({ page, context }) => {
+  test("statistics page lists a mocked lesson linking to its application", async ({ page, context }) => {
     await context.addCookies([SESSION_COOKIE]);
     await mockAuth(page);
 
@@ -209,7 +209,24 @@ test.describe("Flag for next time (slice 9)", () => {
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockLessons()) })
     );
 
-    await page.goto("/");
+    await page.route("**/api/applications/stats**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          applications_truncated: false,
+          groups_truncated: false,
+          computed_at: "2026-10-28T10:00:00Z",
+          since: null,
+          overall: { brought: 3, applied: 2, replied: 1, interview: 0, offer: 0, rejected: 0,
+            reply_rate: 0.5, interview_rate: 0, offer_rate: null },
+          by_country: [], by_job_source: [], by_channel: [], by_cv_version: [], by_role: [],
+          by_contact_found_via: [], by_contact_relationship: [], by_outreach_variant: [],
+        }),
+      })
+    );
+
+    await page.goto("/stats");
 
     const items = page.getByTestId("lesson-item");
     await expect(items).toHaveCount(1);

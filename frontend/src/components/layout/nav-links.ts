@@ -18,7 +18,7 @@ import {
 // and the mission sweep removed Channels/notifications. Job360 never sources
 // or ranks jobs (VISION rule 4), so there is no catalog to browse either.
 //
-// Owner, 2026-10-26: Needs you, Home, Jobs in, Applications, Outreach,
+// Owner, 2026-10-26: Needs you, Progress dashboard (the page at /, was Home), Jobs in, Applications, Outreach,
 // Receipts, Stats, Profile, Memory, Connect your assistant, Account - every one
 // a top-level item. Outreach IS the people page (no People sub-item); Memory
 // has its own brain icon. There is no Settings item: the old settings pages
@@ -32,7 +32,7 @@ export type NavLink = {
 
 export const NAV_LINKS: readonly NavLink[] = [
   { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
-  { href: "/", label: "Home", icon: House },
+  { href: "/", label: "Progress dashboard", icon: House },
   { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
   { href: "/outreach/people", label: "Outreach", icon: Users },
