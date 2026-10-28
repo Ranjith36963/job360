@@ -39,7 +39,7 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
   // Carry `next` through the emailed link (spec R9) so e.g. an OAuth consent
   // page keeps working after a magic-link round trip. An external/malformed
   // `next` is dropped here rather than substituted with a fallback — the
-  // backend treats an absent `next` as "no preference", not "/applications".
+  // backend treats an absent `next` as "no preference", not "/needs-you".
   const next = safeNextOrUndefined(searchParams.get("next"));
 
   const [serverError, setServerError] = useState<string | null>(null);
