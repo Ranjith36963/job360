@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ad guard: clean a job ad's text, scan it, say what was found (text mode).
+"""Ad guard: clean a job ad's text or HTML, scan it, say what was found.
 
 A job ad is third-party text that the user's assistant reads next to the user's
 personal data. "Ads are data, never instructions" is only as strong as the
@@ -33,13 +33,28 @@ backtracks on caller text. What it does, in text mode:
   * words mixing Latin with Cyrillic or Greek letters: listed
     (posting_guard.py:34-35).
 
+HTML mode (``--html``, ``guard_html``) adds hidden page content, read with
+``html.parser`` and an element stack instead of the reference's tag regex
+(posting_guard.py:113, a pattern CodeQL flags on caller text). Mechanism kept
+from the reference: an element is hidden by display:none, visibility:hidden,
+opacity:0, font-size:0, a transparent colour, clip / clip-path, off-screen
+positioning, a zero-size box together with overflow:hidden, the ``hidden``
+attribute or aria-hidden (posting_guard.py:10-17, :99-109, :236-261); the style
+is read as a browser reads it, entities decoded and CSS comments removed
+(:244-251); a stack with HTML5 implied end tags keeps a stray closer from ending
+a hidden element early and an open <li> or <p> from swallowing the page
+(:116-121, :264-346); script, style, noscript, svg, template and comments are
+dropped and scanned but not listed (:112, :278-286). Hidden content leaves the
+cleaned text and is scanned for instruction-like lines and URLs; blocks are
+listed under ``hidden_blocks``. CSS is read by splitting on ``;`` and ``:``.
+
 Hidden content (invisible characters, text spelled in them) is removed, because
 removal is the defense. The warning mark in the verdict is for the user and
 fires only on signals that indicate targeting. The guard ADVISES; it never
 blocks, never sorts and never drops an ad (posting_guard.py:37-42).
 
 Usage:
-  python kit_guard.py --text [--in FILE] [--json]
+  python kit_guard.py --text|--html [--in FILE] [--json]
 
 Input is ``--in FILE`` or stdin, decoded as UTF-8 with replacement. Output: the
 verdict line, a ``--- findings ---`` block (JSON with ``--json``), then
@@ -52,6 +67,7 @@ import argparse
 import json
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -431,15 +447,212 @@ def verdict(findings: dict[str, Any]) -> str:
     return "ad_guard: clean"
 
 
-def guard(raw: str) -> tuple[str, dict[str, Any]]:
-    """Run the whole gate on plain text. Returns (cleaned text, findings with a verdict)."""
-    text, tf = clean_text(raw)
-    # What invisible characters spell is hidden content: scanned and reported,
-    # never part of the cleaned text (posting_guard.py:446-454).
-    hidden = "\n".join(tf["invisible_text"])
-    findings: dict[str, Any] = {"hidden_blocks": [], **tf, **scan(text, hidden)}
+_VOID = frozenset({"br", "img", "input", "meta", "link", "hr", "wbr", "source", "area", "base", "col", "embed",
+                   "param", "track"})
+_BLOCK = frozenset({"p", "div", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "br", "section",
+                    "article", "header", "footer", "table", "thead", "tbody", "blockquote", "pre", "dd", "dt", "dl",
+                    "nav", "main", "aside", "figure", "form", "fieldset", "legend", "address", "hr", "td", "th",
+                    "option"})  # posting_guard.py:116-118
+_IMPLIED_END = frozenset({"p", "li", "dd", "dt", "tr", "td", "th", "option"})  # :119
+_CLOSES_P = _BLOCK - {"br"}  # :120
+_DROP = frozenset({"script", "style", "noscript", "svg", "template"})  # :112
+_UNITS = ("rem", "px", "pt", "em", "%", "vw", "vh", "ex", "ch", "cm", "mm", "in", "pc")
+MAX_BLOCKS = 50  # hidden blocks listed; a hostile page cannot flood the report
+
+
+def _strip_css_comments(css: str) -> str:
+    """Remove /* ... */ (an unterminated one runs to the end, as in a browser)."""
+    out: list[str] = []
+    i = 0
+    while True:
+        j = css.find("/*", i)
+        if j < 0:
+            out.append(css[i:])
+            return "".join(out)
+        out.append(css[i:j])
+        k = css.find("*/", j + 2)
+        if k < 0:
+            return "".join(out)
+        i = k + 2
+
+
+def _number(value: str) -> float | None:
+    v = value.strip()
+    if not v or len(v) > 40:
+        return None
+    for unit in _UNITS:
+        if v.endswith(unit):
+            v = v[:-len(unit)]
+            break
+    try:
+        return float(v)
+    except ValueError:
+        return None
+
+
+def _style_hides(style: str) -> bool:
+    """True when a declaration hides the box (posting_guard.py:99-109, :240-261).
+
+    Declarations are split on ``;`` and ``:``. A collapsed box hides only
+    together with overflow:hidden; either half alone is ordinary layout CSS.
+    """
+    zero_box = clipped = False
+    for decl in _strip_css_comments(style).split(";"):
+        name, sep, value = decl.partition(":")
+        if not sep:
+            continue
+        name = name.strip().lower()
+        value = value.replace("!important", "").strip().lower()
+        if len(value) > 200:
+            continue
+        if name == "display" and value == "none":
+            return True
+        if name == "visibility" and value in ("hidden", "collapse"):
+            return True
+        if name in ("opacity", "font-size") and _number(value) == 0:
+            return True
+        if name == "color" and value == "transparent":
+            return True
+        if name == "clip" and value.startswith("rect("):
+            first = value[5:].replace(",", " ").split(None, 1)
+            if first and _number(first[0]) == 0:
+                return True
+        if name == "clip-path" and value.startswith("inset(") and value[6:].lstrip().startswith("100%"):
+            return True
+        if name in ("left", "top", "text-indent") and value.endswith("px"):
+            num = _number(value)
+            if num is not None and num <= -1000:
+                return True
+        if name in ("height", "width", "max-height", "max-width") and _number(value) == 0:
+            zero_box = True
+        if name in ("overflow", "overflow-x", "overflow-y") and "hidden" in value.split():
+            clipped = True
+    return zero_box and clipped
+
+
+def _is_hidden(attrs: list[tuple[str, str | None]]) -> bool:
+    found: dict[str, str] = {}
+    for key, val in attrs:
+        found.setdefault(key, val or "")  # the first of a duplicated attribute wins
+    if "hidden" in found or found.get("aria-hidden", "").strip().lower() == "true":
+        return True
+    return _style_hides(found.get("style", ""))
+
+
+class _Walker(HTMLParser):
+    """Visible text out, hidden content aside. One pass, linear: a count of open
+    names answers "is this closer open?" without scanning the stack."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)  # entities decoded once, in text and attributes
+        self.visible: list[str] = []
+        self.hidden_buf: list[str] = []
+        self.hidden_parts: list[str] = []
+        self.hidden_blocks: list[str] = []
+        self.stack: list[str] = []
+        self.open: dict[str, int] = {}
+        self.hidden_at: int | None = None  # stack index of the element that began the hidden run
+        self.listed = True
+
+    def _emit(self, text: str) -> None:
+        (self.visible if self.hidden_at is None else self.hidden_buf).append(text)
+
+    def flush(self) -> None:
+        block = _fold("".join(self.hidden_buf))
+        self.hidden_buf.clear()
+        self.hidden_at = None
+        if block:
+            if self.listed and len(self.hidden_blocks) < MAX_BLOCKS:
+                # Cleaned before cutting: the excerpt carries no invisible characters.
+                self.hidden_blocks.append(clean_text(block)[0][:EXCERPT])
+            self.hidden_parts.append(block)
+
+    def _pop_to(self, index: int) -> None:
+        for name in self.stack[index:]:
+            self.open[name] -= 1
+        del self.stack[index:]
+        if self.hidden_at is not None and self.hidden_at >= len(self.stack):
+            self.flush()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _BLOCK:
+            self._emit("\n")
+        if tag in _VOID:
+            return
+        if self.stack and ((tag in _IMPLIED_END and self.stack[-1] == tag)
+                           or (tag in _CLOSES_P and self.stack[-1] == "p")):
+            self._pop_to(len(self.stack) - 1)
+        self.stack.append(tag)
+        self.open[tag] = self.open.get(tag, 0) + 1
+        if self.hidden_at is None:
+            if tag in _DROP:
+                self.hidden_at, self.listed = len(self.stack) - 1, False
+            elif _is_hidden(attrs):
+                self.hidden_at, self.listed = len(self.stack) - 1, True
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)  # "/>" on a non-void tag is ignored, as browsers do
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _BLOCK:
+            self._emit("\n")
+        if not self.open.get(tag):
+            return  # a closer with no opener is ignored
+        index = len(self.stack) - 1
+        while self.stack[index] != tag:
+            index -= 1
+        self._pop_to(index)
+
+    def handle_data(self, data: str) -> None:
+        self._emit(data)
+
+    def handle_comment(self, data: str) -> None:
+        self.hidden_parts.append(data)  # scanned, never listed
+
+
+def clean_html(markup: str) -> tuple[str, dict[str, Any]]:
+    """Visible text and the hidden content that was removed.
+
+    Returns (text, {"hidden_blocks": excerpts of hidden elements, "hidden_text":
+    everything removed, for scanning and not reported}), as
+    posting_guard.py:264-346 does, on html.parser instead of its tag regex.
+    Unterminated hidden elements, comments and script blocks hide to the end.
+    """
+    walker = _Walker()
+    walker.feed(markup)
+    walker.close()
+    if walker.hidden_at is not None:
+        walker.flush()
+    return _fold("".join(walker.visible)), {
+        "hidden_blocks": walker.hidden_blocks,
+        "hidden_text": "\n".join(walker.hidden_parts),
+    }
+
+
+def _guard(text: str, hidden_text: str, hidden_blocks: list[str]) -> tuple[str, dict[str, Any]]:
+    text, tf = clean_text(text)
+    hidden_text, htf = clean_text(hidden_text)
+    # Invisible characters inside hidden content count and alarm like visible
+    # ones (posting_guard.py:446-454); what they spell is hidden content too.
+    for key, n in htf["invisible_chars"].items():
+        tf["invisible_chars"][key] = tf["invisible_chars"].get(key, 0) + n
+    tf["invisible_flagged"] += htf["invisible_flagged"]
+    tf["invisible_text"] += htf["invisible_text"]
+    hidden = "\n".join([hidden_text, *tf["invisible_text"]])
+    findings: dict[str, Any] = {"hidden_blocks": hidden_blocks, **tf, **scan(text, hidden)}
     findings["verdict"] = verdict(findings)
     return text, findings
+
+
+def guard(raw: str) -> tuple[str, dict[str, Any]]:
+    """Run the whole gate on plain text. Returns (cleaned text, findings with a verdict)."""
+    return _guard(raw, "", [])
+
+
+def guard_html(raw: str) -> tuple[str, dict[str, Any]]:
+    """Run the whole gate on a page's HTML: hidden content is removed, then scanned."""
+    text, hf = clean_html(raw)
+    return _guard(text, hf["hidden_text"], hf["hidden_blocks"])
 
 
 def _plain_findings(findings: dict[str, Any]) -> str:
@@ -477,7 +690,9 @@ def main(argv: list[str] | None = None) -> int:
     _force_utf8_output()
     parser = argparse.ArgumentParser(prog="kit_guard.py", description="Integrity gate for a job ad's text.")
     parser.add_argument("--in", dest="infile", type=Path, default=None, help="input file (default: stdin)")
-    parser.add_argument("--text", action="store_true", help="plain text input (the only mode in this version)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--text", action="store_true", help="plain text input (the default)")
+    mode.add_argument("--html", action="store_true", help="a saved page's HTML: hidden content is removed")
     parser.add_argument("--json", action="store_true", help="print findings as JSON")
     args = parser.parse_args(argv)
 
@@ -487,7 +702,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ad_guard: cannot read input: {exc}", file=sys.stderr)
         return 2
 
-    cleaned, findings = guard(raw)
+    cleaned, findings = (guard_html if args.html else guard)(raw)
     print(findings["verdict"])
     print("--- findings ---")
     print(json.dumps(findings, ensure_ascii=False, indent=2) if args.json else _plain_findings(findings))
