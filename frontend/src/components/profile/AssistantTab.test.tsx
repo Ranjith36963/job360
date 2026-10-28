@@ -127,7 +127,7 @@ describe("AssistantTab", () => {
 
   it("each control sends its own PATCH body as the web user, then re-reads", async () => {
     await ready();
-    // Straight away: both halves in one PATCH, and below-the-line jobs are dropped.
+    // Straight away: both halves in one PATCH; below-the-line keeps its own choice.
     fireEvent.click(screen.getByTestId("mode-straight"));
     fireEvent.click(screen.getByTestId("mode-straight-confirm"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
@@ -135,7 +135,6 @@ describe("AssistantTab", () => {
       { path: "assistant_settings.auto_grant_count", value: null },
       { path: "assistant_settings.auto_grant_until", value: null },
       { path: "assistant_settings.above_line", value: "auto" },
-      { path: "assistant_settings.below_line", value: "skip" },
     ]));
     fireEvent.click(screen.getByTestId("inbox-ask"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "ask" }]));
@@ -482,9 +481,19 @@ describe("AssistantTab", () => {
         { path: "assistant_settings.auto_grant_count", value: null },
         { path: "assistant_settings.auto_grant_until", value: null },
         { path: "assistant_settings.above_line", value: "auto" },
-        { path: "assistant_settings.below_line", value: "skip" },
       ]),
     );
+  });
+
+  it("a mode pick never resets the below-the-line choice", async () => {
+    getAssistantSettings.mockResolvedValue(view({ below_line: field("auto") }));
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-straight"));
+    fireEvent.click(screen.getByTestId("mode-straight-confirm"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
+    for (const call of updateProfileFields.mock.calls) {
+      expect(call[0]).not.toContainEqual(expect.objectContaining({ path: "assistant_settings.below_line" }));
+    }
   });
 
   it("apply hours: a saved window is shown, can be changed (overnight is fine) and cleared with null", async () => {

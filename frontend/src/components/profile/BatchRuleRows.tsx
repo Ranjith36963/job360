@@ -118,7 +118,10 @@ export function applyModeText(mode: ApplyMode, grantCount?: unknown): string {
 function lineEdits(view: AssistantSettingsView, on: boolean): { path: string; value: unknown }[] {
   const now = (f: Parameters<typeof settingEffective>[0]) => String(settingEffective(f) ?? "");
   const state = { above_line: now(view.above_line), below_line: now(view.below_line), submit_mode: now(view.submit_mode) };
-  return batchEdits(state, { scoreValue: null, batch: on }).filter((e) => e.path !== P_SUBMIT);
+  // below_line has its own control on the Permissions tab: a mode pick never resets it.
+  return batchEdits(state, { scoreValue: null, batch: on }).filter(
+    (e) => e.path !== P_SUBMIT && e.path !== "assistant_settings.below_line",
+  );
 }
 
 /** Which rows: how it applies and the three limits (Permissions tab), or the wait (Assistant configure). */
