@@ -143,11 +143,11 @@ def summary(rows: list[dict[str, Any]]) -> dict[str, int]:
     return {"total": len(rows), "verified": verified, "to_verify": len(rows) - verified - missing, "missing": missing}
 
 
-def open_questions(profile: Any) -> list[dict[str, str]]:
+def open_questions(profile: Any, rows: Optional[list[dict[str, Any]]] = None) -> list[dict[str, str]]:
     """The rows with no answer at all - what the assistant drafts next, as Guessed, from the profile.
     Reads the base profile only (no overlay needed to know whether an answer exists)."""
     return [
         {"id": r["id"], "question": r["question"], "save_to": save_path(r),
          **({"topic": r["topic"]} if r.get("topic") else {"kit_key": r["kit_key"]})}
-        for r in common_questions(profile, []) if r["answer"] is None
+        for r in (common_questions(profile, []) if rows is None else rows) if r["answer"] is None
     ]
