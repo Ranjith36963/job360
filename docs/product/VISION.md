@@ -108,7 +108,7 @@ lives on its own page.
 
 ### What sits on the wrong page today (2026-10-27 inventory, to move)
 
-- **Needs you to Home:** the assistant's setting-change requests (`SettingRequestCard`, now in the Other list and its count); "Send these N" (`SendAllCard`); "Run my own-browser tasks now" (`OwnBrowserQueueCard`, `RunChromeTasks`). Their counts may stay on Needs you.
+- **Needs you to Home:** the assistant's setting-change requests (`SettingRequestCard`, now in the Other list and its count); "Send these N" (`SendAllCard`); "Run my own-browser tasks now" (`RunNowPanel`). Their counts may stay on Needs you.
 - **Connect to Home:** the major standing controls `paused_until`, `submit_mode`, `above_line`, `below_line`, `apply_min_score`, `auto_grant_count` / `auto_grant_until`, `daily_cap`, `weekly_cap`, `company_cap`, `outreach_send`, `auto_employer_emails`, `preferences.daily_check`. On Home today they are read-only with "Change in Connect" links (`MorningCheck`, `BatchRulesCard`).
 - **Home to Needs you:** "Started, not confirmed" (`StartedNotConfirmed`), due follow-ups, and queue preflight warnings. Home keeps one linked "N things need you" line.
 - **Home to Connect:** the setup card, the welcome connect cards, run problems and start-link problems (`RunProblems`, `StartLinkProblems`).
@@ -116,16 +116,11 @@ lives on its own page.
 
 ## How a job gets in (decided 2026-10-16, the owner)
 
-Jobs enter the apply process in two ways:
-
-1. **The assistant finds it.** It searches for you ("run 360 hunt").
-2. **You bring it.** Two ways:
-   - a. Paste the **link**.
-   - b. Copy-paste the **whole job description**.
-
-All three land in the same place: `bring_job` births one Application, and the
-same apply process runs from there. There is no fourth way — Job360 never
-finds jobs itself.
+Every way in lands in the same place: `bring_job` births one Application, and
+the same apply process runs from there. The closed list of ways is the `origin`
+field of `api/routes/bring.BringJobRequest`. Whatever is on it, Job360 never
+finds jobs itself (rule 4): each origin is somewhere the assistant or the seeker
+looked, never a Job360 finder.
 
 ## Why this and not the old Job360
 
