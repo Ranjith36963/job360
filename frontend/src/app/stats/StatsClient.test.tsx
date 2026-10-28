@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { StatsClient, blockedText, formatRate } from "./StatsClient";
+import { StatsClient, blockedText, formatRate, buildFunnel } from "./StatsClient";
 import type { StatsResponse } from "@/lib/api";
 
 const getStats = vi.fn();
 vi.mock("@/lib/api", () => ({ getStats: (...a: unknown[]) => getStats(...a) }));
+vi.mock("@/components/profile/LessonsList", () => ({ LessonsList: () => <div data-testid="lessons-list" /> }));
 
 function keyed(key: string | null, label: string, over: Record<string, unknown> = {}) {
   return {
@@ -52,6 +53,24 @@ describe("formatRate", () => {
   });
 });
 
+describe("buildFunnel", () => {
+  it("shows a dash instead of dividing by zero", () => {
+    const steps = buildFunnel({ brought: 3, applied: 0, replied: 0, interview: 0, offer: 0 });
+    expect(steps.map((s) => s.rate)).toEqual([null, "0% of brought in were applied to", "—", "—", "—"]);
+  });
+
+  it("leaves out a step the data does not have, and its rate", () => {
+    const steps = buildFunnel({ brought: 10, applied: 5, interview: 2, offer: 1 });
+    expect(steps.map((s) => s.key)).toEqual(["brought", "applied", "interview", "offer"]);
+    expect(steps.find((s) => s.key === "interview")!.rate).toBeNull();
+    expect(steps.find((s) => s.key === "offer")!.rate).toBe("50% of interviews led to an offer");
+  });
+
+  it("handles no data at all", () => {
+    expect(buildFunnel(null)).toEqual([]);
+  });
+});
+
 describe("StatsClient", () => {
   beforeEach(() => {
     getStats.mockReset();
@@ -63,17 +82,35 @@ describe("StatsClient", () => {
     expect(screen.getByTestId("stats-loading")).toBeInTheDocument();
   });
 
-  it("shows the title, the plain note and the overall numbers", async () => {
+  it("shows the title, the plain note and the funnel with rates in words", async () => {
     getStats.mockResolvedValue(stats());
     render(<StatsClient />);
-    const overall = await screen.findByTestId("stats-overall");
+    const funnel = await screen.findByTestId("stats-funnel");
     for (const [n, label] of [
-      ["12", "brought"], ["9", "applied"], ["4", "replied"], ["2", "interviews"], ["1", "offers"], ["3", "rejected"],
+      ["12", "Brought in"], ["9", "Applied"], ["4", "Replies"], ["2", "Interviews"], ["1", "Offers"],
     ]) {
-      const item = within(overall).getByText(label).closest("li")!;
-      expect(item).toHaveTextContent(n);
+      expect(within(funnel).getByText(label).closest("li")).toHaveTextContent(n);
     }
+    expect(within(funnel).getByText("75% of brought in were applied to")).toBeInTheDocument();
+    expect(within(funnel).getByText("44% of applied got a reply")).toBeInTheDocument();
+    expect(within(funnel).getByText("50% of replies led to an interview")).toBeInTheDocument();
+    expect(within(funnel).getByText("50% of interviews led to an offer")).toBeInTheDocument();
     expect(screen.getByText(/Job360 only counts/)).toBeInTheDocument();
+  });
+
+  it("keeps the rejected count under the funnel", async () => {
+    getStats.mockResolvedValue(stats());
+    render(<StatsClient />);
+    expect(await screen.findByTestId("funnel-rejected")).toHaveTextContent("Rejected: 3");
+  });
+
+  it("is called Statistics, with What's working and Lessons sections", async () => {
+    getStats.mockResolvedValue(stats());
+    render(<StatsClient />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Statistics" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your funnel" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What's working" })).toBeInTheDocument();
+    expect(screen.getByTestId("lessons-list")).toBeInTheDocument();
   });
 
   it("shows the score line card with counts only, and 'Not set' when no line", async () => {
@@ -146,7 +183,7 @@ describe("StatsClient", () => {
   it("omits an empty section", async () => {
     getStats.mockResolvedValue(stats({ by_country: [], by_contact_found_via: [], by_contact_relationship: [], by_outreach_variant: [] }));
     render(<StatsClient />);
-    await screen.findByTestId("stats-overall");
+    await screen.findByTestId("stats-funnel");
     expect(screen.queryByTestId("stats-section-country")).toBeNull();
     expect(screen.queryByTestId("stats-section-people")).toBeNull();
     expect(screen.queryByTestId("stats-section-people-relationship")).toBeNull();
@@ -160,7 +197,7 @@ describe("StatsClient", () => {
     await waitFor(() =>
       expect(screen.getByTestId("stats-error")).toHaveTextContent("Couldn't load this — refresh to try again.")
     );
-    expect(screen.queryByTestId("stats-overall")).toBeNull();
+    expect(screen.queryByTestId("stats-funnel")).toBeNull();
   });
 });
 
@@ -186,7 +223,7 @@ describe("StatsClient sites block", () => {
   it("shows no table without a sites block", async () => {
     getStats.mockResolvedValue(stats({ sites: null } as never));
     render(<StatsClient />);
-    await screen.findByTestId("stats-overall");
+    await screen.findByTestId("stats-funnel");
     expect(screen.queryByTestId("stats-section-sites")).toBeNull();
   });
 
