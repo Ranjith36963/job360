@@ -5186,7 +5186,9 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "you" | "experience" | "work" | "pay" | "form" | "equality";
+            group: "you" | "work" | "pay" | "form" | "equality";
+            /** Guess Source */
+            guess_source?: string | null;
             /** Id */
             id: string;
             /** Kit Key */
@@ -5197,13 +5199,29 @@ export interface components {
              * @enum {string}
              */
             label: "memory" | "guessed" | "not_known";
+            /**
+             * Per Job
+             * @default false
+             */
+            per_job: boolean;
             /** Question */
             question: string;
+            /** Save To */
+            save_to?: string | null;
             /**
              * Seen
              * @default 0
              */
             seen: number;
+            /**
+             * Sensitive
+             * @default false
+             */
+            sensitive: boolean;
+            /** Set At */
+            set_at?: string | null;
+            /** Set By */
+            set_by?: string | null;
             /** Source */
             source?: string | null;
             /**

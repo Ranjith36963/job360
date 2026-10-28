@@ -27,7 +27,11 @@ _SAVE_PATH = {
     "right_to_work": "user_info.right_to_work", "salary": "preferences.salary_by_country",
 }
 _SAVE_PATH_EXACT = {"contact.name": "cv_data.name", "contact.github_url": "cv_data.links"}
-GROUPS: tuple[str, ...] = ("you", "experience", "work", "pay", "form", "equality")
+# "experience" left with the CV-answered rows (plan B1): the CV answers title / years / education.
+GROUPS: tuple[str, ...] = ("you", "work", "pay", "form", "equality")
+# Ids whose answer is sensitive (plan section 5): visa, salary, address, birth date; equality is a group.
+_SENSITIVE_IDS = frozenset(
+    {"visa_type", "visa_expires", "expected_salary", "current_salary", "address", "date_of_birth"})
 _COUNTRY_KEYS = ("{cc}",)
 
 
@@ -79,10 +83,31 @@ def save_path(row: dict[str, Any]) -> str:
     return _SAVE_PATH_EXACT.get(key) or _SAVE_PATH[key.split(".", 1)[0]]
 
 
-def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str]) -> dict[str, Any]:
+def _is_sensitive(q: dict[str, Any]) -> bool:
+    return q["group"] == "equality" or q["id"] in _SENSITIVE_IDS
+
+
+# Who stands behind an answer, read off the kit item's OWN state (the kit judges each answer, so a web
+# save of one field never vouches for another; review of #1357). relayed = the user's chat word that an
+# assistant wrote down; inferred / sensitive = an assistant's draft the user has not confirmed.
+_SET_BY = {"confirmed": "user", "relayed": "assistant", "inferred": "assistant", "sensitive": "assistant"}
+_GUESS_SOURCE = {"relayed": "user_said", "inferred": "agent_inferred", "sensitive": "agent_inferred"}
+
+
+def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str],
+         relayed: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """``relayed`` = the save paths whose newest row an assistant wrote as the user's chat word: the kit
+    folds an unconfirmed private answer into ``sensitive``, so this tells how that guess got here."""
     text = q["question"].replace("{country}", country or "")
-    verified = item is not None and item.get("state") == "confirmed" and (
+    sensitive = _is_sensitive(q)
+    state = str(item.get("state") or "") if item is not None else ""
+    # Verified = the kit reads this very answer confirmed (an assistant's user_said write reads relayed,
+    # an unconfirmed private one sensitive); an approved answer must also be the user's own write.
+    verified = item is not None and state == "confirmed" and (
         item.get("source") != "approved_text" or bool(item.get("by_user")))
+    if sensitive and state == "relayed":
+        verified = False  # plan B1: a private answer is "From memory" only from the user's own save
+    label = "not_known" if item is None else ("memory" if verified else "guessed")
     return {
         "id": q["id"] if country is None else f"{q['id']}.{country}",
         "group": q["group"], "question": text, "country": country,
@@ -96,8 +121,19 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         "verified": verified,
         # Owner 2026-10-26: "memory" (the user's own), "guessed" (anything else the assistant drafted), or
         # "not_known" until the assistant drafts it (get_profile common_questions_open).
-        "label": "not_known" if item is None else ("memory" if verified else "guessed"),
+        "label": label,
         "seen": int(q.get("seen") or 0),
+        "per_job": bool(q.get("per_job")),
+        "save_to": save_path({"kit_key": q.get("kit_key")}),
+        "sensitive": sensitive,
+        # Who stands behind this answer ("user" / "assistant") and when its block was last saved.
+        "set_by": ("user" if verified else _SET_BY.get(state, "assistant")) if item is not None else None,
+        "set_at": (str(item["saved_at"]) if item.get("saved_at") else None) if item is not None else None,
+        # How an assistant's draft got here (agent_inferred / user_said); None unless the row reads guessed.
+        "guess_source": (
+            ("user_said" if state == "sensitive" and save_path(q) in relayed else _GUESS_SOURCE.get(state))
+            if label == "guessed" else None
+        ),
     }
 
 
@@ -124,30 +160,38 @@ def common_questions(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[s
     def by_topic(answers: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
         return {**drafts, **{str(i["topic"]): i for i in answers.get("approved_text", []) if i.get("topic")}}
 
+    from src.services.profile.edits import is_assistant_actor  # noqa: PLC0415
+
+    relayed = frozenset(
+        str(r["path"]) for r in overlay if isinstance(r, dict) and r.get("path")
+        and is_assistant_actor(str(r.get("set_by") or "")) and str(r.get("source") or "") == "user_said"
+    )
     rows: list[dict[str, Any]] = []
     for q in catalog():
         key = q.get("kit_key")
         if key and "{cc}" in key:
-            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc) for cc in countries]
+            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc, relayed) for cc in countries]
         elif key:
-            rows.append(_row(q, items(plain).get(key), None))
+            rows.append(_row(q, items(plain).get(key), None, relayed))
         else:
-            rows.append(_row(q, by_topic(plain).get(q["topic"]), None))
+            rows.append(_row(q, by_topic(plain).get(q["topic"]), None, relayed))
     return rows
 
 
 def summary(rows: list[dict[str, Any]]) -> dict[str, int]:
-    """How many rows are verified, saved but not verified, and not answered yet."""
+    """How many rows are verified, saved but not verified, and not answered yet (per-job rows skipped)."""
+    rows = [r for r in rows if not r.get("per_job")]
     verified = sum(1 for r in rows if r["verified"])
     missing = sum(1 for r in rows if r["answer"] is None)
     return {"total": len(rows), "verified": verified, "to_verify": len(rows) - verified - missing, "missing": missing}
 
 
-def open_questions(profile: Any) -> list[dict[str, str]]:
+def open_questions(profile: Any, rows: Optional[list[dict[str, Any]]] = None) -> list[dict[str, str]]:
     """The rows with no answer at all - what the assistant drafts next, as Guessed, from the profile.
     Reads the base profile only (no overlay needed to know whether an answer exists)."""
     return [
         {"id": r["id"], "question": r["question"], "save_to": save_path(r),
          **({"topic": r["topic"]} if r.get("topic") else {"kit_key": r["kit_key"]})}
-        for r in common_questions(profile, []) if r["answer"] is None
+        for r in (common_questions(profile, []) if rows is None else rows)
+        if r["answer"] is None and not r["per_job"]
     ]

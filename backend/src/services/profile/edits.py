@@ -487,8 +487,19 @@ def _validate_records(path: str, value: Any) -> list[dict[str, Any]]:
 # Kept as a set so a second note-shaped path is one entry here, not a new branch.
 NOTE_PATHS: frozenset[str] = frozenset({"preferences.assistant_notes"})
 
+# Memory steps file a user's own fact as "<Step>: <fact>" in the same list
+# (frontend/src/lib/step-facts.ts STEP_FACT_NAMES). Those are facts, not instructions.
+STEP_FACT_PREFIXES: tuple[str, ...] = tuple(
+    f"{step}: " for step in ("About you", "Job targets", "Right to work", "Logistics", "Equality")
+)
 
-def _validate_notes(path: str, value: Any) -> list[str]:
+
+def instruction_count(notes: Iterable[str]) -> int:
+    """How many notes are instruction lines (no Memory step prefix)."""
+    return sum(1 for n in notes if isinstance(n, str) and not n.startswith(STEP_FACT_PREFIXES))
+
+
+def _validate_notes(path: str, value: Any, stored: list[str] | None = None) -> list[str]:
     """A list of short one-line notes, capped per note and per list.
 
     Each note has control/bidi characters stripped (same set as the record
@@ -497,6 +508,11 @@ def _validate_notes(path: str, value: Any) -> list[str]:
     note (case/space-insensitive) keeps its first spelling. At most
     ``PROFILE_EDIT_MAX_LIST_ITEMS`` notes. An empty list is valid and means
     "nothing to say" (rule #29).
+
+    ``stored`` (the notes saved now, when the caller knows them) turns on the
+    instruction-line cap: more than ``INSTRUCTIONS_MAX_LINES`` non-prefixed
+    lines is a 422 only when the count is also above the stored count, so a
+    list already over the cap can still be edited down or sideways.
     """
     if not isinstance(value, list):
         raise ProfileEditError(422, f"{path} must be a list of strings, got {type(value).__name__}")
@@ -524,6 +540,13 @@ def _validate_notes(path: str, value: Any) -> list[str]:
             422,
             f"{path} exceeds the {settings.PROFILE_EDIT_MAX_LIST_ITEMS}-item limit "
             "(PROFILE_EDIT_MAX_LIST_ITEMS)",
+        )
+    count = instruction_count(out)
+    if stored is not None and count > settings.INSTRUCTIONS_MAX_LINES and count > instruction_count(stored):
+        raise ProfileEditError(
+            422,
+            f"{path}: at most {settings.INSTRUCTIONS_MAX_LINES} instructions "
+            f"(INSTRUCTIONS_MAX_LINES); delete one first",
         )
     return out
 
@@ -586,12 +609,15 @@ def check_years_order(low: Any, high: Any) -> None:
         raise ProfileEditError(422, f"{YEARS_MIN_PATH} must not be above {YEARS_MAX_PATH}")
 
 
-def validate_edit(path: str, value: Any) -> Any:
+def validate_edit(path: str, value: Any, *, stored_notes: list[str] | None = None) -> Any:
     """Normalise ``value`` for ``path``, or raise ``ProfileEditError(422, ...)``.
 
     ``value=None`` clears the path unconditionally — always valid for a
     known path (R8). An unknown path is a 422 that lists the editable set
     (R9); a value of the wrong shape is a 422 naming the path (R10).
+
+    ``stored_notes`` is the user's saved ``preferences.assistant_notes``; a door
+    that writes notes passes it so the instruction-line cap can see growth.
     """
     paths = editable_paths()
     forgiving.set_path(path)
@@ -645,7 +671,7 @@ def validate_edit(path: str, value: Any) -> Any:
         # Bounded by shape alone: PROFILE_NOTE_MAX_CHARS x PROFILE_EDIT_MAX_LIST_ITEMS.
         # The generic encoded cap (PROFILE_EDIT_MAX_CHARS) would quietly allow
         # only a handful of notes, which is not what either setting says.
-        return _validate_notes(path, value)
+        return _validate_notes(path, value, stored_notes)
     if path in RECORD_SCHEMAS:
         return _bound_encoded_size(
             path,

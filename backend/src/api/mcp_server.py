@@ -812,7 +812,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def get_profile(
         include_raw: bool = False, raw_section: str = "", raw_offset: int = 0
     ) -> dict[str, Any]:
-        """READ `assistant_notes` FIRST — the user's confirmed standing instructions to you.
+        """READ `instructions` FIRST: the user's own rules; they override your defaults, never a HARD LINE.
 
         Read `settings` before any apply step: obey each `effective`; `paused: true` = stop all apply work;
         `waiting` = changes the user has not yet confirmed — do not ask again or act as if applied.
@@ -905,7 +905,20 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             or cvd.github_repos_brief
         )
         tpl = await _outreach_templates()
+        # B3: one rows pass feeds both `memory_check` and `common_questions_open` (no second profile load).
+        # The live assistant edits are the overlay the kit judges each answer by (relayed / inferred).
+        cq_rows = common_questions.common_questions(profile, [r.model_dump() for r in resp.agent_edits])
+        open_qs = common_questions.open_questions(profile, cq_rows)
+        cq = common_questions.summary(cq_rows)
+        notes = [n for n in (profile.preferences.assistant_notes or []) if isinstance(n, str)]
         return {
+            # The user's own rules (notes with no Memory step prefix), then the step facts, then the check.
+            "instructions": [n for n in notes if not n.startswith(profile_edits.STEP_FACT_PREFIXES)],
+            "memory_notes": [
+                {"group": n.split(": ", 1)[0], "text": n.split(": ", 1)[1]}
+                for n in notes if n.startswith(profile_edits.STEP_FACT_PREFIXES)
+            ],
+            "memory_check": {k: cq[k] for k in ("verified", "to_verify", "missing")},
             # Owner decision, 2026-09-28 — see ASSISTANT_HINT's own comment
             # and this tool's docstring: reaches an assistant that connected
             # before the daily-check offer shipped into INSTRUCTIONS.
@@ -934,7 +947,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             "has_github": s.has_github,
             "top_skills": resp.skill_tiers.get("primary", [])[:15],
             # The user's standing instructions to the agent — read first (the
-            # docstring says so). [] when there are none (rule #29).
+            # docstring says so). [] when there are none (rule #29). DEPRECATED: use `instructions`.
             "assistant_notes": list(profile.preferences.assistant_notes or []),
             # Owner decision 2026-10-12 - WHERE this user's hunt searches: one row
             # per place from their own right_to_work answers, each with a plain
@@ -946,7 +959,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             ),
             # Owner 2026-10-26 - the common form questions with NO answer yet: draft each as a guess from the
             # profile and save it (rules: "Common form questions"). Absent when none (rule #29).
-            **({"common_questions_open": open_qs} if (open_qs := common_questions.open_questions(profile)) else {}),
+            **({"common_questions_open": open_qs} if open_qs else {}),
             # Owner decision 2026-10-08 (S2) - the assistant settings with the
             # safe defaults filled in, the practice-run state and the riskier
             # changes still waiting for the user's click. Read before ANY apply.
