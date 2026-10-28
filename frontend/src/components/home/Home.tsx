@@ -5,13 +5,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { getStats, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { RunProblems } from "@/components/needs-you/RunProblems";
 import { MorningCheck } from "@/components/needs-you/MorningCheck";
 import { BatchApplyPanel } from "@/components/needs-you/BatchApplyPanel";
-import { DutyStatus } from "@/components/home/DutyStatus";
-import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
+import { CountsBlock, FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
-import { SetupCard } from "@/components/profile/SetupProgress";
 import { LessonsList } from "@/components/profile/LessonsList";
 import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
 import {
@@ -175,14 +172,6 @@ export function Home() {
       ? buildSentence({ events: since.value.events, truncated: since.value.truncated, openAsks: openCount })
       : null;
 
-  // Due follow-ups come from the ledger rows already on the page (each row
-  // carries `follow_up_due`), soonest first — no second request.
-  const dueList =
-    apps.status === "ok"
-      ? apps.value.list
-          .filter((a) => a.follow_up_due)
-          .sort((a, b) => (a.follow_up_on ?? "").localeCompare(b.follow_up_on ?? ""))
-      : [];
   const feedItems = feed.status === "ok" ? feed.value.items : [];
   const applied = feed.status === "ok" ? feed.value.applied : null;
   const appliedWhen = applied ? dayAt(applied.occurredAt) : "";
@@ -190,7 +179,6 @@ export function Home() {
     !settled ||
     stats.status === "loading" ||
     stats.status === "ok" ||
-    dueList.length > 0 ||
     feedItems.length > 0;
 
   return (
@@ -246,10 +234,8 @@ export function Home() {
             </Link>
           </header>
 
-          <RunProblems />
           {/* The morning check and Batch apply moved here from Needs you (owner, 2026-10-26). */}
           <MorningCheck />
-          <DutyStatus />
 
           {apps.status === "error" && (
             <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
@@ -270,9 +256,7 @@ export function Home() {
             data-testid="home-rail"
             className="flex min-w-0 flex-col gap-7 border-t border-border pt-8 min-[1000px]:border-l min-[1000px]:border-t-0 min-[1000px]:pl-8 min-[1000px]:pt-0"
           >
-            <SetupCard />
             {stats.status === "ok" && <CountsBlock overall={stats.value} />}
-            <DueBlock due={dueList} />
             <FeedBlock items={feedItems} />
           </aside>
         )}

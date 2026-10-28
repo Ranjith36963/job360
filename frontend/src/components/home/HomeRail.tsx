@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ApplicationSummary, StatsResponse } from "@/lib/api";
-import { formatDayMonth } from "@/lib/format-date";
+import type { StatsResponse } from "@/lib/api";
 import { formatFeedTime } from "@/lib/home";
 import type { FeedItem } from "@/lib/home";
 
@@ -30,37 +29,6 @@ export function CountsBlock({ overall }: { overall: StatsResponse["overall"] }) 
           <li key={label}>
             <span className="block font-heading text-4xl leading-none">{n}</span>
             <span className="mt-1 block text-[12.5px] text-muted-foreground">{label}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-export function DueBlock({ due }: { due: ApplicationSummary[] }) {
-  if (due.length === 0) return null;
-  return (
-    <section aria-labelledby="home-due" data-testid="home-due">
-      <h2 id="home-due" className={`${LABEL} mb-1.5`}>
-        Due
-      </h2>
-      <ul>
-        {due.map((a) => (
-          <li
-            key={a.id}
-            className="flex items-baseline justify-between gap-3 border-t border-border py-2 text-sm first:border-t-0"
-          >
-            <Link
-              href={`/applications/${a.id}`}
-              className="min-w-0 underline-offset-2 hover:underline"
-            >
-              Follow up with {a.job_company || a.job_title}
-            </Link>
-            {a.follow_up_on && (
-              <span className="shrink-0 font-mono text-xs text-faint">
-                {formatDayMonth(a.follow_up_on)}
-              </span>
-            )}
           </li>
         ))}
       </ul>

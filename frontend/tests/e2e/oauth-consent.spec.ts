@@ -13,7 +13,7 @@ import { test, expect } from "@playwright/test";
  *    copy and no Allow button.
  * 4. /connect lists connected apps (oauth_grants) and Revoke calls
  *    DELETE and removes the row.
- * 5. /auth/magic honours ?next — including falling back to /applications for
+ * 5. /auth/magic honours ?next — including falling back to /needs-you for
  *    an external next.
  *
  * The backend is mocked with page.route — this proves the UI wiring, same
@@ -215,7 +215,7 @@ test.describe("/auth/magic honours ?next", () => {
     });
   });
 
-  test("falls back to /applications when next is an external URL", async ({
+  test("falls back to /needs-you when next is an external URL", async ({
     page,
     context,
   }) => {
@@ -228,8 +228,8 @@ test.describe("/auth/magic honours ?next", () => {
     await page.goto(`/auth/magic?token=t&next=${encodeURIComponent("https://evil.com")}`);
     await page.getByRole("button", { name: /sign in to job360/i }).click();
 
-    // safeNext (src/lib/safe-next.ts) falls back to /applications — /dashboard
-    // left with the sourcing era.
-    await expect(page).toHaveURL(/\/applications/, { timeout: 10_000 });
+    // safeNext (src/lib/safe-next.ts) falls back to /needs-you (owner 2026-10-28:
+    // sign-in opens Needs you).
+    await expect(page).toHaveURL(/\/needs-you/, { timeout: 10_000 });
   });
 });

@@ -4,7 +4,7 @@
  * Verifies:
  * 1. safeNext() accepts valid internal paths and rejects external/protocol-relative URLs.
  * 2. LoginForm redirects to the ?next path when it is a valid internal path.
- * 3. LoginForm falls back to /applications when ?next is an external URL (open-redirect guard).
+ * 3. LoginForm falls back to /needs-you when ?next is an external URL (open-redirect guard).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -36,36 +36,36 @@ vi.mock("@/lib/api", () => ({
 // ---------------------------------------------------------------------------
 
 describe("safeNext()", () => {
-  it("returns /applications for null", () => {
-    expect(safeNext(null)).toBe("/applications");
+  it("returns /needs-you for null", () => {
+    expect(safeNext(null)).toBe("/needs-you");
   });
 
-  it("returns /applications for empty string", () => {
-    expect(safeNext("")).toBe("/applications");
+  it("returns /needs-you for empty string", () => {
+    expect(safeNext("")).toBe("/needs-you");
   });
 
-  it("returns /applications for an external URL", () => {
-    expect(safeNext("https://evil.com")).toBe("/applications");
+  it("returns /needs-you for an external URL", () => {
+    expect(safeNext("https://evil.com")).toBe("/needs-you");
   });
 
-  it("returns /applications for a protocol-relative URL", () => {
-    expect(safeNext("//evil.com/steal")).toBe("/applications");
+  it("returns /needs-you for a protocol-relative URL", () => {
+    expect(safeNext("//evil.com/steal")).toBe("/needs-you");
   });
 
   // The WHATWG URL parser treats "\" as "/" for http(s) and strips tab/CR/LF
   // before parsing — each of these resolves to https://evil.com/ in a browser.
   it.each(["/\\evil.com", "/\t/evil.com", "/\n/evil.com", "/\r/evil.com"])(
-    "returns /applications for the URL-parser trick %j",
+    "returns /needs-you for the URL-parser trick %j",
     (p) => {
-      expect(safeNext(p)).toBe("/applications");
+      expect(safeNext(p)).toBe("/needs-you");
       expect(new URL(p, "https://job360.uk").origin).not.toBe("https://job360.uk");
     },
   );
 
   // A backslash later in the path stays same-origin, but a path is plain
   // characters or it is not a path — rejected all the same.
-  it("returns /applications for a backslash anywhere in the path", () => {
-    expect(safeNext("/ok\\evil.com")).toBe("/applications");
+  it("returns /needs-you for a backslash anywhere in the path", () => {
+    expect(safeNext("/ok\\evil.com")).toBe("/needs-you");
   });
 
   it("returns the path for a valid internal path", () => {
@@ -119,18 +119,18 @@ describe("LoginPage — ?next redirect", () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/receipts"));
   });
 
-  it("falls back to /applications when ?next=https://evil.com", async () => {
+  it("falls back to /needs-you when ?next=https://evil.com", async () => {
     mockGet.mockReturnValue("https://evil.com");
     renderPage();
     await fillAndSubmit();
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/applications"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/needs-you"));
   });
 
-  it("falls back to /applications when ?next is null", async () => {
+  it("falls back to /needs-you when ?next is null", async () => {
     mockGet.mockReturnValue(null);
     renderPage();
     await fillAndSubmit();
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/applications"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/needs-you"));
   });
 });
 
