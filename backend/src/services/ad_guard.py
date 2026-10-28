@@ -59,11 +59,11 @@ EXCERPT = 120
 LINE_MAX = 200  # quoted excerpts (posting_guard.py:70)
 SCAN_CHUNK = 500  # a longer line is scanned in pieces of at most this many characters
 
-ZERO_WIDTH = "​‌‍⁠⁡⁢⁣⁤"
-BIDI = "‎‏‪‫‬‭‮⁦⁧⁨⁩"
-BIDI_TAMPER = "‭‮⁦⁧⁨⁩"  # overrides and isolates
-FORMAT = "­  "  # soft hyphen, line and paragraph separators
-BOM = "﻿"
+ZERO_WIDTH = "\u200b\u200c\u200d\u2060\u2061\u2062\u2063\u2064"
+BIDI = "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+BIDI_TAMPER = "\u202d\u202e\u2066\u2067\u2068\u2069"  # overrides and isolates
+FORMAT = "\u00ad\u2028\u2029"  # soft hyphen, line and paragraph separators
+BOM = "\ufeff"
 # U+E0000-U+E007F: the Unicode "tags" block, one invisible code point per ASCII
 # character (posting_guard.py:77-82).
 TAG_CHARS = "".join(chr(c) for c in range(0xE0000, 0xE0080))
@@ -78,8 +78,8 @@ RGI_TAG_FLAG = re.compile(
 )
 # Variation selectors: a lone one (the VS16 in a heart emoji) is noise, a run of
 # two or more carries a payload (posting_guard.py:93-97).
-VARIATION = re.compile("[︀-️\U000E0100-\U000E01EF]")
-VARIATION_RUN = re.compile("[︀-️\U000E0100-\U000E01EF]{2,}")
+VARIATION = re.compile("[\ufe00-\ufe0f\U000E0100-\U000E01EF]")
+VARIATION_RUN = re.compile("[\ufe00-\ufe0f\U000E0100-\U000E01EF]{2,}")
 
 URL = re.compile(r"https?://[^\s<>\"')\]]+")  # one character class: linear
 WORD = re.compile(r"\w+")
