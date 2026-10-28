@@ -8,6 +8,8 @@ import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { OtherList } from "./OtherList";
+import { StartedNotConfirmed } from "./StartedNotConfirmed";
+import { DueFollowUps } from "./DueFollowUps";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
 import { askerName, whoLabel } from "@/lib/event-labels";
@@ -478,6 +480,13 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         questions={general}
         renderQuestion={(a) => <AskCard key={a.id} ask={a} mode="open" onChanged={load} />}
       />
+      {/* Moved here from Home (owner 2026-10-28): each is silent when empty. */}
+      {(active === "all" || active === "other") && (
+        <>
+          <StartedNotConfirmed />
+          <DueFollowUps />
+        </>
+      )}
 
       {active === "all" && answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">

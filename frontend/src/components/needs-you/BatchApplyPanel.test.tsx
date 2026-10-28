@@ -69,16 +69,15 @@ beforeEach(() => {
 });
 
 describe("BatchApplyPanel", () => {
-  it("is titled Batch apply and has the three cards", async () => {
+  it("is titled Batch apply and has the queue and the rules", async () => {
     render(<BatchApplyPanel />);
     const panel = screen.getByTestId("batch-apply-panel");
     expect(panel).toHaveTextContent("Batch apply");
     await screen.findByTestId("batch-row-11");
-    await screen.findByTestId("started-5");
     expect(screen.getByTestId("batch-rules")).toHaveTextContent("Your rules");
     expect(screen.queryByTestId("daily-cap")).toBeNull();
     expect(screen.getByTestId("batch-queue")).toHaveTextContent("Queue");
-    expect(screen.getByTestId("started-not-confirmed")).toHaveTextContent("Started, not confirmed");
+    expect(screen.queryByTestId("started-not-confirmed")).toBeNull();
   });
 
   it("scrolls with the page and puts what needs the user first", () => {
@@ -184,30 +183,6 @@ describe("BatchApplyPanel", () => {
         expect(recordApplicationEvent).toHaveBeenCalledWith(11, { event_type: "unqueued", payload: { reason: "user_removed" } }),
       );
       await waitFor(() => expect(listApplications).toHaveBeenCalledTimes(2));
-    });
-  });
-
-  describe("Started, not confirmed", () => {
-    it("'It was sent' records the application after a confirm, then refreshes", async () => {
-      render(<BatchApplyPanel />);
-      fireEvent.click(await screen.findByTestId("submit-was-sent-5"));
-      fireEvent.click(screen.getByTestId("submit-sent-confirm-5"));
-      await waitFor(() => expect(recordApplicationReceipt).toHaveBeenCalledWith(5, {}));
-      await waitFor(() => expect(fetchWhatsNewPages).toHaveBeenCalledTimes(2));
-    });
-
-    it("'It was not sent' closes the stop, then refreshes", async () => {
-      render(<BatchApplyPanel />);
-      fireEvent.click(await screen.findByTestId("submit-not-sent-5"));
-      await waitFor(() => expect(resolveSubmit).toHaveBeenCalledWith(5));
-      await waitFor(() => expect(fetchWhatsNewPages).toHaveBeenCalledTimes(2));
-    });
-
-    it("is hidden when nothing is waiting", async () => {
-      fetchWhatsNewPages.mockResolvedValue({ events: [], applications: [] });
-      render(<BatchApplyPanel />);
-      await waitFor(() => expect(fetchWhatsNewPages).toHaveBeenCalled());
-      expect(screen.queryByTestId("started-not-confirmed")).toBeNull();
     });
   });
 });

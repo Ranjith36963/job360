@@ -22,6 +22,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AssistantTab } from "@/components/profile/AssistantTab";
 import { AssistantInstructions } from "@/components/connect/AssistantInstructions";
+import { RunProblems } from "@/components/needs-you/RunProblems";
+import { DutyStatus } from "@/components/home/DutyStatus";
+import { SetupProgress, useSetupProgress } from "@/components/profile/SetupProgress";
 import { JobSitesPanel } from "@/components/connect/JobSitesPanel";
 import { CalendarFeedSection } from "@/components/settings/CalendarFeedSection";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -690,6 +693,12 @@ function DeveloperTokensSection({
 // Page
 // ---------------------------------------------------------------------------
 
+/** The six setup rounds, at the top of the Setup tab (moved from Home's card). Silent until read. */
+function SetupProgressTop() {
+  const { progress } = useSetupProgress();
+  return progress ? <SetupProgress progress={progress} /> : null;
+}
+
 const TAB_KEYS = ["permissions", "setup", "assistant", "schedules", "job-sites", "apps", "developers"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 const TAB_LABELS: Record<TabKey, string> = {
@@ -883,6 +892,7 @@ function ConnectAgentPageInner() {
         </TabsList>
 
         <TabsContent value="setup" className="space-y-8">
+          <SetupProgressTop />
           <AddressStepCard />
           <AssistantStepsCard />
           <SayHelloCard />
@@ -904,6 +914,9 @@ function ConnectAgentPageInner() {
         </TabsContent>
 
         <TabsContent value="schedules" className="space-y-8">
+          {/* Moved from Home (owner 2026-10-28): what went wrong with runs and what is on. */}
+          <RunProblems />
+          <DutyStatus />
           <DailyCheckCard
             dailyCheck={dailyCheck}
             connected={connected}

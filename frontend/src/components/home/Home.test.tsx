@@ -25,7 +25,6 @@ vi.mock("posthog-js", () => ({ default: { capture: vi.fn() } }));
 // The morning check and Batch apply have their own tests; here only where they sit on Home matters.
 vi.mock("@/components/needs-you/MorningCheck", () => ({ MorningCheck: () => <div data-testid="morning-check" /> }));
 vi.mock("@/components/needs-you/BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
-vi.mock("@/components/home/DutyStatus", () => ({ DutyStatus: () => <section data-testid="duty-status" /> }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 // "Now" is the real clock: the sentence counts events after the last visit
@@ -190,24 +189,6 @@ describe("Home", () => {
     expect(api.listApplications.mock.calls[0][0]).not.toHaveProperty("due");
   });
 
-  it("due follow-ups come from the ledger rows, soonest first", async () => {
-    happy();
-    api.listApplications.mockResolvedValue({
-      applications: [
-        { ...app, id: 8, job_company: "Lakera", follow_up_due: true, follow_up_on: "2026-10-09" },
-        { ...app, id: 9, job_company: "Sana", follow_up_due: true, follow_up_on: "2026-10-05" },
-        app,
-      ],
-      total: 3,
-    });
-    render(<Home />);
-    const due = await screen.findByTestId("home-due");
-    const text = due.textContent ?? "";
-    expect(text.indexOf("Sana")).toBeGreaterThan(-1);
-    expect(text.indexOf("Sana")).toBeLessThan(text.indexOf("Lakera"));
-    expect(text).not.toContain("Mistral AI");
-  });
-
   it("events from before the last visit are in the feed but not in the sentence", async () => {
     const old = { ...event(3, "agent:Claude"), recorded_at: new Date(Date.now() - 20 * 864e5).toISOString() };
     happy({ events: [old, event(1, "agent:Claude")] });
@@ -255,17 +236,20 @@ describe("Home lessons", () => {
 });
 
 describe("Home: moved from Needs you (owner, 2026-10-26)", () => {
-  it("puts MorningCheck above what the assistant is doing, and Batch apply below Lessons", async () => {
+  it("puts MorningCheck above Lessons, and Batch apply below Lessons", async () => {
     happy();
     api.listLessons.mockResolvedValue({ lessons: [], total: 0 });
     render(<Home />);
     const morning = await screen.findByTestId("morning-check");
-    const duty = screen.getByTestId("duty-status");
     const batch = screen.getByTestId("batch-apply-panel");
     const lessons = await screen.findByRole("heading", { name: "Lessons" });
     const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(before(morning, duty)).toBe(true);
+    expect(before(morning, batch)).toBe(true);
     expect(before(lessons, batch)).toBe(true);
     expect(screen.getByTestId("home-rail")).not.toContainElement(batch);
+    // Attention items moved to Needs you, Connect your assistant (owner 2026-10-28).
+    expect(screen.queryByTestId("home-due")).toBeNull();
+    expect(screen.queryByTestId("duty-status")).toBeNull();
+    expect(screen.queryByTestId("setup-card")).toBeNull();
   });
 });

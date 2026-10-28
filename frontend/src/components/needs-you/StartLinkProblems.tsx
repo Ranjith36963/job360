@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { getDutyTriggers, type DutyTrigger } from "@/lib/api";
@@ -44,10 +43,7 @@ export function StartLinkProblems() {
         ))}
       </ul>
       <p className="mt-1 text-xs text-muted-foreground">
-        Your hourly run still does the work.{" "}
-        <Link href="/connect?tab=schedules" className="underline underline-offset-2">
-          Check your start links
-        </Link>
+        Your hourly run still does the work. Check your start links below.
       </p>
     </div>
   );
