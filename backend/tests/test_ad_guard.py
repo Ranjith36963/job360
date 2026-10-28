@@ -41,18 +41,18 @@ def test_subdivision_flag_emoji_is_kept_and_not_flagged():
 
 
 def test_zero_width_inside_word_flagged_bom_at_start_not():
-    cleaned, findings = ad_guard.guard("﻿Hello ign​ore world")
+    cleaned, findings = ad_guard.guard("\ufeffHello ign\u200bore world")
     assert cleaned == "Hello ignore world"
     assert findings["invisible_flagged"] == 1
     assert findings["invisible_chars"] == {"zero_width": 1, "bom": 1}
-    _, noisy = ad_guard.guard("﻿Hello world")
+    _, noisy = ad_guard.guard("\ufeffHello world")
     assert noisy["invisible_flagged"] == 0
     assert noisy["verdict"] == "ad_guard: clean"
 
 
 def test_bidi_override_flagged():
-    cleaned, findings = ad_guard.guard("pay ‮gnirts‬ here")
-    assert "‮" not in cleaned and "‬" not in cleaned
+    cleaned, findings = ad_guard.guard("pay \u202egnirts\u202c here")
+    assert "\u202e" not in cleaned and "\u202c" not in cleaned
     assert findings["invisible_flagged"] == 1
     assert findings["verdict"].startswith("ad_guard: ⚠ 1 invisible character inside words")
 
@@ -140,8 +140,8 @@ def test_urls_listed_only_when_hidden():
 
 def test_hostile_long_input_is_linear():
     start = time.perf_counter()
-    ad_guard.guard("​" * 200_000)
-    ad_guard.guard("ab" + "​" * 100_000 + "cd")
+    ad_guard.guard("\u200b" * 200_000)
+    ad_guard.guard("ab" + "\u200b" * 100_000 + "cd")
     ad_guard.guard("word " * 10_000)
     ad_guard.guard("a" * 50_000)
     ad_guard.guard("do not " * 8_000 + "x")
