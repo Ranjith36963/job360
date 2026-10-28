@@ -337,11 +337,14 @@ _NOTES_PATH = "preferences.assistant_notes"
 _OVERLAY_ONLY_PREFERENCES: frozenset[str] = OVERLAY_ONLY_PREFERENCE_FIELDS
 
 
-def _notes_or_422(value: Any) -> list[str]:
+def _notes_or_422(value: Any, stored: list[str] | None = None) -> list[str]:
     """The notes list through the SAME validator ``update_profile`` uses, or
     a 422 naming the limit — never a silent cut."""
     try:
-        return cast(list[str], profile_edits.validate_edit(_NOTES_PATH, value if value is not None else []))
+        return cast(
+            list[str],
+            profile_edits.validate_edit(_NOTES_PATH, value if value is not None else [], stored_notes=stored),
+        )
     except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -990,10 +993,15 @@ def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> Updat
     # EVERY bad path is collected (not just the first) so one refusal can name them all and the
     # assistant fixes the whole call at once. Normalisations that fire are recorded for the reply.
     failures: list[tuple[str, profile_edits.ProfileEditError]] = []
+    stored_notes = (
+        list((load_profile(user.id) or UserProfile()).preferences.assistant_notes or [])
+        if any(p == _NOTES_PATH for p, _ in pairs)
+        else None
+    )
     with forgiving.recording() as normalized_rows:
         for path, value in pairs:
             try:
-                profile_edits.validate_edit(path, value)
+                profile_edits.validate_edit(path, value, stored_notes=stored_notes if path == _NOTES_PATH else None)
             except profile_edits.ProfileEditError as exc:
                 failures.append((path, exc))
     if failures:
@@ -1226,7 +1234,13 @@ async def keep_edit(
     # tightened since the assistant wrote this row would otherwise raise
     # after the base was already saved — a 500 with half a Keep applied.
     try:
-        profile_edits.validate_edit(path, value)
+        profile_edits.validate_edit(
+            path, value,
+            stored_notes=(
+                list((load_profile(user.id) or UserProfile()).preferences.assistant_notes or [])
+                if path == _NOTES_PATH else None
+            ),
+        )
     except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     base = load_profile(user.id, with_overlay=False)
@@ -1499,7 +1513,7 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         # validator as update_profile (length cap, count cap, control chars
         # stripped) so the web and the agent can never store different shapes.
         assistant_notes=_notes_or_422(
-            pref_dict.get("assistant_notes", existing.assistant_notes)
+            pref_dict.get("assistant_notes", existing.assistant_notes), list(existing.assistant_notes or [])
         ),
         # Owner decision 2026-10-08 — the salary per hiring country. Same
         # partial-save shape as assistant_notes: OMITTED keeps the stored
