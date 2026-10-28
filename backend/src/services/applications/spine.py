@@ -1200,7 +1200,9 @@ async def _artifact_version_count_and_max(db: JobDatabase, application_id: int, 
     return int(row[0]), int(row[1])
 
 
-async def _run_save_checks(user_id: str, kind: str, text: str) -> list[dict[str, str]]:
+async def _run_save_checks(
+    user_id: str, kind: str, text: str, jd_requirements: Optional[list[str]] = None,
+) -> list[dict[str, str]]:
     """The deterministic checks (``cv_checks``) for a CV / cover letter / outreach / answers being saved.
 
     Never raises and never blocks a save: any failure just yields fewer checks.
@@ -1240,7 +1242,10 @@ async def _run_save_checks(user_id: str, kind: str, text: str) -> list[dict[str,
                     pages = int(style_for_profile(profile).get("page", {}).get("pages") or 0) or None
                 except (TypeError, ValueError):
                     pages = None
-            checks.extend(await asyncio.to_thread(cv_checks.check_pdf, pdf, text, pages))
+            source = cv_checks.profile_source_text(profile) if profile is not None else ""
+            checks.extend(
+                await asyncio.to_thread(cv_checks.check_pdf, pdf, text, pages, jd_requirements, source)
+            )
         except Exception:  # noqa: BLE001 - a render failure must not block the save
             pass
     return checks
@@ -1278,7 +1283,16 @@ async def save_artifact(
     # Owner decision 2026-10-04 — the assistant's ATS opinion rides on THIS
     # version; a re-check is a new version, never an UPDATE of an old row.
     ats_score, ats_notes = validate_ats(kind, ats_score, ats_notes)
-    checks = await _run_save_checks(user_id, kind, text)
+    # The saved fit's requirements feed the advisory keyword_coverage check (none = silent).
+    from src.services.applications.fit_record import fit_view  # noqa: PLC0415 - fit_record imports spine
+
+    try:  # a fit that cannot be read must not block a save
+        items = (fit_view(app_row) or {}).get("jd_requirements") or []
+    except Exception:  # noqa: BLE001
+        items = []
+    # Same item shape as gaps: a plain string or {"text": ...}.
+    requirements = [str(i.get("text") or "") if isinstance(i, dict) else str(i) for i in items if i]
+    checks = await _run_save_checks(user_id, kind, text, requirements)
     checks_json = json.dumps(checks) if checks else None
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16).
