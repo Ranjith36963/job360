@@ -105,9 +105,8 @@ bar on every page, and the Permissions tab (the same switch).
 | **Memory & instructions** | How the assistant should work for the seeker, and the facts job forms ask, each From memory / Guessed / Not known (plan: [`MEMORY_AND_INSTRUCTIONS.md`](MEMORY_AND_INSTRUCTIONS.md)). |
 | **Account** | Sign-in, privacy, export and delete. |
 
-### Still to move
+### Still open
 
-- **Connect to Memory & instructions:** the standing notes ("Things your AI assistant should know", `AssistantInstructions.tsx`), decided 2026-10-28.
 - "Auto for a while" shows "up to N", not "N left": the settings view does not return how many are used.
 
 ## How a job gets in (decided 2026-10-16, the owner)
