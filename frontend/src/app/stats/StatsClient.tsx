@@ -127,6 +127,11 @@ function Funnel({ overall }: { overall: StatsResponse["overall"] }) {
           </li>
         ))}
       </ol>
+      {typeof overall.rejected === "number" && overall.rejected > 0 && (
+        <p data-testid="funnel-rejected" className="mt-4 text-[12.5px] text-muted-foreground">
+          Rejected: {overall.rejected}
+        </p>
+      )}
     </section>
   );
 }

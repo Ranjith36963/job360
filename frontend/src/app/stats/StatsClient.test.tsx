@@ -98,6 +98,12 @@ describe("StatsClient", () => {
     expect(screen.getByText(/Job360 only counts/)).toBeInTheDocument();
   });
 
+  it("keeps the rejected count under the funnel", async () => {
+    getStats.mockResolvedValue(stats());
+    render(<StatsClient />);
+    expect(await screen.findByTestId("funnel-rejected")).toHaveTextContent("Rejected: 3");
+  });
+
   it("is called Statistics, with What's working and Lessons sections", async () => {
     getStats.mockResolvedValue(stats());
     render(<StatsClient />);
