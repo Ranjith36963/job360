@@ -3,7 +3,7 @@
 `require_verified_user` is the only gate that can refuse a fully logged-in
 user, so "which routes does it cover?" is a question every verification run and
 every auth change has to answer. The answer has lived in prose:
-`.claude/skills/verify-job360/SKILL.md` told the reader to
+`.claude/skills/run-job360/SKILL.md` told the reader to
 ``grep "Depends(require_verified_user)"`` and asserted the result was
 `routes/tailor.py` alone.
 

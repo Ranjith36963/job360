@@ -1,6 +1,6 @@
 """`DELETE /api/auth/users/me` is an ERASURE, not a reversible soft-delete.
 
-Why this file exists: `.claude/skills/verify-job360/CHECKLIST.md` item 31 told
+Why this file exists: `.claude/skills/run-job360/CHECKLIST.md` item 31 told
 the nightly sweep the route "sets `deleted_at`" and to "restore after to keep
 the demo account". `routes/auth.delete_account` calls
 `repositories.database.JobDatabase.hard_delete_user`, which drops the `users`

@@ -122,43 +122,6 @@ if [ -n "$GUARD_FILES" ]; then
   done
 fi
 
-# GUARDS ARE NOT EXEMPT FROM BEING CHECKED.
-#
-# The early exit below waves through any commit that touches nothing under
-# backend/ or frontend/ — correct for docs, but it also means the hooks and
-# workflows that ENFORCE everything else commit with zero verification. Three
-# guards shipped broken on 2026-08-11 for exactly this reason: a size check that
-# swallowed its own exit code, a sed range whose anchor had been deleted, and a
-# drift rule blind to the file carrying its bug. All three were syntactically
-# valid, so this catches a narrower class — but a YAML or bash parse error in a
-# guard is silent until the loop next runs, which can be a day later.
-GUARD_FILES="$(git status --porcelain -uall -- .claude/hooks .github/workflows scripts \
-               | awk '{print $NF}')"
-if [ -n "$GUARD_FILES" ]; then
-  for f in $GUARD_FILES; do
-    [ -f "$ROOT/$f" ] || continue
-    case "$f" in
-      *.sh)
-        bash -n "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
-          echo "[commit-gate] BLOCKED: $f is not valid bash:" >&2
-          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
-        rm -f /tmp/gate-syn.$$ ;;
-      *.yml|*.yaml)
-        python -c "import sys,yaml;yaml.safe_load(open(sys.argv[1],encoding='utf-8'))" \
-          "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
-          echo "[commit-gate] BLOCKED: $f is not valid YAML:" >&2
-          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
-        rm -f /tmp/gate-syn.$$ ;;
-      *.py)
-        python -c "import sys,ast;ast.parse(open(sys.argv[1],encoding='utf-8').read())" \
-          "$ROOT/$f" 2>/tmp/gate-syn.$$ || {
-          echo "[commit-gate] BLOCKED: $f does not parse as Python:" >&2
-          cat /tmp/gate-syn.$$ >&2; rm -f /tmp/gate-syn.$$; exit 2; }
-        rm -f /tmp/gate-syn.$$ ;;
-    esac
-  done
-fi
-
 # Docs/scripts/config-only tree: no changes at all under backend/ or frontend/
 # means nothing testable is being committed — allow instantly.
 if [ -z "$(git status --porcelain -- backend frontend)" ]; then
