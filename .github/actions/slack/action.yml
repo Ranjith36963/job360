@@ -99,10 +99,10 @@ description: >-
 #   python scripts/check_workflow_slack_wiring.py --drill  (the callers are correct)
 #
 # THEN the one thing no test can prove — that the credential reaches a real
-# channel: Actions -> "Slack drill" -> Run workflow (.github/workflows/
-# slack-drill.yml). It asserts a missing token exits 1, a bad channel exits 1
-# with `channel_not_found` (which only a VALID token can produce), and then
-# sends one real message.
+# channel: the daily watchers (absence.yml, daily-digest, loop-red) post through
+# this action every day, and a dead token fails them loud. (The manual Slack
+# drill workflow that also proved it was deleted 2026-10-28, owner: the daily
+# posts already exercise it.)
 #
 
 # The body lives in post.sh precisely so it can be run WITHOUT a runner. All

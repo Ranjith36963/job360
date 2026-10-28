@@ -327,12 +327,12 @@ def drill() -> int:
         ("a backend thread -> dispatch", [th("a", "backend/src/api/routes/jobs.py")], [], 1, 1),
         ("outdated thread is not fixable", [th("a", "backend/src/a.py", outdated=True)], [], 0, 1),
         ("resolved thread is not a finding", [th("a", ".github/x.yml", resolved=True)], [], 0, 0),
-        ("clean PR (PR #703 at f89ec5f9)", [], [ck("verify", "success")], 0, 0),
+        ("clean PR (PR #703 at f89ec5f9)", [], [ck("offline-suite", "success")], 0, 0),
         ("npm audit red is main's problem (PR #666)", [], [ck("npm audit (frontend deps)", "failure")], 0, 1),
         ("reviewer ran out of turns", [], [ck("reviewer-bugs", "failure")], 0, 1),
         ("cancelled / action_required are no verdict", [],
-         [ck("verify / backend", "cancelled"), ck("verify / frontend", "action_required")], 0, 2),
-        ("a real red test IS fixable", [], [ck("verify / backend", "failure")], 1, 1),
+         [ck("offline-suite", "cancelled"), ck("frontend-e2e", "action_required")], 0, 2),
+        ("a real red test IS fixable", [], [ck("offline-suite", "failure")], 1, 1),
     ]
     for what, threads, checks, want_fix, want_raw in triage_cases:
         total += 1

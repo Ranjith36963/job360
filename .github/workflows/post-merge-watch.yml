@@ -553,8 +553,8 @@ jobs:
       # failure with a ::warning:: — the exact RESEND_API_KEY shape: a secret
       # that may never have been set, and a step that goes green either way.
       # A production rollback is the one message that must not be lost, so it
-      # now uses the bot-token action that slack-drill.yml proved live on
-      # 2026-09-11, which fails LOUD when it cannot speak.
+      # now uses the bot-token action (proved live on 2026-09-11, and posted
+      # through daily by the watchers since), which fails LOUD when it cannot speak.
       - name: "Step 6 — Slack: production was rolled back"
         if: always() && steps.decide.outputs.tripped == 'true'
         uses: ./.github/actions/slack

@@ -383,7 +383,6 @@ DENY_REASONS: dict[str, str] = {
         "scripts/agent-gate.sh",
         "backend/scripts/mypy_ratchet.py",
         ".github/workflows/auto-merge.yml",
-        ".github/workflows/verify-live.yml",
         ".github/workflows/revert-main.yml",
         ".github/workflows/post-merge-watch.yml",
         ".github/workflows/triage.yml",
@@ -1384,7 +1383,7 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
 # WHY THIS EXISTS AS A SEPARATE CAGE FROM PROOF.
 # PROOF asks "did the REQUIRED_CHECKS run and pass?" — a fixed list, the same
 # for every PR. The policy asks a different question: the PRODUCT lane requires
-# `verify`, and the HARNESS lane does not. `verify-live.yml` is NOT in the
+# `verify`, and the HARNESS lane does not. `verify` is NOT a context in the
 # repo's ruleset (measured 2026-08-24: the ruleset names 11 contexts and none of
 # them is `verify`), so GitHub will happily report a product PR as CLEAN with
 # the app never once started. PROOF would agree with GitHub. This cage is the
@@ -1405,13 +1404,13 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
     "security": ("gitleaks (secret scan)", "bandit (python static analysis)",
                  "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
                  "reviewer-security"),
-    # The eyes, AND the two ci-offline.yml jobs they defer to. Since 2026-10-19
-    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q3
-    # or Playwright when ci_scope.py says offline-suite / frontend-e2e already
-    # run them on this same tree; they record that instead. Naming those two
-    # here keeps `verify` self-contained: it is never earned by a deferral to
-    # a job that did not pass.
-    "verify": ("verify / backend", "verify / frontend", "offline-suite", "frontend-e2e"),
+    # The eyes: the two ci-offline.yml jobs that really start the app.
+    # `offline-suite` boots the backend and calls the real routes (Q1-Q3);
+    # `frontend-e2e` drives a real browser (Playwright). The old verify-live.yml
+    # jobs (`verify / backend`, `verify / frontend`) only deferred to these two
+    # and were deleted 2026-10-28 (owner); the tag name stays, because the
+    # merge-policy `requires:` lists name it.
+    "verify": ("offline-suite", "frontend-e2e"),
     "drill": ("Chain wires (harness)",),
     # The `reviewer-bugs` check (.github/workflows/review-bugs.yml) — the R3
     # bug-hunting reviewer, wired to CI 2026-09-11. Fails on any P0/P1 finding;
@@ -3531,7 +3530,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "a PR with no test-integrity verdict was machine-mergeable", ["judge_check_runs"])
 
     # ── THE TAGS CAGE ────────────────────────────────────────────────────────
-    # The PRODUCT lane requires `verify`, and `verify-live.yml` is NOT one of
+    # The PRODUCT lane requires `verify`, and `verify` is NOT one of
     # the 11 contexts in this repo's ruleset (measured 2026-08-24). So GitHub
     # will report a product PR as CLEAN with the app never once started, and
     # PROOF — which only knows REQUIRED_CHECKS — would agree with GitHub. Every
@@ -3544,13 +3543,15 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not judge_tags(_prod_req, _full),
        "the tags cage refused a PR whose every required check really passed", T)
 
-    _no_verify = [r for r in _full if not r["name"].startswith("verify")]
+    # The browser run is the eye that starts the app; drop it and the tag must refuse.
+    _no_verify = [r for r in _full if r["name"] != "frontend-e2e"]
     ok("THE HOLE: a product PR that never ran `verify` is refused",
-       any("verify" in r for r in judge_tags(_prod_req, _no_verify)),
+       any("tag `verify` needs `frontend-e2e`" in r
+           for r in judge_tags(_prod_req, _no_verify)),
        "a product change merged without the app ever being started — the one "
        "thing the product lane's speed is borrowed against", T)
 
-    _verify_skipped = [r for r in _full if not r["name"].startswith("verify")] + \
+    _verify_skipped = [r for r in _full if r["name"] not in TAG_CHECKS["verify"]] + \
         _rs([(n, "skipped") for n in TAG_CHECKS["verify"]])
     _dep_skipped = [r for r in _full if r["name"] not in DEPENDABOT_SKIPPED_REVIEWERS] + \
         _rs([(n, "skipped") for n in DEPENDABOT_SKIPPED_REVIEWERS])
@@ -3565,7 +3566,8 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
                        _rs([("CodeQL", "skipped")]), author=DEPENDABOT)),
        "Dependabot got a pass on a check that is not a designed skip", T)
     ok("...and a `verify` that SKIPPED does not earn the tag either",
-       bool(judge_tags(_prod_req, _verify_skipped)),
+       any("tag `verify`" in r and "skipped" in r
+           for r in judge_tags(_prod_req, _verify_skipped)),
        "a skipped job was allowed to prove something — a skip proves nothing, "
        "which is the entire point of a tag", T)
 
@@ -3603,10 +3605,10 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...but a `neutral` CodeQL after every Analyze job finished still refuses the tag",
        any("concluded `neutral`" in r for r in _nl), f"got {_nl}", T)
 
-    _verify_pending = [r for r in _full if not r["name"].startswith("verify")] + \
+    _verify_pending = [r for r in _full if r["name"] != TAG_CHECKS["verify"][0]] + \
         [{"name": TAG_CHECKS["verify"][0], "status": "in_progress", "conclusion": None}]
     ok("...and a `verify` still RUNNING is waited for, not counted",
-       bool(judge_tags(_prod_req, _verify_pending)),
+       any("tag `verify`" in r for r in judge_tags(_prod_req, _verify_pending)),
        "a check that had not finished was counted as finished", T)
 
     ok("the HARNESS lane does not demand `verify` it was never going to run",
@@ -3872,7 +3874,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         #
         # This one needs a richer fake than `perfect_gh`: the lane REQUIRES six
         # tags, and `TAG_CHECKS` maps those onto real check names that are not in
-        # `REQUIRED_CHECKS` (`offline-suite`, `verify / backend`, `reviewer-bugs`
+        # `REQUIRED_CHECKS` (`offline-suite`, `frontend-e2e`, `reviewer-bugs`
         # ...). Feeding the thin list would make this case fail for a reason that
         # has nothing to do with the lane — which is the whole defect class this
         # file exists to refuse, committed inside its own negative control.

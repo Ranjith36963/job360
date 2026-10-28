@@ -434,10 +434,10 @@ jobs:
     # (they set a fake session cookie + mock the API via page.route), so no backend
     # is needed — Playwright's webServer builds and starts the app itself.
     #
-    # THE ONE PLAYWRIGHT RUN PER PR. verify-live.yml `verify / frontend` ran the
-    # same `npx playwright test` again until 2026-10-19; it now defers to this
-    # job whenever this job runs the specs (scope `full` / `frontend`), and the
-    # evidence it used to keep (report + traces, 14 days) is uploaded HERE.
+    # THE ONE PLAYWRIGHT RUN PER PR. A second workflow re-ran the same
+    # `npx playwright test` until 2026-10-19, then only deferred to this job, and
+    # was deleted 2026-10-28; the evidence it used to keep (report + traces,
+    # 14 days) is uploaded HERE. merge_cage.py's `verify` tag reads this job.
     # Steps run on an explicit list of scopes: `docs` and `tested` skip them.
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -489,7 +489,7 @@ jobs:
           else
             echo "::error title=playwright::playwright did not run (an earlier step failed)"
           fi
-      # Moved here from verify-live.yml with the run itself: a green covers
+      # Moved here with the run itself (2026-10-19): a green covers
       # every spec that RAN, and this says out loud if any is quarantined.
       - name: State the coverage bound
         if: always() && (needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend')
@@ -502,10 +502,10 @@ jobs:
             echo "Spec files containing a quarantined (\`test.fixme\`) case: **$fixmes**"
             echo ""
             echo "A green run covers every spec that RAN. Any quarantined spec is"
-            echo "NOT covered by it — do not read this check (or \`verify / frontend\`,"
-            echo "which defers to it) as 'the frontend works' if the count is non-zero."
+            echo "NOT covered by it — do not read this check as 'the frontend works'"
+            echo "if the count is non-zero."
           } >> "$GITHUB_STEP_SUMMARY"
-      # The evidence `verify / frontend` used to keep: report + traces/screens,
+      # The Playwright evidence: report + traces/screens,
       # pass or fail, 14 days. (Was: report on failure only, 7 days.)
       - name: Keep the evidence (Playwright report + test results)
         if: always() && (needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend')
