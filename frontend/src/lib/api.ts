@@ -809,6 +809,9 @@ export async function listApplications(
     queued?: boolean;
     // Job priority (owner decision 2026-10-19): highest|high|medium|low|off|not_set.
     priority?: string;
+    // Owner 2026-10-28: only jobs from one source (the row's `origin`), and applied / never applied.
+    origin?: string;
+    applied?: boolean;
   } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };

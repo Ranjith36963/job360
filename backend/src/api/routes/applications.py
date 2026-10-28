@@ -2287,6 +2287,9 @@ async def list_applications(
     priority: Optional[str] = Query(None, max_length=20),
     # Gap 10 - only applications with an interview or follow-up in the range, in the user's timezone.
     agenda: Optional[str] = Query(None, max_length=20),
+    # Owner 2026-10-28 - only jobs from one source (the row's `origin`), and applied / never applied.
+    origin: Optional[str] = Query(None, max_length=20),
+    applied: Optional[bool] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -2294,7 +2297,7 @@ async def list_applications(
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,
-            agenda=agenda,
+            agenda=agenda, origin=origin, applied=applied,
         )
     except SpineError as exc:
         _raise(exc)

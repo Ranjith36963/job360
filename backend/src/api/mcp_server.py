@@ -1344,7 +1344,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
                     due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
-                    priority=priority, agenda=agenda, db=db, user=_user(),
+                    priority=priority, agenda=agenda, origin=None, applied=None, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)

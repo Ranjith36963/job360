@@ -2073,17 +2073,24 @@ async def submit_override(db: JobDatabase, user_id: str, application_id: int) ->
     return mode if mode in ("confirm", "auto_when_sure") else None
 
 
-async def origin_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, str]:
+ORIGINS: tuple[str, ...] = ("ai_hunt", "user_link", "user_paste", "your_mail", "user", "ai")
+
+
+async def origin_by_app(db: JobDatabase, user_id: str, app_ids: Optional[list[int]]) -> dict[int, str]:
     """Where each application's job came from (owner ask 2026-10-18), for the tag on every job:
     the ``origin`` its ``brought`` event carries (ai_hunt / user_link / user_paste / your_mail); without one,
-    ``user`` when the web brought it, ``ai`` when an assistant did. ONE query for the page."""
-    if not app_ids:
+    ``user`` when the web brought it, ``ai`` when an assistant did. ONE query for the page;
+    ``app_ids`` None = every application of the user (the list's ``origin`` filter)."""
+    if app_ids is not None and not app_ids:
         return {}
-    marks = ",".join("?" for _ in app_ids)
+    in_sql, in_params = "", []
+    if app_ids is not None:
+        in_sql = f" AND application_id IN ({','.join('?' for _ in app_ids)})"
+        in_params = list(app_ids)
     cur = await db._db.execute(
         f"SELECT application_id, payload, recorded_by FROM application_events "  # noqa: S608 - placeholders only
-        f"WHERE user_id = ? AND event_type = 'brought' AND application_id IN ({marks}) ORDER BY id",
-        [user_id, *app_ids],
+        f"WHERE user_id = ? AND event_type = 'brought'{in_sql} ORDER BY id",
+        [user_id, *in_params],
     )
     from src.services.profile import edits as profile_edits  # noqa: PLC0415
 
@@ -2553,6 +2560,8 @@ async def list_applications(
     queued: bool = False,
     priority: Optional[str] = None,
     agenda: Optional[str] = None,
+    origin: Optional[str] = None,
+    applied: Optional[bool] = None,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
@@ -2581,6 +2590,11 @@ async def list_applications(
 
     ``agenda`` (``today`` | ``tomorrow`` | ``week``) - only open applications with a live interview
     or a ``follow_up_on`` inside that range, in the CALLER's own timezone (``agenda.py``).
+
+    ``origin`` (owner 2026-10-28: "I need to be able to choose mail jobs") - only applications whose
+    job came from that source (:data:`ORIGINS`, the row's ``origin``). ``applied`` - true: only
+    applications with an ``applied`` event; false: only ones never applied to (the record of jobs
+    not sent, each with its fit verdict as the reason).
     """
     from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
     from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
@@ -2609,6 +2623,8 @@ async def list_applications(
 
     if agenda is not None and agenda not in AGENDA_RANGES:
         raise SpineError(422, f"agenda must be one of: {', '.join(AGENDA_RANGES)}")
+    if origin is not None and origin not in ORIGINS:
+        raise SpineError(422, f"origin must be one of: {', '.join(ORIGINS)}")
 
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
@@ -2661,6 +2677,17 @@ async def list_applications(
         p_sql, p_params = job_priority.filter_sql(rtw, priority)
         where.append(p_sql)
         params.extend(p_params)
+    if origin is not None:
+        from_origin = [a for a, o in (await origin_by_app(db, user_id, None)).items() if o == origin]
+        if from_origin:
+            where.append(f"id IN ({','.join('?' for _ in from_origin)})")
+            params.extend(from_origin)
+        else:
+            where.append("1 = 0")
+    if applied is not None:
+        sent = "SELECT application_id FROM application_events WHERE user_id = ? AND event_type = 'applied'"
+        where.append(f"id IN ({sent})" if applied else f"id NOT IN ({sent})")  # noqa: S608 - constant SQL
+        params.append(user_id)
     # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
     # Two queries for the page (events, then the status of the queued ids), never N+1.
     queue_order: list[int] = []

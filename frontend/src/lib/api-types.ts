@@ -10537,6 +10537,8 @@ export interface operations {
                 queued?: boolean;
                 priority?: string | null;
                 agenda?: string | null;
+                origin?: string | null;
+                applied?: boolean | null;
             };
             header?: {
                 authorization?: string | null;

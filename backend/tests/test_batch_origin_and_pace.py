@@ -106,6 +106,26 @@ async def test_a_job_from_the_users_mail_is_tagged_your_mail_and_starts_the_batc
 
 
 @pytest.mark.asyncio
+async def test_the_list_filters_by_source_and_by_applied(authenticated_async_context, fixture_user_id):
+    """Owner 2026-10-28: "I need to be able to choose mail jobs ... applied, not applied" - the mail jobs
+    the assistant did not send stay on record, each with its fit verdict as the reason."""
+    async with authenticated_async_context() as client:
+        sent = await _bring(client, _ad(1, origin="your_mail"))
+        kept = await _bring(client, _ad(2, company="Contoso", origin="your_mail"))
+        hunted = await _bring(client, _ad(3, company="Initech", origin="ai_hunt"))
+        resp = await client.post(f"/api/applications/{sent['application_id']}/events", json={"event_type": "applied"})
+        assert resp.status_code == 201, resp.text
+        mail = await _rows(client, origin="your_mail")
+        assert set(mail) == {sent["application_id"], kept["application_id"]}
+        assert set(await _rows(client, origin="your_mail", applied="false")) == {kept["application_id"]}
+        assert set(await _rows(client, origin="your_mail", applied="true")) == {sent["application_id"]}
+        assert set(await _rows(client, origin="ai_hunt")) == {hunted["application_id"]}
+        assert set(await _rows(client, applied="false")) == {kept["application_id"], hunted["application_id"]}
+        bad = await client.get("/api/applications", params={"origin": "scraped"})
+        assert bad.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_a_closed_application_is_not_queued_by_a_bring(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         first = await _bring(client, _ad(1))

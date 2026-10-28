@@ -9,7 +9,7 @@ import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { PRIORITY_LABEL, PRIORITY_OPTIONS } from "@/lib/memory";
-import { filterByBrowser, originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import { ORIGIN_LABEL, filterByBrowser, originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
 import type { QueueBrowserFilter, QueueSummary } from "@/lib/batch-queue";
 import { QueueBrowserChip, QueueBrowserFilterRow } from "@/components/needs-you/QueueBrowser";
 
@@ -240,6 +240,10 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   const [inFlight, setInFlight] = useState(false);
   // Job priority filter — asks the server (`priority=`): "all" sends nothing.
   const [priority, setPriority] = useState<string>("all");
+  // Owner 2026-10-28: where the job came from (Your mail, AI hunt...) and applied / not applied. Server-side,
+  // like priority, so a source with hundreds of jobs is filtered across all of them, not one page.
+  const [origin, setOrigin] = useState<string>("all");
+  const [applied, setApplied] = useState<"all" | "yes" | "no">("all");
   // Batch queue: server-side too (`queued=true` gives queue order, preflight and the summary).
   const [queuedOnly, setQueuedOnly] = useState(false);
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
@@ -254,6 +258,8 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       limit,
       ...(queuedOnly ? { queued: true } : inFlight ? { in_flight: true } : {}),
       ...(priority !== "all" ? { priority } : {}),
+      ...(origin !== "all" ? { origin } : {}),
+      ...(applied !== "all" ? { applied: applied === "yes" } : {}),
     })
       .then((res) => {
         if (cancelled) return;
@@ -270,7 +276,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return () => {
       cancelled = true;
     };
-  }, [limit, inFlight, queuedOnly, priority]);
+  }, [limit, inFlight, queuedOnly, priority, origin, applied]);
 
   // Browser-side only — one chip per status actually present in this list,
   // plus "All". Counts move with the data; there is no server-side facet
@@ -305,7 +311,8 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return <p className="text-sm text-muted-foreground">Loading your applications…</p>;
   }
 
-  if (applications.length === 0 && !inFlight && !queuedOnly && priority === "all") {
+  const narrowed = priority !== "all" || origin !== "all" || applied !== "all";
+  if (applications.length === 0 && !inFlight && !queuedOnly && !narrowed) {
     return (
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
@@ -418,6 +425,39 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             <option value="not_set">Not set</option>
           </select>
         </label>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Source:
+          <select
+            data-testid="origin-filter"
+            value={origin}
+            onChange={(e) => {
+              setSwitching(true);
+              setOrigin(e.target.value);
+            }}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="all">All</option>
+            {Object.entries(ORIGIN_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Applied:
+          <select
+            data-testid="applied-filter"
+            value={applied}
+            onChange={(e) => {
+              setSwitching(true);
+              setApplied(e.target.value as "all" | "yes" | "no");
+            }}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="all">All</option>
+            <option value="yes">Applied</option>
+            <option value="no">Not applied</option>
+          </select>
+        </label>
       </div>
 
       {queuedOnly && queueSummaryLine(queueSummary) && (
@@ -443,8 +483,8 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             ? "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt."
             : inFlight
               ? "Nothing is in flight right now."
-              : priority !== "all"
-                ? "No applications with this priority."
+              : narrowed
+                ? "No applications match these filters."
                 : "No applications with this status."}
         </p>
       ) : (
