@@ -106,15 +106,15 @@ beforeEach(() => {
 });
 
 describe("Home", () => {
-  it("shows the sentence, the ledger and the right pane", async () => {
+  it("shows the sentence and the Activity feed", async () => {
     happy({ asks: [ask(1), ask(2)] });
     render(<Home />);
     const h1 = await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
     expect(h1).toHaveTextContent("Your assistant (Claude) wrote 1 record since you were last here. Two things need you.");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.queryByTestId("home-apps")).toBeNull();
-    expect(await screen.findByTestId("home-counts")).toHaveTextContent("jobs brought");
-    expect(screen.getByTestId("home-feed")).toHaveTextContent("Document saved");
+    expect(await screen.findByTestId("home-feed")).toHaveTextContent("Document saved");
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Jobs in" })).toHaveAttribute("href", "/bring");
   });
 
@@ -165,17 +165,17 @@ describe("Home", () => {
     expect(screen.queryByRole("link", { name: "See all" })).toBeNull();
   });
 
-  it("brand-new user: heading and connect steps, no sentence, no ledger, no rail", async () => {
+  it("brand-new user: heading and connect steps, no sentence, no ledger, no feed", async () => {
     api.whatsNew.mockResolvedValue(whatsNewOk([]));
     api.getStats.mockResolvedValue({ overall: { brought: 0, applied: 0, replied: 0, interview: 0 } });
     api.listApplications.mockResolvedValue({ applications: [], total: 0 });
     api.listAsks.mockResolvedValue({ asks: [], open_count: 0 });
     render(<Home />);
     expect(await screen.findByTestId("home-welcome")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Progress dashboard" })).toBeInTheDocument();
     expect(screen.getByText(/^Step 1/)).toBeInTheDocument();
     expect(screen.queryByText(/Nothing new since/)).toBeNull();
-    expect(screen.queryByTestId("home-rail")).toBeNull();
+    expect(screen.queryByTestId("home-feed")).toBeNull();
     expect(screen.queryByTestId("home-apps")).toBeNull();
   });
 
@@ -197,13 +197,14 @@ describe("Home", () => {
     expect(screen.getByTestId("home-feed").querySelectorAll("li")).toHaveLength(2);
   });
 
-  it("a failed right-pane call shows nothing; the rest still renders", async () => {
+  it("a failed whats-new call hides Activity; the rest still renders", async () => {
     happy();
-    api.getStats.mockRejectedValue(new Error("boom"));
+    api.whatsNew.mockRejectedValue(new Error("boom"));
     render(<Home />);
-    expect(await screen.findByTestId("home-feed")).toBeInTheDocument();
-    expect(screen.queryByTestId("home-counts")).toBeNull();
-    expect(screen.getByTestId("home-feed")).toBeInTheDocument();
+    expect(await screen.findByTestId("morning-check")).toBeInTheDocument();
+    await waitFor(() => expect(api.whatsNew).toHaveBeenCalled());
+    expect(screen.queryByTestId("home-feed")).toBeNull();
+    expect(screen.getByTestId("batch-apply-panel")).toBeInTheDocument();
   });
 
   it("a failed ledger shows an error with a retry", async () => {
@@ -223,31 +224,39 @@ describe("Home", () => {
   });
 });
 
-describe("Home lessons", () => {
-  it("shows the Lessons section on Home (moved from Profile)", async () => {
-    api.listLessons.mockResolvedValue({
-      lessons: [{ application_id: 8282, detail: "Ask about sponsorship first.", job_title: "AI Engineer", job_company: "Acme", occurred_at: "2026-10-18T10:00:00+00:00" }],
-      total: 1,
-    });
-    render(<Home />);
-    expect(await screen.findByText("Ask about sponsorship first.")).toBeInTheDocument();
-    expect(api.listLessons).toHaveBeenCalled();
-  });
-});
-
-describe("Home: moved from Needs you (owner, 2026-10-26)", () => {
-  it("puts MorningCheck above Lessons, and Batch apply below Lessons", async () => {
+describe("Progress dashboard: now and recent only (owner, 2026-10-28)", () => {
+  it("carries no counts and no lessons: they live on Statistics", async () => {
     happy();
-    api.listLessons.mockResolvedValue({ lessons: [], total: 0 });
     render(<Home />);
-    const morning = await screen.findByTestId("morning-check");
+    await screen.findByTestId("home-feed");
+    expect(screen.queryByTestId("home-counts")).toBeNull();
+    expect(screen.queryByText("Your hunt, in counts")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Lessons" })).toBeNull();
+    expect(api.getStats).not.toHaveBeenCalled();
+    expect(api.listLessons).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("home-rail")).toBeNull();
+  });
+
+  it("orders header, Right now, Next up, Activity, then the statistics link", async () => {
+    happy();
+    render(<Home />);
+    const sentence = await screen.findByTestId("home-sentence");
+    const now = screen.getByRole("heading", { name: "Right now" });
+    const morning = screen.getByTestId("morning-check");
+    const next = screen.getByRole("heading", { name: "Next up" });
     const batch = screen.getByTestId("batch-apply-panel");
-    const lessons = await screen.findByRole("heading", { name: "Lessons" });
+    const activity = await screen.findByRole("heading", { name: "Activity" });
+    const link = screen.getByRole("link", { name: /See your statistics/ });
+    const order = [sentence, now, morning, next, batch, activity, link];
     const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(before(morning, batch)).toBe(true);
-    expect(before(lessons, batch)).toBe(true);
-    expect(screen.getByTestId("home-rail")).not.toContainElement(batch);
-    // Attention items moved to Needs you, Connect your assistant (owner 2026-10-28).
+    order.slice(1).forEach((el, i) => expect(before(order[i], el)).toBe(true));
+    expect(link).toHaveAttribute("href", "/stats");
+  });
+
+  it("Attention items stay on Needs you and Connect your assistant", async () => {
+    happy();
+    render(<Home />);
+    await screen.findByTestId("home-feed");
     expect(screen.queryByTestId("home-due")).toBeNull();
     expect(screen.queryByTestId("duty-status")).toBeNull();
     expect(screen.queryByTestId("setup-card")).toBeNull();

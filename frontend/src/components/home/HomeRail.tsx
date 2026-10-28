@@ -1,47 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import type { StatsResponse } from "@/lib/api";
 import { formatFeedTime } from "@/lib/home";
 import type { FeedItem } from "@/lib/home";
 
-// The right pane. Every block hides itself when it has nothing to say (owner
+// The Activity block. It hides itself when it has nothing to say (owner
 // rule #29: empty stays silent) and a block whose call failed is simply not
 // passed in — it never breaks the page. Every string here came from the API,
 // so it is only ever rendered as a React text node.
-
-const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
-
-export function CountsBlock({ overall }: { overall: StatsResponse["overall"] }) {
-  const items: [number, string][] = [
-    [overall.brought, "jobs brought"],
-    [overall.applied, "applied"],
-    [overall.replied, "replies"],
-    [overall.interview, "interviews"],
-  ];
-  return (
-    <section aria-labelledby="home-counts" data-testid="home-counts">
-      <h2 id="home-counts" className={`${LABEL} mb-3.5`}>
-        Your hunt, in counts
-      </h2>
-      <ul className="grid grid-cols-2 gap-x-3 gap-y-4">
-        {items.map(([n, label]) => (
-          <li key={label}>
-            <span className="block font-heading text-4xl leading-none">{n}</span>
-            <span className="mt-1 block text-[12.5px] text-muted-foreground">{label}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
 
 export function FeedBlock({ items }: { items: FeedItem[] }) {
   if (items.length === 0) return null;
   return (
     <section aria-labelledby="home-feed" data-testid="home-feed">
-      <h2 id="home-feed" className={`${LABEL} mb-3`}>
-        What your assistant did
+      <h2 id="home-feed" className="mb-4 font-heading text-xl font-normal">
+        Activity
       </h2>
       <ul>
         {items.map((it) => (
