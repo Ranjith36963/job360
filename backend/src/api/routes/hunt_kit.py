@@ -71,9 +71,17 @@ KIT_FILES: dict[str, str] = {
     "kit_niche.py": "text/plain; charset=utf-8",
     "kit_places.py": "text/plain; charset=utf-8",
     "kit_xml.py": "text/plain; charset=utf-8",
+    "kit_guard.py": "text/plain; charset=utf-8",
     "companies.json": "application/json",
     "places.json": "application/json",
     "NOTICE.md": "text/markdown; charset=utf-8",
+}
+
+# Served names whose bytes come from another folder. ``kit_guard.py`` is the
+# server's own ``services/ad_guard.py`` (standard library only): the kit
+# downloads the server's module, so the server never imports the kit.
+_SOURCES: dict[str, Path] = {
+    "kit_guard.py": Path(__file__).resolve().parents[2] / "services" / "ad_guard.py",
 }
 
 _HEADERS = {
@@ -98,7 +106,7 @@ class KitIndex(BaseModel):
 @cache
 def _read(name: str) -> bytes:
     """One kit file's bytes (cached: the files only change with a deploy)."""
-    return (HUNT_KIT_DIR / name).read_bytes()
+    return _SOURCES.get(name, HUNT_KIT_DIR / name).read_bytes()
 
 
 @router.get("/hunt-kit", response_model=KitIndex)
