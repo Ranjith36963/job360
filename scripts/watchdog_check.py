@@ -120,16 +120,11 @@ EXPECTED: dict[str, tuple[float, str]] = {
     # from). Not exceeding its 32-day budget; left alone for lack of evidence
     # either way, not because it was re-confirmed generous.
     "revert-main.yml": (32 * 24, "monthly, 1st 06:00"),
-    # Added 2026-10-03: both gained a cron on 2026-10-02 (#682, #708) and were
-    # flagged as roster drift by issue #702. Not yet measured — budgets copy
-    # the same-cadence entries above. claude-md-apply.yml first fires Monday
-    # 2026-10-05; until then SCHEDULE_SINCE makes it "not due yet", not STOPPED.
+    # Added 2026-10-03: it gained a cron on 2026-10-02 (#708) and was flagged
+    # as roster drift by issue #702. Not yet measured — budget copies the
+    # same-cadence entries above. (claude-md-apply.yml, added with it, and
+    # nightly-audit.yml were deleted 2026-10-28, owner's call.)
     "daily-digest.yml": (36, "daily 07:45"),
-    "claude-md-apply.yml": (9 * 24, "weekly Mon 06:30"),
-    # Added 2026-10-23 with the file itself (a new file, so its created_at is
-    # its schedule start and it needs no SCHEDULE_SINCE). Not yet measured;
-    # budget copies the other daily entries.
-    "nightly-audit.yml": (36, "daily 03:23"),
     # ci.yml is event-triggered only — silence is normal, so it is
     # deliberately NOT watched here. Watching it would produce a permanent
     # false alarm, and a permanent alarm is how a loop dies.
@@ -142,11 +137,8 @@ EXPECTED: dict[str, tuple[float, str]] = {
 # caused it, not by a nightly bot), so a quiet weekend with no PRs is normal
 # silence, not a stopped watcher. Watching it here would fire "STOPPED" every
 # quiet weekend — a permanent false alarm.
-# branch-reaper.yml moved here 2026-09-10 (slice 2): it dropped its weekly
-# cron for a push-to-main trigger, so it runs exactly when a merge lands and
-# is silent otherwise. Its drill still fires on every PR via ci.yml.
 NOT_SCHEDULED: set[str] = {
-    "ci.yml", "pr-repair.yml", "triage.yml", "doc-sync.yml", "branch-reaper.yml",
+    "ci.yml", "pr-repair.yml", "triage.yml", "doc-sync.yml",
 }
 
 # Not scheduled, so never STOPPED — but its conclusion on main IS the health of
@@ -187,7 +179,7 @@ def assess(runs: list[dict], now: datetime, max_h: float | None, workflow: str,
     if not runs:
         # NOT DUE YET IS NOT STOPPED (2026-10-03). A weekly cron added on a
         # Friday has no run until Monday; calling it STOPPED for those days is a
-        # false alarm on every new loop (claude-md-apply.yml, issue #702). Only
+        # false alarm on every new loop (issue #702). Only
         # a workflow older than its own budget with no run has really stopped.
         if max_h is not None and born_h is not None and born_h <= max_h:
             return Verdict(workflow, cadence, None, stopped=False, red=False, streak=0,
@@ -287,7 +279,6 @@ def recent_runs(workflow: str, branch: str | None = None) -> list[dict] | str:
 # EXPECTED entry, add its merge time here. Only read while it has NO runs, so a
 # stale entry is harmless; no entry keeps the old verdict (never ran = STOPPED).
 SCHEDULE_SINCE: dict[str, str] = {
-    "claude-md-apply.yml": "2026-10-02T11:47:10+00:00",  # #682
     "daily-digest.yml": "2026-10-02T20:35:53+00:00",  # #708
 }
 
@@ -339,13 +330,16 @@ def _drill() -> int:
     check("unrecorded schedule start gives no grace", workflow_age_h("x.yml", now), None)
     v = assess([], now, 216, "x.yml", "weekly", born_h=workflow_age_h("x.yml", now))
     check("...so never ran with no record IS stopped", v.stopped, True)
-    # Every EXPECTED entry added with a new cron must carry its start; the two
-    # added together on 2026-10-02 must both be recorded (reviewer-bugs #720).
-    check("both 2026-10-02 crons record their start",
-          {"claude-md-apply.yml", "daily-digest.yml"} <= set(SCHEDULE_SINCE), True)
-    since = datetime.fromisoformat(SCHEDULE_SINCE["claude-md-apply.yml"])
+    # Every EXPECTED entry added with a new cron must carry its start
+    # (reviewer-bugs #720); daily-digest.yml is the 2026-10-02 cron still
+    # watched (claude-md-apply.yml, recorded with it, was deleted 2026-10-28).
+    check("the 2026-10-02 cron records its start",
+          {"daily-digest.yml"} <= set(SCHEDULE_SINCE), True)
+    check("every recorded start is a watched workflow",
+          set(SCHEDULE_SINCE) <= set(EXPECTED), True)
+    since = datetime.fromisoformat(SCHEDULE_SINCE["daily-digest.yml"])
     check("recorded start is measured from that start",
-          round(workflow_age_h("claude-md-apply.yml", since) or 0, 3), 0.0)
+          round(workflow_age_h("daily-digest.yml", since) or 0, 3), 0.0)
 
     # RED — the new question.
     v = assess([run(1, "failure"), run(7, "failure"), run(13, "success")], now, 14, "x.yml", "6h")
