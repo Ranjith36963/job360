@@ -42,20 +42,13 @@ import {
   settingAutoEmails,
   settingOutreachSend,
   settingScore,
-  settingSwitch,
 } from "@/lib/assistant-tab";
 import type { ChangeRow, HistRow } from "@/lib/assistant-tab";
-import {
-  ALWAYS_ASKS,
-  LINE_SWITCH_LABEL,
-  batchEdits,
-  batchOn,
-  belowText,
-  quotaText,
-  scoreLineText,
-} from "@/lib/morning-check";
+import { ALWAYS_ASKS, LINE_SWITCH_LABEL, belowText, quotaText, scoreLineText } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
-import { BatchRuleRows, LABEL, NUMBOX, Row } from "./BatchRuleRows";
+import { PauseButton } from "@/components/layout/TopBar";
+import { SettingRequestCard } from "@/components/needs-you/SettingRequestCard";
+import { APPLY_MODES, BatchRuleRows, LABEL, NUMBOX, Row, modeOf } from "./BatchRuleRows";
 
 const Section = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
   <section className="flex flex-col">
@@ -67,52 +60,14 @@ const Section = ({ title, hint, children }: { title: string; hint?: string; chil
   </section>
 );
 
-function Option({
-  id,
-  title,
-  sub,
-  on,
-  disabled,
-  onPick,
-}: {
-  id: string;
-  title: string;
-  sub: string;
-  on: boolean;
-  disabled: boolean;
-  onPick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={on}
-      data-testid={id}
-      disabled={disabled}
-      onClick={onPick}
-      className={cn(
-        "flex min-h-11 items-start gap-2.5 rounded-xl border bg-card px-3.5 py-3 text-left transition-colors hover:bg-muted disabled:opacity-60",
-        on ? "border-brand shadow-[0_0_0_1px_var(--brand)]" : "border-border",
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn("mt-1 h-3.5 w-3.5 flex-none rounded-full border-[1.5px]", on ? "border-brand bg-primary" : "border-faint")}
-      />
-      <span>
-        <span className="block font-medium">{title}</span>
-        <span className="block text-[12.5px] text-muted-foreground">{sub}</span>
-      </span>
-    </button>
-  );
-}
-
 const eff = (f: { effective?: unknown; value?: unknown } | undefined) => f?.effective ?? f?.value;
 
-/** Profile -> Assistant: the score line, how it submits, its limits
- *  and inbox, the hard stops that cannot change, and every change with Take back.
+/** Connect your assistant, two tabs (owner 2026-10-28: every permission in ONE place).
+ *  "permissions": the assistant's requests to change a setting, Pause, the score line and how it
+ *  applies, the limits, sending in your name, the Gmail check and the hard stops.
+ *  "configure": the fine-tuning (wait, job hunt, people hunt, PC-on time) and History with Take back.
  *  Every control is a PATCH as the web user and applies at once. */
-export function AssistantTab() {
+export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const [view, setView] = useState<AssistantSettingsView | null>(null);
   const [rows, setRows] = useState<ChangeRow[]>([]);
   const [today, setToday] = useState<MorningCheck | null>(null);
@@ -226,12 +181,10 @@ export function AssistantTab() {
   }
   if (!view) return <p className="pt-6 text-sm text-muted-foreground">Loading…</p>;
 
-  const aboveLine = settingSwitch(view.above_line);
   const belowLine = String(eff(view.below_line) || "ask");
   const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const outreachSend = settingOutreachSend(view.outreach_send);
-  const submit_mode = String(eff(view.submit_mode) ?? "confirm");
-  const batch = batchOn(aboveLine, submit_mode);
+  const applyMode = APPLY_MODES.find((m) => m.value === modeOf(view))?.title ?? "";
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
   const savedScore: number | null = settingScore(view.apply_min_score);
@@ -250,7 +203,6 @@ export function AssistantTab() {
     }
     void save(P_PC_ON, { days: pcDays, from: pcFrom, to: pcTo });
   }
-  const liveState = { apply_min_score: savedScore, above_line: aboveLine, below_line: belowLine, submit_mode };
   function commitScore() {
     const t = score.trim();
     if (t === "") {
@@ -297,9 +249,31 @@ export function AssistantTab() {
     commit();
   };
 
+  const perms = part === "permissions";
   return (
     <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="flex min-w-0 flex-col gap-8" data-testid="assistant-tab">
+        {perms && view.waiting.length > 0 && (
+          <Section title="Your assistant asks to change" hint="Nothing changes until you confirm.">
+            <ul className="flex flex-col gap-3" data-testid="permission-requests">
+              {view.waiting.map((r) => (
+                <SettingRequestCard
+                  key={r.id}
+                  request={{ ...r, current_score_line: savedScore, grant_queue: view.auto_grant_scope?.queue ?? null }}
+                  onChanged={load}
+                />
+              ))}
+            </ul>
+          </Section>
+        )}
+        {perms && (
+          <Section title="Pause">
+            <Row title="Pause your assistant" sub="Stops every application and every send at once. The same switch as the top bar.">
+              <PauseButton />
+            </Row>
+          </Section>
+        )}
+        {perms && (
         <Section title="Your score line" hint="Your assistant scores each job. You choose what happens on each side of your line.">
           <Row title="Score line" sub="A whole number from 0 to 100. It is yours; nothing is set for you.">
             <input
@@ -326,81 +300,27 @@ export function AssistantTab() {
               </span>
             )}
           </Row>
-          {/* Owner decision 2026-10-19: ONE switch. On = apply on its own to every job at or
-              above the line; off = ask first. Jobs below the line are dropped. */}
-          <div role="radiogroup" aria-label="Batch auto apply" className="grid gap-2 pt-3 md:grid-cols-2">
-            {([false, true] as const).map((on) => (
-              <Option
-                key={String(on)}
-                id={`batch-${on ? "on" : "off"}`}
-                title={on ? "Batch auto apply: on" : "Batch auto apply: off"}
-                sub={
-                  on
-                    ? "Your assistant applies on its own to every job at or above your score line."
-                    : "Your assistant asks you before each application."
-                }
-                on={batch === on}
-                disabled={busy}
-                onPick={() => {
-                  const edits = batchEdits(liveState, { scoreValue: savedScore, batch: on });
-                  if (edits.length) void saveMany(edits);
-                }}
-              />
-            ))}
-          </div>
+          {/* One control writes submit_mode (owner 2026-10-28): the old Batch auto apply switch is folded in. */}
+          <BatchRuleRows part="apply" view={view} busy={busy} save={save} saveMany={saveMany} />
           <p data-testid="below-line-rule" className="pt-2 text-[12.5px] text-muted-foreground">
             {belowLine === "skip"
               ? "Jobs below your score line are dropped — never applied to."
-              : `${belowText(belowLine)}. Choosing either option above drops them from now on.`}
+              : `${belowText(belowLine)}. Choosing Ask me each time or Straight away drops them from now on.`}
           </p>
           <p data-testid="always-asks" className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
             {ALWAYS_ASKS}
           </p>
         </Section>
+        )}
 
-        <Section title="Limits & inbox">
-          <BatchRuleRows view={view} busy={busy} save={save} saveMany={saveMany} />
-          <Row title="Gmail check" sub="Your assistant reads your inbox and records replies.">
-            <div role="radiogroup" aria-label="Gmail check" className="inline-flex overflow-hidden rounded-lg border border-border">
-              {INBOX_MODES.map((m, i) => (
-                <button
-                  key={m.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={inbox === m.value}
-                  data-testid={`inbox-${m.value}`}
-                  disabled={busy}
-                  onClick={() => inbox !== m.value && void save(P_INBOX, m.value)}
-                  className={cn(
-                    "min-h-11 px-3.5 text-sm font-medium md:min-h-9",
-                    i > 0 && "border-l border-border",
-                    inbox === m.value ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              every
-              <select
-                aria-label="Check every"
-                data-testid="check-every"
-                value={every}
-                disabled={busy}
-                onChange={(e) => void save(P_EVERY, e.target.value === "" ? null : e.target.value)}
-                className="min-h-11 rounded-lg border border-border bg-card px-2 font-mono text-sm md:min-h-9"
-              >
-                <option value="">-</option>
-                {CHECK_EVERY.map((h) => (
-                  <option key={h} value={h}>
-                    {h.replace("h", "")}
-                  </option>
-                ))}
-              </select>
-              {every === "1h" ? "hour" : "hours"}
-            </label>
-          </Row>
+        {perms && (
+          <Section title="Limits">
+            <BatchRuleRows part="limits" view={view} busy={busy} save={save} saveMany={saveMany} />
+          </Section>
+        )}
+        {!perms && (
+        <Section title="Fine-tuning">
+          <BatchRuleRows part="pace" view={view} busy={busy} save={save} saveMany={saveMany} />
           <Row
             title="Job hunt"
             sub="Your assistant looks for new jobs on a schedule you set, from its own task. Blank = off."
@@ -451,7 +371,9 @@ export function AssistantTab() {
             )}
           </Row>
         </Section>
+        )}
 
+        {!perms && (
         <Section title="Your own browser" hint="Job360's browser goes first">
           <Row title="My PC-on time" sub={PC_ON_HELP}>
             <div className="flex flex-wrap items-center gap-2" data-testid="pc-on-row">
@@ -523,57 +445,10 @@ export function AssistantTab() {
             </div>
           </Row>
         </Section>
+        )}
 
-        <Section title="Employer emails" hint="Sent in your name by your assistant">
-          <Row title="Automatic employer emails" sub={AUTO_EMAILS_HELP}>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoEmails}
-              aria-label="Automatic employer emails"
-              data-testid="auto-employer-emails-toggle"
-              disabled={busy}
-              onClick={() => {
-                if (autoEmails) {
-                  setConfirmAuto(false);
-                  void save(P_AUTO_EMAILS, false); // the stop switch applies at once
-                } else {
-                  setConfirmAuto(true);
-                }
-              }}
-              className={cn(
-                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
-                autoEmails ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
-              )}
-            >
-              {autoEmails ? "On" : "Off"}
-            </button>
-            {confirmAuto && !autoEmails && (
-              <span className="flex items-center gap-2 text-[13px]">
-                Let your assistant email employers in your name?
-                <button
-                  type="button"
-                  data-testid="auto-employer-emails-confirm"
-                  disabled={busy}
-                  onClick={() => {
-                    setConfirmAuto(false);
-                    void save(P_AUTO_EMAILS, true);
-                  }}
-                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
-                >
-                  Confirm
-                </button>
-                <button
-                  type="button"
-                  data-testid="auto-employer-emails-cancel"
-                  onClick={() => setConfirmAuto(false)}
-                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
-                >
-                  Cancel
-                </button>
-              </span>
-            )}
-          </Row>
+        {perms && (
+        <Section title="Sending in your name" hint="Sent in your name by your assistant">
           <Row title="Automatic outreach emails" sub={OUTREACH_SEND_HELP}>
             <button
               type="button"
@@ -623,8 +498,100 @@ export function AssistantTab() {
               </span>
             )}
           </Row>
+          <Row title="Automatic employer emails" sub={AUTO_EMAILS_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoEmails}
+              aria-label="Automatic employer emails"
+              data-testid="auto-employer-emails-toggle"
+              disabled={busy}
+              onClick={() => {
+                if (autoEmails) {
+                  setConfirmAuto(false);
+                  void save(P_AUTO_EMAILS, false); // the stop switch applies at once
+                } else {
+                  setConfirmAuto(true);
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                autoEmails ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {autoEmails ? "On" : "Off"}
+            </button>
+            {confirmAuto && !autoEmails && (
+              <span className="flex items-center gap-2 text-[13px]">
+                Let your assistant email employers in your name?
+                <button
+                  type="button"
+                  data-testid="auto-employer-emails-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmAuto(false);
+                    void save(P_AUTO_EMAILS, true);
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  data-testid="auto-employer-emails-cancel"
+                  onClick={() => setConfirmAuto(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
+          <Row title="Gmail check" sub="Your assistant reads your inbox and records replies.">
+            <div role="radiogroup" aria-label="Gmail check" className="inline-flex overflow-hidden rounded-lg border border-border">
+              {INBOX_MODES.map((m, i) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={inbox === m.value}
+                  data-testid={`inbox-${m.value}`}
+                  disabled={busy}
+                  onClick={() => inbox !== m.value && void save(P_INBOX, m.value)}
+                  className={cn(
+                    "min-h-11 px-3.5 text-sm font-medium md:min-h-9",
+                    i > 0 && "border-l border-border",
+                    inbox === m.value ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+              every
+              <select
+                aria-label="Check every"
+                data-testid="check-every"
+                value={every}
+                disabled={busy}
+                onChange={(e) => void save(P_EVERY, e.target.value === "" ? null : e.target.value)}
+                className="min-h-11 rounded-lg border border-border bg-card px-2 font-mono text-sm md:min-h-9"
+              >
+                <option value="">-</option>
+                {CHECK_EVERY.map((h) => (
+                  <option key={h} value={h}>
+                    {h.replace("h", "")}
+                  </option>
+                ))}
+              </select>
+              {every === "1h" ? "hour" : "hours"}
+            </label>
+          </Row>
         </Section>
+        )}
 
+        {perms && (
         <Section title="Hard stops" hint="Always on. Cannot be switched off.">
           {HARD_STOPS.map((t) => (
             <div key={t} data-testid="hard-stop" className="flex items-baseline gap-2.5 border-t border-border py-2.5 text-[13.5px]">
@@ -633,7 +600,9 @@ export function AssistantTab() {
             </div>
           ))}
         </Section>
+        )}
 
+        {!perms && (
         <Section title="History" hint="Every change, newest first">
           {rows.length === 0 && <p className="border-t border-border py-3 text-sm text-faint">No changes yet</p>}
           {rows.map((r) => (
@@ -662,6 +631,7 @@ export function AssistantTab() {
             </div>
           ))}
         </Section>
+        )}
       </div>
 
       <aside className="flex flex-col gap-6" data-testid="assistant-rail">
@@ -671,7 +641,7 @@ export function AssistantTab() {
             {(
               [
                 ["Score line", scoreLineText(savedScore).replace(/^Score line /, "")],
-                ["Batch auto apply", batch ? "On" : "Off"],
+                ["How it applies", applyMode],
                 ["Below the line", LINE_SWITCH_LABEL[belowLine] ?? belowLine],
                 ...(today ? [["Today", quotaText(today.state.applied_today, today.state.daily_cap).replace(/ today$/, "")]] : []),
                 ...(inbox ? [["Gmail check", [INBOX_MODES.find((m) => m.value === inbox)?.label, everyText(every)].filter(Boolean).join(", ")]] : []),
@@ -688,7 +658,7 @@ export function AssistantTab() {
           </dl>
         </section>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          Changes take effect at once. Each one is listed in History with who made it. Take back adds a new row; nothing is erased.
+          Changes take effect at once. Each one is listed in History (Assistant configure) with who made it. Take back adds a new row; nothing is erased.
         </p>
       </aside>
     </div>

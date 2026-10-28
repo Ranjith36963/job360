@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { CircleHelp, Mail, RotateCcw, Settings, type LucideIcon } from "lucide-react";
 import type { Ask } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { OutcomeSuggestionCard, useOutcomeSuggestions } from "./OutcomeSuggestions";
-import { SettingRequestCard, describeSettingRequest, type WaitingRequest } from "./SettingRequestCard";
+import type { WaitingRequest } from "./SettingRequestCard";
 import { InboxItemCard, useUnmatchedMail } from "./UnmatchedMail";
 import { useLiveRows } from "./useLiveLists";
 
@@ -52,12 +53,11 @@ function OtherRow({ kind, id, summary, verb, children }: {
 
 const firstLine = (s: string) => s.split("\n").find((l) => l.trim()) ?? s;
 
-export function OtherList({ waiting, questions, onChanged, renderQuestion, hidden = false, onCount }: {
+export function OtherList({ waiting, questions, renderQuestion, hidden = false, onCount }: {
   /** Setting changes an assistant asked for, waiting for the user's OK. */
   waiting: WaitingRequest[];
   /** Open asks not about one loaded job. */
   questions: Ask[];
-  onChanged: () => Promise<void>;
   /** The question's full card (AskCard lives on the page). */
   renderQuestion: (ask: Ask) => ReactNode;
   /** Another chip is chosen: the list still loads (its counts feed the chips), it just does not show. */
@@ -82,14 +82,18 @@ export function OtherList({ waiting, questions, onChanged, renderQuestion, hidde
         Other · {count}
       </h2>
       <ul className="flex flex-col gap-2">
-        {waiting.map((r) => {
-          const { title, change } = describeSettingRequest(r.path, r.value, r.current_score_line);
-          return (
-            <OtherRow key={`s${r.id}`} kind="setting" id={r.id} verb="Review" summary={`${title}: ${firstLine(change)}`}>
-              <ul><SettingRequestCard request={r} onChanged={onChanged} /></ul>
-            </OtherRow>
-          );
-        })}
+        {/* Setting changes are permissions (owner 2026-10-28): they are answered on Connect > Permissions; here only a pointer. */}
+        {waiting.length > 0 && (
+          <li data-testid="other-row-setting-link" className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2">
+            <Settings aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-sm">
+              Your assistant asks to change {waiting.length === 1 ? "a setting" : `${waiting.length} settings`}
+            </span>
+            <Link href="/connect?tab=permissions" className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted">
+              Review
+            </Link>
+          </li>
+        )}
         {questions.map((a) => (
           <OtherRow key={`q${a.id}`} kind="question" id={a.id} verb="Answer"
             summary={[a.job_company, firstLine(a.question)].filter(Boolean).join(": ")}>

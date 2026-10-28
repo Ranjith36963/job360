@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AssistantTab } from "./AssistantTab";
 import { historyWhen } from "@/lib/assistant-tab";
 
@@ -16,10 +16,15 @@ vi.mock("@/lib/api", () => ({
   getSettingHistory: (...a: unknown[]) => getSettingHistory(...a),
   takeBackSetting: (...a: unknown[]) => takeBackSetting(...a),
   updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),
+  confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
+  declineSettingRequest: vi.fn(),
 }));
+const confirmSettingRequest = vi.fn();
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }));
+// The top bar's own Pause button (tested in TopBar.test.tsx); here only where it sits.
+vi.mock("@/components/layout/TopBar", () => ({ PauseButton: () => <button type="button" data-testid="pause-button" /> }));
 
 const field = (value: unknown, effective: unknown = value) => ({ value, effective });
 const view = (over: Record<string, unknown> = {}) => ({
@@ -30,6 +35,7 @@ const view = (over: Record<string, unknown> = {}) => ({
   daily_cap: field(null, null),
   inbox_mode: "auto",
   check_every: "6h",
+  waiting: [],
   ...over,
 });
 const check = { state: { applied_today: 4, daily_cap: 10 } };
@@ -54,10 +60,12 @@ beforeEach(() => {
   toastError.mockReset();
 });
 
-async function ready() {
-  render(<AssistantTab />);
+/** Permissions (Connect's first tab) or Assistant configure (the fine-tuning and History). */
+async function ready(part: "permissions" | "configure" = "permissions") {
+  render(<AssistantTab part={part} />);
   await screen.findByTestId("assistant-tab");
-  await screen.findAllByTestId("history-row");
+  if (part === "configure") await screen.findAllByTestId("history-row");
+  else await waitFor(() => expect(getMorningCheck).toHaveBeenCalled());
 }
 
 describe("AssistantTab", () => {
@@ -65,22 +73,28 @@ describe("AssistantTab", () => {
     await ready();
     const tab = screen.getByTestId("assistant-tab");
     for (const t of [
-      "Your score line", "Score line", "Batch auto apply: off", "Batch auto apply: on",
-      "Your assistant asks you before each application.",
+      "Pause", "Pause your assistant",
+      "Your score line", "Score line", "How your assistant applies", "Ask me each time", "Straight away",
       "Your assistant applies on its own to every job at or above your score line.",
       "Your assistant always stops and asks you when it is not sure: a CAPTCHA, a login page, a guessed answer, or anything not verified.",
-      "Limits & inbox", "Daily limit", "Most applications per day. Leave blank for no limit.",
-      "Gmail check", "Auto", "Ask first", "Off", "Hard stops", "Always on. Cannot be switched off.",
-      "History", "Every change, newest first",
+      "Limits", "Daily limit", "Most applications per day. Leave blank for no limit.",
+      "Sending in your name", "Gmail check", "Auto", "Ask first", "Off", "Hard stops", "Always on. Cannot be switched off.",
     ]) {
       expect(tab).toHaveTextContent(t);
     }
-    expect(screen.getByTestId("batch-off")).toHaveAttribute("aria-checked", "true");
+    expect(tab).toContainElement(screen.getByTestId("pause-button"));
+    // ONE control writes submit_mode: the old Batch auto apply switch is gone.
+    expect(screen.queryByTestId("batch-off")).toBeNull();
+    expect(screen.getByTestId("mode-ask")).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByTestId("above-line-ask")).toBeNull();
     expect(screen.queryByTestId("submit-mode-confirm")).toBeNull();
+    // the fine-tuning and History live on Assistant configure
+    expect(screen.queryByTestId("hunt-every")).toBeNull();
+    expect(screen.queryByTestId("min-gap")).toBeNull();
+    expect(tab).not.toHaveTextContent("Every change, newest first");
     // an older "ask" below the line is shown honestly, with what a click will do
     expect(screen.getByTestId("below-line-rule")).toHaveTextContent(
-      "Below the line: asks you. Choosing either option above drops them from now on.",
+      "Below the line: asks you. Choosing Ask me each time or Straight away drops them from now on.",
     );
     expect(tab).not.toHaveTextContent("Submit mode");
     expect(screen.getByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true");
@@ -91,13 +105,33 @@ describe("AssistantTab", () => {
     expect(tab.textContent).not.toMatch(/\b75\b/);
   });
 
+  it("your assistant's requests to change a setting come first on Permissions; Confirm re-reads", async () => {
+    const asked = { id: 11, path: "assistant_settings.daily_cap", value: 25, requested_by: "agent:x", requested_at: NOW, expires_at: NOW, status: "waiting" };
+    getAssistantSettings.mockResolvedValueOnce(view({ waiting: [asked] }));
+    confirmSettingRequest.mockReset().mockResolvedValue({});
+    await ready();
+    const list = screen.getByTestId("permission-requests");
+    expect(screen.getByTestId("assistant-tab").firstElementChild).toContainElement(list);
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Your assistant asks to change");
+    fireEvent.click(within(list).getByTestId("setting-request-confirm"));
+    await waitFor(() => expect(confirmSettingRequest).toHaveBeenCalledWith(11));
+    await waitFor(() => expect(screen.queryByTestId("permission-requests")).toBeNull());
+    cleanup();
+    await ready("configure");
+    expect(screen.queryByTestId("permission-requests")).toBeNull();
+  });
+
   it("each control sends its own PATCH body as the web user, then re-reads", async () => {
     await ready();
-    // Batch auto apply ON: both halves in one PATCH, and below-the-line jobs are dropped.
-    fireEvent.click(screen.getByTestId("batch-on"));
+    // Straight away: both halves in one PATCH, and below-the-line jobs are dropped.
+    fireEvent.click(screen.getByTestId("mode-straight"));
+    fireEvent.click(screen.getByTestId("mode-straight-confirm"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
-      { path: "assistant_settings.above_line", value: "auto" },
       { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
+      { path: "assistant_settings.apply_hours", value: null },
+      { path: "assistant_settings.auto_grant_count", value: null },
+      { path: "assistant_settings.auto_grant_until", value: null },
+      { path: "assistant_settings.above_line", value: "auto" },
       { path: "assistant_settings.below_line", value: "skip" },
     ]));
     fireEvent.click(screen.getByTestId("inbox-ask"));
@@ -171,7 +205,7 @@ describe("AssistantTab", () => {
   });
 
   it("job hunt: blank means off and writes nothing; a number of hours saves it", async () => {
-    await ready();
+    await ready("configure");
     const box = screen.getByTestId("hunt-every");
     expect(box).toHaveValue(null);
     fireEvent.blur(box);
@@ -185,7 +219,7 @@ describe("AssistantTab", () => {
 
   it("job hunt: out of range is refused; clearing a saved one turns it off", async () => {
     getAssistantSettings.mockResolvedValue(view({ hunt_every_hours: field(6, 6) }));
-    await ready();
+    await ready("configure");
     expect(screen.getByTestId("assistant-rail")).toHaveTextContent("every 6 hours");
     const box = screen.getByTestId("hunt-every");
     expect(box).toHaveValue(6);
@@ -202,7 +236,7 @@ describe("AssistantTab", () => {
   });
 
   it("people hunt: off by default; one click turns it on, no confirm (it never sends)", async () => {
-    await ready();
+    await ready("configure");
     const toggle = screen.getByTestId("people-hunt-toggle");
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(screen.queryByTestId("people-hunt-last")).toBeNull();
@@ -214,7 +248,7 @@ describe("AssistantTab", () => {
 
   it("people hunt: when on, says when it last ran and turns off in one click", async () => {
     getAssistantSettings.mockResolvedValue(view({ people_hunt: field(true, true), people_hunt_last_at: null }));
-    await ready();
+    await ready("configure");
     expect(screen.getByTestId("people-hunt-last")).toHaveTextContent("Not run yet");
     expect(screen.getByTestId("assistant-rail")).toHaveTextContent("People hunt");
     fireEvent.click(screen.getByTestId("people-hunt-toggle"));
@@ -225,7 +259,7 @@ describe("AssistantTab", () => {
 
   it("people hunt: a past run shows its time", async () => {
     getAssistantSettings.mockResolvedValue(view({ people_hunt: field(true, true), people_hunt_last_at: NOW }));
-    await ready();
+    await ready("configure");
     expect(screen.getByTestId("people-hunt-last")).toHaveTextContent(/^Last ran Today/);
   });
 
@@ -306,11 +340,13 @@ describe("AssistantTab", () => {
 
   it("a refused save shows the error and never 'Saved.'", async () => {
     updateProfileFields.mockRejectedValueOnce(new Error("422"));
+    getAssistantSettings.mockImplementation(async () => view()); // each read is a new object, as from the server
     await ready();
-    fireEvent.click(screen.getByTestId("batch-on"));
+    fireEvent.click(screen.getByTestId("mode-straight"));
+    fireEvent.click(screen.getByTestId("mode-straight-confirm"));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not save. Try again."));
     expect(toastSuccess).not.toHaveBeenCalled();
-    expect(screen.getByTestId("batch-off")).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(screen.getByTestId("mode-ask")).toHaveAttribute("aria-checked", "true"));
   });
 
   it("batch reads on only when both halves are on; OFF writes ask + confirm; a dropped line says so", async () => {
@@ -318,13 +354,21 @@ describe("AssistantTab", () => {
       above_line: field("auto"), submit_mode: field("auto_when_sure"), below_line: field("skip"),
     }));
     await ready();
-    expect(screen.getByTestId("batch-on")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("below-line-rule")).toHaveTextContent("Jobs below your score line are dropped — never applied to.");
-    fireEvent.click(screen.getByTestId("batch-off"));
+    fireEvent.click(screen.getByTestId("mode-ask"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
-      { path: "assistant_settings.above_line", value: "ask" },
       { path: "assistant_settings.submit_mode", value: "confirm" },
+      { path: "assistant_settings.apply_hours", value: null },
+      { path: "assistant_settings.auto_grant_count", value: null },
+      { path: "assistant_settings.auto_grant_until", value: null },
+      { path: "assistant_settings.above_line", value: "ask" },
     ]));
+    // only one half on (the line still asks) reads as Ask me each time
+    cleanup();
+    getAssistantSettings.mockResolvedValue(view({ submit_mode: field("auto_when_sure") }));
+    await ready();
+    expect(screen.getByTestId("mode-ask")).toHaveAttribute("aria-checked", "true");
   });
 
   it("hard stops are read-only text with no control", async () => {
@@ -339,7 +383,7 @@ describe("AssistantTab", () => {
   });
 
   it("history: who, when, was -> now; Take back only on the newest change per setting", async () => {
-    await ready();
+    await ready("configure");
     const rows = screen.getAllByTestId("history-row");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent(`${historyWhen(NOW)}`);
@@ -350,7 +394,7 @@ describe("AssistantTab", () => {
   });
 
   it("Take back: a setting uses the take-back route, a preference PATCHes the previous value as web", async () => {
-    await ready();
+    await ready("configure");
     const rows = screen.getAllByTestId("history-row");
     fireEvent.click(within(rows[0]).getByTestId("history-take-back"));
     await waitFor(() => expect(takeBackSetting).toHaveBeenCalledWith("assistant_settings.daily_cap"));
@@ -362,14 +406,15 @@ describe("AssistantTab", () => {
   it("right rail: Right now, today's count, and the note", async () => {
     await ready();
     const rail = screen.getByTestId("assistant-rail");
-    for (const t of ["Right now", "Score line", "Batch auto applyOff", "Below the lineAsk me", "Today4 of 10", "Take back adds a new row; nothing is erased."]) {
+    await waitFor(() => expect(rail).toHaveTextContent("Today4 of 10"));
+    for (const t of ["Right now", "Score line", "How it appliesAsk me each time", "Below the lineAsk me", "Take back adds a new row; nothing is erased."]) {
       expect(rail).toHaveTextContent(t);
     }
   });
 
   it("a failed read says so and offers Try again", async () => {
     getAssistantSettings.mockRejectedValueOnce(new Error("down"));
-    render(<AssistantTab />);
+    render(<AssistantTab part="permissions" />);
     fireEvent.click(await screen.findByTestId("assistant-retry"));
     await screen.findByTestId("assistant-tab");
   });
@@ -396,7 +441,9 @@ describe("AssistantTab", () => {
     fireEvent.change(weekly, { target: { value: "20" } });
     fireEvent.blur(weekly);
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.weekly_cap", value: 20 }]));
-    // minutes and seconds
+    // minutes and seconds: the wait is fine-tuning, on Assistant configure
+    cleanup();
+    await ready("configure");
     fireEvent.change(screen.getByTestId("min-gap"), { target: { value: "1" } });
     const sec = screen.getByTestId("min-gap-seconds");
     fireEvent.change(sec, { target: { value: "30" } });
@@ -412,7 +459,7 @@ describe("AssistantTab", () => {
   });
 
   it("a bad pace number says so and is not sent", async () => {
-    await ready();
+    await ready("configure");
     const sec = screen.getByTestId("min-gap-seconds");
     fireEvent.change(sec, { target: { value: "75" } });
     fireEvent.blur(sec);
@@ -433,6 +480,8 @@ describe("AssistantTab", () => {
         { path: "assistant_settings.apply_hours", value: null },
         { path: "assistant_settings.auto_grant_count", value: null },
         { path: "assistant_settings.auto_grant_until", value: null },
+        { path: "assistant_settings.above_line", value: "auto" },
+        { path: "assistant_settings.below_line", value: "skip" },
       ]),
     );
   });
@@ -440,6 +489,7 @@ describe("AssistantTab", () => {
   it("offers no Hours to apply card; an old saved window reads as Straight away, is shown, and clears", async () => {
     getAssistantSettings.mockResolvedValue(
       view({
+        above_line: field("auto"),
         submit_mode: field("auto_when_sure", "auto_when_sure"),
         apply_hours: field({ from: "09:00", to: "17:30" }),
       }),
@@ -457,7 +507,7 @@ describe("AssistantTab", () => {
   });
 
   it("Ask me each time turns sending on its own off", async () => {
-    getAssistantSettings.mockResolvedValue(view({ submit_mode: field("auto_when_sure", "auto_when_sure") }));
+    getAssistantSettings.mockResolvedValue(view({ above_line: field("auto"), submit_mode: field("auto_when_sure", "auto_when_sure") }));
     await ready();
     expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByTestId("mode-ask"));

@@ -23,7 +23,7 @@ import {
 import type { Bucket } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 
-const SETTINGS_HREF = "/connect?tab=assistant";
+const SETTINGS_HREF = "/connect?tab=permissions";
 
 // Company, title and every label here are written by the user's assistants -
 // untrusted. They are only ever rendered as React text nodes.

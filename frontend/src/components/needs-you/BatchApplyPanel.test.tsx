@@ -110,7 +110,7 @@ describe("BatchApplyPanel", () => {
       render(<BatchApplyPanel />);
       const rules = screen.getByTestId("batch-rules");
       expect(rules).toHaveTextContent("Your rules");
-      expect(screen.getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=assistant");
+      expect(screen.getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=permissions");
       expect(screen.queryByTestId("daily-cap")).toBeNull();
       expect(screen.queryByTestId("batch-never-apply")).toBeNull();
       expect(rules.querySelectorAll("input, select, textarea, button")).toHaveLength(0);
@@ -139,11 +139,11 @@ describe("BatchApplyPanel", () => {
       expect(screen.getByTestId("batch-rules-link")).toBeInTheDocument();
     });
 
-    it("the panel renders no rule inputs and links to /connect?tab=assistant", async () => {
+    it("the panel renders no rule inputs and links to /connect?tab=permissions", async () => {
       render(<BatchApplyPanel />);
       const panel = await screen.findByTestId("batch-apply-panel");
       await screen.findByTestId("batch-row-11");
-      expect(within(panel).getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=assistant");
+      expect(within(panel).getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=permissions");
       for (const id of ["daily-cap", "mode-while", "auto-grant-count", "batch-never-apply"]) {
         expect(screen.queryByTestId(id)).toBeNull();
       }

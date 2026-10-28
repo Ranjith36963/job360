@@ -30,6 +30,7 @@ import {
   scopeText,
   settingEffective,
 } from "@/lib/assistant-tab";
+import { batchEdits, batchOn } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 
 export const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
@@ -86,17 +87,28 @@ export function gapParts(v: unknown): { min: string; sec: string } {
 
 export type ApplyMode = "ask" | "straight" | "while";
 export const APPLY_MODES: { value: ApplyMode; title: string; sub: string }[] = [
-  { value: "straight", title: "Straight away", sub: "Your assistant applies on its own, at any time." },
+  { value: "straight", title: "Straight away", sub: "Your assistant applies on its own to every job at or above your score line." },
   { value: "while", title: "Auto for a while", sub: "Your assistant applies on its own for your next N jobs, then asks you again." },
   { value: "ask", title: "Ask me each time", sub: "Your assistant fills the form and waits on Needs you for your Submit." },
 ];
 
-/** Which of the modes the saved settings are in: a live grant, else sending on its own, else asking. */
+/** Which of the modes the saved settings are in: a live grant, else sending on its own (both
+ *  halves: jobs at or above the line AND submit mode), else asking. */
 export function modeOf(view: AssistantSettingsView): ApplyMode {
   if (grantActive(view.auto_grant_count?.value, String(view.auto_grant_until?.value ?? ""))) return "while";
-  if (settingEffective(view.submit_mode) !== "auto_when_sure") return "ask";
-  return "straight";
+  return batchOn(String(settingEffective(view.above_line) ?? "ask"), String(settingEffective(view.submit_mode) ?? "")) ? "straight" : "ask";
 }
+
+/** The line edits the old "Batch auto apply" switch sent (above_line, and below_line dropped), so
+ *  the one "How your assistant applies" control keeps writing them (submit_mode is its own). */
+function lineEdits(view: AssistantSettingsView, on: boolean): { path: string; value: unknown }[] {
+  const now = (f: Parameters<typeof settingEffective>[0]) => String(settingEffective(f) ?? "");
+  const state = { above_line: now(view.above_line), below_line: now(view.below_line), submit_mode: now(view.submit_mode) };
+  return batchEdits(state, { scoreValue: null, batch: on }).filter((e) => e.path !== P_SUBMIT);
+}
+
+/** Which rows: how it applies and the three limits (Permissions tab), or the wait (Assistant configure). */
+export type RuleRowsPart = "apply" | "limits" | "pace";
 
 /** The user's own batch rules: daily / weekly / per-company limits, the wait between
  *  applications and "auto for my next N". Shared by Profile -> Assistant
@@ -104,11 +116,13 @@ export function modeOf(view: AssistantSettingsView): ApplyMode {
  *  written for the user. Every change goes through `save` / `saveMany` (a PATCH as the
  *  web user that applies at once; the click is the confirmation). */
 export function BatchRuleRows({
+  part,
   view,
   busy,
   save,
   saveMany,
 }: {
+  part: RuleRowsPart;
   view: AssistantSettingsView;
   busy: boolean;
   save: (path: string, value: unknown) => void | Promise<void>;
@@ -256,7 +270,7 @@ export function BatchRuleRows({
     setConfirmGrant(false);
     setMode(next);
     if (next === "ask") {
-      void saveMany([{ path: P_SUBMIT, value: "confirm" }, { path: P_HOURS, value: null }, ...clearGrant]);
+      void saveMany([{ path: P_SUBMIT, value: "confirm" }, { path: P_HOURS, value: null }, ...clearGrant, ...lineEdits(view, false)]);
     } else if (next === "straight") {
       setConfirmStraight(true);
     }
@@ -297,6 +311,7 @@ export function BatchRuleRows({
 
   return (
     <>
+          {part === "limits" && <>
           <Row title="Daily limit" sub="Most applications per day. Leave blank for no limit.">
             <input
               type="number"
@@ -316,6 +331,28 @@ export function BatchRuleRows({
               onKeyDown={onEnter(commitCap)}
               className={cn(NUMBOX, "w-32 min-w-[11ch] max-w-full")}
             />
+          </Row>
+          <Row title="Weekly limit" sub="Most applications per week (Monday to Sunday).">
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
+              <NoLimitTick
+                testid="weekly-cap-none"
+                on={weeklyCap === "" && !weeklyOpen}
+                busy={busy}
+                onToggle={(none) => {
+                  if (none) {
+                    setWeeklyOpen(false);
+                    setWeeklyCap("");
+                    if (numText(view.weekly_cap) !== "") void save(P_WEEKLY_CAP, null);
+                  } else setWeeklyOpen(true);
+                }}
+              />
+              {(weeklyCap !== "" || weeklyOpen) &&
+                numInput(
+                  "weekly-cap", "Weekly limit", weeklyCap, setWeeklyCap,
+                  () => commitNumber(P_WEEKLY_CAP, weeklyCap, numText(view.weekly_cap), setWeeklyCap, { max: WEEKLY_CAP_MAX, label: "Weekly limit", blankMeans: "no limit", min: 0 }),
+                  WEEKLY_CAP_MAX, "N",
+                )}
+            </span>
           </Row>
           <Row
             title="Applications per company"
@@ -358,28 +395,8 @@ export function BatchRuleRows({
               )}
             </span>
           </Row>
-          <Row title="Weekly limit" sub="Most applications per week (Monday to Sunday).">
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
-              <NoLimitTick
-                testid="weekly-cap-none"
-                on={weeklyCap === "" && !weeklyOpen}
-                busy={busy}
-                onToggle={(none) => {
-                  if (none) {
-                    setWeeklyOpen(false);
-                    setWeeklyCap("");
-                    if (numText(view.weekly_cap) !== "") void save(P_WEEKLY_CAP, null);
-                  } else setWeeklyOpen(true);
-                }}
-              />
-              {(weeklyCap !== "" || weeklyOpen) &&
-                numInput(
-                  "weekly-cap", "Weekly limit", weeklyCap, setWeeklyCap,
-                  () => commitNumber(P_WEEKLY_CAP, weeklyCap, numText(view.weekly_cap), setWeeklyCap, { max: WEEKLY_CAP_MAX, label: "Weekly limit", blankMeans: "no limit", min: 0 }),
-                  WEEKLY_CAP_MAX, "N",
-                )}
-            </span>
-          </Row>
+          </>}
+          {part === "pace" && (
           <Row title="Wait between applications" sub="Minutes and seconds. 0 or blank = no wait.">
             <span className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
               Wait at least
@@ -395,6 +412,8 @@ export function BatchRuleRows({
               s
             </span>
           </Row>
+          )}
+          {part === "apply" && (
           <div className="border-t border-border py-3">
             <div className="font-medium">How your assistant applies</div>
             <div className="text-[12.5px] text-muted-foreground">
@@ -452,7 +471,7 @@ export function BatchRuleRows({
                   disabled={busy}
                   onClick={() => {
                     setConfirmStraight(false);
-                    void saveMany([{ path: P_SUBMIT, value: "auto_when_sure" }, { path: P_HOURS, value: null }, ...clearGrant]);
+                    void saveMany([{ path: P_SUBMIT, value: "auto_when_sure" }, { path: P_HOURS, value: null }, ...clearGrant, ...lineEdits(view, true)]);
                   }}
                   className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                 >
@@ -550,6 +569,7 @@ export function BatchRuleRows({
               </div>
             )}
           </div>
+          )}
     </>
   );
 }

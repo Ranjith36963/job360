@@ -76,7 +76,7 @@ describe("MorningCheck", () => {
     expect(strip).toHaveTextContent("Score line not set");
     expect(screen.queryByTestId("mc-below")).toBeNull();
     expect(screen.getByTestId("mc-always-asks")).toBeInTheDocument();
-    expect(screen.getByTestId("mc-score-line-set")).toHaveAttribute("href", "/connect?tab=assistant");
+    expect(screen.getByTestId("mc-score-line-set")).toHaveAttribute("href", "/connect?tab=permissions");
   });
 
   it("paused with no limit: '4 today', who and when", async () => {
@@ -148,7 +148,7 @@ describe("MorningCheck", () => {
 describe("MorningCheck inline editor", () => {
   // Owner rule 2026-10-26: every assistant setting lives on /connect. The strip only
   // reports; Change is a link, and nothing here can write a setting.
-  const HREF = "/connect?tab=assistant";
+  const HREF = "/connect?tab=permissions";
   const noEditor = () => {
     for (const id of ["mc-editor", "mc-score-input", "mc-batch-on", "mc-batch-off", "mc-save", "mc-cancel"]) {
       expect(screen.queryByTestId(id)).toBeNull();
