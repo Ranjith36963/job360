@@ -20,7 +20,7 @@ Print this checklist and tick each step:
    reason="login_wall" or "captcha")`, then `ask_user` (kind login or captcha) and STOP. Never solve it, never type
    or ask for a password. Profile gone: release `profile_not_found`. Pending: release `already_pending`, next person.
 3. **The right draft.** `not_connected` needs a connection note of at most 200 characters (300 with Premium, only
-   if the user set it); `connected` needs a message of at most 400. Wrong kind or too long: rewrite it (true facts
+   if the user set it); `connected` needs a message of at most 400. Wrong kind or too long: rewrite it (the Doctor: `get_recipe("doctor")`; true facts
    only) with `save_artifact(contact_id, kind="outreach", channel="linkedin", draft_kind="connection_note" or
    "message")`, release `draft_rewritten`, next person: the user must press Send again for the new text.
 4. **The gate.** `check_outreach(contact_id, message_id, session)` right before you send. `send`

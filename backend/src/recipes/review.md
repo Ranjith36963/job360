@@ -26,12 +26,13 @@ and neither do you on these numbers.
    words: group similar ones yourself and say which you merged. `skill_gaps`: name the Critical and
    High gaps with their counts (hard = a must-have). Never add a skill to a CV the user does not have.
    If the user wants a learning plan, write it and `save_artifact` kind `skill_gap_report` on the newest
-   weak-fit application, first line `schema: 1`.
+   weak-fit application, first line `schema: 1`, after the Doctor checks it (`get_recipe("doctor")`).
 4. **Did the lesson help?** `lesson_effect`: for each agreed lesson, the reply and interview rates
    before vs after, with both n. Always add "not proof of cause"; `comparable` false = the samples are
    too small to compare.
 5. **Suggest one or two changes** for next week about the user's own targeting, CV and habits
-   (titles, places, CV angle, which gap to close) - never a ranking of jobs or companies. Ask which
+   (titles, places, CV angle, which gap to close) - never a ranking of jobs or companies. The Doctor checks the
+   numbers and suggestions first (`get_recipe("doctor")`, rows Facts and rounds, Lessons). Ask which
    to keep.
 6. **Save only what the user says yes to** as a `lesson` with `record_event` on the application it came
    from, so the next run starts from it. Never record one they did not agree to. A lesson they later

@@ -479,7 +479,7 @@ outreach still goes through record_event. At most RECORD_EVENTS_MAX_ITEMS (50) i
 Outreach to a person — recruiter, hiring manager, referral, cold
 networking. add_contact them (application_id if tied to a job, omitted
 for cold networking; pass `found_via` — where you found them, and `email_source` — where the EMAIL came from: they_emailed, on_company_page, provider_verified, pattern_guess (you built it from a name pattern) or user_gave; leave it out if unsure), write the
-message YOURSELF, then save_artifact(contact_id=..., kind="outreach",
+message YOURSELF, run the Doctor (get_recipe("doctor")), then save_artifact(contact_id=..., kind="outreach",
 channel="linkedin"|"email"|"other", text=...) — this DRAFTS a version.
 Adding the same person twice returns the existing contact (`already_existed: true`, `matched_on`): same email; else
 same LinkedIn URL; else same phone (7+ digits); else same name (on a job: unless both have different LinkedIn URLs or
@@ -567,6 +567,7 @@ VOICE (from career-ops followup.md): 3-4 sentences, under 150 words. Lead with
 value, not with the ask. Reference something specific to THAT company. Professional
 but warm, NOT desperate. NEVER use "just checking in", "just following up",
 "touching base" or "circling back". Include a subject line. Sign with the owner's name.
+The Doctor checks every one before it goes (get_recipe("doctor")).
 
 RECORD after sending: `record_event` `checkin_sent` / `feedback_asked` /
 `feedback_followup_sent` with `to` (<= 320, required), `thread_id` (<= 256),

@@ -19,7 +19,7 @@ Use this when an application has an interview requested or scheduled.
    - the gaps the fit verdict named, and an honest way to talk about each;
    - 3 good questions to ask them, including visa sponsorship if the user
      needs it and it is still unknown.
-4. **Save it** with `save_artifact` (kind `answers`, label "interview prep v1")
+4. **The Doctor checks it** (`get_recipe("doctor")`), **then save it** with `save_artifact` (kind `answers`, label "interview prep v1")
    so it is versioned with the application. The stories go in the `story_bank`
    artifact: start from the newest one (`stats(view="digest")` `story_bank` says
    where; `get_application` on that id) and save a NEW version on this application.
