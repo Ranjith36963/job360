@@ -1538,6 +1538,26 @@ def resume_hint(argv: list[str], stream: Stream) -> str:
 
 
 # ================================================================ collector
+def norm_known_url(url: str) -> str:
+    """Compare key for --known: lower-case host, no query or fragment, no trailing slash."""
+    try:
+        sp = urllib.parse.urlsplit(url.strip())
+        port = ":%d" % sp.port if sp.port else ""
+    except ValueError:
+        return ""
+    if sp.scheme.lower() not in ("http", "https") or not sp.hostname:
+        return ""
+    return "%s://%s%s%s" % (sp.scheme.lower(), sp.hostname.lower(), port, sp.path.rstrip("/"))
+
+
+def load_known(path: str) -> set[str]:
+    """Read a --known file (one URL per line) into a set of normalised URLs."""
+    if not path:
+        return set()
+    with open(path, encoding="utf-8") as f:
+        return {k for k in (norm_known_url(line) for line in f) if k}
+
+
 class Collector:
     """Thread-safe stats + results, applying the shared filter pipeline."""
 
@@ -1552,6 +1572,8 @@ class Collector:
         self.seen_key: dict[str, str] = {}
         self.failed: list[dict[str, str]] = []  # sources that raised: {source, error}
         self.skipped_seen = 0  # jobs dropped at output because history already has them
+        self.known: set[str] = load_known(getattr(args, "known", "") or "")  # --known: URLs already in Job360
+        self.known_skipped = 0
         self.boards_listed: dict[str, int] = {}  # per ATS, after dedup and dead-board skip, before rotation
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
         self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
@@ -1621,6 +1643,10 @@ class Collector:
         if self.skipped(raw.get("company", ""), raw.get("board", "")):
             self.bump(source, "skipped_company")
             return
+        if self.known and norm_known_url(url) in self.known:
+            with self.lock:
+                self.known_skipped += 1
+            return  # already in Job360: dropped before any detail fetch, output or stream
         det = raw.get("detail")
         if callable(det):  # lazy detail fetch, only for title matches
             extra = det() or {}
@@ -3336,6 +3362,8 @@ def format_stats(col: Collector, skipped_seen: int = 0) -> str:
     if col.boards_listed:
         lines.append("boards_listed: " + ", ".join("%s=%d" % kv for kv in sorted(col.boards_listed.items())))
         lines.append("boards_this_run: " + ", ".join("%s=%d" % kv for kv in sorted(col.boards_this_run.items())))
+    if col.known:
+        lines.append("known_skipped=%d" % col.known_skipped)
     lines.append("total kept: %d   skipped as already seen: %d   boards skipped as dead: %d"
                  % (len(col.results), skipped_seen, col.dead_skipped))
     return "\n".join(lines)
@@ -3429,6 +3457,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSONL file one summary row is appended to for every run, failed ones too "
              "(default: hunt_runs.jsonl next to the stream; 'none' = off)",
     )
+    p.add_argument("--known", default="", metavar="FILE",
+                   help="file of URLs already in Job360, one per line: matching jobs are dropped before output")
     p.add_argument("--stats", action="store_true", help="print coverage counts per source to stderr")
     return p
 
