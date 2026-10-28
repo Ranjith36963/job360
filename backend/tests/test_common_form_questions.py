@@ -124,7 +124,7 @@ async def test_b1_per_job_flag_no_education_and_office_days_kit_key(authenticate
         assert rows["how_heard"]["per_job"] is True and rows["email"]["per_job"] is False
         assert not any(k.split(".")[0] == "education" for k in rows)
         assert rows["office_days.GB"]["kit_key"] == "right_to_work.GB.onsite"
-        assert (rows["office_days.GB"]["answer"], rows["office_days.GB"]["set_by"]) == ("yes", "web")
+        assert (rows["office_days.GB"]["answer"], rows["office_days.GB"]["set_by"]) == ("yes", "user")
         assert rows["office_days.GB"]["set_at"] and rows["office_days.GB"]["save_to"] == "user_info.right_to_work"
         assert rows["expected_salary.GB"]["sensitive"] is True and rows["email"]["sensitive"] is False
         summary = (await client.get("/api/profile/common-questions")).json()["summary"]
@@ -147,12 +147,12 @@ async def test_b1_sensitive_row_needs_a_web_write(authenticated_async_context):
             assert put.status_code == 200, put.text
         row = (await _rows(client))["expected_salary.GB"]
         assert (row["label"], row["verified"], row["guess_source"]) == ("guessed", False, "user_said")
-        assert row["set_by"] != "web"
+        assert row["set_by"] == "assistant"
         web = await client.patch("/api/profile", json={"edits": [
             {"path": "preferences.salary_by_country", "value": [salary]}]})
         assert web.status_code == 200, web.text
         row = (await _rows(client))["expected_salary.GB"]
-        assert (row["label"], row["verified"], row["set_by"], row["guess_source"]) == ("memory", True, "web", None)
+        assert (row["label"], row["verified"], row["set_by"], row["guess_source"]) == ("memory", True, "user", None)
 
 
 def test_b1_open_questions_and_summary_skip_per_job():

@@ -87,20 +87,26 @@ def _is_sensitive(q: dict[str, Any]) -> bool:
     return q["group"] == "equality" or q["id"] in _SENSITIVE_IDS
 
 
-def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str],
-         edit: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """``edit`` = the newest overlay row for the path the answer is saved to (who wrote it, when)."""
-    from src.services.profile.edits import WEB_ACTOR  # noqa: PLC0415
+# Who stands behind an answer, read off the kit item's OWN state (the kit judges each answer, so a web
+# save of one field never vouches for another; review of #1357). relayed = the user's chat word that an
+# assistant wrote down; inferred / sensitive = an assistant's draft the user has not confirmed.
+_SET_BY = {"confirmed": "user", "relayed": "assistant", "inferred": "assistant", "sensitive": "assistant"}
+_GUESS_SOURCE = {"relayed": "user_said", "inferred": "agent_inferred", "sensitive": "agent_inferred"}
 
+
+def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str],
+         relayed: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """``relayed`` = the save paths whose newest row an assistant wrote as the user's chat word: the kit
+    folds an unconfirmed private answer into ``sensitive``, so this tells how that guess got here."""
     text = q["question"].replace("{country}", country or "")
     sensitive = _is_sensitive(q)
-    set_by = (str(edit.get("set_by") or "") or None) if edit else None
-    verified = item is not None and item.get("state") == "confirmed" and (
+    state = str(item.get("state") or "") if item is not None else ""
+    # Verified = the kit reads this very answer confirmed (an assistant's user_said write reads relayed,
+    # an unconfirmed private one sensitive); an approved answer must also be the user's own write.
+    verified = item is not None and state == "confirmed" and (
         item.get("source") != "approved_text" or bool(item.get("by_user")))
-    # Forge closure (plan B1): a sensitive row is the user's own only when the WEB wrote it; an assistant
-    # passing source=user_said is a guess on this page (the kit already holds such an item back).
-    if sensitive and edit is not None and set_by != WEB_ACTOR:
-        verified = False
+    if sensitive and state == "relayed":
+        verified = False  # plan B1: a private answer is "From memory" only from the user's own save
     label = "not_known" if item is None else ("memory" if verified else "guessed")
     return {
         "id": q["id"] if country is None else f"{q['id']}.{country}",
@@ -120,11 +126,14 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         "per_job": bool(q.get("per_job")),
         "save_to": save_path({"kit_key": q.get("kit_key")}),
         "sensitive": sensitive,
-        # Who wrote the newest saved value and when (the overlay's newest row); None when nothing is saved.
-        "set_by": set_by if item is not None else None,
-        "set_at": (str(edit["set_at"]) if edit and edit.get("set_at") else None) if item is not None else None,
+        # Who stands behind this answer ("user" / "assistant") and when its block was last saved.
+        "set_by": ("user" if verified else _SET_BY.get(state, "assistant")) if item is not None else None,
+        "set_at": (str(item["saved_at"]) if item.get("saved_at") else None) if item is not None else None,
         # How an assistant's draft got here (agent_inferred / user_said); None unless the row reads guessed.
-        "guess_source": (str(edit.get("source") or "") or None) if label == "guessed" and edit else None,
+        "guess_source": (
+            ("user_said" if state == "sensitive" and save_path(q) in relayed else _GUESS_SOURCE.get(state))
+            if label == "guessed" else None
+        ),
     }
 
 
@@ -151,20 +160,21 @@ def common_questions(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[s
     def by_topic(answers: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
         return {**drafts, **{str(i["topic"]): i for i in answers.get("approved_text", []) if i.get("topic")}}
 
-    newest = {str(r["path"]): r for r in overlay if isinstance(r, dict) and r.get("path")}
+    from src.services.profile.edits import is_assistant_actor  # noqa: PLC0415
+
+    relayed = frozenset(
+        str(r["path"]) for r in overlay if isinstance(r, dict) and r.get("path")
+        and is_assistant_actor(str(r.get("set_by") or "")) and str(r.get("source") or "") == "user_said"
+    )
     rows: list[dict[str, Any]] = []
     for q in catalog():
         key = q.get("kit_key")
-        # Who wrote it comes from the newest history row of the BLOCK a kit row lives in. A topic row
-        # shares one list (user_info.answers) with every other saved answer, so its newest row says
-        # nothing about this answer: no edit for it.
-        edit = newest.get(save_path(q)) if key else None
         if key and "{cc}" in key:
-            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc, edit) for cc in countries]
+            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc, relayed) for cc in countries]
         elif key:
-            rows.append(_row(q, items(plain).get(key), None, edit))
+            rows.append(_row(q, items(plain).get(key), None, relayed))
         else:
-            rows.append(_row(q, by_topic(plain).get(q["topic"]), None, edit))
+            rows.append(_row(q, by_topic(plain).get(q["topic"]), None, relayed))
     return rows
 
 
