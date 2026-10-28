@@ -3,7 +3,7 @@
 
 > Every gate that can stop the user's assistant, and every setting the owner
 > chose. Plain list, one table per section. Each row points at the file and
-> symbol (or test) found on `origin/main` on 2026-10-26; grep the symbol to find it. `NOT FOUND` means no code on main yet.
+> symbol (or test); grep the symbol to find it. `NOT FOUND` means no code on main yet.
 > Built or planned is stated on every decision in section 2.
 
 ## 1. Gates that stop an action
@@ -33,17 +33,13 @@ Pause is the `paused_until` setting: empty, `until_resumed`, or a future time. A
 
 | What | Behaviour when paused | Where it lives |
 |---|---|---|
-| Setting | `paused_until` and `pause_reason`. | `assistant_settings.py` (path), (`is_paused`), (`pause_state`). |
-| `check_submit` | Answers `stop`, reason `paused`, and ends the whole run (`stop_run`). | `assistant_settings.py`, (`RUN_STOP_REASONS`). |
+| Setting | `paused_until` and `pause_reason`. | `assistant_settings.is_paused`, `assistant_settings.pause_state`. |
+| `check_submit` | Answers `stop`, reason `paused`, and ends the whole run. | `assistant_settings.RUN_STOP_REASONS`. |
 | `check_outreach` | Answers `stop`, reason `paused`. | `assistant_settings.py`. |
-| Tools that start or advance work | Answer `status: paused` and write nothing: `bring_job`, `ask_user`, `match_email`, `mark_inbox_checked`, `record_events`, `save_artifact`, `save_fit`, `add_contact`, `update_contact`, `update_job`, `check_outreach`, `check_auto_email`, `check_form`, `browser`, `get_application_kit`. | `mcp_server.py` (list), (gate runs before the body). |
-| Tools that keep working | Reads, `doctor`, `get_recipe`, `update_profile`, `answer_ask`, `mark_done`, `check_submit`, `record_application`. Event types `note`, `withdrawn`, `submit_declined`, `ask_withdrawn`, `applied` still go through. | `mcp_server.py`. |
-| `whats_due` | Returns nothing due and claims nothing. | `mcp_server.py`. |
-| Work recipes | `get_recipe` for `apply`, `batch`, `daily`, `hunt`, `own_browser`, `reach` puts the pause first. | `mcp_server.py` (`PAUSE_WORK_RECIPES`). |
-| Own-browser queue | `take` answers `paused`. | `own_browser.py`. |
-| Held forms after a deploy | A paused user's held form is not restored. | `backend/src/services/browser_agent/restore.py`. |
-| The user's own web clicks | Never paused. | `mcp_server.py`. |
-| Test | The whole behaviour. | `backend/tests/test_pause_stops_all.py`. |
+| The MCP door | Which tools are refused, which `record_event` types still go through, and which recipes put the pause first are three closed sets; reads are never refused. | `mcp_server.pause_blocks`, `PAUSE_REFUSED_TOOLS`, `PAUSE_ALLOWED_EVENT_TYPES`, `PAUSE_WORK_RECIPES`. |
+| The REST door | An assistant calling `/api/...` with its own bearer meets the same table. A call with no bearer is the user's web session: never paused. | `api/pause_gate.rest_pause_gate`, `mcp_server.PAUSE_REFUSED_ROUTES`. |
+| Own-browser queue, held forms after a deploy | `take` answers `paused`; a paused user's held form is not restored. | `own_browser.take`, `browser_agent/restore.py`. |
+| Tests | The whole behaviour, both doors. | `backend/tests/test_pause_stops_all.py`, `backend/tests/test_pause_rest.py`. |
 
 ### 1d. Caps
 
@@ -95,12 +91,12 @@ All dated 2026-10-26 (owner).
 | Decision | Status | Evidence |
 |---|---|---|
 | LinkedIn signed-in work runs in the user's own Chrome only. Job360's browser never opens LinkedIn. | Built | `routing.py`, `egress.py`, `agent.py`. |
-| Job360's server may read public LinkedIn job pages signed out (PR D). One block stops these reads for 7 days. | Being built (PR D). The switch exists and is off. The 7-day block is not built. | `routing.py` (`LINKEDIN_GUEST_READS = False`). Chip text exists: `routing.py` (`linkedin_guest_blocked`). The 7-day block: NOT FOUND. |
+| Job360's server may read public LinkedIn job pages signed out (PR D). One block stops these reads for 7 days. | Built | `routing.LINKEDIN_GUEST_READS` (the switch), `browser_agent/linkedin_guest.BLOCK_FOR` (the block and its window). Test: `backend/tests/test_linkedin_guest.py`. |
 | A company form reached from a LinkedIn job is filled in Job360's browser. | Built | `test_linkedin_own_browser.py`. |
 | Easy Apply follows the same submit gate. Caps are the safe defaults (10 a day). | Built | `own_browser.py`. Easy Apply waits in the own-browser queue: `test_linkedin_own_browser.py`. |
 | Gmail outreach sends by itself. Owner said yes. It will be a setting in "Connect your assistant". | Planned. NOT built. | Today's setting is `outreach_send`, `draft_only` to `auto`; a riskier move needs the user's Confirm on the web: `assistant_settings.py`. The new Gmail auto-send setting: NOT FOUND. |
 | The browser acts as the user's agent and does not announce itself as "HeadlessChrome". | Planned. NOT built. | `HeadlessChrome` in `backend/src`: NOT FOUND. |
-| Route learning: switch a site to the own browser after 2 blocks in a row, then try Job360's browser again after 3 days (7 days if it repeats). | Planned (PR F1). Gated on 2 weeks of real data from the attempts table (PR #1321). | Reasons `learned_blocked`, `learned_login`, `probe` exist as chip names only (`routing.py`, ). The learner and its 2/3/7 numbers: NOT FOUND. The attempts table: NOT FOUND on this `origin/main`. |
+| Route learning: switch a site to the own browser after 2 blocks in a row, then try Job360's browser again after 3 days (7 days if it repeats). | Planned (PR F1). Gated on 2 weeks of real data from the attempts table. | The attempts table is written by `browser_agent/route_book.record`. The learner and its 2/3/7 numbers: NOT FOUND; `learned_blocked`, `learned_login` and `probe` are chip names in `routing.ROUTE_REASONS` only. |
 
 ## 3. Planned settings for "Connect your assistant"
 
