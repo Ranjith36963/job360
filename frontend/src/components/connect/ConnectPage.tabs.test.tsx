@@ -9,7 +9,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(tabParam ? `tab=${tabParam}` : ""),
 }));
 vi.mock("@/components/settings/CalendarFeedSection", () => ({ CalendarFeedSection: () => null }));
-vi.mock("@/components/profile/AssistantTab", () => ({ AssistantTab: () => <p data-testid="assistant-tab-stub" /> }));
+vi.mock("@/components/profile/AssistantTab", () => ({
+  AssistantTab: ({ part }: { part: string }) => <p data-testid="assistant-tab-stub" data-part={part} />,
+}));
 vi.mock("@/components/connect/JobSitesPanel", () => ({ JobSitesPanel: () => <p data-testid="job-sites-stub" /> }));
 vi.mock("@/lib/api", () => ({
   createToken: vi.fn(),
@@ -52,9 +54,10 @@ describe("ConnectAgentPage tabs", () => {
     expect(screen.queryByTestId("send-card")).toBeNull();
   });
 
-  it("has the six tabs in the owner's order", () => {
+  it("has the seven tabs in the owner's order, Permissions first", () => {
     render(<ConnectAgentPage />);
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Permissions",
       "Setup",
       "Assistant configure",
       "Schedules & start links",
@@ -67,8 +70,14 @@ describe("ConnectAgentPage tabs", () => {
   it("?tab=assistant and ?tab=job-sites open those tabs", () => {
     tabParam = "assistant";
     const a = render(<ConnectAgentPage />);
-    expect(screen.getByTestId("assistant-tab-stub")).toBeInTheDocument();
+    // An old ?tab=assistant link still lands on Assistant configure (the fine-tuning).
+    expect(screen.getByTestId("assistant-tab-stub")).toHaveAttribute("data-part", "configure");
     a.unmount();
+    tabParam = "permissions";
+    const p = render(<ConnectAgentPage />);
+    expect(screen.getByTestId("connect-tab-permissions")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("assistant-tab-stub")).toHaveAttribute("data-part", "permissions");
+    p.unmount();
     tabParam = "job-sites";
     render(<ConnectAgentPage />);
     expect(screen.getByTestId("job-sites-stub")).toBeInTheDocument();

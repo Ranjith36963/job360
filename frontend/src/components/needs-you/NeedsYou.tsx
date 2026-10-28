@@ -478,7 +478,6 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         onCount={setOtherLoaded}
         waiting={shownWaiting}
         questions={general}
-        onChanged={load}
         renderQuestion={(a) => <AskCard key={a.id} ask={a} mode="open" onChanged={load} />}
       />
       {/* Moved here from Home (owner 2026-10-28): each is silent when empty. */}

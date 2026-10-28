@@ -33,10 +33,25 @@ vi.mock("@/lib/api", async (importOriginal) => ({
   updateProfileFields: (...args: unknown[]) => updateProfileFields(...args),
   listTokens: () => listTokens(),
   listGrants: vi.fn().mockResolvedValue([]),
+  getAssistantSettings: () => getAssistantSettings(),
+  getMorningCheck: vi.fn().mockRejectedValue(new Error("not needed")),
+  getSettingHistory: vi.fn().mockResolvedValue([]),
+  getProfileEditHistory: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("@/components/layout/AuthProvider", () => ({ useAuth: () => ({ user: { email: "a@b.co" } }) }));
+
+// The Permissions tab's Gmail check reads the assistant settings view.
+const getAssistantSettings = vi.fn();
+const unset = { value: null, effective: null };
+const settings = (over: Record<string, unknown> = {}) => ({
+  apply_min_score: unset, above_line: unset, below_line: unset, submit_mode: unset, daily_cap: unset,
+  inbox_mode: "", check_every: "", waiting: [], paused: false, ...over,
+});
 
 describe("ConnectAgentPage — daily check status", () => {
   beforeEach(() => {
+    nav.tab = "schedules";
+    getAssistantSettings.mockReset().mockResolvedValue(settings());
     getProfile.mockReset();
     updateProfileFields.mockReset();
     listTokens.mockReset();
@@ -72,119 +87,107 @@ describe("ConnectAgentPage — daily check status", () => {
     expect(screen.getByTestId("daily-check-reset")).toBeInTheDocument();
   });
 
+  // One Gmail editor (owner 2026-10-28): the mode and how often moved to the Permissions tab.
   it("connected: mode control writes daily_check; legacy values display as Auto / Off", async () => {
     listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockResolvedValue({ preferences: { daily_check: "scheduled" } });
+    nav.tab = "permissions";
+    getAssistantSettings.mockResolvedValueOnce(settings({ inbox_mode: "scheduled" }));
     render(<ConnectAgentPage />);
-    const group = await screen.findByTestId("inbox-mode");
-    expect(group).toBeInTheDocument();
-    expect(screen.getByTestId("inbox-mode-auto")).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByTestId("inbox-check-toggle")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("inbox-mode-ask"));
+    expect(await screen.findByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true");
+    getAssistantSettings.mockResolvedValueOnce(settings({ inbox_mode: "ask" }));
+    fireEvent.click(screen.getByTestId("inbox-ask"));
     await waitFor(() =>
-      expect(updateProfileFields).toHaveBeenCalledWith([
-        { path: "preferences.daily_check", value: "ask" },
-      ])
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "ask" }])
     );
+    await waitFor(() => expect(screen.getByTestId("inbox-ask")).toHaveAttribute("aria-checked", "true"));
+    fireEvent.click(screen.getByTestId("inbox-paused"));
     await waitFor(() =>
-      expect(screen.getByTestId("inbox-mode-ask")).toHaveAttribute("aria-checked", "true")
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "paused" }])
     );
-    fireEvent.click(screen.getByTestId("inbox-mode-paused"));
-    await waitFor(() =>
-      expect(updateProfileFields).toHaveBeenCalledWith([
-        { path: "preferences.daily_check", value: "paused" },
-      ])
-    );
-    expect(screen.getByTestId("daily-check-status")).toHaveTextContent(/off/i);
   });
 
   it("declined displays as Off and '' has no option selected but can be picked", async () => {
-    listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockResolvedValue({ preferences: { daily_check: "declined" } });
+    nav.tab = "permissions";
+    getAssistantSettings.mockResolvedValue(settings({ inbox_mode: "declined" }));
     const first = render(<ConnectAgentPage />);
-    await screen.findByTestId("inbox-mode");
-    expect(screen.getByTestId("inbox-mode-paused")).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByTestId("inbox-paused")).toHaveAttribute("aria-checked", "true");
     first.unmount();
 
-    getProfile.mockResolvedValue({ preferences: {} });
+    getAssistantSettings.mockResolvedValue(settings());
     render(<ConnectAgentPage />);
-    await screen.findByTestId("inbox-mode");
+    await screen.findByTestId("inbox-auto");
     for (const m of ["auto", "ask", "paused"]) {
-      expect(screen.getByTestId(`inbox-mode-${m}`)).toHaveAttribute("aria-checked", "false");
+      expect(screen.getByTestId(`inbox-${m}`)).toHaveAttribute("aria-checked", "false");
     }
-    fireEvent.click(screen.getByTestId("inbox-mode-auto"));
+    fireEvent.click(screen.getByTestId("inbox-auto"));
     await waitFor(() =>
-      expect(updateProfileFields).toHaveBeenCalledWith([
-        { path: "preferences.daily_check", value: "auto" },
-      ])
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "auto" }])
     );
   });
 
-  it("frequency select shows Once a day for '' and writes check_every on change", async () => {
-    listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockResolvedValue({ preferences: { daily_check: "auto" } });
+  it("frequency select shows - for '' (never a default) and writes check_every on change", async () => {
+    nav.tab = "permissions";
     render(<ConnectAgentPage />);
-    const select = (await screen.findByTestId("inbox-check-every")) as HTMLSelectElement;
-    expect(select.value).toBe("24h");
+    const select = (await screen.findByTestId("check-every")) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(select.selectedOptions[0].textContent).toBe("-");
     fireEvent.change(select, { target: { value: "3h" } });
     await waitFor(() =>
-      expect(updateProfileFields).toHaveBeenCalledWith([
-        { path: "preferences.check_every", value: "3h" },
-      ])
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.check_every", value: "3h" }])
     );
-    expect((screen.getByTestId("inbox-check-every") as HTMLSelectElement).value).toBe("3h");
   });
 
-  it("frequency select shows a stored 1h as Every hour, not blank", async () => {
-    listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockResolvedValue({ preferences: { check_every: "1h" } });
+  it("frequency select shows a stored 1h as every 1 hour, not blank", async () => {
+    nav.tab = "permissions";
+    getAssistantSettings.mockResolvedValue(settings({ check_every: "1h" }));
     render(<ConnectAgentPage />);
-    const select = (await screen.findByTestId("inbox-check-every")) as HTMLSelectElement;
+    const select = (await screen.findByTestId("check-every")) as HTMLSelectElement;
     expect(select.value).toBe("1h");
-    expect(select.selectedOptions[0].textContent).toBe("Every hour");
+    expect(select.selectedOptions[0].textContent).toBe("1");
+    expect(select.parentElement).toHaveTextContent(/hour$/);
   });
 
   it("frequency select reverts when the save fails", async () => {
-    listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockResolvedValue({ preferences: { check_every: "12h" } });
+    nav.tab = "permissions";
+    getAssistantSettings.mockImplementation(async () => settings({ check_every: "12h" }));
     updateProfileFields.mockRejectedValue(new Error("nope"));
     render(<ConnectAgentPage />);
-    const select = (await screen.findByTestId("inbox-check-every")) as HTMLSelectElement;
+    const select = (await screen.findByTestId("check-every")) as HTMLSelectElement;
     expect(select.value).toBe("12h");
     fireEvent.change(select, { target: { value: "6h" } });
-    await waitFor(() =>
-      expect((screen.getByTestId("inbox-check-every") as HTMLSelectElement).value).toBe("12h")
-    );
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
+    await waitFor(() => expect((screen.getByTestId("check-every") as HTMLSelectElement).value).toBe("12h"));
   });
 
   it("frequency select is locked while a save is in flight", async () => {
-    listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockResolvedValue({ preferences: { check_every: "12h" } });
+    nav.tab = "permissions";
+    getAssistantSettings.mockResolvedValue(settings({ check_every: "12h" }));
     let finish: () => void = () => {};
     updateProfileFields.mockReturnValue(new Promise<void>((r) => (finish = r)));
     render(<ConnectAgentPage />);
-    const select = (await screen.findByTestId("inbox-check-every")) as HTMLSelectElement;
+    const select = (await screen.findByTestId("check-every")) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "6h" } });
-    await waitFor(() => expect(screen.getByTestId("inbox-check-every")).toBeDisabled());
+    await waitFor(() => expect(screen.getByTestId("check-every")).toBeDisabled());
     finish();
-    await waitFor(() => expect(screen.getByTestId("inbox-check-every")).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByTestId("check-every")).not.toBeDisabled());
   });
 
-  it("not connected: no mode control and no frequency select", async () => {
+  it("the schedules tab has no mode control and no frequency select (they are on Permissions)", async () => {
+    listTokens.mockResolvedValue(connectedTokens);
     getProfile.mockResolvedValue({ preferences: { daily_check: "auto" } });
     render(<ConnectAgentPage />);
     await screen.findByTestId("daily-check-status");
-    await waitFor(() => expect(getProfile).toHaveBeenCalled());
-    expect(screen.queryByTestId("inbox-mode")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("inbox-check-every")).not.toBeInTheDocument();
+    for (const id of ["inbox-mode", "inbox-check-every", "inbox-auto", "check-every"]) {
+      expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+    }
   });
 
-  it("hides the controls when the profile read fails", async () => {
-    listTokens.mockResolvedValue(connectedTokens);
-    getProfile.mockRejectedValue(new Error("boom"));
+  it("hides the controls when the settings read fails", async () => {
+    nav.tab = "permissions";
+    getAssistantSettings.mockRejectedValue(new Error("boom"));
     render(<ConnectAgentPage />);
-    await screen.findByTestId("daily-check-status");
-    expect(screen.queryByTestId("inbox-mode")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("inbox-check-every")).not.toBeInTheDocument();
+    await screen.findByTestId("assistant-retry");
+    expect(screen.queryByTestId("inbox-auto")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("check-every")).not.toBeInTheDocument();
   });
 });

@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 async function ready() {
-  render(<AssistantTab />);
+  render(<AssistantTab part="configure" />);
   await screen.findByTestId("pc-on-row");
 }
 

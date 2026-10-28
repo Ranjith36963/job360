@@ -243,8 +243,8 @@ describe("NeedsYou", () => {
     getAssistantSettings.mockResolvedValue({ waiting: [{ id: 11, key: "apply_daily_cap", value: 25, asked_by: "agent:Claude", asked_at: base.asked_at, reason: "" }] });
     setup([{ ...openAsk, application_id: null }]);
     render(<NeedsYou />);
-    // Both now sit in the ONE Other list, setting request first, after the job list.
-    const ok = await screen.findByTestId("other-row-setting-11");
+    // Both sit in the ONE Other list (the request as a link to Permissions) first, after the job list.
+    const ok = await screen.findByTestId("other-row-setting-link");
     const other = await screen.findByTestId("other-row-question-1");
     const jobs = screen.getByText("Waiting for you");
     expect(screen.getByTestId("other-count")).toHaveTextContent("Other · 2");

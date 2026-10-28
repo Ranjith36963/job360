@@ -195,16 +195,12 @@ describe("Needs-you page", () => {
     const q = (id: number) => ({ id, application_id: null, question: `Q${id}`, context: "", asked_by: "x", asked_at: "2026-10-20T10:00:00Z", status: "open" });
     listAsks.mockImplementation(async (s: string) => ({ asks: s === "open" ? [q(1), q(2)] : [], open_count: 2 }));
     render(<NeedsYou />);
-    // One Review row in the Other list; Review opens the full request card inline.
-    expect(await screen.findByTestId("other-open-setting-11")).toHaveTextContent("Review");
-    fireEvent.click(screen.getByTestId("other-open-setting-11"));
-    expect(await screen.findByTestId("setting-request-11")).toBeInTheDocument();
-    await waitFor(() => expect(seen).toEqual([3])); // 2 open asks + 1 waiting
-    // after the user confirms, the reload comes back empty and the badge follows
-    getAssistantSettings.mockResolvedValue({ waiting: [] });
-    fireEvent.click(screen.getByTestId("setting-request-confirm"));
-    await waitFor(() => expect(seen).toEqual([3, 2]));
+    // A request is a permission (owner 2026-10-28): one Review link to Connect > Permissions, no card here.
+    const row = await screen.findByTestId("other-row-setting-link");
+    expect(row).toHaveTextContent("Your assistant asks to change a setting");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "/connect?tab=permissions");
     expect(screen.queryByTestId("setting-request-11")).toBeNull();
+    await waitFor(() => expect(seen).toEqual([3])); // 2 open asks + 1 waiting (the count is unchanged)
     window.removeEventListener("job360:asks-changed", on);
   });
 

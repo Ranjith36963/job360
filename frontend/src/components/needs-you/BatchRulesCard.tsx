@@ -10,11 +10,11 @@ export function BatchRulesCard() {
     <p data-testid="batch-rules" className="px-1 text-[12.5px] text-muted-foreground">
       Your rules:{" "}
       <Link
-        href="/connect?tab=assistant"
+        href="/connect?tab=permissions"
         data-testid="batch-rules-link"
         className="underline underline-offset-2 hover:text-foreground"
       >
-        Connect your assistant &rsaquo; Assistant configure
+        Connect your assistant &rsaquo; Permissions
       </Link>
     </p>
   );
