@@ -269,6 +269,7 @@ class BrowserPool:
         self._sessions: dict[str, Session] = {}
         self._playwright: Any = None
         self._browser: Any = None
+        self._user_agent: Optional[str] = None  # the browser's own UA, "HeadlessChrome" read as "Chrome"
         self._start_lock = asyncio.Lock()
         # Session creation awaits several times; two `open`s at once must not both pass the
         # "no session yet" and "under the cap" checks (CodeRabbit on #902).
@@ -301,6 +302,26 @@ class BrowserPool:
                 ],
             )
             return self._browser
+
+    async def _desktop_user_agent(self, browser: Any) -> Optional[str]:
+        """The browser's own User-Agent with the ``HeadlessChrome`` token read as ``Chrome`` (it is Chrome).
+
+        Read once from a blank page (no network) and kept, so the version never goes stale. Nothing here
+        hides automation: no webdriver patch, no fingerprint change, no bot-check workaround.
+        """
+        if self._user_agent is None:
+            try:
+                page = await browser.new_page()
+                try:
+                    raw = await page.evaluate("navigator.userAgent")
+                finally:
+                    await page.close()
+            except Exception:  # noqa: BLE001 - no UA to read: Playwright's own default stays
+                logger.warning("browser_agent could not read the browser user agent")
+                return None
+            if isinstance(raw, str) and raw:
+                self._user_agent = raw.replace("HeadlessChrome", "Chrome")
+        return self._user_agent
 
     async def reap(self) -> None:
         """Close every session idle longer than ``idle_s``, and every live view past its lifetime."""
@@ -407,6 +428,7 @@ class BrowserPool:
         state = await load_state() if load_state is not None else None
         context = await browser.new_context(
             accept_downloads=False, service_workers="block", locale="en-GB", viewport=dict(VIEWPORT),
+            timezone_id="Europe/London", user_agent=await self._desktop_user_agent(browser),
             storage_state=state if state and (state.get("cookies") or state.get("origins")) else None,
         )
         context.set_default_timeout(ACTION_TIMEOUT_MS)
