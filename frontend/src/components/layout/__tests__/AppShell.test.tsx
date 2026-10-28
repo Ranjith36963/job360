@@ -54,7 +54,7 @@ describe("AppShell", () => {
     const side = screen.getByTestId("app-sidebar");
     const labels = [
       "Needs you",
-      "Home",
+      "Progress dashboard",
       "Jobs in",
       "Applications",
       "Outreach",
@@ -92,7 +92,7 @@ describe("AppShell", () => {
 
   const EXPECTED_ORDER = [
     "Needs you",
-    "Home",
+    "Progress dashboard",
     "Jobs in",
     "Applications",
     "Outreach",
@@ -183,7 +183,7 @@ describe("AppShell", () => {
       const side = screen.getByTestId("app-sidebar");
       const links = within(within(side).getByRole("navigation", { name: "Main navigation" })).getAllByRole("link");
       expect(links[0]).toHaveAccessibleName(/^Needs you/);
-      expect(links[1]).toHaveAccessibleName("Home");
+      expect(links[1]).toHaveAccessibleName("Progress dashboard");
       if (homeActive) expect(links[1]).toHaveAttribute("aria-current", "page");
       else expect(links[1]).not.toHaveAttribute("aria-current");
       unmount();

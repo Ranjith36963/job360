@@ -114,7 +114,7 @@ test.describe("Landing CTA → profile journeys", () => {
     );
 
     await page.goto("/");
-    const homeLink = page.getByRole("link", { name: "Home", exact: true });
+    const homeLink = page.getByRole("link", { name: "Progress dashboard", exact: true });
     await expect(homeLink).toBeVisible({ timeout: 20_000 });
     await expect(homeLink).toHaveAttribute("aria-current", "page");
     // The nav now carries "Connect your assistant" on every signed-in page, so

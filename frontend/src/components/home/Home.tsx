@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { getStats, listAsks } from "@/lib/api";
-import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
+import { listAsks } from "@/lib/api";
+import type { ApplicationSummary, Ask } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { MorningCheck } from "@/components/needs-you/MorningCheck";
 import { BatchApplyPanel } from "@/components/needs-you/BatchApplyPanel";
-import { CountsBlock, FeedBlock } from "@/components/home/HomeRail";
+import { FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
-import { LessonsList } from "@/components/profile/LessonsList";
 import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
@@ -29,11 +28,12 @@ import type { FeedItem } from "@/lib/home";
 import type { WhatsNewPages } from "@/lib/home-fetch";
 
 // ---------------------------------------------------------------------------
-// The signed-in Home (redesign slice 2): one sentence on what changed, the
-// questions waiting for you, the whole ledger, and a right pane with counts,
-// what is due and what your assistant did.
+// The signed-in Progress dashboard (owner, 2026-10-28): NOW and RECENT only.
+// One sentence on what changed, "Right now" (the morning check), "Next up" (the
+// batch queue) and "Activity" (what your assistant did), in one column. The
+// counts and the lessons live on Statistics (/stats).
 //
-// Four independent calls feed it. Each can fail on its own: a failed
+// Independent calls feed it. Each can fail on its own: a failed
 // right-pane block shows nothing, a failed ledger shows an error with a retry,
 // a failed sentence falls back to the plain heading. Job360 judges nothing
 // here — every string below is stored data rendered as a React text node.
@@ -49,6 +49,8 @@ type Feed = { items: FeedItem[]; eventCount: number; applied: ReturnType<typeof 
 const linkBtn =
   "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
 
+const GROUP = "font-heading text-xl font-normal";
+
 const subscribeNever = () => () => {};
 
 export function Home() {
@@ -59,7 +61,6 @@ export function Home() {
   const [since, setSince] = useState<Load<SinceVisit>>(LOADING);
   const [asks, setAsks] = useState<Load<Asks>>(LOADING);
   const [apps, setApps] = useState<Load<{ list: ApplicationSummary[]; total: number }>>(LOADING);
-  const [stats, setStats] = useState<Load<StatsResponse["overall"]>>(LOADING);
   const [feed, setFeed] = useState<Load<Feed>>(LOADING);
 
   // Which "since" this page view uses — read once, so a retry or a reload after
@@ -80,13 +81,6 @@ export function Home() {
     fetchAllApplications()
       .then((r) => live() && setApps({ status: "ok", value: { list: r.applications, total: r.total } }))
       .catch(() => live() && setApps({ status: "error" }));
-
-    getStats()
-      .then((r) => {
-        if (!live()) return;
-        setStats(r?.overall ? { status: "ok", value: r.overall } : { status: "error" });
-      })
-      .catch(() => live() && setStats({ status: "error" }));
 
     // ONE whats-new read feeds both the sentence and the feed: the last-visit
     // window is cut out of the 30-day read here instead of asking twice. (A
@@ -141,7 +135,6 @@ export function Home() {
     setSince(LOADING);
     setAsks(LOADING);
     setApps(LOADING);
-    setStats(LOADING);
     setFeed(LOADING);
     run();
   }
@@ -153,13 +146,10 @@ export function Home() {
     openAsks: asks.status === "ok" ? asks.value.openCount : null,
   });
 
-  const settled =
-    since.status !== "loading" && asks.status !== "loading" && apps.status !== "loading" && feed.status !== "loading";
-
   if (brandNew) {
     return (
       <PageContainer className="flex flex-col gap-8 py-8 sm:py-12">
-        <h1 className="font-heading text-4xl font-normal tracking-tight">Home</h1>
+        <h1 className="font-heading text-4xl font-normal tracking-tight">Progress dashboard</h1>
         <HomeWelcome />
       </PageContainer>
     );
@@ -175,91 +165,85 @@ export function Home() {
   const feedItems = feed.status === "ok" ? feed.value.items : [];
   const applied = feed.status === "ok" ? feed.value.applied : null;
   const appliedWhen = applied ? dayAt(applied.occurredAt) : "";
-  const showRail =
-    !settled ||
-    stats.status === "loading" ||
-    stats.status === "ok" ||
-    feedItems.length > 0;
 
   return (
     <PageContainer className="py-8 sm:py-12">
-      <div
-        className={`grid gap-10 ${showRail ? "min-[1000px]:grid-cols-[minmax(0,1fr)_332px] min-[1000px]:gap-0" : ""}`}
-      >
-        <div className="flex min-w-0 flex-col gap-10 min-[1000px]:pr-10">
-          <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-            <div className="min-w-0 flex-1 basis-80">
-              <p className="font-mono text-xs text-faint" data-testid="home-date">
-                {today || " "}
-              </p>
-              <h1
-                data-testid="home-sentence"
-                className="mt-2 text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]"
-              >
-                {!sentenceReady ? (
-                  <>
-                    <span className="sr-only">Home</span>
-                    <span
-                      aria-hidden="true"
-                      data-testid="home-sentence-skeleton"
-                      className="block h-10 w-3/4 animate-pulse rounded-md bg-muted"
-                    />
-                  </>
-                ) : parts ? (
-                  parts.map((p, i) =>
-                    p.em ? (
-                      <em key={i} className="not-italic text-brand">
-                        {p.text}
-                      </em>
-                    ) : (
-                      <span key={i}>{p.text}</span>
-                    )
-                  )
-                ) : (
-                  "Home"
-                )}
-              </h1>
-              {applied && (
-                <p data-testid="home-subline" className="mt-3 text-[15px] text-muted-foreground">
-                  The last application you confirmed was {applied.company}
-                  {appliedWhen ? `, ${appliedWhen}` : ""}.
-                </p>
-              )}
-            </div>
-            <Link
-              href="/bring"
-              className="shrink-0 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+      <div className="flex min-w-0 flex-col gap-10">
+        <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0 flex-1 basis-80">
+            <p className="font-mono text-xs text-faint" data-testid="home-date">
+              {today || " "}
+            </p>
+            <h1
+              data-testid="home-sentence"
+              className="mt-2 text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]"
             >
-              Jobs in
-            </Link>
-          </header>
-
-          {/* The morning check and Batch apply moved here from Needs you (owner, 2026-10-26). */}
-          <MorningCheck />
-
-          {apps.status === "error" && (
-            <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
-              <span>Could not load your applications.</span>
-              <button type="button" data-testid="home-retry" onClick={retry} className={linkBtn}>
-                Try again
-              </button>
-            </div>
-          )}
-
-          {/* Lessons live on Home (owner, 2026-10-26), not on Profile. */}
-          <LessonsList />
-          <BatchApplyPanel />
-        </div>
-
-        {showRail && (
-          <aside
-            data-testid="home-rail"
-            className="flex min-w-0 flex-col gap-7 border-t border-border pt-8 min-[1000px]:border-l min-[1000px]:border-t-0 min-[1000px]:pl-8 min-[1000px]:pt-0"
+              {!sentenceReady ? (
+                <>
+                  <span className="sr-only">Progress dashboard</span>
+                  <span
+                    aria-hidden="true"
+                    data-testid="home-sentence-skeleton"
+                    className="block h-10 w-3/4 animate-pulse rounded-md bg-muted"
+                  />
+                </>
+              ) : parts ? (
+                parts.map((p, i) =>
+                  p.em ? (
+                    <em key={i} className="not-italic text-brand">
+                      {p.text}
+                    </em>
+                  ) : (
+                    <span key={i}>{p.text}</span>
+                  )
+                )
+              ) : (
+                "Progress dashboard"
+              )}
+            </h1>
+            {applied && (
+              <p data-testid="home-subline" className="mt-3 text-[15px] text-muted-foreground">
+                The last application you confirmed was {applied.company}
+                {appliedWhen ? `, ${appliedWhen}` : ""}.
+              </p>
+            )}
+          </div>
+          <Link
+            href="/bring"
+            className="shrink-0 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
           >
-            {stats.status === "ok" && <CountsBlock overall={stats.value} />}
-            <FeedBlock items={feedItems} />
-          </aside>
+            Jobs in
+          </Link>
+        </header>
+
+        <section aria-labelledby="home-now" data-testid="home-now" className="flex flex-col gap-4">
+          <h2 id="home-now" className={GROUP}>
+            Right now
+          </h2>
+          <MorningCheck />
+        </section>
+
+        {apps.status === "error" && (
+          <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
+            <span>Could not load your applications.</span>
+            <button type="button" data-testid="home-retry" onClick={retry} className={linkBtn}>
+              Try again
+            </button>
+          </div>
         )}
+
+        <section aria-labelledby="home-next" data-testid="home-next" className="flex flex-col gap-4">
+          <h2 id="home-next" className={GROUP}>
+            Next up
+          </h2>
+          <BatchApplyPanel />
+        </section>
+
+        <FeedBlock items={feedItems} />
+
+        <Link href="/stats" data-testid="home-stats-link" className={`${linkBtn} self-start text-sm`}>
+          See your statistics &rarr;
+        </Link>
       </div>
     </PageContainer>
   );
