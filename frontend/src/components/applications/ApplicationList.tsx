@@ -454,7 +454,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="all">All</option>
-            <option value="yes">Applied</option>
+            <option value="yes">Applied jobs</option>
             <option value="no">Not applied</option>
           </select>
         </label>
