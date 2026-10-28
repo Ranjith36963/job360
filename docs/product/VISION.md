@@ -85,7 +85,7 @@ question it answers:
 |---|---|---|---|
 | **Needs you** | **The attention cockpit.** The page the seeker lives on. | Every item that waits on the user, one card per job: questions to answer, guesses to OK, a CAPTCHA or sign-in on an open form, a CV to approve, a note to send to one person, an outcome to confirm, an email to match. Cards are folded to one dense row (company, role, where it came from, when, score, next step) and unfold with **+**. It updates live while the assistant works. | Standing rules, limits or on/off switches. Setup. |
 | **Home** | **The permissions cockpit.** The major controls. | Everything that decides **what the assistant may do**, and every yes it is waiting for: Pause; how it applies (ask first or apply on its own, the score line, the "auto for a while" grant); limits (per day, per week, per company); sending in the user's name (employer emails, outreach, the Gmail mode); the assistant's requests to change a setting; bulk yeses (send these N, run my own-browser tasks now, the batch queue). Plus one linked line: "N things need you". | Per-job work (that is Needs you). Setup and fine-tuning (that is Connect). |
-| **Connect your assistant** | **Maintenance.** The workshop. | Connecting an assistant, tokens and connected apps, start links and schedules, job-site sign-ins for Job360's browser, the setup steps, run problems, and the fine-tuning of the rules (gap between applications, apply hours, how often it hunts, people hunt, PC-on hours, standing notes). | Anything that waits on the user today. |
+| **Connect your assistant** | **Maintenance.** The workshop. | Connecting an assistant, tokens and connected apps, start links and schedules, job-site sign-ins for Job360's browser, the setup steps, run problems, and the fine-tuning of the rules (gap between applications, apply hours, how often it hunts, people hunt, PC-on hours). | Anything that waits on the user today. |
 
 A yes or no about **one** job or **one** person (Send this application, Skip this
 job, send this person's note) is attention, not a standing permission: it stays
@@ -103,7 +103,7 @@ lives on its own page.
 | **Receipts** | Proof of what was sent. |
 | **Stats** | How the hunt is going. Read only. |
 | **Profile** | Who the seeker is: the CV and the facts the assistant writes from. |
-| **Memory** | What the assistant knows and has saved about the seeker, and what the seeker has confirmed. |
+| **Memory & instructions** | How the assistant should work for the seeker (their own instructions, in their words) and the facts job forms ask, each From memory / Guessed / Not known (owner 2026-10-28; plan: [`MEMORY_AND_INSTRUCTIONS.md`](MEMORY_AND_INSTRUCTIONS.md)). |
 | **Account** | Sign-in, privacy, export and delete. |
 
 ### What sits on the wrong page today (2026-10-27 inventory, to move)
@@ -112,6 +112,7 @@ lives on its own page.
 - **Connect to Home:** the major standing controls `paused_until`, `submit_mode`, `above_line`, `below_line`, `apply_min_score`, `auto_grant_count` / `auto_grant_until`, `daily_cap`, `weekly_cap`, `company_cap`, `outreach_send`, `auto_employer_emails`, `preferences.daily_check`. On Home today they are read-only with "Change in Connect" links (`MorningCheck`, `BatchRulesCard`).
 - **Home to Needs you:** "Started, not confirmed" (`StartedNotConfirmed`), due follow-ups, and queue preflight warnings. Home keeps one linked "N things need you" line.
 - **Home to Connect:** the setup card, the welcome connect cards, run problems and start-link problems (`RunProblems`, `StartLinkProblems`).
+- **Connect to Memory & instructions:** the standing notes ("Things your AI assistant should know", `AssistantInstructions.tsx`) - decided 2026-10-28.
 - **Stays where it is, with a count elsewhere:** Pause stays global in the top bar *and* is the first control on Home. The assistant-saved Memory and Profile marks (Keep / Take back) stay on their record pages.
 
 ## How a job gets in (decided 2026-10-16, the owner)
