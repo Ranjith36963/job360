@@ -1286,8 +1286,12 @@ async def save_artifact(
     # The saved fit's requirements feed the advisory keyword_coverage check (none = silent).
     from src.services.applications.fit_record import fit_view  # noqa: PLC0415 - fit_record imports spine
 
-    fit = fit_view(app_row)
-    requirements = [str(i.get("text") or "") for i in (fit or {}).get("jd_requirements") or [] if isinstance(i, dict)]
+    try:  # a fit that cannot be read must not block a save
+        items = (fit_view(app_row) or {}).get("jd_requirements") or []
+    except Exception:  # noqa: BLE001
+        items = []
+    # Same item shape as gaps: a plain string or {"text": ...}.
+    requirements = [str(i.get("text") or "") if isinstance(i, dict) else str(i) for i in items if i]
     checks = await _run_save_checks(user_id, kind, text, requirements)
     checks_json = json.dumps(checks) if checks else None
 
