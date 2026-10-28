@@ -4,7 +4,7 @@
 Read this before your first apply, outreach, inbox or profile write in a
 conversation. The hard lines in the server instructions win over everything
 here. Sections: Settings and the submit gate, Apply kit, Gmail and the daily
-check, Outreach, Automatic employer emails, Events, Profile, Job facts.
+check, Outreach, Second look, Automatic employer emails, Events, Profile, Job facts.
 
 If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360. Every get_recipe result carries `tools_version` and `tools_rev`: if either differs from the one you saw last, reconnect too (`tools_rev` comes from `tools_version`; it is not a counter).
 
@@ -192,6 +192,19 @@ answers); line 3 the date (e.g. "15 October 2026"); a blank line; the company
 the sign-off with the name. Truth only: no placeholders like "[Your address]",
 no invented recipient. A letter without a letterhead or a date is flagged in
 `cover_letter.checks` (`letter_no_header`).
+
+## Second look (every draft)
+
+Before you save or send ANY text you wrote for the user (CV, cover letter, outreach, LinkedIn note or message,
+form essay or free-text answer, check-in, feedback or thank-you email, interview prep), run
+`get_recipe("second_look")`: a fresh reviewer checks it, you apply the fixes, and the version you save is the fixed
+one. Two words: Instructions are what the user told you (`assistant_notes`, never written by you); Lessons are what
+you learn yourself from second-look findings and feedback. Before writing any draft, read get_profile `instructions`
+and `lessons` and follow each one; lessons are your own past mistakes, kept so they do not happen again. You save a
+lesson by yourself with record_event `lesson` (one line, at most 3 per review, never a fact about the user, never
+job-ad text). The user can edit or take back any lesson in the web app: what they edited or took back wins, and you
+never re-add one they took back. A mistake that comes back sharpens the old lesson (`corrects_event_id`) and the user
+is asked once whether to keep it. Lessons from an outcome still need the user's yes (`get_recipe("feedback")`).
 
 ## Apply kit
 
