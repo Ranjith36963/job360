@@ -423,6 +423,200 @@ def missing_current_roles(text: str, profile: Any) -> Optional[dict[str, str]]:
     return _issue("missing_current_roles", "warn", f"Current role missing from the CV: {_listed(gone)}.")
 
 
+# ── (c2) entry lines vs the profile's cv_positions ─────────────────────────
+
+# MadsLorentzen/ai-job-search (MIT) .claude/commands/apply.md:169 "Compare every date, employer,
+# job title ... in both drafts against the union of ... sources ... reframed emphasis is fine;
+# changed facts ... are not", apply.md:117 (the Grounding Audit: "all dates, roles, and metrics
+# match exactly") and .claude/agents/application-reviewer.md:11 ("Never propose a skill, employer,
+# date ... those files do not contain"). Only the entry lines (``Company | Role | Place | dates``,
+# the shape recipes/rules.md asks for) are compared; bullets are reframed emphasis and are not
+# checked. The entry-line parser is ours (NOT IN REFERENCE). The only vocabulary is the profile's
+# own cv_positions (hard rule #28); no positions means no check (hard rule #29).
+
+_MONTH_NUMBERS = {
+    m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)
+}
+_PRESENT_WORDS = frozenset({"present", "current", "now", "ongoing", "today", "date"})
+_LEGAL_SUFFIXES = frozenset(
+    {
+        "ltd", "limited", "inc", "incorporated", "llc", "llp", "plc", "corp", "corporation",
+        "gmbh", "co", "company", "ag", "sa", "bv", "pty", "the",
+    }
+)
+# Every dash kind becomes " - ": a range is then split word by word, with no regex on caller text.
+_DASHES = {ord(c): " - " for c in "-\u2010\u2011\u2012\u2013\u2014\u2015\u2212"}
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_ENTRY_LINE_MAX = 300
+_EXPERIENCE_WORDS = ("experience", "employment", "work history", "career history")
+_BULLET_STARTS = ("-", "*", "•", "▪", "–", "—")
+
+# One end of a date range: (is_present, (year, month-or-None) or None).
+_DatePoint = tuple[bool, Optional[tuple[int, Optional[int]]]]
+
+
+def _date_point(text: str) -> _DatePoint:
+    """One end of a range: present, or (year, month); ``(False, None)`` when unreadable."""
+    words = _WORD_RE.findall(text.casefold())
+    if any(w in _PRESENT_WORDS for w in words):
+        return True, None
+    year = next((int(w) for w in words if len(w) == 4 and w.isdigit() and 1950 <= int(w) <= 2100), None)
+    if year is None:
+        return False, None
+    month: Optional[int] = None
+    for w in words:
+        if w.isalpha() and len(w) >= 3 and w[:3] in _MONTH_NUMBERS:
+            month = _MONTH_NUMBERS[w[:3]]
+            break
+        if w.isdigit() and len(w) <= 2 and 1 <= int(w) <= 12:
+            month = int(w)
+            break
+    return False, (year, month)
+
+
+def _date_range(text: str) -> Optional[tuple[_DatePoint, _DatePoint]]:
+    """Both ends of ``Mar 2023 - Present`` (any dash, or ``to``); ``None`` unless both ends read."""
+    if len(text) > _ENTRY_LINE_MAX:
+        return None
+    words = text.translate(_DASHES).split()
+    cuts = [i for i, w in enumerate(words) if w == "-" or w.casefold() == "to"]
+    if len(cuts) != 1:
+        return None
+    parts = [" ".join(words[: cuts[0]]), " ".join(words[cuts[0] + 1 :])]
+    if not all(parts):
+        return None
+    start, end = _date_point(parts[0]), _date_point(parts[1])
+    if start[0] or start[1] is None or not (end[0] or end[1] is not None):
+        return None
+    return start, end
+
+
+def _point_matches(a: _DatePoint, b: _DatePoint) -> bool:
+    if a[0] or b[0]:
+        return a[0] and b[0]
+    pa, pb = a[1], b[1]
+    if pa is None or pb is None or pa[0] != pb[0]:
+        return False
+    return pa[1] is None or pb[1] is None or pa[1] == pb[1]  # a month only counts when both give one
+
+
+def _words(text: str) -> list[str]:
+    return _WORD_RE.findall(_norm(text))
+
+
+def _company_words(name: str) -> list[str]:
+    words = [w for w in _words(_core_company(name)) if w not in _LEGAL_SUFFIXES]
+    return words or _words(name)
+
+
+def _has_run(hay: list[str], needle: list[str]) -> bool:
+    n = len(needle)
+    return bool(n) and any(hay[i : i + n] == needle for i in range(len(hay) - n + 1))
+
+
+def _same_company(a: str, b: str) -> bool:
+    wa, wb = _company_words(a), _company_words(b)
+    return bool(wa and wb) and (wa == wb or _has_run(wa, wb) or _has_run(wb, wa))
+
+
+def _same_title(a: str, b: str) -> bool:
+    """Generous: the shorter title's words all appear in the longer (``Engineer`` vs ``Senior Engineer``)."""
+    sa, sb = set(_words(a)), set(_words(b))
+    return bool(sa and sb) and (sa <= sb or sb <= sa)
+
+
+def _is_heading(line: str) -> bool:
+    s = line.strip()
+    return bool(s) and "|" not in s and len(s) <= 40 and s == s.upper() and any(c.isalpha() for c in s)
+
+
+def _experience_lines(text: str) -> list[str]:
+    """Lines inside an EXPERIENCE-like section (no such heading: nothing, so nothing is checked)."""
+    out: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if _is_heading(line):
+            inside = any(w in line.casefold() for w in _EXPERIENCE_WORDS)
+            continue
+        if inside and line.strip():
+            out.append(line.strip())
+    return out
+
+
+def _entry_parts(line: str) -> Optional[tuple[list[str], str]]:
+    """``(non-date parts, date text)`` for an entry line, else ``None``."""
+    if line.startswith(_BULLET_STARTS) or "|" not in line or len(line) > _ENTRY_LINE_MAX:
+        return None
+    parts = [p.strip() for p in line.split("|") if p.strip()]
+    for i in range(len(parts) - 1, 0, -1):
+        if _date_range(parts[i]) is not None:
+            return parts[:i] + parts[i + 1 :], parts[i]
+    return None
+
+
+def _quoted(text: str) -> str:
+    return f'"{" ".join(text.split())}"'
+
+
+def _compare_position(entry: list[str], cv_dates: str, pos: dict[str, Any]) -> list[str]:
+    """What differs between one CV entry and one cv_positions record (empty list = same)."""
+    diffs: list[str] = []
+    cv_range, pos_dates = _date_range(cv_dates), str(pos.get("dates") or "").strip()
+    pr = _date_range(pos_dates) if pos_dates else None
+    if cv_range and pr and not (_point_matches(cv_range[0], pr[0]) and _point_matches(cv_range[1], pr[1])):
+        diffs.append(f"dates: CV says {_quoted(cv_dates)}, profile says {_quoted(pos_dates)}")
+    title = str(pos.get("title") or "").strip()
+    others = [p for p in entry if not _same_company(p, str(pos.get("company") or ""))]
+    if title and others and not any(_same_title(p, title) for p in others):
+        diffs.append(f"title: CV says {_quoted(others[0])}, profile says {_quoted(title)}")
+    return diffs
+
+
+def cv_entry_mismatch(text: str, profile: Any) -> Optional[dict[str, str]]:
+    """Advisory: a CV entry line whose dates or title differ from the profile's position at the
+    same employer, or whose employer is in no cv_positions or linkedin_positions record. Warn only; check_submit does
+    not read it. No cv_positions (or none with a company): silent."""
+    cv = getattr(profile, "cv_data", None)
+    positions = [
+        p
+        for p in (getattr(cv, "cv_positions", None) or [])
+        if isinstance(p, dict) and str(p.get("company") or "").strip()
+    ]
+    if not positions:
+        return None
+    linkedin_companies = [
+        str(p.get("company") or "").strip()
+        for p in (getattr(cv, "linkedin_positions", None) or [])
+        if isinstance(p, dict) and str(p.get("company") or "").strip()
+    ]
+    found: list[str] = []
+    for line in _experience_lines(text):
+        parsed = _entry_parts(line)
+        if parsed is None:
+            continue
+        entry, cv_dates = parsed
+        head = entry[:2]  # the company is the first part (rules.md shape) or, in older CVs, the second
+        matched = [p for p in positions if any(_same_company(h, str(p["company"])) for h in head)]
+        if not matched:
+            # A job that is only on the user's LinkedIn is still theirs: not an unknown employer.
+            if not any(_same_company(h, c) for h in head for c in linkedin_companies):
+                found.append(f"{_quoted(entry[0])}: employer is in none of the profile's positions")
+            continue
+        options = [_compare_position(entry, cv_dates, p) for p in matched]
+        if all(options):
+            best = min(options, key=len)
+            name = next(h for h in head if any(_same_company(h, str(p["company"])) for p in matched))
+            found.append(f"{_quoted(name)} " + "; ".join(best))
+    if not found:
+        return None
+    return _issue(
+        "cv_entry_mismatch",
+        "warn",
+        f"CV entry lines that do not match the profile: {_listed(found)}. Fix the CV, or ask the user"
+        " and update the profile if the CV is right.",
+    )
+
+
 # ── (d) leaked chatter ──────────────────────────────────────────────────────
 
 _CHATTER_ANYWHERE = (
@@ -573,6 +767,7 @@ def check_text(kind: str, text: str, profile: Any) -> list[dict[str, str]]:
             if kind == "cv":
                 out.append(unsupported_terms(text, source))
                 out.append(missing_current_roles(text, profile))
+                out.append(cv_entry_mismatch(text, profile))
     return [i for i in out if i]
 
 
