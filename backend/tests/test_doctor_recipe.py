@@ -30,7 +30,7 @@ def _recipe(name: str) -> str:
     return flat(load_recipe(name).text)
 
 
-def test_doctor_is_listed_short_and_has_stops():
+def test_second_look_is_listed_short_and_has_stops():
     from src.api import mcp_server
     from src.api.routes.recipes import RECIPE_NAMES, load_recipe
 
@@ -42,7 +42,7 @@ def test_doctor_is_listed_short_and_has_stops():
     assert "doctor" not in mcp_server.PAUSE_WORK_RECIPES
 
 
-def test_doctor_pins_the_review():
+def test_second_look_pins_the_review():
     text = _recipe("doctor")
     for words in ("fresh context", "inline", "only read", "say so to the user",
                   "every date, employer, job title, number and claim",
@@ -53,7 +53,7 @@ def test_doctor_pins_the_review():
         assert words in text, words
 
 
-def test_doctor_pins_fix_save_lessons_alert():
+def test_second_look_pins_fix_save_lessons_alert():
     text = _recipe("doctor")
     for words in ("fix before saving", "the saved version is the fixed one", "after second look",
                   "at most 3 per review", "never a fact about the user", "never ad text", "corrects_event_id",
@@ -63,14 +63,14 @@ def test_doctor_pins_fix_save_lessons_alert():
         assert words in text, words
 
 
-def test_doctor_names_every_draft_kind():
+def test_second_look_names_every_draft_kind():
     text = _recipe("doctor")
     for words in ("cv", "cover letter", "outreach email", "linkedin connection note", "inmail", "form essay",
                   "check-in", "feedback email", "thank-you", "interview prep"):
         assert words in text, words
 
 
-def test_apply_batch_and_rules_point_to_doctor():
+def test_apply_batch_and_rules_point_to_second_look():
     for name in ("apply", "batch", "rules"):
         assert 'get_recipe("doctor")' in _recipe(name), name
     assert "## doctor (every draft, judgment and action)" in _recipe("rules")
