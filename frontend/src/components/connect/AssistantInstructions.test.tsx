@@ -24,7 +24,7 @@ beforeEach(() => {
   api.getProfileEditHistory.mockResolvedValue([]);
 });
 
-describe("AssistantInstructions (Connect your assistant > Assistant configure)", () => {
+describe("AssistantInstructions (Memory & instructions page)", () => {
   it("shows 'Things your AI assistant should know' ABOVE the sentence, saving the whole preferences block", async () => {
     api.updateProfileFields.mockResolvedValue({
       preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },

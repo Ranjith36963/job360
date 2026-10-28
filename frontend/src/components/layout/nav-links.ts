@@ -39,7 +39,7 @@ export const NAV_LINKS: readonly NavLink[] = [
   { href: "/receipts", label: "Receipts", icon: Receipt },
   { href: "/stats", label: "Statistics", icon: BarChart3 },
   { href: "/profile", label: "Profile", icon: User },
-  { href: "/profile/memory", label: "Memory", icon: Brain },
+  { href: "/profile/memory", label: "Memory & instructions", icon: Brain },
   { href: "/connect", label: "Connect your assistant", icon: Plug },
   { href: "/account", label: "Account", icon: CircleUser },
 ];
