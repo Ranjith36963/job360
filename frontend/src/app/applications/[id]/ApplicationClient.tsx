@@ -27,6 +27,7 @@ import { Contacts } from "@/components/applications/Contacts";
 import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
+import { LessonRow } from "@/components/applications/LessonRow";
 import { JobFacts } from "@/components/applications/JobFacts";
 import { PayAdvertised } from "@/components/applications/PayAdvertised";
 import { VisaBadge } from "@/components/applications/VisaBadge";
@@ -521,7 +522,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               <ul className="mb-3 flex flex-col gap-2">
                 {lessonEvents.map((event) => (
                   <li key={event.id} data-testid="lesson-here" className="border-t border-border pt-3 text-sm first:border-t-0 first:pt-0">
-                    <p className="font-heading text-base leading-snug">{event.detail}</p>
+                    <LessonRow
+                      applicationId={detail.id}
+                      eventId={event.id}
+                      detail={event.detail}
+                      recordedBy={event.recorded_by}
+                      onChanged={load}
+                    />
                     <p className="mt-1 font-mono text-xs text-faint">
                       {formatDateTime(event.occurred_at)}
                     </p>

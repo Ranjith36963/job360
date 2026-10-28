@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { LessonRow } from "@/components/applications/LessonRow";
 import { BookOpen } from "lucide-react";
 import { listLessons, type Lesson } from "@/lib/api";
 import { formatDate } from "@/lib/format-date";
@@ -14,6 +15,9 @@ export function LessonsList() {
   const [lessons, setLessons] = useState<Lesson[] | null>(null);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(async () => setVersion((v) => v + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,7 +35,7 @@ export function LessonsList() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [version]);
 
   return (
     <div className="rounded-xl border border-border bg-card p-6">
@@ -53,7 +57,13 @@ export function LessonsList() {
           <ul className="divide-y divide-border">
             {lessons.map((l) => (
               <li key={l.event_id} data-testid="lesson-item" className="py-3 first:pt-0 last:pb-0">
-                <p className="whitespace-pre-wrap font-heading text-base text-foreground">{l.detail}</p>
+                <LessonRow
+                  applicationId={l.application_id}
+                  eventId={l.event_id}
+                  detail={l.detail}
+                  recordedBy={l.recorded_by}
+                  onChanged={reload}
+                />
                 <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                   <Link
                     href={`/applications/${l.application_id}`}
