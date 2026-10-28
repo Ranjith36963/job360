@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   getAssistantSettings,
   getMorningCheck,
+  getProfile,
   getProfileEditHistory,
   getSettingHistory,
   takeBackSetting,
@@ -19,7 +20,10 @@ import {
   INBOX_MODES,
   AUTO_EMAILS_HELP,
   OUTREACH_SEND_HELP,
+  LINKEDIN_PREMIUM_HELP,
   P_AUTO_EMAILS,
+  P_BELOW,
+  P_LINKEDIN_PREMIUM,
   P_OUTREACH_SEND,
   P_EVERY,
   P_HUNT_EVERY,
@@ -44,11 +48,19 @@ import {
   settingScore,
 } from "@/lib/assistant-tab";
 import type { ChangeRow, HistRow } from "@/lib/assistant-tab";
-import { ALWAYS_ASKS, LINE_SWITCH_LABEL, belowText, quotaText, scoreLineText } from "@/lib/morning-check";
+import { ALWAYS_ASKS, LINE_SWITCH_LABEL, quotaText, scoreLineText } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 import { PauseButton } from "@/components/layout/TopBar";
 import { SettingRequestCard } from "@/components/needs-you/SettingRequestCard";
-import { APPLY_MODES, BatchRuleRows, LABEL, NUMBOX, Row, modeOf } from "./BatchRuleRows";
+import { BatchRuleRows, LABEL, NUMBOX, Row, applyModeText, modeOf } from "./BatchRuleRows";
+import { PauseUntil } from "./PauseUntil";
+
+/** Below the score line (owner 2026-10-28): all three choices. "Apply on its own" asks first. */
+const BELOW_CHOICES: { value: "skip" | "ask" | "auto"; label: string }[] = [
+  { value: "skip", label: "Drop it" },
+  { value: "ask", label: "Ask me" },
+  { value: "auto", label: "Apply on its own" },
+];
 
 const Section = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
   <section className="flex flex-col">
@@ -80,6 +92,8 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const [pcTo, setPcTo] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
+  const [confirmBelowAuto, setConfirmBelowAuto] = useState(false);
+  const [premium, setPremium] = useState(false);
   const enterDone = useRef(false);
 
   const readHistory = useCallback(async () => {
@@ -115,6 +129,12 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
       return;
     }
     await readHistory();
+    try {
+      // Not in the settings view: read the profile's own preference (off unless the user turned it on).
+      setPremium((await getProfile()).preferences?.linkedin_premium === true);
+    } catch {
+      setPremium(false);
+    }
     try {
       setToday(await getMorningCheck(new Date().toISOString()));
     } catch {
@@ -184,7 +204,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const belowLine = String(eff(view.below_line) || "ask");
   const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const outreachSend = settingOutreachSend(view.outreach_send);
-  const applyMode = APPLY_MODES.find((m) => m.value === modeOf(view))?.title ?? "";
+  const applyMode = applyModeText(modeOf(view), view.auto_grant_count?.value);
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
   const savedScore: number | null = settingScore(view.apply_min_score);
@@ -271,6 +291,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
             <Row title="Pause your assistant" sub="Stops every application and every send at once. The same switch as the top bar.">
               <PauseButton />
             </Row>
+            <PauseUntil />
           </Section>
         )}
         {perms && (
@@ -302,11 +323,58 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
           </Row>
           {/* One control writes submit_mode (owner 2026-10-28): the old Batch auto apply switch is folded in. */}
           <BatchRuleRows part="apply" view={view} busy={busy} save={save} saveMany={saveMany} />
-          <p data-testid="below-line-rule" className="pt-2 text-[12.5px] text-muted-foreground">
-            {belowLine === "skip"
-              ? "Jobs below your score line are dropped — never applied to."
-              : `${belowText(belowLine)}. Choosing Ask me each time or Straight away drops them from now on.`}
-          </p>
+          <Row title="Below your score line" sub="What your assistant does with a job that scores under your line.">
+            <div role="radiogroup" aria-label="Below your score line" className="inline-flex overflow-hidden rounded-lg border border-border">
+              {BELOW_CHOICES.map((c, i) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={belowLine === c.value}
+                  data-testid={`below-${c.value}`}
+                  disabled={busy}
+                  onClick={() => {
+                    if (belowLine === c.value) return;
+                    if (c.value === "auto") return setConfirmBelowAuto(true);
+                    setConfirmBelowAuto(false);
+                    void save(P_BELOW, c.value);
+                  }}
+                  className={cn(
+                    "min-h-11 px-3.5 text-sm font-medium md:min-h-9",
+                    i > 0 && "border-l border-border",
+                    belowLine === c.value ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            {confirmBelowAuto && belowLine !== "auto" && (
+              <span className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="below-auto-ask">
+                Let your assistant apply on its own to jobs below your score line?
+                <button
+                  type="button"
+                  data-testid="below-auto-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmBelowAuto(false);
+                    void save(P_BELOW, "auto");
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  data-testid="below-auto-cancel"
+                  onClick={() => setConfirmBelowAuto(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
           <p data-testid="always-asks" className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
             {ALWAYS_ASKS}
           </p>
@@ -546,6 +614,23 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                 </button>
               </span>
             )}
+          </Row>
+          <Row title="I have LinkedIn Premium" sub={LINKEDIN_PREMIUM_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={premium}
+              aria-label="I have LinkedIn Premium"
+              data-testid="linkedin-premium-toggle"
+              disabled={busy}
+              onClick={() => void save(P_LINKEDIN_PREMIUM, !premium)}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                premium ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {premium ? "On" : "Off"}
+            </button>
           </Row>
           <Row title="Gmail check" sub="Your assistant reads your inbox and records replies.">
             <div role="radiogroup" aria-label="Gmail check" className="inline-flex overflow-hidden rounded-lg border border-border">

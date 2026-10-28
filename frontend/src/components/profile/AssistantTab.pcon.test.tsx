@@ -9,6 +9,7 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   getMorningCheck: vi.fn().mockResolvedValue({ state: { applied_today: 0, daily_cap: null } }),
   getProfileEditHistory: vi.fn().mockResolvedValue([]),
+  getProfile: vi.fn().mockResolvedValue({ preferences: {} }),
   getSettingHistory: vi.fn().mockResolvedValue([]),
   takeBackSetting: vi.fn(),
   updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),

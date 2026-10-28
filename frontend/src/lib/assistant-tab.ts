@@ -103,7 +103,13 @@ export const SETTING_HISTORY_PATHS = [
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
   P_PEOPLE_HUNT, P_PC_ON,
 ] as const;
-export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
+/** Owner 2026-10-28: "I have LinkedIn Premium" (300-character connection notes, not 200). Off unless the user says. */
+export const P_LINKEDIN_PREMIUM = "preferences.linkedin_premium";
+export const LINKEDIN_PREMIUM_HELP = "Longer connection notes: 300 characters instead of 200.";
+/** The pause reason: one short line for the user's own memory, never logged. Same caps as the backend. */
+export const PAUSE_REASON_MAX = 200; // PROFILE_EDIT_MAX_ITEM_CHARS
+export const PAUSE_MAX_DAYS = 365; // backend PAUSE_MAX_DAYS
+export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY, P_LINKEDIN_PREMIUM] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
 
 const KEY_LABEL: Record<string, string> = {
@@ -126,6 +132,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_HUNT_EVERY]: "Job hunt",
   [P_PEOPLE_HUNT]: "People hunt",
   [P_PC_ON]: "My PC-on time",
+  [P_LINKEDIN_PREMIUM]: "LinkedIn Premium",
 };
 
 /** "auto"/"scheduled" -> auto, "declined" -> paused (Off); anything else as stored. */
@@ -170,7 +177,7 @@ export function pcOnText(v: unknown): string {
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
-  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT) return v === true ? "on" : "off";
+  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM) return v === true ? "on" : "off";
   if (path === P_OUTREACH_SEND) return v === "auto" ? "on" : "off";
   if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
   if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;
@@ -280,6 +287,27 @@ export function isoToLocalInput(iso: string): string {
 export function localInputToIso(local: string): string {
   const d = new Date(local);
   return local && !Number.isNaN(d.getTime()) ? d.toISOString() : "";
+}
+
+/** A timed pause from the `datetime-local` box: the ISO time, or why it is refused.
+ *  It must be in the future and at most PAUSE_MAX_DAYS ahead (the backend's own rule). */
+export function pauseUntilIso(local: string, now: Date = new Date()): { iso: string } | { error: string } {
+  const iso = localInputToIso(local);
+  const t = iso ? new Date(iso).getTime() : Number.NaN;
+  if (Number.isNaN(t) || t <= now.getTime() || t > now.getTime() + PAUSE_MAX_DAYS * 86_400_000) {
+    return { error: `Pick a time in the future, at most ${PAUSE_MAX_DAYS} days from now. Not saved.` };
+  }
+  return { iso };
+}
+
+/** "Paused until 3 Nov, 09:00" for a timed pause; "" for none or "until_resumed". */
+export function pausedUntilText(until: string): string {
+  if (!until || until === "until_resumed") return "";
+  const d = new Date(until);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `Paused until ${day}, ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /** Is the grant still running? (a count and a future end). */

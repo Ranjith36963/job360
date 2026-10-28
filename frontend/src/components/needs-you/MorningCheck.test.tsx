@@ -5,7 +5,9 @@ import { LAST_CHECK_KEY } from "@/lib/morning-check";
 
 const getMorningCheck = vi.fn();
 const updateProfileFields = vi.fn();
+const getAssistantSettings = vi.fn();
 vi.mock("@/lib/api", () => ({
+  getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   getMorningCheck: (...a: unknown[]) => getMorningCheck(...a),
   updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),
 }));
@@ -39,6 +41,7 @@ const payload = (state: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   getMorningCheck.mockReset().mockResolvedValue(payload());
+  getAssistantSettings.mockReset().mockResolvedValue({ auto_grant_count: { value: null }, auto_grant_until: { value: "" } });
   updateProfileFields.mockReset().mockResolvedValue({});
   toastSuccess.mockReset();
   toastError.mockReset();
@@ -50,7 +53,7 @@ describe("MorningCheck", () => {
   it("running: word, score line, batch switch, below-line rule, quota with a limit, the amber note", async () => {
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
-    for (const t of ["On", "Score line 75", "Batch auto apply: off", "Below the line: dropped", "4 of 10 today"]) {
+    for (const t of ["On", "Score line 75", "How it applies: Ask me each time", "Below the line: dropped", "4 of 10 today"]) {
       expect(strip).toHaveTextContent(t);
     }
     expect(strip).not.toHaveTextContent("Confirm before sending");
@@ -65,7 +68,7 @@ describe("MorningCheck", () => {
     getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure", below_line: "ask" }));
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
-    expect(strip).toHaveTextContent("Batch auto apply: on");
+    expect(strip).toHaveTextContent("How it applies: Straight away");
     expect(strip).toHaveTextContent("Below the line: asks you");
   });
 
@@ -79,13 +82,28 @@ describe("MorningCheck", () => {
     expect(screen.getByTestId("mc-score-line-set")).toHaveAttribute("href", "/connect?tab=permissions");
   });
 
+  it("a running grant reads as Auto for a while, with the number the user picked", async () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    getAssistantSettings.mockResolvedValue({ auto_grant_count: { value: 5 }, auto_grant_until: { value: until } });
+    render(<MorningCheck />);
+    await waitFor(() => expect(screen.getByTestId("mc-batch")).toHaveTextContent("How it applies: Auto for a while (up to 5)"));
+    expect(screen.getByTestId("mc-strip")).not.toHaveTextContent("Batch auto apply");
+  });
+
+  it("an unreadable grant falls back to the strip's own mode words", async () => {
+    getAssistantSettings.mockRejectedValue(new Error("down"));
+    getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure" }));
+    render(<MorningCheck />);
+    await waitFor(() => expect(screen.getByTestId("mc-batch")).toHaveTextContent("How it applies: Straight away"));
+  });
+
   it("paused with no limit: '4 today', who and when", async () => {
     const paused = { paused: true, paused_by: "web", paused_at: NOW, daily_cap: null, submit_mode: "auto_when_sure" };
     getMorningCheck.mockResolvedValue(payload(paused));
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
     expect(strip).toHaveTextContent("Paused");
-    expect(strip).toHaveTextContent("Batch auto apply: off");
+    expect(strip).toHaveTextContent("How it applies: Ask me each time");
     expect(screen.getByTestId("mc-quota").textContent).toBe("4 today");
     expect(screen.getByTestId("mc-paused-by").textContent).toMatch(/^Paused by you, /);
   });
@@ -168,7 +186,7 @@ describe("MorningCheck inline editor", () => {
     getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure" }));
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
-    expect(strip).toHaveTextContent("Batch auto apply: on");
+    expect(strip).toHaveTextContent("How it applies: Straight away");
     noEditor();
     expect(updateProfileFields).not.toHaveBeenCalled();
   });
@@ -176,7 +194,7 @@ describe("MorningCheck inline editor", () => {
   it("Batch auto apply OFF writes ask + confirm back", async () => {
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
-    expect(strip).toHaveTextContent("Batch auto apply: off");
+    expect(strip).toHaveTextContent("How it applies: Ask me each time");
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(updateProfileFields).not.toHaveBeenCalled();
   });
@@ -194,7 +212,7 @@ describe("MorningCheck inline editor", () => {
     await screen.findByTestId("mc-strip");
     getMorningCheck.mockResolvedValue(payload({ above_line: "auto", submit_mode: "auto_when_sure" }));
     window.dispatchEvent(new CustomEvent("job360:ready-changed"));
-    await waitFor(() => expect(screen.getByTestId("mc-strip")).toHaveTextContent("Batch auto apply: on"));
+    await waitFor(() => expect(screen.getByTestId("mc-strip")).toHaveTextContent("How it applies: Straight away"));
     expect(updateProfileFields).not.toHaveBeenCalled();
   });
 

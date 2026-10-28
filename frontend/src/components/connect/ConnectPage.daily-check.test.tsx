@@ -93,7 +93,8 @@ describe("ConnectAgentPage — daily check status", () => {
     nav.tab = "permissions";
     getAssistantSettings.mockResolvedValueOnce(settings({ inbox_mode: "scheduled" }));
     render(<ConnectAgentPage />);
-    expect(await screen.findByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true");
+    // Wait for the saved mode, not just the button: it renders before the settings load.
+    await waitFor(() => expect(screen.getByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true"));
     getAssistantSettings.mockResolvedValueOnce(settings({ inbox_mode: "ask" }));
     fireEvent.click(screen.getByTestId("inbox-ask"));
     await waitFor(() =>

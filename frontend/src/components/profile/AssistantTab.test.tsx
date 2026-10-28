@@ -6,6 +6,7 @@ import { historyWhen } from "@/lib/assistant-tab";
 const getAssistantSettings = vi.fn();
 const getMorningCheck = vi.fn();
 const getProfileEditHistory = vi.fn();
+const getProfile = vi.fn();
 const getSettingHistory = vi.fn();
 const takeBackSetting = vi.fn();
 const updateProfileFields = vi.fn();
@@ -13,6 +14,7 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   getMorningCheck: (...a: unknown[]) => getMorningCheck(...a),
   getProfileEditHistory: (...a: unknown[]) => getProfileEditHistory(...a),
+  getProfile: (...a: unknown[]) => getProfile(...a),
   getSettingHistory: (...a: unknown[]) => getSettingHistory(...a),
   takeBackSetting: (...a: unknown[]) => takeBackSetting(...a),
   updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),
@@ -25,6 +27,8 @@ const toastError = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }));
 // The top bar's own Pause button (tested in TopBar.test.tsx); here only where it sits.
 vi.mock("@/components/layout/TopBar", () => ({ PauseButton: () => <button type="button" data-testid="pause-button" /> }));
+// "Pause until" has its own test (PauseUntil.test.tsx); here only where it sits.
+vi.mock("./PauseUntil", () => ({ PauseUntil: () => <div data-testid="pause-until-row" /> }));
 
 const field = (value: unknown, effective: unknown = value) => ({ value, effective });
 const view = (over: Record<string, unknown> = {}) => ({
@@ -52,6 +56,7 @@ const histories: Record<string, unknown[]> = {
 beforeEach(() => {
   getAssistantSettings.mockReset().mockResolvedValue(view());
   getMorningCheck.mockReset().mockResolvedValue(check);
+  getProfile.mockReset().mockResolvedValue({ preferences: {} });
   getSettingHistory.mockReset().mockImplementation(async (p: string) => histories[p] ?? []);
   getProfileEditHistory.mockReset().mockImplementation(async (p: string) => histories[p] ?? []);
   takeBackSetting.mockReset().mockResolvedValue(view());
@@ -93,9 +98,8 @@ describe("AssistantTab", () => {
     expect(screen.queryByTestId("min-gap")).toBeNull();
     expect(tab).not.toHaveTextContent("Every change, newest first");
     // an older "ask" below the line is shown honestly, with what a click will do
-    expect(screen.getByTestId("below-line-rule")).toHaveTextContent(
-      "Below the line: asks you. Choosing Ask me each time or Straight away drops them from now on.",
-    );
+    expect(screen.getByTestId("below-ask")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("below-auto")).toHaveAttribute("aria-checked", "false");
     expect(tab).not.toHaveTextContent("Submit mode");
     expect(screen.getByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true");
     expect((screen.getByTestId("check-every") as HTMLSelectElement).value).toBe("6h");
@@ -123,16 +127,14 @@ describe("AssistantTab", () => {
 
   it("each control sends its own PATCH body as the web user, then re-reads", async () => {
     await ready();
-    // Straight away: both halves in one PATCH, and below-the-line jobs are dropped.
+    // Straight away: both halves in one PATCH; below-the-line keeps its own choice.
     fireEvent.click(screen.getByTestId("mode-straight"));
     fireEvent.click(screen.getByTestId("mode-straight-confirm"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
       { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
-      { path: "assistant_settings.apply_hours", value: null },
       { path: "assistant_settings.auto_grant_count", value: null },
       { path: "assistant_settings.auto_grant_until", value: null },
       { path: "assistant_settings.above_line", value: "auto" },
-      { path: "assistant_settings.below_line", value: "skip" },
     ]));
     fireEvent.click(screen.getByTestId("inbox-ask"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "ask" }]));
@@ -355,11 +357,10 @@ describe("AssistantTab", () => {
     }));
     await ready();
     expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("below-line-rule")).toHaveTextContent("Jobs below your score line are dropped — never applied to.");
+    expect(screen.getByTestId("below-skip")).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByTestId("mode-ask"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
       { path: "assistant_settings.submit_mode", value: "confirm" },
-      { path: "assistant_settings.apply_hours", value: null },
       { path: "assistant_settings.auto_grant_count", value: null },
       { path: "assistant_settings.auto_grant_until", value: null },
       { path: "assistant_settings.above_line", value: "ask" },
@@ -477,16 +478,25 @@ describe("AssistantTab", () => {
     await waitFor(() =>
       expect(updateProfileFields).toHaveBeenCalledWith([
         { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
-        { path: "assistant_settings.apply_hours", value: null },
         { path: "assistant_settings.auto_grant_count", value: null },
         { path: "assistant_settings.auto_grant_until", value: null },
         { path: "assistant_settings.above_line", value: "auto" },
-        { path: "assistant_settings.below_line", value: "skip" },
       ]),
     );
   });
 
-  it("offers no Hours to apply card; an old saved window reads as Straight away, is shown, and clears", async () => {
+  it("a mode pick never resets the below-the-line choice", async () => {
+    getAssistantSettings.mockResolvedValue(view({ below_line: field("auto") }));
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-straight"));
+    fireEvent.click(screen.getByTestId("mode-straight-confirm"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
+    for (const call of updateProfileFields.mock.calls) {
+      expect(call[0]).not.toContainEqual(expect.objectContaining({ path: "assistant_settings.below_line" }));
+    }
+  });
+
+  it("apply hours: a saved window is shown, can be changed (overnight is fine) and cleared with null", async () => {
     getAssistantSettings.mockResolvedValue(
       view({
         above_line: field("auto"),
@@ -496,14 +506,119 @@ describe("AssistantTab", () => {
     );
     await ready();
     expect(screen.queryByTestId("mode-hours")).toBeNull();
-    expect(screen.queryByTestId("apply-hours-from")).toBeNull();
-    expect(screen.queryByTestId("apply-hours-to")).toBeNull();
     expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("old-apply-hours")).toHaveTextContent("between 09:00 and 17:30");
-    fireEvent.click(screen.getByTestId("old-apply-hours-clear"));
+    expect((screen.getByTestId("apply-hours-from") as HTMLInputElement).value).toBe("09:00");
+    expect((screen.getByTestId("apply-hours-to") as HTMLInputElement).value).toBe("17:30");
+    fireEvent.change(screen.getByTestId("apply-hours-from"), { target: { value: "22:00" } });
+    fireEvent.change(screen.getByTestId("apply-hours-to"), { target: { value: "06:00" } });
+    fireEvent.click(screen.getByTestId("apply-hours-save"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([
+        { path: "assistant_settings.apply_hours", value: { from: "22:00", to: "06:00" } },
+      ]),
+    );
+    fireEvent.click(screen.getByTestId("apply-hours-clear"));
     await waitFor(() =>
       expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_hours", value: null }]),
     );
+  });
+
+  it("apply hours: the two times must differ and both be set; nothing is sent otherwise", async () => {
+    await ready();
+    expect(screen.queryByTestId("apply-hours-clear")).toBeNull();
+    fireEvent.change(screen.getByTestId("apply-hours-from"), { target: { value: "09:00" } });
+    fireEvent.click(screen.getByTestId("apply-hours-save"));
+    expect(toastError).toHaveBeenLastCalledWith("Pick both times, or press Clear for any time. Not saved.");
+    fireEvent.change(screen.getByTestId("apply-hours-to"), { target: { value: "09:00" } });
+    fireEvent.click(screen.getByTestId("apply-hours-save"));
+    expect(toastError).toHaveBeenLastCalledWith("The two times must be different. Not saved.");
+    expect(updateProfileFields).not.toHaveBeenCalled();
+  });
+
+  it("a saved apply-hours window survives every mode change", async () => {
+    const hours = { apply_hours: field({ from: "09:00", to: "17:00" }) };
+    const sentHours = () =>
+      updateProfileFields.mock.calls.some((c) =>
+        (c[0] as { path: string }[]).some((e) => e.path === "assistant_settings.apply_hours"),
+      );
+    getAssistantSettings.mockResolvedValue(view(hours));
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-straight"));
+    fireEvent.click(screen.getByTestId("mode-straight-confirm"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    cleanup();
+    getAssistantSettings.mockResolvedValue(view({ ...hours, above_line: field("auto"), submit_mode: field("auto_when_sure") }));
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-ask"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByTestId("mode-while"));
+    fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "3" } });
+    fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
+    fireEvent.click(screen.getByTestId("auto-grant-save"));
+    fireEvent.click(screen.getByTestId("auto-grant-confirm"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(3));
+    expect(sentHours()).toBe(false);
+    expect((screen.getByTestId("apply-hours-from") as HTMLInputElement).value).toBe("09:00");
+  });
+
+  it("below the line: Drop it and Ask me save at once; Apply on its own asks first and never starts selected", async () => {
+    await ready();
+    expect(screen.getByTestId("below-auto")).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(screen.getByTestId("below-skip"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.below_line", value: "skip" }]),
+    );
+    updateProfileFields.mockClear();
+    fireEvent.click(screen.getByTestId("below-auto"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(screen.getByTestId("below-auto")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("below-auto-ask")).toHaveTextContent(
+      "Let your assistant apply on its own to jobs below your score line?",
+    );
+    fireEvent.click(screen.getByTestId("below-auto-cancel"));
+    expect(screen.queryByTestId("below-auto-ask")).toBeNull();
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("below-auto"));
+    fireEvent.click(screen.getByTestId("below-auto-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.below_line", value: "auto" }]),
+    );
+  });
+
+  it("below the line: a saved auto shows as chosen; Ask me goes back at once", async () => {
+    getAssistantSettings.mockResolvedValue(view({ below_line: field("auto") }));
+    await ready();
+    expect(screen.getByTestId("below-auto")).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByTestId("below-ask"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.below_line", value: "ask" }]),
+    );
+  });
+
+  it("LinkedIn Premium: off by default, read from the profile, and each click writes the user's choice", async () => {
+    await ready();
+    const toggle = screen.getByTestId("linkedin-premium-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent("I have LinkedIn Premium");
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Longer connection notes: 300 characters instead of 200.");
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.linkedin_premium", value: true }]),
+    );
+    cleanup();
+    getProfile.mockResolvedValue({ preferences: { linkedin_premium: true } });
+    await ready();
+    await waitFor(() => expect(screen.getByTestId("linkedin-premium-toggle")).toHaveAttribute("aria-checked", "true"));
+    fireEvent.click(screen.getByTestId("linkedin-premium-toggle"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.linkedin_premium", value: false }]),
+    );
+  });
+
+  it("History reads the LinkedIn Premium changes too", async () => {
+    await ready("configure");
+    expect(getProfileEditHistory).toHaveBeenCalledWith("preferences.linkedin_premium");
   });
 
   it("Ask me each time turns sending on its own off", async () => {
@@ -540,7 +655,6 @@ describe("AssistantTab", () => {
     expect(new Date(String(sent[1].value)).getFullYear()).toBe(2099);
     expect(sent.slice(2)).toEqual([
       { path: "assistant_settings.submit_mode", value: "confirm" },
-      { path: "assistant_settings.apply_hours", value: null },
     ]);
   });
 

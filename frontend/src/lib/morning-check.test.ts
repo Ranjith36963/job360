@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
-import { ALWAYS_ASKS, LAST_CHECK_KEY, LINE_SWITCH_LABEL, batchEdits, batchOn, batchText, belowText, SUBMIT_MODE_LABEL, lineSwitchText, pausedByText, quotaText, scoreLineText, sinceText } from "./morning-check";
+import { ALWAYS_ASKS, LAST_CHECK_KEY, LINE_SWITCH_LABEL, batchEdits, batchOn, belowText, SUBMIT_MODE_LABEL, lineSwitchText, pausedByText, quotaText, scoreLineText, sinceText } from "./morning-check";
 
 const now = new Date("2026-10-10T12:00:00");
 
@@ -42,8 +42,6 @@ describe("batch auto apply (owner decision 2026-10-19)", () => {
     expect(batchOn("auto", "confirm")).toBe(false);
     expect(batchOn("ask", "auto_when_sure")).toBe(false);
     expect(batchOn(undefined, undefined)).toBe(false);
-    expect(batchText(true)).toBe("Batch auto apply: on");
-    expect(batchText(false)).toBe("Batch auto apply: off");
   });
 
   it("says what happens below the line", () => {
