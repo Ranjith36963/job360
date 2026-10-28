@@ -55,65 +55,60 @@ full job-seeking help, because every part that matters lives in Job360:
 | Duty board | `whats_due` / `mark_done`: what is due now, what is done |
 | Ignition | Job360 starts the assistant the moment the seeker acts or a step finishes (a vendor start link where one exists; the vendor's own timer everywhere) |
 | Engines on a clock | Hunt, people hunt, apply, Gmail check: scheduled runs with the seeker's computer off |
-| Dashboards | Two cockpits: **Needs you** for attention (one card per job, one click per action) and **Home** for permissions (pause, apply mode, limits, every yes the assistant waits for). See "Every page has one purpose". |
+| Dashboards | **Needs you** for attention and Run now triggers, the **Progress dashboard** for now and recent, **Statistics** for results over time, **Connect your assistant** for every permission and setting. See "Every page has one purpose". |
 
 The harness never becomes the brain: no LLM of its own (decision 28), never
 sources, ranks or recommends (rule 4). It steers, limits and records. What
 differs per assistant is only the setup (how its timer is made, whether a start
 link exists); the parts above stay the same.
 
-## Every page has one purpose (the owner, 2026-10-27)
+## Every page has one purpose (the owner, 2026-10-27, revised 2026-10-28)
 
-> "Everything that needs my attention comes to Needs you. Everything that needs my
-> permission goes to Home. Connect your assistant is maintenance. Each and every
-> page has its own vision, its own persona."
+> "Needs you is where it needs my attention. Connect your assistant is setup,
+> configure, permissions, all those things. Progress dashboard and Statistics as
+> two different pages." (2026-10-28)
 
-Job360 is the job seeker's cockpit. There are two cockpits, for two different
-purposes, plus one workshop. A control lives on exactly one page, chosen by the
-question it answers:
+Each page answers one question. A control or a number lives on exactly one page;
+another page may only link to it.
 
-| Question the control answers | Kind | Its page |
+| Question | Kind | Its page |
 |---|---|---|
-| "What is waiting for **me** right now, on one job, person or email?" | **Attention** | **Needs you** |
-| "What may my assistant do, and does it have my yes?" | **Permission** | **Home** |
-| "How is it set up and connected?" | **Maintenance** | **Connect your assistant** |
+| "What is waiting for **me** right now?" | **Attention** (and **triggers**) | **Needs you** |
+| "What is happening now, and what is next?" | **Now and recent** | **Progress dashboard** (`/`) |
+| "What is working, over time?" | **Results** | **Statistics** (`/stats`) |
+| "What may my assistant do, and how is it set up?" | **Permissions, settings, setup, maintenance** | **Connect your assistant** |
 | "What happened, and what is on record?" | **Record** | the record pages below |
 
-### The three main pages
+### The four main pages
 
-| Page | Persona | It is for | It never holds |
-|---|---|---|---|
-| **Needs you** | **The attention cockpit.** The page the seeker lives on. | Every item that waits on the user, one card per job: questions to answer, guesses to OK, a CAPTCHA or sign-in on an open form, a CV to approve, a note to send to one person, an outcome to confirm, an email to match. Cards are folded to one dense row (company, role, where it came from, when, score, next step) and unfold with **+**. It updates live while the assistant works. | Standing rules, limits or on/off switches. Setup. |
-| **Home** | **The permissions cockpit.** The major controls. | Everything that decides **what the assistant may do**, and every yes it is waiting for: Pause; how it applies (ask first or apply on its own, the score line, the "auto for a while" grant); limits (per day, per week, per company); sending in the user's name (employer emails, outreach, the Gmail mode); the assistant's requests to change a setting; bulk yeses (send these N, run my own-browser tasks now, the batch queue). Plus one linked line: "N things need you". | Per-job work (that is Needs you). Setup and fine-tuning (that is Connect). |
-| **Connect your assistant** | **Maintenance.** The workshop. | Connecting an assistant, tokens and connected apps, start links and schedules, job-site sign-ins for Job360's browser, the setup steps, run problems, and the fine-tuning of the rules (gap between applications, apply hours, how often it hunts, people hunt, PC-on hours). | Anything that waits on the user today. |
+| Page | It is for | It never holds |
+|---|---|---|
+| **Needs you** (opens first after sign-in) | Every item that waits on the user: one folded card per job (questions, guesses to OK, an open form, a CV to approve, a person's note, an outcome to confirm), unmatched email, "Started, not confirmed", follow-ups that are due, and a one-line pointer to the assistant's setting requests. Beside the summary, the **Run now** panel: triggers, not permissions (each runs on its schedule anyway; a press starts it early and never says yes to a submit): run my own-browser tasks, Check Gmail, Hunt, Find people, Apply. Live while the assistant works. | Standing rules, limits, switches, setup. |
+| **Progress dashboard** (`/`) | Right now (running or paused, today's limit used, since you last looked, how it applies), Next up (the queue of jobs and LinkedIn sends, each with its browser), Activity (the feed). Read only; one link to Statistics. | Counts over time, lessons, switches, setup. |
+| **Statistics** | Your funnel (brought in, applied, replies, interviews, offers, with the rate at each step, and rejected), What's working (by score line, source, site, person, message), Lessons. Read only. | Anything live or editable. |
+| **Connect your assistant** | **Permissions** tab first, every permission once: the assistant's requests to change a setting, Pause (also in the top bar) and pause until a time, score line, how it applies (Ask me each time / Straight away / Auto for a while), below the line (Drop / Ask me / Apply on its own, with a confirm), limits (day, week, company), apply hours, outreach emails, employer emails, Gmail check, LinkedIn Premium, hard stops. Then Setup (with progress), Assistant configure (pace, hunt, people hunt, PC-on time, History), Schedules & start links (with run problems and duty status), Job sites, Connected apps, Developers. | Anything that waits on the user today. |
 
-A yes or no about **one** job or **one** person (Send this application, Skip this
-job, send this person's note) is attention, not a standing permission: it stays
-in that job's card on Needs you and on the application page. Only standing rules
-and **bulk** yeses go to Home. A count can appear on another page; the control
-lives on its own page.
+A yes or no about **one** job or **one** person stays in that job's card on Needs
+you and on the application page. A count can appear on another page; the
+control lives on its own page. Pause is the one control in two places: the top
+bar on every page, and the Permissions tab (the same switch).
 
 ### The record pages
 
-| Page | Persona: what it is for |
+| Page | What it is for |
 |---|---|
 | **Jobs in** | The front door: bring a job (link or pasted text). |
-| **Applications** (and one application's page) | The record of each job, one object per job: every version, event, decision and receipt. The list uses the same folded row as Needs you. |
+| **Applications** (and one application's page) | The record of each job, one object per job: every version, event, decision and receipt. |
 | **Outreach** | The record of people: who, linked to which job, every note and reply. |
 | **Receipts** | Proof of what was sent. |
-| **Stats** | How the hunt is going. Read only. |
 | **Profile** | Who the seeker is: the CV and the facts the assistant writes from. |
-| **Memory & instructions** | How the assistant should work for the seeker (their own instructions, in their words) and the facts job forms ask, each From memory / Guessed / Not known (owner 2026-10-28; plan: [`MEMORY_AND_INSTRUCTIONS.md`](MEMORY_AND_INSTRUCTIONS.md)). |
+| **Memory & instructions** | How the assistant should work for the seeker, and the facts job forms ask, each From memory / Guessed / Not known (plan: [`MEMORY_AND_INSTRUCTIONS.md`](MEMORY_AND_INSTRUCTIONS.md)). |
 | **Account** | Sign-in, privacy, export and delete. |
 
-### What sits on the wrong page today (2026-10-27 inventory, to move)
+### Still to move
 
-- **Needs you to Home:** the assistant's setting-change requests (`SettingRequestCard`, now in the Other list and its count); "Send these N" (`SendAllCard`); "Run my own-browser tasks now" (`RunNowPanel`). Their counts may stay on Needs you.
-- **Connect to Home:** the major standing controls `paused_until`, `submit_mode`, `above_line`, `below_line`, `apply_min_score`, `auto_grant_count` / `auto_grant_until`, `daily_cap`, `weekly_cap`, `company_cap`, `outreach_send`, `auto_employer_emails`, `preferences.daily_check`. On Home today they are read-only with "Change in Connect" links (`MorningCheck`, `BatchRulesCard`).
-- **Home to Needs you:** "Started, not confirmed" (`StartedNotConfirmed`), due follow-ups, and queue preflight warnings. Home keeps one linked "N things need you" line.
-- **Home to Connect:** the setup card, the welcome connect cards, run problems and start-link problems (`RunProblems`, `StartLinkProblems`).
-- **Connect to Memory & instructions:** the standing notes ("Things your AI assistant should know", `AssistantInstructions.tsx`) - decided 2026-10-28.
-- **Stays where it is, with a count elsewhere:** Pause stays global in the top bar *and* is the first control on Home. The assistant-saved Memory and Profile marks (Keep / Take back) stay on their record pages.
+- **Connect to Memory & instructions:** the standing notes ("Things your AI assistant should know", `AssistantInstructions.tsx`), decided 2026-10-28.
+- "Auto for a while" shows "up to N", not "N left": the settings view does not return how many are used.
 
 ## How a job gets in (decided 2026-10-16, the owner)
 
@@ -283,6 +278,7 @@ consent-first; everything free; auto-submit only when the user switches it on (o
 |---|---|---|
 | 29 | "Claude in Chrome needs my PC on, and only Claude can use it. Can we build one browser that works for every assistant, even with my laptop off?" | **Yes: the Job360 browser agent** (`docs/product/BROWSER_AGENT.md`, which says what is built and what is still off). It replaces "browser automation of our own" on the never-build list. A cloud Chrome that Job360 runs, driven by the user's own agent over MCP, so Claude, ChatGPT, Gemini and others all use the same browser, laptop on or off. The agent still thinks; Job360's browser only does what the agent asks, through the same gates (`check_submit`, never-apply list, limits). The owner also said yes to keeping the user's signed-in session (cookie only, encrypted, never a password) and to Job360 submitting from the cloud. Hard lines stay: never type a password, never solve a CAPTCHA, never disguise the browser to get past a bot check. What the cloud browser cannot do goes to Needs you, and the user's own assistant's browser (Claude in Chrome, Gemini in Chrome, ChatGPT agent, Comet) finishes it when their computer is on. |
 | 30 | "Everything that needs my attention comes to Needs you. Everything that needs my permission goes to Home. Connect your assistant is maintenance. Each page has its own vision, its own persona." (2026-10-27) | **Two cockpits and a workshop.** Needs you = attention, Home = permissions and the major controls, Connect your assistant = maintenance. A control lives on one page, picked by the question it answers. See "Every page has one purpose" above for the page personas and the list of moves. |
+| 31 | "Home doesn't make sense for permissions. Connect your assistant becomes setup, configure, permissions, all those things. Progress dashboard and Statistics as two different pages." (2026-10-28) | **Replaces 30's Home-as-permissions.** Needs you = attention + Run now triggers; Progress dashboard (`/`, was Home) = now and recent, read only; Statistics (`/stats`, was Stats) = results over time and Lessons; Connect your assistant = every permission once (a Permissions tab first) plus setup and maintenance. Sign-in opens Needs you. Shipped in #1350, #1360, #1362, #1366, #1367, #1368. |
 
 ## Older docs this supersedes
 
