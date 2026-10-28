@@ -921,7 +921,72 @@ def _link_core(url: str) -> str:
     return low.rstrip("/")
 
 
-def check_pdf(pdf_bytes: bytes, cv_text: str, template_pages: Optional[int] = None) -> list[dict[str, str]]:
+# ── keyword coverage (advisory, info) ───────────────────────────────────────
+
+# Mirrors ai-job-search .claude/commands/apply.md:331-340 (covered / missing (have it) / missing (gap),
+# "Never stuff keywords") and career-ops keyword-match.mjs:8-11 ("DIAGNOSTIC ONLY. Never edits the CV or
+# injects keywords"). "Synonym" is the assistant's call: no synonym list lives here (hard rule #28).
+_KEYWORD_MAX_WORDS = 4  # a longer requirement is a sentence: the assistant judges it
+_KEYWORD_MAX_ITEMS = 50
+
+
+def _keyword_haystack(text: str) -> str:
+    """Case-folded whitespace tokens with outer punctuation trimmed, space-joined and padded, so a
+    term matches whole tokens only (``Go`` is not found in ``Django``). Linear, no regex."""
+    toks = [t for t in (w.strip(_OUTER_PUNCT + "|\u2022") for w in text.casefold().split()) if t]
+    return " " + " ".join(toks) + " "
+
+
+def keyword_coverage(pdf_text: str, source: str, requirements: list[str]) -> Optional[dict[str, str]]:
+    """Per requirement of the saved fit: ``covered`` (literal, in the rendered PDF text), ``missing (have it)``
+    (the profile says it, the CV does not) or ``missing (gap)`` (neither). Silent (None) with no profile text
+    or no short requirement (hard rule #29). Never edits anything and never asks for anything."""
+    if not source.strip():
+        return None
+    pdf_hay, src_hay = _keyword_haystack(pdf_text), _keyword_haystack(source)
+    covered: list[str] = []
+    have_it: list[str] = []
+    gap: list[str] = []
+    long_items = 0
+    for raw in requirements[:_KEYWORD_MAX_ITEMS]:
+        term = " ".join(str(raw or "").split())
+        needle = _keyword_haystack(term)
+        if needle.strip() == "":
+            continue
+        if len(term.split()) > _KEYWORD_MAX_WORDS:
+            long_items += 1
+        elif needle in pdf_hay:
+            covered.append(term)
+        elif needle in src_hay:
+            have_it.append(term)
+        else:
+            gap.append(term)
+    if not (covered or have_it or gap):
+        return None
+    parts = []
+    if covered:
+        parts.append(f"covered: {_listed(covered)}")
+    if have_it:
+        parts.append(f"missing (have it): {_listed(have_it)}")
+    if gap:
+        parts.append(f"missing (gap): {_listed(gap)}")
+    if long_items:
+        parts.append(f"{long_items} longer requirement(s) left for you to judge")
+    detail = (
+        "Keyword coverage of the saved fit's requirements in the PDF text (literal match; a synonym is your call): "
+        + "; ".join(parts)
+        + ". Add a missing (have it) term where it is true; a gap stays missing. Never stuff keywords."
+    )
+    return _issue("keyword_coverage", "info", detail)
+
+
+def check_pdf(
+    pdf_bytes: bytes,
+    cv_text: str,
+    template_pages: Optional[int] = None,
+    requirements: Optional[list[str]] = None,
+    source: str = "",
+) -> list[dict[str, str]]:
     """Parse the RENDERED CV back with pdfplumber (lazy import) and report what an ATS would see."""
     try:
         import pdfplumber  # noqa: PLC0415 - heavy, lazy (rule #16)
@@ -1011,4 +1076,8 @@ def check_pdf(pdf_bytes: bytes, cv_text: str, template_pages: Optional[int] = No
         room = int(max(0.0, 0.90 * last_height - last_bottom) // line_h)
         if room >= 1:
             out.append(_issue("pdf_space", "info", f"Room for about {room} more lines on the last page."))
+    if requirements:
+        coverage = keyword_coverage(full, source, requirements)
+        if coverage:
+            out.append(coverage)
     return out
