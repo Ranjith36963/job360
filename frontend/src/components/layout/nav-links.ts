@@ -37,7 +37,7 @@ export const NAV_LINKS: readonly NavLink[] = [
   { href: "/applications", label: "Applications", icon: FolderClock },
   { href: "/outreach/people", label: "Outreach", icon: Users },
   { href: "/receipts", label: "Receipts", icon: Receipt },
-  { href: "/stats", label: "Stats", icon: BarChart3 },
+  { href: "/stats", label: "Statistics", icon: BarChart3 },
   { href: "/profile", label: "Profile", icon: User },
   { href: "/profile/memory", label: "Memory", icon: Brain },
   { href: "/connect", label: "Connect your assistant", icon: Plug },

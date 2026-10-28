@@ -7,6 +7,7 @@ import { closedSetLabel } from "@/lib/closed-sets";
 import { countryName } from "@/lib/countries";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LessonsList } from "@/components/profile/LessonsList";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const TH = `${LABEL} whitespace-nowrap px-3 py-2 text-right font-medium first:pl-0 first:text-left last:pr-0`;
@@ -77,24 +78,56 @@ export function buildSections(stats: StatsResponse): Section[] {
   return sections.filter((s) => s.rows.length > 0);
 }
 
-function Overall({ overall }: { overall: StatsResponse["overall"] }) {
-  const items: [number, string][] = [
-    [overall.brought, "brought"],
-    [overall.applied, "applied"],
-    [overall.replied, "replied"],
-    [overall.interview, "interviews"],
-    [overall.offer, "offers"],
-    [overall.rejected, "rejected"],
-  ];
+type FunnelStep = { key: string; label: string; count: number; rate: string | null };
+
+const FUNNEL: { key: string; field: string; label: string; rate: (pct: string) => string }[] = [
+  { key: "brought", field: "brought", label: "Brought in", rate: () => "" },
+  { key: "applied", field: "applied", label: "Applied", rate: (p) => `${p} of brought in were applied to` },
+  { key: "replied", field: "replied", label: "Replies", rate: (p) => `${p} of applied got a reply` },
+  { key: "interview", field: "interview", label: "Interviews", rate: (p) => `${p} of replies led to an interview` },
+  { key: "offer", field: "offer", label: "Offers", rate: (p) => `${p} of interviews led to an offer` },
+];
+
+/** Pure: the funnel steps. A step the data lacks is left out; a rate needs the
+ * step right before it, and a zero there gives "—" (never divides by zero). */
+export function buildFunnel(overall: Partial<Record<string, number | null>> | null | undefined): FunnelStep[] {
+  const steps: FunnelStep[] = [];
+  let prev: number | null = null;
+  FUNNEL.forEach((f, i) => {
+    const n = overall?.[f.field];
+    if (typeof n !== "number") {
+      prev = null;
+      return;
+    }
+    let rate: string | null = null;
+    if (i > 0 && prev !== null) rate = prev === 0 ? "—" : f.rate(formatRate(n / prev));
+    steps.push({ key: f.key, label: f.label, count: n, rate });
+    prev = n;
+  });
+  return steps;
+}
+
+function Funnel({ overall }: { overall: StatsResponse["overall"] }) {
+  const steps = buildFunnel(overall as unknown as Record<string, number | null>);
   return (
-    <ul data-testid="stats-overall" className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-6">
-      {items.map(([n, label]) => (
-        <li key={label}>
-          <span className="block font-heading text-4xl leading-none">{n}</span>
-          <span className="mt-1 block text-[12.5px] text-muted-foreground">{label}</span>
-        </li>
-      ))}
-    </ul>
+    <section aria-labelledby="stats-funnel" data-testid="stats-funnel">
+      <h2 id="stats-funnel" className="font-heading text-xl font-normal mb-3">
+        Your funnel
+      </h2>
+      <ol className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
+        {steps.map((st) => (
+          <li key={st.key} data-testid={`funnel-${st.key}`}>
+            <span className="block font-heading text-4xl leading-none">{st.count}</span>
+            <span className="mt-1 block text-[12.5px] text-muted-foreground">{st.label}</span>
+            {st.rate && (
+              <span data-testid="funnel-rate" className="mt-1 block text-[12.5px] text-muted-foreground">
+                {st.rate}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -324,7 +357,7 @@ export function StatsClient() {
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
       <div>
-        <h1 className="font-heading text-3xl font-normal tracking-tight">Stats</h1>
+        <h1 className="font-heading text-3xl font-normal tracking-tight">Statistics</h1>
         <p className="text-muted-foreground">
           Counts from your records. Your assistant reads these and judges; Job360 only counts.
         </p>
@@ -341,7 +374,8 @@ export function StatsClient() {
         </div>
       ) : (
         <>
-          <Overall overall={stats.overall} />
+          <Funnel overall={stats.overall} />
+          <h2 className="font-heading text-xl font-normal -mb-4">What&apos;s working</h2>
           {scoreLine && <ScoreLineCard data={scoreLine} />}
           {sections.map((s) => (
             <JobTable key={s.id} section={s} />
@@ -352,6 +386,9 @@ export function StatsClient() {
           )}
           {variants.length > 0 && <OutreachVariantTable rows={variants} />}
           {stats.sites && stats.sites.sites.length > 0 && <SitesTable data={stats.sites} />}
+          <section aria-label="Lessons" data-testid="stats-lessons">
+            <LessonsList />
+          </section>
         </>
       )}
     </PageContainer>
