@@ -21,7 +21,6 @@ import { apiErrorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AssistantTab } from "@/components/profile/AssistantTab";
-import { AssistantInstructions } from "@/components/connect/AssistantInstructions";
 import { RunProblems } from "@/components/needs-you/RunProblems";
 import { DutyStatus } from "@/components/home/DutyStatus";
 import { SetupProgress, useSetupProgress } from "@/components/profile/SetupProgress";
@@ -906,7 +905,6 @@ function ConnectAgentPageInner() {
 
         <TabsContent value="assistant" className="space-y-8">
           <AssistantTab part="configure" />
-          <AssistantInstructions />
         </TabsContent>
 
         <TabsContent value="job-sites" className="space-y-8">

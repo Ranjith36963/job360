@@ -99,7 +99,7 @@ describe("AppShell", () => {
     "Receipts",
     "Statistics",
     "Profile",
-    "Memory",
+    "Memory & instructions",
     "Connect your assistant",
     "Account",
   ];
@@ -123,7 +123,7 @@ describe("AppShell", () => {
     expect(within(side).queryByRole("link", { name: "Settings" })).toBeNull();
     expect(within(side).queryByRole("link", { name: "People" })).toBeNull();
     expect(within(side).getByRole("link", { name: "Outreach" })).toHaveAttribute("href", "/outreach/people");
-    expect(within(side).getByRole("link", { name: "Memory" })).toHaveAttribute("href", "/profile/memory");
+    expect(within(side).getByRole("link", { name: "Memory & instructions" })).toHaveAttribute("href", "/profile/memory");
     expect(within(side).getByRole("link", { name: "Connect your assistant" })).toHaveAttribute("href", "/connect");
     expect(within(side).getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
   });
@@ -132,7 +132,7 @@ describe("AppShell", () => {
     mockAuth.user = { email: "someone@example.com" };
     for (const [path, active] of [
       ["/profile", ["Profile"]],
-      ["/profile/memory", ["Memory"]],
+      ["/profile/memory", ["Memory & instructions"]],
       ["/outreach/people", ["Outreach"]],
       ["/connect", ["Connect your assistant"]],
       ["/account", ["Account"]],
