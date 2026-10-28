@@ -8,6 +8,7 @@ bytes served, and the hunt recipe points the assistant at it.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -35,6 +36,18 @@ async def test_index_and_every_file_are_public_and_match_their_hash():
         script = await anon.get("/api/hunt-kit/hunt_kit.py")
         # Served as text to read and run, never as something a browser executes.
         assert script.headers["content-type"].startswith("text/plain")
+
+
+@pytest.mark.asyncio
+async def test_kit_guard_is_served_and_is_the_server_module():
+    from src.api.main import app
+    from src.services import ad_guard
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
+        got = await anon.get("/api/hunt-kit/kit_guard.py")
+    assert got.status_code == 200
+    assert got.headers["content-type"].startswith("text/plain")
+    assert got.content == Path(ad_guard.__file__).read_bytes()
 
 
 @pytest.mark.asyncio
