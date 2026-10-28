@@ -401,4 +401,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
   `_HOST_RULES`, `NOTICE.md`, `companies.json`), so each merge turns the next one `dirty`.
   **Rule:** expect that conflict; merge main in, keep both sides (add a comma between `companies.json`
   rows), re-gate the merged tree, and re-read the PR's `mergeable_state` after the push.
+- 2026-10-28: PR #1362 sat "blocked" for 30 minutes with every check green: its `merge-cage` status still
+  said "waiting for Frontend". The cage judges on PR events and a `*/20` cron that GitHub runs only every
+  3-4 hours; re-running the old run from the cloud integration returned 403. **Rule:** dispatch
+  `gh workflow run auto-merge.yml -f pr=<n>` (or merge main into the branch when it moved); never push an
+  empty commit from the agent to kick it.
+- 2026-10-28: I told a worker to revert `frontend/AGENTS.md` after `next dev`; `frontend/AGENTS.md` itself says
+  the opposite. **Rule:** a rewrite means installed Next differs from the commit: `npm ci`, and if it still
+  changes, commit the new block.
 
