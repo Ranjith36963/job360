@@ -362,6 +362,27 @@ describe("ApplicationList — Job priority (owner decision, 2026-10-19)", () => 
     await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 }));
   });
 
+  it("filters by source and by applied on the server (owner 2026-10-28: mail jobs, applied or not)", async () => {
+    listApplications.mockImplementation((params: { origin?: string }) =>
+      Promise.resolve(params.origin === "ai" ? { applications: [], total: 0 } : { applications: [summary()], total: 1 })
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.change(screen.getByTestId("origin-filter"), { target: { value: "your_mail" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, origin: "your_mail" }));
+    fireEvent.change(screen.getByTestId("applied-filter"), { target: { value: "no" } });
+    await waitFor(() =>
+      expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, origin: "your_mail", applied: false })
+    );
+    fireEvent.change(screen.getByTestId("applied-filter"), { target: { value: "yes" } });
+    await waitFor(() =>
+      expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, origin: "your_mail", applied: true })
+    );
+    fireEvent.change(screen.getByTestId("origin-filter"), { target: { value: "ai" } });
+    expect(await screen.findByText("No applications match these filters.")).toBeInTheDocument();
+    expect(screen.getByTestId("origin-filter")).toBeInTheDocument();
+  });
+
   it("priority and In flight combine, and an empty priority result keeps the select", async () => {
     listApplications.mockImplementation((params: { priority?: string }) =>
       Promise.resolve(params.priority ? { applications: [], total: 0 } : { applications: [summary()], total: 1 })
