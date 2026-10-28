@@ -58,6 +58,7 @@ from typing import Any
 EXCERPT = 120
 LINE_MAX = 200  # quoted excerpts (posting_guard.py:70)
 SCAN_CHUNK = 500  # a longer line is scanned in pieces of at most this many characters
+CHUNK_OVERLAP = 100  # pieces overlap by this much, so no phrase is cut in two
 
 ZERO_WIDTH = "\u200b\u200c\u200d\u2060\u2061\u2062\u2063\u2064"
 BIDI = "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
@@ -326,11 +327,15 @@ def _instruction_hit(line: str) -> int | None:
     return hit if word_hit is None else min(hit, word_hit)
 
 
-def _chunks(line: str) -> list[str]:
-    """Pieces of at most SCAN_CHUNK characters, cut at a space when there is one."""
+def _chunks(line: str) -> list[tuple[int, str]]:
+    """(offset, piece) pairs of at most SCAN_CHUNK characters, cut at a space when there is one.
+
+    Neighbouring pieces overlap by CHUNK_OVERLAP characters, so a phrase that straddles a cut
+    ("ignore all | previous instructions") is still whole in one piece.
+    """
     if len(line) <= SCAN_CHUNK:
-        return [line]
-    pieces = []
+        return [(0, line)]
+    pieces: list[tuple[int, str]] = []
     start = 0
     while start < len(line):
         end = min(len(line), start + SCAN_CHUNK)
@@ -338,8 +343,10 @@ def _chunks(line: str) -> list[str]:
             cut = line.rfind(" ", start + SCAN_CHUNK // 2, end)
             if cut > start:
                 end = cut
-        pieces.append(line[start:end])
-        start = end
+        pieces.append((start, line[start:end]))
+        if end >= len(line):
+            break
+        start = end - CHUNK_OVERLAP  # end - start >= SCAN_CHUNK // 2 > CHUNK_OVERLAP: always moves on
     return pieces
 
 
@@ -355,12 +362,11 @@ def scan(visible: str, hidden: str = "") -> dict[str, Any]:
         stripped = line.strip()
         if not stripped or stripped in seen:
             continue
-        for piece in _chunks(stripped):
+        for offset, piece in _chunks(stripped):
             at = _instruction_hit(piece)
             if at is not None:
                 seen.add(stripped)
-                offset = stripped.find(piece)
-                instruction_like.append(_excerpt(stripped, max(0, offset) + at))
+                instruction_like.append(_excerpt(stripped, offset + at))
                 break
     hidden_urls: list[str] = []
     for url in URL.findall(hidden):
