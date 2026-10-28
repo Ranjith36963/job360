@@ -523,8 +523,8 @@ jobs:
       # WHOSE TOKEN QUEUES THE MERGE DECIDES WHETHER MAIN EVER HEARS OF IT.
       # Measured 2026-09-19: the four machine merges of the day (#531, #532,
       # #589, #591) started ZERO workflows on main -- no CI, no CodeQL, no
-      # branch-reaper and no post-merge watch -- while the owner's three hand
-      # merges started all five. GitHub's rule: an event caused by GITHUB_TOKEN
+      # remote-branch cleanup and no post-merge watch -- while the owner's three
+      # hand merges started all five. GitHub's rule: an event caused by GITHUB_TOKEN
       # creates no workflow run, and a merge queued by GITHUB_TOKEN is such an
       # event. So the product_owner lane's "watched 15 minutes, rollback ready"
       # had never once run for the merges it exists for. `MERGE_TOKEN` is a

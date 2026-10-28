@@ -388,10 +388,12 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/worktree_census.py --drill
 
-      # The broom's ENTRANCE. Same reason this step sits next to the one above and
-      # not in branch-reaper.yml alone: that workflow runs only on merges to
-      # main, so a break would surface only AFTER a merge — too late for the one
-      # component whose whole job is deleting things. Here it fires on every PR.
+      # The broom's ENTRANCE. Same reason this step sits next to the one above:
+      # a break must surface BEFORE a merge, not after, for the one component
+      # whose whole job is deleting things. Here it fires on every PR, and it
+      # also drills the `--remote` half, which no workflow calls since the
+      # remote-branch workflow was deleted (2026-10-28: GitHub's own
+      # delete-branch-on-merge already removes merged branches).
       - name: The reaper still refuses, and still delegates
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/worktree_reaper.py --drill
