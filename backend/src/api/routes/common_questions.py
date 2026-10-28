@@ -20,7 +20,7 @@ router = APIRouter(tags=["profile"])
 
 class CommonQuestionOut(BaseModel):
     id: str
-    group: Literal["you", "experience", "work", "pay", "form", "equality"]
+    group: Literal["you", "work", "pay", "form", "equality"]
     question: str
     country: Optional[str] = None
     # Where the answer lives: a structured Memory field (kit key) or a saved answer's topic.
@@ -33,6 +33,14 @@ class CommonQuestionOut(BaseModel):
     # Owner 2026-10-26: "memory", "guessed", or "not_known" until the assistant drafts it.
     label: Literal["memory", "guessed", "not_known"] = "not_known"
     seen: int = 0
+    # B1: asked on each job's card (not kept in Memory); where an answer is saved (update_profile path);
+    # who wrote the newest value and when; how a guess got here; sensitive = only a web write is verified.
+    per_job: bool = False
+    save_to: Optional[str] = None
+    set_by: Optional[str] = None
+    set_at: Optional[str] = None
+    guess_source: Optional[str] = None
+    sensitive: bool = False
 
 
 class CommonQuestionsSummary(BaseModel):

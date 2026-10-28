@@ -4091,7 +4091,6 @@
           "group": {
             "enum": [
               "you",
-              "experience",
               "work",
               "pay",
               "form",
@@ -4099,6 +4098,17 @@
             ],
             "title": "Group",
             "type": "string"
+          },
+          "guess_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guess Source"
           },
           "id": {
             "title": "Id",
@@ -4125,14 +4135,57 @@
             "title": "Label",
             "type": "string"
           },
+          "per_job": {
+            "default": false,
+            "title": "Per Job",
+            "type": "boolean"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "save_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Save To"
           },
           "seen": {
             "default": 0,
             "title": "Seen",
             "type": "integer"
+          },
+          "sensitive": {
+            "default": false,
+            "title": "Sensitive",
+            "type": "boolean"
+          },
+          "set_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set At"
+          },
+          "set_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set By"
           },
           "source": {
             "anyOf": [
