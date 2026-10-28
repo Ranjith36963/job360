@@ -561,15 +561,61 @@ def make_prefs(
 
 
 # ===================================================== pure filter functions
-def html_to_text(raw: str | None) -> str:
-    """Turn an HTML fragment into plain text, keeping line breaks between blocks."""
-    h = html.unescape(raw or "")
+_KIT_GUARD: Any = False  # False = not tried yet, None = missing, else the kit_guard module
+_GUARD_NOTE = threading.Lock()
+_HTML_FINDINGS: dict[str, dict[str, Any]] = {}  # cleaned ad text -> what html_to_text removed from it
+_HTML_FINDINGS_MAX = 4096
+
+
+def _kit_guard() -> Any:
+    """The ad guard (kit_guard.py, downloaded next to the kit), or None: the kit then runs unguarded."""
+    global _KIT_GUARD
+    if _KIT_GUARD is False:
+        with _GUARD_NOTE:
+            if _KIT_GUARD is False:
+                if str(HERE) not in sys.path:
+                    sys.path.insert(0, str(HERE))
+                try:
+                    _KIT_GUARD = importlib.import_module("kit_guard")
+                except ImportError as e:
+                    print("note: kit_guard unavailable (%s); ads are not checked for hidden text" % e, file=sys.stderr)
+                    _KIT_GUARD = None
+    return _KIT_GUARD
+
+
+def _plain_html_to_text(h: str) -> str:
     h = re.sub(r"(?i)</(p|li|div|h[1-6]|ul|ol|tr)>|<br\s*/?>", "\n", h)
     h = re.sub(r"<[^<>]+>", " ", h)  # [^<>]: a "<" with no ">" stops at the next "<" (linear on "<a " * n)
-    h = html.unescape(h)
+    return html.unescape(h)
+
+
+def html_to_text(raw: str | None) -> str:
+    """Turn an HTML fragment into plain text, keeping line breaks between blocks.
+
+    With kit_guard present, hidden elements (display:none, aria-hidden, off-screen, ...) and invisible
+    characters never reach the text; what was removed is remembered for Collector.offer's ``guard`` field.
+    """
+    h = html.unescape(raw or "")
+    g = _kit_guard()
+    found: dict[str, Any] | None = None
+    if g is not None and h:
+        try:
+            h, found = g.guard_html(h)  # already plain text: hidden content removed, tags dropped
+        except Exception as e:  # the guard must never stop a hunt
+            print("note: kit_guard failed (%s: %s); this ad is not checked" % (type(e).__name__, e), file=sys.stderr)
+            h = _plain_html_to_text(h)
+    else:
+        h = _plain_html_to_text(h)
     h = re.sub(r"[ \t\r\f\v\xa0]+", " ", h)
     h = re.sub(r"\s*\n\s*", "\n", h)
-    return h.strip()
+    out = h.strip()
+    flagged = found is not None and any(found.get(k) for k in ("hidden_blocks", "instruction_like", "invisible_text"))
+    if found is not None and out and flagged:
+        with _GUARD_NOTE:
+            if len(_HTML_FINDINGS) >= _HTML_FINDINGS_MAX:
+                _HTML_FINDINGS.pop(next(iter(_HTML_FINDINGS)))
+            _HTML_FINDINGS[out] = found
+    return out
 
 
 def _phrase_regex(phrases: Iterable[str]) -> re.Pattern[str] | None:
@@ -1628,6 +1674,40 @@ class Collector:
             rec_source=job.get("source") or label,
         )
 
+    @staticmethod
+    def guard_ad(desc: str) -> tuple[str, Any]:
+        """Run the ad guard on one description. Returns (cleaned text, the job's ``guard`` field).
+
+        Instruction-like lines stay in the text and are quoted in ``guard``; hidden text and invisible
+        characters are gone. A flagged ad is still offered: the guard advises, it never drops or ranks.
+        """
+        g = _kit_guard()
+        if g is None:
+            return desc, "unavailable"
+        try:
+            cleaned, f = g.guard(desc)
+            with _GUARD_NOTE:  # findings are stored only for ads that had some: a short list
+                keys = list(_HTML_FINDINGS)[-256:]
+                priors = [_HTML_FINDINGS[k] for k in keys if k in desc]  # a description may join several parts
+            for prior in priors:  # what html_to_text removed before this text existed
+                f["hidden_blocks"] = list(f.get("hidden_blocks") or []) + list(prior.get("hidden_blocks") or [])
+                for key in ("instruction_like", "invisible_text", "hidden_urls"):
+                    f[key] = list(f.get(key) or []) + [x for x in (prior.get(key) or []) if x not in (f.get(key) or [])]
+                f["invisible_flagged"] = int(f.get("invisible_flagged") or 0) + int(prior.get("invisible_flagged") or 0)
+                for k, n in (prior.get("invisible_chars") or {}).items():
+                    f["invisible_chars"][k] = f["invisible_chars"].get(k, 0) + n
+            if priors:
+                f["verdict"] = g.verdict(f)
+            return cleaned, {
+                "verdict": f["verdict"],
+                "instruction_like": [str(x)[:200] for x in f.get("instruction_like", [])[:5]],
+                "invisible_text": [str(x)[:200] for x in f.get("invisible_text", [])[:5]],
+                "hidden_blocks": len(f.get("hidden_blocks") or []),
+            }
+        except Exception as e:  # never stop a hunt over the guard
+            print("note: kit_guard failed (%s: %s); this ad is not checked" % (type(e).__name__, e), file=sys.stderr)
+            return desc, "unavailable"
+
     def offer(self, source: str, raw: dict[str, Any], rec_source: str | None = None) -> None:
         """Run one raw job through title, location, years, date filters and keep it."""
         a = self.args
@@ -1655,6 +1735,7 @@ class Collector:
             raw["desc"] = extra.get("desc") or raw.get("desc", "")
             raw["posted"] = extra.get("posted") or raw.get("posted", "")
         desc = raw.get("desc") or ""
+        desc, guard = self.guard_ad(desc)
         reg_ids, reg_cc = getattr(self.tl, "register", None) or ("", frozenset())  # set by the board task
         row = classify_location(raw.get("loc", ""), desc, self.prefs, bool(raw.get("visa_flag")), reg_cc)
         if not row:
@@ -1684,6 +1765,7 @@ class Collector:
             "years_min": y,
             "visa_lines": lines,
             "description": desc,
+            "guard": guard,
         }
         if row == "visa_maybe_register":
             rec["sponsor_register"] = reg_ids
