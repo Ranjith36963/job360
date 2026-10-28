@@ -92,11 +92,25 @@ export const APPLY_MODES: { value: ApplyMode; title: string; sub: string }[] = [
   { value: "ask", title: "Ask me each time", sub: "Your assistant fills the form and waits on Needs you for your Submit." },
 ];
 
-/** Which of the modes the saved settings are in: a live grant, else sending on its own (both
- *  halves: jobs at or above the line AND submit mode), else asking. */
+/** Which of the modes the settings are in: a live grant, else sending on its own (both halves:
+ *  jobs at or above the line AND submit mode), else asking. Shared by this page and Home's morning check. */
+export function applyModeOf(s: { above?: unknown; submit?: unknown; grantCount?: unknown; grantUntil?: unknown }): ApplyMode {
+  if (grantActive(s.grantCount, String(s.grantUntil ?? ""))) return "while";
+  return batchOn(String(s.above ?? "ask"), String(s.submit ?? "")) ? "straight" : "ask";
+}
+
 export function modeOf(view: AssistantSettingsView): ApplyMode {
-  if (grantActive(view.auto_grant_count?.value, String(view.auto_grant_until?.value ?? ""))) return "while";
-  return batchOn(String(settingEffective(view.above_line) ?? "ask"), String(settingEffective(view.submit_mode) ?? "")) ? "straight" : "ask";
+  return applyModeOf({
+    above: settingEffective(view.above_line), submit: settingEffective(view.submit_mode),
+    grantCount: view.auto_grant_count?.value, grantUntil: view.auto_grant_until?.value,
+  });
+}
+
+/** "Ask me each time" / "Straight away" / "Auto for a while (up to N)". The API holds the N the user
+ *  picked, not how many are used, so the words say "up to". */
+export function applyModeText(mode: ApplyMode, grantCount?: unknown): string {
+  const title = APPLY_MODES.find((m) => m.value === mode)?.title ?? "";
+  return mode === "while" && grantCount != null && grantCount !== "" ? `${title} (up to ${String(grantCount)})` : title;
 }
 
 /** The line edits the old "Batch auto apply" switch sent (above_line, and below_line dropped), so
@@ -141,6 +155,8 @@ export function BatchRuleRows({
   const [grantCount, setGrantCount] = useState("");
   const [grantUntil, setGrantUntil] = useState("");
   const [confirmGrant, setConfirmGrant] = useState(false);
+  const [hoursFrom, setHoursFrom] = useState("");
+  const [hoursTo, setHoursTo] = useState("");
   const enterDone = useRef(false);
 
   // Show what the server now holds whenever a new view arrives (state adjusted
@@ -161,14 +177,15 @@ export function BatchRuleRows({
     setGrantCount(numText(view.auto_grant_count));
     setGrantUntil(isoToLocalInput(String(view.auto_grant_until?.value ?? "")));
     setConfirmGrant(false);
+    setHoursFrom(hoursOf(view.apply_hours).from);
+    setHoursTo(hoursOf(view.apply_hours).to);
   }
 
   const savedCap = view.daily_cap.value == null ? "" : String(view.daily_cap.value);
   const savedGrantCount = view.auto_grant_count?.value;
   const savedGrantUntil = String(view.auto_grant_until?.value ?? "");
   const grantOn = grantActive(savedGrantCount, savedGrantUntil);
-  // A window saved by the removed "Hours to apply" card still limits sending; show it so it can be cleared.
-  const oldHours = hoursOf(view.apply_hours);
+  const savedHours = hoursOf(view.apply_hours);
   // Slice 30: a grant covers only the queue the user sees here when they confirm it.
   const scope = view.auto_grant_scope;
   const queueNow = scope?.queue;
@@ -270,11 +287,11 @@ export function BatchRuleRows({
     setConfirmGrant(false);
     setMode(next);
     if (next === "ask") {
-      void saveMany([{ path: P_SUBMIT, value: "confirm" }, { path: P_HOURS, value: null }, ...clearGrant, ...lineEdits(view, false)]);
+      void saveMany([{ path: P_SUBMIT, value: "confirm" }, ...clearGrant, ...lineEdits(view, false)]);
     } else if (next === "straight") {
       setConfirmStraight(true);
     }
-    // "while" saves on Confirm. Ask, straight and while each clear any old apply-hours window.
+    // "while" saves on Confirm. No mode touches the apply-hours window (owner 2026-10-28).
   }
   function saveGrant() {
     const n = Number(grantCount.trim());
@@ -286,13 +303,24 @@ export function BatchRuleRows({
       return;
     }
     setConfirmGrant(false);
-    // "Auto for a while" alone: back to asking afterwards, and any old hours window cleared.
+    // "Auto for a while" alone: back to asking afterwards.
     void saveMany([
       { path: P_GRANT_COUNT, value: n },
       { path: P_GRANT_UNTIL, value: until },
       { path: P_SUBMIT, value: "confirm" },
-      { path: P_HOURS, value: null },
     ]);
+  }
+  /** "Only apply between": both times, and different (overnight, 22:00 to 06:00, is fine). */
+  function saveHours() {
+    if (!hoursFrom || !hoursTo) {
+      toast.error("Pick both times, or press Clear for any time. Not saved.");
+      return;
+    }
+    if (hoursFrom === hoursTo) {
+      toast.error("The two times must be different. Not saved.");
+      return;
+    }
+    void save(P_HOURS, { from: hoursFrom, to: hoursTo });
   }
   /** Enter commits exactly like blur; the blur that may follow must not commit twice. */
   const onEnter = (commit: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -395,6 +423,50 @@ export function BatchRuleRows({
               )}
             </span>
           </Row>
+          <Row title="Apply hours" sub="Only apply between these times, in your own time zone. Overnight is fine. Blank = any time.">
+            <span className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground" data-testid="apply-hours-row">
+              Only apply between
+              <input
+                type="time"
+                aria-label="Apply from"
+                data-testid="apply-hours-from"
+                value={hoursFrom}
+                disabled={busy}
+                onChange={(e) => setHoursFrom(e.target.value)}
+                className="min-h-11 rounded-lg border border-border bg-card px-2 font-mono text-sm md:min-h-9"
+              />
+              and
+              <input
+                type="time"
+                aria-label="Apply to"
+                data-testid="apply-hours-to"
+                value={hoursTo}
+                disabled={busy}
+                onChange={(e) => setHoursTo(e.target.value)}
+                className="min-h-11 rounded-lg border border-border bg-card px-2 font-mono text-sm md:min-h-9"
+              />
+              <button
+                type="button"
+                data-testid="apply-hours-save"
+                disabled={busy}
+                onClick={saveHours}
+                className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+              >
+                Save
+              </button>
+              {savedHours.from !== "" && (
+                <button
+                  type="button"
+                  data-testid="apply-hours-clear"
+                  disabled={busy}
+                  onClick={() => void save(P_HOURS, null)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Clear
+                </button>
+              )}
+            </span>
+          </Row>
           </>}
           {part === "pace" && (
           <Row title="Wait between applications" sub="Minutes and seconds. 0 or blank = no wait.">
@@ -448,20 +520,6 @@ export function BatchRuleRows({
                 </button>
               ))}
             </div>
-            {oldHours.from !== "" && (
-              <span className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground" data-testid="old-apply-hours">
-                Your assistant still only applies between {oldHours.from} and {oldHours.to} (a window you saved earlier).
-                <button
-                  type="button"
-                  data-testid="old-apply-hours-clear"
-                  disabled={busy}
-                  onClick={() => void save(P_HOURS, null)}
-                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
-                >
-                  Clear
-                </button>
-              </span>
-            )}
             {confirmStraight && (
               <span className="mt-2 flex flex-wrap items-center gap-2 text-[13px]" data-testid="mode-straight-ask">
                 Let your assistant apply on its own, at any time? Indeed, LinkedIn and the first practice run still wait for you.
@@ -471,7 +529,7 @@ export function BatchRuleRows({
                   disabled={busy}
                   onClick={() => {
                     setConfirmStraight(false);
-                    void saveMany([{ path: P_SUBMIT, value: "auto_when_sure" }, { path: P_HOURS, value: null }, ...clearGrant, ...lineEdits(view, true)]);
+                    void saveMany([{ path: P_SUBMIT, value: "auto_when_sure" }, ...clearGrant, ...lineEdits(view, true)]);
                   }}
                   className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                 >

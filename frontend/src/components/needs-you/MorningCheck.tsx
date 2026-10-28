@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getMorningCheck } from "@/lib/api";
+import { getAssistantSettings, getMorningCheck } from "@/lib/api";
 import type { MorningCheck as MorningCheckData } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { formatFeedTime, hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
@@ -12,8 +12,6 @@ import {
   BUCKET_LABEL,
   CHECK_LOOKBACK_DAYS,
   LAST_CHECK_KEY,
-  batchOn,
-  batchText,
   belowText,
   pausedByText,
   quotaText,
@@ -22,6 +20,7 @@ import {
 } from "@/lib/morning-check";
 import type { Bucket } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
+import { applyModeOf, applyModeText } from "@/components/profile/BatchRuleRows";
 
 const SETTINGS_HREF = "/connect?tab=permissions";
 
@@ -40,6 +39,8 @@ export function MorningCheck() {
   const [data, setData] = useState<MorningCheckData | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Bucket | null>(null);
+  // The "Auto for a while" grant is not in the morning check's state: read it from the settings.
+  const [grant, setGrant] = useState<{ count: unknown; until: unknown }>({ count: null, until: null });
   // One window per page view: a retry or a pause toggle keeps it. `last` is null on a first visit.
   // The words show the server's `since`: it clamps a stale (>30 days) or future stamp.
   const [win] = useState(() => {
@@ -55,6 +56,10 @@ export function MorningCheck() {
         setFailed(false);
       },
       () => setFailed(true),
+    );
+    getAssistantSettings().then(
+      (v) => setGrant({ count: v.auto_grant_count?.value, until: v.auto_grant_until?.value }),
+      () => setGrant({ count: null, until: null }),
     );
   }, [win]);
 
@@ -109,7 +114,8 @@ export function MorningCheck() {
   const lineSet = state.apply_min_score != null;
   const sep = <span aria-hidden="true" className="text-faint">·</span>;
 
-  const batch = batchOn(state.above_line, state.submit_mode);
+  // The same mode logic as Connect's "How your assistant applies".
+  const mode = applyModeOf({ above: state.above_line, submit: state.submit_mode, grantCount: grant.count, grantUntil: grant.until });
 
   return (
     <section aria-labelledby="morning-check" data-testid="morning-check" className="flex flex-col gap-2.5">
@@ -139,7 +145,7 @@ export function MorningCheck() {
         )}
         {sep}
         <span data-testid="mc-batch" className="text-[13.5px] text-muted-foreground">
-          {batchText(batch)}
+          How it applies: {applyModeText(mode, grant.count)}
         </span>
         {lineSet && (
           <>

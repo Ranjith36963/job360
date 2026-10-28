@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PAUSE_CHANGED_EVENT, RESUME_ASK_EVENT, usePause } from "@/lib/assistant-state";
+import { pausedUntilText } from "@/lib/assistant-tab";
 
 const solidBtn =
   "min-h-11 rounded-lg border border-foreground bg-foreground px-3.5 text-[13px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50 md:min-h-0 md:py-2";
@@ -14,7 +15,8 @@ const plainBtn =
  * first; "Stay paused" changes nothing and calls nothing.
  */
 export function PausedBanner() {
-  const { paused, resume } = usePause();
+  const { paused, until, resume } = usePause();
+  const timed = pausedUntilText(until);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -51,7 +53,7 @@ export function PausedBanner() {
         className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-warning bg-warning-soft px-5 py-3.5 sm:px-6 lg:px-10"
       >
         <p className="min-w-0 flex-1 basis-80 text-sm">
-          <strong className="font-semibold text-warning">Paused.</strong>{" "}
+          <strong className="font-semibold text-warning">{timed ? `${timed}.` : "Paused."}</strong>{" "}
           <span>{"Your assistants can still read your memory, but won't apply or send anything."}</span>
         </p>
         <button type="button" data-testid="paused-banner-resume" onClick={() => setConfirming(true)} className={solidBtn}>

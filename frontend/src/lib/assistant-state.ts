@@ -13,6 +13,7 @@ import type { AssistantSettingsView } from "@/lib/api";
 import { onChanges } from "@/lib/live-changes";
 
 export const PAUSE_PATH = "assistant_settings.paused_until";
+export const PAUSE_REASON_PATH = "assistant_settings.pause_reason";
 /** Fired with `detail: boolean` (paused) after a successful pause or resume. */
 export const PAUSE_CHANGED_EVENT = "job360:pause-changed";
 /** Fired after a Send / Send all / Don't send: the morning check strip re-reads. */
@@ -34,6 +35,12 @@ export function fetchSettingsShared(key: string): Promise<AssistantSettingsView>
   return entry.view;
 }
 
+/** The pause just written ("" | "until_resumed" | an ISO time), set right before
+ *  PAUSE_CHANGED_EVENT fires: the event's detail stays a boolean, so every hook reads the time here. */
+let lastUntil = "";
+const untilOf = (view: AssistantSettingsView): string =>
+  view.paused ? String(view.paused_until?.effective ?? view.paused_until?.value ?? "") : "";
+
 export function askResume(): void {
   window.dispatchEvent(new CustomEvent(RESUME_ASK_EVENT));
 }
@@ -42,21 +49,30 @@ export function usePause() {
   const pathname = usePathname();
   const signedIn = Boolean(useAuth().user);
   const [paused, setPaused] = useState(false);
+  const [until, setUntil] = useState("");
+  const show = useCallback((view: AssistantSettingsView) => {
+    setPaused(Boolean(view.paused));
+    setUntil(untilOf(view));
+  }, []);
 
   useEffect(() => {
     if (!signedIn) return;
     let cancelled = false;
     fetchSettingsShared(pathname).then(
-      (view) => !cancelled && setPaused(Boolean(view.paused)),
+      (view) => !cancelled && show(view),
       () => {},
     );
     return () => {
       cancelled = true;
     };
-  }, [signedIn, pathname]);
+  }, [signedIn, pathname, show]);
 
   useEffect(() => {
-    const onChanged = (e: Event) => setPaused(Boolean((e as CustomEvent).detail));
+    const onChanged = (e: Event) => {
+      const on = Boolean((e as CustomEvent).detail);
+      setPaused(on);
+      setUntil(on ? lastUntil : "");
+    };
     window.addEventListener(PAUSE_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(PAUSE_CHANGED_EVENT, onChanged);
   }, []);
@@ -66,24 +82,33 @@ export function usePause() {
     if (!signedIn) return;
     return onChanges((d) => {
       if (!d.full && !d.areas.includes("settings")) return;
-      fetchSettingsShared(`live:${d.seq}`).then((view) => setPaused(Boolean(view.paused)), () => {});
+      fetchSettingsShared(`live:${d.seq}`).then(show, () => {});
     });
-  }, [signedIn]);
+  }, [signedIn, show]);
 
-  const change = useCallback(async (next: boolean): Promise<boolean> => {
+  /** `value`: "until_resumed", an ISO time (a timed pause) or "" (resume). `reason`, when given,
+   *  goes in the same PATCH; it is free text, so it is never logged or put in a message. */
+  const change = useCallback(async (value: string, reason?: string): Promise<boolean> => {
+    const next = value !== "";
+    const edits: { path: string; value: unknown }[] = [{ path: PAUSE_PATH, value }];
+    if (reason !== undefined) edits.push({ path: PAUSE_REASON_PATH, value: reason });
     try {
-      await updateProfileFields([{ path: PAUSE_PATH, value: next ? "until_resumed" : "" }]);
+      await updateProfileFields(edits);
     } catch {
       toast.error(next ? "Could not pause. Try again." : "Could not resume. Try again.");
       return false;
     }
+    lastUntil = value;
     window.dispatchEvent(new CustomEvent(PAUSE_CHANGED_EVENT, { detail: next }));
     return true;
   }, []);
 
   return {
     paused: signedIn && paused,
-    pause: useCallback(() => change(true), [change]),
-    resume: useCallback(() => change(false), [change]),
+    /** "" | "until_resumed" | the ISO time a timed pause ends. */
+    until: signedIn && paused ? until : "",
+    pause: useCallback(() => change("until_resumed"), [change]),
+    pauseUntil: useCallback((iso: string, reason?: string) => change(iso, reason), [change]),
+    resume: useCallback(() => change(""), [change]),
   };
 }

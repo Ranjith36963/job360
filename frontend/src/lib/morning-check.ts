@@ -76,10 +76,6 @@ export function batchOn(above: string | null | undefined, submit: string | null 
   return above === "auto" && submit === "auto_when_sure";
 }
 
-export function batchText(on: boolean): string {
-  return on ? "Batch auto apply: on" : "Batch auto apply: off";
-}
-
 /** What happens to a job below the line, in words. */
 export function belowText(below: string | null | undefined): string {
   if (below === "skip") return "Below the line: dropped";
