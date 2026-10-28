@@ -56,6 +56,7 @@ npm run build            # production build (catches type + RSC errors CI catche
 npm run type-check       # tsc --noEmit
 npm run lint             # eslint (CI gate)
 npm run test:unit        # vitest
+npx vitest run src/path/File.test.tsx   # one test file
 npm run test:e2e         # playwright
 npm run check:types-drift # regenerate api-types from backend OpenAPI + fail if drifted
 ```
@@ -70,6 +71,10 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 
 ## Where things are
 
+- Which page a control or number lives on: `../docs/product/VISION.md` § "Every page has one
+  purpose" (decision 31): Needs you = attention + Run now; Progress dashboard (`/`) = now and
+  recent; Statistics (`/stats`) = results over time; Connect your assistant › Permissions =
+  every permission once; Memory & instructions = instructions and facts.
 - `src/app/`, `src/components/`, `src/lib/` — `ls` them. There is no Settings page;
   `src/app/__tests__/redirects.test.tsx` pins where each old `/settings/*` URL lands.
 - `src/middleware.ts` — session-cookie auth guard; `PROTECTED_PATHS` there is the
