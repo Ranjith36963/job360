@@ -42,9 +42,11 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - A branch checked out in a stale worktree blocks git writes (branch-owner-guard): `git worktree list`, remove only clean ones.
 - One PR per slice, at most 1000 read lines (aim for 400 or fewer) (`size.max_lines` in `.github/merge-policy.yml`;
   generated files don't count). Never keep pushing new slices onto an open PR: open the next.
-- Auto-merge is always on (owner, 2026-10-19), but the cage HOLDS a refused PR armed only once
-  `merge-cage` is a required check on `main-production-gate` (and never one touching `.github/`);
-  until then it still withdraws, so re-arm after CI is green. Never hand-merge past a red or pending `merge-cage` unless the owner said so for that PR.
+- Auto-merge is always on (owner, 2026-10-19). `merge-cage` is a required check on `main-production-gate`,
+  so the cage HOLDS a refused PR armed (never one touching `.github/`: re-arm that after CI is green).
+  Never hand-merge past a red or pending `merge-cage` unless the owner said so for that PR.
+- A `merge-cage` still "pending" after green CI is stale: `gh workflow run auto-merge.yml -f pr=<n>` re-judges it
+  (the `*/20` sweep really runs every 3-4 hours), or merge main into the branch.
   Only the owner turns it off (repository variable `AUTO_MERGE=off`).
 - Read CI failures from the job summary, not the log tail (Postgres noise).
 - Never run `scripts/ruleset_gate.py --live` on a branch: it rewrites the ruleset snapshot.

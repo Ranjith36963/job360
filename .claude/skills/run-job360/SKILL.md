@@ -18,13 +18,15 @@ description: How to build, launch and sign in to Job360 locally (Postgres, backe
 - Backend, from `backend/`: `python main.py` (127.0.0.1:8000; migrations auto-apply on boot). Not bare `uvicorn`. `./run-backend.sh` wraps it.
 - Frontend dev: `cd frontend && npm run dev` (:3000; `/api/*` proxies to `BACKEND_ORIGIN`, default `http://localhost:8000`).
 - Frontend production build: `npm run build && npm run start`.
-- `npm run dev` rewrites tracked `frontend/AGENTS.md`; run `git checkout frontend/AGENTS.md` afterwards.
+- If `npm run dev` changes `frontend/AGENTS.md`, the installed Next differs from the commit: run `npm ci`. If it still changes, commit the new block (frontend/AGENTS.md says so).
 - Health: `curl http://127.0.0.1:8000/api/health` (its version field is hardcoded; `/api/readyz` checks the DB).
 
 ## Get a session
 - `POST /api/auth/register` `{"email","password"}` (password 8+ chars) returns **201 and sets no cookie**.
 - Then `POST /api/auth/login` `{"email","password"}` sets the `job360_session` cookie (`curl -c jar -b jar`). Login locks per (email, IP) after repeated failures; use a throwaway email for lockout tests.
 - Browser: `/login` shows the magic-link form first; click **Use password instead**.
+- UI with no backend: `E2E_TEST_MODE=1 npm run dev`, then Playwright that mocks `/api/**` and sets any
+  `job360_session` cookie (`src/middleware.ts` skips the backend check; off when `APP_ENV=production` or `RAILWAY_ENVIRONMENT` is set).
 - Browser driving: Playwright via node `require('playwright')`, or Claude in Chrome.
 
 ## MCP token
