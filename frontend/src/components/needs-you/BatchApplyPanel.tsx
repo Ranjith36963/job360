@@ -2,11 +2,10 @@
 
 import { BatchQueueCard } from "./BatchQueueCard";
 import { BatchRulesCard } from "./BatchRulesCard";
-import { StartedNotConfirmed } from "./StartedNotConfirmed";
 
 /** Batch apply, on Home under Lessons (moved from Needs you, owner 2026-10-26). It is the last
  *  block of the main column, full width on phone and desktop. What needs the user comes first
- *  (started submits, then the queue); the rules sit last. It scrolls with the page: a sticky
+ *  (the queue); the rules sit last. It scrolls with the page: a sticky
  *  panel taller than the screen hid the queue in the first real-browser check (2026-10-18). */
 export function BatchApplyPanel() {
   return (
@@ -18,7 +17,6 @@ export function BatchApplyPanel() {
       <h2 id="batch-apply" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         Batch apply
       </h2>
-      <StartedNotConfirmed />
       <BatchQueueCard />
       <BatchRulesCard />
     </aside>

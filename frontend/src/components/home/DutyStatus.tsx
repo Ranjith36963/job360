@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { getScheduleStatus, type DutyStatus as Row } from "@/lib/api";
@@ -74,9 +73,6 @@ export function DutyStatus() {
         <h2 id="home-duty-status" className={LABEL}>
           Your assistant&apos;s jobs
         </h2>
-        <Link href="/connect?tab=schedules" className="text-xs underline underline-offset-2">
-          Run one now
-        </Link>
       </div>
       <ul className="rounded-lg border border-border">
         {on.map((row) => (

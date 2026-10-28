@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { getRunProblems, type RunProblem } from "@/lib/api";
@@ -42,10 +41,7 @@ export function RunProblems() {
               <p className="font-medium">{p.title}</p>
               <p className="mt-1 text-muted-foreground">{p.what_to_do}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                It now waits longer between tries.{" "}
-                <Link href="/connect?tab=schedules" className="underline underline-offset-2">
-                  Run it now
-                </Link>
+                It now waits longer between tries. You can run it now from the start links below.
               </p>
             </div>
           ))}
