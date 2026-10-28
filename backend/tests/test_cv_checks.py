@@ -142,6 +142,8 @@ def test_pdf_unreadable_bytes_do_not_raise():
 DATED = (
     "RANJITH EXAMPLE\nAI Engineer\nLondon | +44 7442 564327 | ranjith@example.com\n\n"
     "EXPERIENCE\nJob360 | Founder | London | Jan 2023 {dash} Present\n- Built the product.\n"
+    # A bullet keeps its dash as written: the renderer only rewrites the entry line's dates.
+    "- Led the launch, Feb 2024 {dash} Present.\n"
 )
 
 
@@ -152,7 +154,7 @@ def _codes_of(pdf_text: str, cv_text: str | None = None) -> dict[str, dict[str, 
 def test_pdf_date_dash_flags_en_dash_year():
     found = _codes_of(DATED.format(dash="\u2013"))
     assert found["pdf_date_dash"]["severity"] == "warn"
-    assert "U+2013" in found["pdf_date_dash"]["detail"] and "Jan 2023" in found["pdf_date_dash"]["detail"]
+    assert "U+2013" in found["pdf_date_dash"]["detail"] and "Feb 2024" in found["pdf_date_dash"]["detail"]
 
 
 def test_pdf_date_dash_ascii_is_clean():
