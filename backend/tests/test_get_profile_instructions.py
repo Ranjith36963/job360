@@ -41,6 +41,11 @@ async def test_get_profile_leads_with_instructions(authenticated_async_context, 
     async with mcp_runtime():
         async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
             got = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
+            # An assistant's own guess counts as "to check", never as verified (the live overlay is read).
+            saved = await mcp.call_tool("update_profile", {"edits": [
+                {"path": "user_info.contact", "value": {"email": "ada@example.com"}, "source": "agent_inferred"}]})
+            assert not saved.is_error, saved.content
+            after = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)["memory_check"]
 
     assert next(iter(got)) == "instructions"
     assert got["instructions"] == ["Never apply to agencies", "Keep letters short"]
@@ -49,3 +54,4 @@ async def test_get_profile_leads_with_instructions(authenticated_async_context, 
     assert set(check) == {"verified", "to_verify", "missing"}
     assert all(isinstance(v, int) for v in check.values())
     assert got["assistant_notes"] == NOTES
+    assert after["verified"] == check["verified"] and after["to_verify"] == check["to_verify"] + 1

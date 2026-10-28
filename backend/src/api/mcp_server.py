@@ -906,7 +906,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         )
         tpl = await _outreach_templates()
         # B3: one rows pass feeds both `memory_check` and `common_questions_open` (no second profile load).
-        cq_rows = common_questions.common_questions(profile, [])
+        # The live assistant edits are the overlay the kit judges each answer by (relayed / inferred).
+        cq_rows = common_questions.common_questions(profile, [r.model_dump() for r in resp.agent_edits])
         open_qs = common_questions.open_questions(profile, cq_rows)
         cq = common_questions.summary(cq_rows)
         notes = [n for n in (profile.preferences.assistant_notes or []) if isinstance(n, str)]
