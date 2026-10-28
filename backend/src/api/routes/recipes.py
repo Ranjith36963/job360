@@ -28,9 +28,12 @@ RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 # Order is the order a new user runs them in. Adding a recipe = add the file
 # AND a row here; tests/test_recipes.py pins that the two agree.
 RECIPE_NAMES: tuple[str, ...] = (
-    "setup", "hunt", "research", "apply", "batch", "forms", "ats", "second_look", "reach", "daily", "feedback", "prep",
+    "setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "reach", "daily", "feedback", "prep",
     "debrief", "review", "own_browser", "rules",
 )
+
+# Old names that still load: assistants that learned `get_recipe("second_look")` keep working.
+RECIPE_ALIASES: dict[str, str] = {"second_look": "doctor"}
 
 
 class RecipeSummary(BaseModel):
@@ -79,6 +82,7 @@ async def list_recipes(user: CurrentUser = Depends(require_user)) -> list[Recipe
 async def get_recipe(name: str, user: CurrentUser = Depends(require_user)) -> Recipe:
     """One recipe's full text. Only names in ``RECIPE_NAMES`` resolve — the
     name never reaches the filesystem otherwise (no path traversal)."""
+    name = RECIPE_ALIASES.get(name, name)
     if name not in RECIPE_NAMES:
         _log_read(user, name, "not_found")
         raise HTTPException(status_code=404, detail=f"No recipe {name!r}. Recipes: {', '.join(RECIPE_NAMES)}")
