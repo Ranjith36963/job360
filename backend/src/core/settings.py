@@ -973,6 +973,9 @@ PROFILE_EDIT_MAX_BULLET_CHARS = int(os.getenv("PROFILE_EDIT_MAX_BULLET_CHARS", "
 PROFILE_EDIT_MAX_RECORDS_CHARS = int(os.getenv("PROFILE_EDIT_MAX_RECORDS_CHARS", "60000"))
 # preferences.assistant_notes — the length of ONE note (a line, not an essay).
 PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
+# preferences.assistant_notes — how many INSTRUCTION lines (notes without a Memory step prefix)
+# a user may keep. Enforced only when a write makes the count grow.
+INSTRUCTIONS_MAX_LINES = int(os.getenv("INSTRUCTIONS_MAX_LINES", "20"))
 # Assistant settings (S2, owner decision 2026-10-08). The most applications a
 # user may cap themselves to per day; no cap is the default (owner: "no cap by
 # default"), this is only the ceiling a typed cap may take.
