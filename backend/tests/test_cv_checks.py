@@ -137,6 +137,103 @@ def test_pdf_unreadable_bytes_do_not_raise():
     assert cc.check_pdf(b"not a pdf", "x")[0]["code"] == "pdf_unreadable"
 
 
+# -- PDF: date dashes, reading order, link text (PR 6) ------------------------
+
+DATED = (
+    "RANJITH EXAMPLE\nAI Engineer\nLondon | +44 7442 564327 | ranjith@example.com\n\n"
+    "EXPERIENCE\nJob360 | Founder | London | Jan 2023 {dash} Present\n- Built the product.\n"
+)
+
+
+def _codes_of(pdf_text: str, cv_text: str | None = None) -> dict[str, dict[str, str]]:
+    return {c["code"]: c for c in cc.check_pdf(render_cv_pdf(pdf_text, None), cv_text or pdf_text, template_pages=2)}
+
+
+def test_pdf_date_dash_flags_en_dash_year():
+    found = _codes_of(DATED.format(dash="\u2013"))
+    assert found["pdf_date_dash"]["severity"] == "warn"
+    assert "U+2013" in found["pdf_date_dash"]["detail"] and "Jan 2023" in found["pdf_date_dash"]["detail"]
+
+
+def test_pdf_date_dash_ascii_is_clean():
+    assert "pdf_date_dash" not in _codes_of(DATED.format(dash="-"))
+
+
+@pytest.mark.parametrize(
+    ("line", "flagged"),
+    [
+        ("Pay EUR 1500\u20132000 a month", False),
+        ("Handled 2000\u20135000 requests/s", False),
+        ("Studied 2016\u201317", True),
+        ("2019\u20142021", True),
+        ("Mar 2018 \u2212 Jun 2020", True),
+        ("120000\u2013130000 users", False),
+        ("2019 - 2021 and 2020", False),
+    ],
+)
+def test_non_ascii_date_dashes_unit(line, flagged):
+    assert bool(cc.non_ascii_date_dashes(line)) is flagged
+
+
+def test_pdf_date_dash_ignores_quantity_range():
+    assert "pdf_date_dash" not in _codes_of(DATED.format(dash="-") + "- Salary band EUR 1500\u20132000.\n")
+
+
+def test_non_ascii_date_dashes_hostile_input_is_fast():
+    import time
+
+    t = time.perf_counter()
+    cc.non_ascii_date_dashes(("2020 " + "\u2013" * 4000 + " ") * 20 + "9" * 200000)
+    assert time.perf_counter() - t < 2.0
+
+
+ORDERED = (
+    "RANJITH EXAMPLE\nAI Engineer\nLondon | +44 7442 564327 | ranjith@example.com\n\n"
+    "SUMMARY\nBuilds agent systems for support teams.\n\n"
+    "EXPERIENCE\nJob360 | Founder | London | Jan 2023 - Present\n- Built the memory layer for agents.\n"
+    "- Shipped the MCP server to real users.\n\nSKILLS\nLanguages: Python, Go, Docker\n"
+)
+
+
+def test_own_single_column_render_has_no_order_warning():
+    assert "pdf_reading_order" not in _codes_of(ORDERED)
+
+
+def test_pdf_reading_order_flags_shuffled_text():
+    lines = ORDERED.splitlines()
+    shuffled = "\n".join(reversed(lines))
+    found = _codes_of(shuffled, ORDERED)
+    assert found["pdf_reading_order"]["severity"] == "warn" and "order match" in found["pdf_reading_order"]["detail"]
+
+
+def test_reading_order_fidelity_unit():
+    assert cc.reading_order_fidelity("a b\nc d\ne f\ng h", "a b c d e f g h") == 1.0
+    assert cc.reading_order_fidelity("a b\nc d\ne f\ng h", "g h e f c d a b") == 0.0
+    assert cc.reading_order_fidelity("a b\nc d", "a b c d") is None  # too few lines to judge
+    assert cc.reading_order_fidelity("a b\nc d\ne f\ng h", "nothing alike here at all") is None
+
+
+def test_pdf_contact_flags_url_missing_from_text():
+    pdf = render_cv_pdf(TINY, None)
+    cv = TINY + "GitHub: https://github.com/ranjith-example/job360 | www.example.org/portfolio\n"
+    found = {c["code"]: c for c in cc.check_pdf(pdf, cv, template_pages=1)}
+    detail = found["pdf_contact"]["detail"]
+    assert "https://github.com/ranjith-example/job360" in detail and "www.example.org/portfolio" in detail
+
+
+def test_pdf_contact_link_printed_in_text_is_clean():
+    cv = TINY + "https://github.com/ranjith-example/job360 | www.example.org/portfolio\n"
+    assert "pdf_contact" not in _codes_of(cv)
+
+
+def test_rules_cv_entry_uses_ascii_hyphen():
+    from pathlib import Path
+
+    text = (Path(cc.__file__).parents[2] / "recipes" / "rules.md").read_text(encoding="utf-8")
+    assert "`Company | Role | Place | Mon YYYY - Mon YYYY`" in text
+    assert "Mon YYYY \u2013 Mon YYYY" not in text.split("## Writing the CV")[1].split("## Writing the cover letter")[0]
+
+
 # -- filename ----------------------------------------------------------------
 
 

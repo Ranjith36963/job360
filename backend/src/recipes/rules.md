@@ -150,8 +150,9 @@ LinkedIn, portfolio, own product); a blank line; then sections.
 
 SECTIONS, in this order: SUMMARY, EXPERIENCE, PROJECTS (or PORTFOLIO
 PROJECTS), SKILLS, EDUCATION & CERTIFICATION. Headings in CAPITALS, alone on a
-line. Entry line: `Company | Role | Place | Mon YYYY – Mon YYYY` (dates last,
-"Present" for a current role). Project line: `Name | tech, tech, tech`.
+line. Entry line: `Company | Role | Place | Mon YYYY - Mon YYYY` (dates last,
+"Present" for a current role; a plain hyphen: some hiring software drops a date
+joined by a long dash). Project line: `Name | tech, tech, tech`.
 Bullets start with "- ".
 
 RULES:
@@ -175,6 +176,8 @@ RULES:
 9. Before sending, LOOK at the rendered PDF (get_application_kit `file.url`):
    page count, nothing cut off, dates on the right, no orphan heading. Fix
    and save a new version if anything looks wrong.
+   Read the save's `checks`: `pdf_date_dash`, `pdf_reading_order` and
+   `pdf_contact` are what hiring software would misread; fix and save a new version.
 
 ## Writing the cover letter
 

@@ -779,6 +779,148 @@ def garbled(text: str) -> bool:
     return bool(_CID_RE.search(text)) or "�" in text
 
 
+
+# ── PDF text-layer helpers (dates, reading order, links) ────────────────────
+
+# Mirrors ai-job-search tools/verify_pdf.py:112-116 (NON_ASCII_DASHES): U+2010-2015 and the minus
+# sign. Software that splits a date range only on U+002D drops the date (verify_pdf.py:13-16).
+_NON_ASCII_DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
+_LINE_CAP = 500  # a CV line is short; a longer one is cut before any scan
+_OUTER_PUNCT = ".,;:!?()[]{}\"'"
+
+
+def _is_year(s: str) -> bool:
+    return len(s) == 4 and s.isascii() and s.isdigit() and s[:2] in ("19", "20")
+
+
+def _year_ends(text: str) -> bool:
+    """True when ``text`` ends with a standalone year (a digit before it would make it a longer number)."""
+    return _is_year(text[-4:]) and not (len(text) > 4 and text[-5].isdigit())
+
+
+def _year_starts(text: str) -> bool:
+    return _is_year(text[:4]) and not text[4:5].isdigit()
+
+
+def _bare_number(token: str) -> Optional[str]:
+    """The token minus outer punctuation when it is a bare number (``1,500``, ``2.0M``, ``40%``), else None.
+    A dotted or comma-separated token with a year group (``01.2016``) is a date, not a number."""
+    core = token.strip(_OUTER_PUNCT)
+    body = core.rstrip("kKmM%") if core[:1].isdigit() else ""
+    groups = body.replace(",", ".").split(".")
+    if not body or not all(g.isascii() and g.isdigit() for g in groups):
+        return None
+    if len(groups) > 1 and any(_is_year(g) for g in groups):
+        return None
+    return core
+
+
+def _quantity_range(before: str, after: str) -> bool:
+    """Both sides of the dash are bare numbers and not a year pair (``2016-2024``, ``2016-17``):
+    ``EUR 1500-2000`` is a quantity, not a date. Mirrors verify_pdf.py:130-179 (_quantity_range)."""
+    left = _bare_number(before.split()[-1]) if before.split() else None
+    right = _bare_number(after.split()[0]) if after.split() else None
+    if left is None or right is None:
+        return False
+    if _is_year(left) and (_is_year(right) or (len(right) == 2 and right.isdigit())):
+        return False
+    return True
+
+
+def non_ascii_date_dashes(text: str) -> list[str]:
+    """Hits (``'<context>' (U+2013)``) for a year joined to a non-ASCII dash on one line of the RAW text
+    layer. Scans character by character, so the work is linear however the text is shaped."""
+    hits: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line[:_LINE_CAP]
+        for i, ch in enumerate(line):
+            if ch not in _NON_ASCII_DASHES:
+                continue
+            before, after = line[:i].rstrip(), line[i + 1 :].lstrip()
+            if not (_year_ends(before) or _year_starts(after)):
+                continue
+            if _quantity_range(before, after):
+                continue
+            context = line[max(0, i - 12) : i + 13].strip()
+            hits.append(f'"{context}" (U+{ord(ch):04X})')
+    return hits
+
+
+_WORD_RE = re.compile(r"\w+")
+_ORDER_PREFIX = 4  # tokens of a CV line matched in the extracted stream
+_ORDER_MIN_LINES = 4
+_ORDER_MAX_LINES = 400
+_MIN_ORDER_FIDELITY = 0.9
+
+
+def _kendall_fidelity(positions: list[int]) -> float:
+    """Kendall tau of the observed positions vs the expected order, mapped to 0..1.
+    Mirrors Resume-Matcher ats_parse/roundtrip.py:291-304 (kendall_fidelity)."""
+    n = len(positions)
+    if n < 2:
+        return 1.0
+    concordant = discordant = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            if positions[j] > positions[i]:
+                concordant += 1
+            elif positions[j] < positions[i]:
+                discordant += 1
+    return ((concordant - discordant) / (n * (n - 1) / 2) + 1) / 2
+
+
+def reading_order_fidelity(cv_text: str, extracted: str) -> Optional[float]:
+    """How well the order of the CV's lines survives in the PDF text layer (1.0 = same order).
+    None when too few lines can be located to judge. Each non-empty CV line is placed by its first
+    four word tokens in the extracted token stream (a line that wraps still matches: tokens ignore
+    line breaks); a line that cannot be placed in full is skipped, never counted as out of order."""
+    doc = _WORD_RE.findall(extracted.casefold())
+    index: dict[str, list[int]] = {}
+    for pos, tok in enumerate(doc):
+        index.setdefault(tok, []).append(pos)
+    positions: list[int] = []
+    last = -1
+    for line in cv_text.splitlines()[: 4 * _ORDER_MAX_LINES]:
+        prefix = _WORD_RE.findall(line[:_LINE_CAP].casefold())[:_ORDER_PREFIX]
+        if len(prefix) < 2 or len(positions) >= _ORDER_MAX_LINES:
+            continue
+        found = [
+            s
+            for s in index.get(prefix[0], [])
+            if doc[s : s + len(prefix)] == prefix  # the whole prefix, or the line is not placed
+        ]
+        if not found:
+            continue
+        pos = next((s for s in found if s > last), found[0])
+        positions.append(pos)
+        last = pos
+    if len(positions) < _ORDER_MIN_LINES:
+        return None
+    return _kendall_fidelity(positions)
+
+
+def _link_tokens(cv_text: str) -> list[str]:
+    """http(s):// and www. tokens of the CV text, outer punctuation trimmed."""
+    out: list[str] = []
+    for tok in cv_text.split():
+        t = tok.strip(_OUTER_PUNCT + "<>|")
+        if t.casefold().startswith(("http://", "https://", "www.")) and len(t) > 8:
+            out.append(t)
+    return list(dict.fromkeys(out))
+
+
+def _link_core(url: str) -> str:
+    """The URL without scheme, ``www.`` and a trailing slash, whitespace-free and folded, for a text match."""
+    low = url.casefold()
+    for prefix in ("https://", "http://"):
+        if low.startswith(prefix):
+            low = low[len(prefix) :]
+            break
+    if low.startswith("www."):
+        low = low[4:]
+    return low.rstrip("/")
+
+
 def check_pdf(pdf_bytes: bytes, cv_text: str, template_pages: Optional[int] = None) -> list[dict[str, str]]:
     """Parse the RENDERED CV back with pdfplumber (lazy import) and report what an ATS would see."""
     try:
@@ -824,12 +966,37 @@ def check_pdf(pdf_bytes: bytes, cv_text: str, template_pages: Optional[int] = No
         d = re.sub(r"\D", "", phone)
         if len(d) >= 8 and d not in digits:
             missing.append(phone.strip())
+    # A link carried only by an annotation (target) and not printed is invisible to hiring software
+    # (ai-job-search .claude/commands/apply.md:325): its text must be in the layer.
+    for url in _link_tokens(cv_text):
+        if _link_core(url) not in squashed:
+            missing.append(url)
     if missing:
         out.append(
             _issue(
                 "pdf_contact",
                 "warn",
-                f"Contact details in the CV text are not readable in the PDF: {_listed(missing)}.",
+                f"Contact details or links in the CV text are not readable in the PDF: {_listed(missing)}.",
+            )
+        )
+    dashes = non_ascii_date_dashes(full)
+    if dashes:
+        out.append(
+            _issue(
+                "pdf_date_dash",
+                "warn",
+                f"A year is joined to a long dash in the PDF text: {_listed(dashes)}. Some hiring software"
+                " drops a date written that way: use a plain hyphen (Mon YYYY - Mon YYYY).",
+            )
+        )
+    fidelity = reading_order_fidelity(cv_text, full)
+    if fidelity is not None and fidelity < _MIN_ORDER_FIDELITY:
+        out.append(
+            _issue(
+                "pdf_reading_order",
+                "warn",
+                f"The PDF text reads in a different order than the CV text (order match {fidelity:.2f}, below"
+                f" {_MIN_ORDER_FIDELITY}). Hiring software may mix up sections; use a single-column layout.",
             )
         )
     if template_pages and n_pages > template_pages:
