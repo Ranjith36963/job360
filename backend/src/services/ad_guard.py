@@ -133,6 +133,39 @@ def _fold(text: str) -> str:
     return "\n".join(out).strip()
 
 
+_STRIP_READ = {ord(c): None for c in ZERO_WIDTH + BIDI + BOM}
+
+
+def strip_invisible(text: str) -> str:
+    """Drop what hides text from a reader, keep every other character (no whitespace folding):
+    tag characters (the three subdivision flags stay), zero-width and bidi controls, BOM and runs of
+    two or more variation selectors (a lone one, the emoji VS16, stays). A zero-width joiner next to a
+    non-letter (an emoji sequence) stays. Used on the MCP read path (``services/untrusted``)."""
+    if text.isascii():
+        return text
+    flags = list(RGI_TAG_FLAG.finditer(text))
+    pieces: list[str] = []
+    last = 0
+    for m in flags:
+        pieces.append(_strip_read(text[last:m.start()]))
+        pieces.append(m.group(0))
+        last = m.end()
+    pieces.append(_strip_read(text[last:]))
+    return "".join(pieces)
+
+
+def _strip_read(text: str) -> str:
+    text = VARIATION_RUN.sub("", text)
+    out: list[str] = []
+    for i, ch in enumerate(text):
+        if ord(ch) in _STRIP_READ or "\U000E0000" <= ch <= "\U000E007F":
+            if ch == "\u200d" and not (text[i - 1:i].isalpha() and text[i + 1:i + 2].isalpha()):
+                out.append(ch)  # an emoji joiner stays; one inside a word goes
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def clean_text(text: str) -> tuple[str, dict[str, Any]]:
     """Remove invisible characters.
 
