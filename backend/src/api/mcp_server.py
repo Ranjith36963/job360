@@ -407,11 +407,14 @@ class _Fence:
                 self.record(art, ("text",))
 
     def checks(self, rows: Any) -> None:
-        """Job checks: only a found `pay_advertised` quotes the ad (`evidence`, and `reason` repeats it);
+        """Job checks: a found `pay_advertised` quotes the ad (`evidence`, and `reason` repeats it), and
+        `ad_hidden_text` quotes it in `value` (its `reason` only counts);
         with no evidence the reason is Job360's own sentence and stays plain."""
         for check in rows if isinstance(rows, list) else []:
             if isinstance(check, dict) and check.get("code") == "pay_advertised" and check.get("evidence"):
                 self.record(check, ("evidence", "reason"))
+            elif isinstance(check, dict) and check.get("code") == "ad_hidden_text":
+                self.record(check, ("value.instruction_like", "value.invisible_text"))
 
 
 def _unfence_in(value: Any) -> Any:

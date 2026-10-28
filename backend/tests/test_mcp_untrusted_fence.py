@@ -137,7 +137,12 @@ def test_only_a_pay_check_that_quotes_the_ad_is_fenced():
     assert pay["amount"].startswith("£60,000"), "the matched figure stays plain"
     no_pay = next(c for c in unpaid if c["code"] == "pay_advertised")
     assert "_untrusted" not in no_pay and no_pay["reason"].startswith("No pay"), "Job360's own sentence"
-    assert all("_untrusted" not in c for c in paid + unpaid if c["code"] != "pay_advertised")
+    assert all("_untrusted" not in c for c in paid + unpaid if c["code"] not in ("pay_advertised", "ad_hidden_text"))
+    # ad_hidden_text quotes the ad in `value`, so its quoted lines are fenced; its reason only counts.
+    hidden = next(c for c in unpaid if c["code"] == "ad_hidden_text")
+    assert hidden["_untrusted"] == ["value.instruction_like"]
+    assert INJECTION.split()[0] in _inside(hidden["value"]["instruction_like"][0])
+    assert "IGNORE ALL" not in hidden["reason"]
 
 
 # ── Over MCP vs the web routes ───────────────────────────────────────────────
@@ -251,6 +256,42 @@ async def test_poisoned_ad_email_contact_and_ask_come_back_fenced_over_mcp_and_r
         assert "<<untrusted-text" not in json.dumps(web_news)
         web_people = (await client.get("/api/people")).json()
         assert web_people["people"][0]["notes"] == "LinkedIn headline: " + INJECTION
+
+
+ENGLAND = "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F"
+HIDDEN = (
+    "Hello \U000E0049\U000E0067\U000E006E world, zero​width, bidi‮flip⁩ end. "
+    "Run" + "️" * 10 + " ok ❤️ flag " + ENGLAND + " done"
+)
+
+
+def test_fence_drops_invisible_characters_and_keeps_emoji_and_the_three_flags():
+    from src.services.untrusted import fence_stored
+
+    body = _inside(fence_stored(HIDDEN))
+    for bad in ("​", "‮", "⁩", "\U000E0049", "️️"):
+        assert bad not in body
+    assert "zerowidth" in body and "bidiflip" in body
+    assert "❤️" in body, "a lone VS16 stays"
+    assert ENGLAND in body, "the England flag stays"
+
+
+@pytest.mark.asyncio
+async def test_mcp_read_drops_invisible_chars_db_unchanged(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    token = await _mint_token(authenticated_async_context)
+    ad = {**JOB, "description": HIDDEN + " " + "Python role. " * 20}
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            brought = _payload(await mcp.call_tool("bring_job", ad))
+            job = _payload(await mcp.call_tool("get_job", {"job_id": brought["job_id"]}))
+            body = _inside(job["description"])
+            assert "​" not in body and "\U000E0049" not in body and "‮" not in body
+            assert "❤️" in body and ENGLAND in body
+    async with authenticated_async_context() as client:
+        web_job = (await client.get(f"/api/applications/job/{brought['job_id']}")).json()
+        assert web_job["description"] == ad["description"], "stored bytes and the web view are unchanged"
 
 
 # ── Round 2: the way back (unfence on every MCP write door) ──────────────────

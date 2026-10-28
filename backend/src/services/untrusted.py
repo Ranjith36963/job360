@@ -6,7 +6,8 @@ Two shapes, one mechanism (a per-read random nonce in the start AND end marker):
   unchanged from ``services/browser_agent/agent.py`` (gap-audit #15); its output is byte-identical.
 * :func:`fence_stored` - text Job360 STORED from a job ad, an email or another person and hands back
   through an MCP tool (``<<untrusted-text N>>``). Applied on READ only, on the MCP path only
-  (``api/mcp_server.py``): the stored bytes and the web route JSON never change.
+  (``api/mcp_server.py``): the stored bytes and the web route JSON never change. Invisible
+  characters are dropped from the handed-out text only.
 * :func:`unfence` - the way back: the MCP write tools strip a COMPLETE fence an assistant copied
   out of a read, so a fenced value written back is stored as the plain text it came from.
 
@@ -72,9 +73,13 @@ def _defuse(text: str) -> str:
 
 
 def fence_stored(text: str) -> str:
-    """Stored third-party text inside a fresh per-read marker; both marker families are defused first."""
+    """Stored third-party text inside a fresh per-read marker; both marker families are defused first.
+    Characters that hide text from a human reader (tag characters, zero-width, bidi, variation-selector
+    runs) are dropped from what is handed out; the stored bytes keep them (``ad_guard.strip_invisible``)."""
+    from src.services.ad_guard import strip_invisible  # noqa: PLC0415 - stdlib-only, loaded on use
+
     nonce = secrets.token_hex(4)
-    return f"<<{STORED_LABEL} {nonce}>>\n{_defuse(text)}\n<<end {STORED_LABEL} {nonce}>>"
+    return f"<<{STORED_LABEL} {nonce}>>\n{_defuse(strip_invisible(text))}\n<<end {STORED_LABEL} {nonce}>>"
 
 
 def unfence(text: str) -> str:
