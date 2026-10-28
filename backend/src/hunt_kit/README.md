@@ -47,6 +47,7 @@ What the options mean:
 - `--why-missed URL` explains why a job link was not in your results and proposes one change, then exits. It makes no request and writes nothing. It uses the same `--companies`, `--companies-extra`, `--sources`, `--universe` and `--history` as a real run, and reads the open company list only if it is already cached. Answers: `board_not_in_list`, `universe_not_cached`, `board_in_list_source_skipped`, `skipped_by_option`, `board_marked_dead`, `board_covered`, `feed_covered`, `ats_not_supported`, `not_a_board_url`.
 - `--discover "Company A,Company B"` probes likely board names on Greenhouse, Lever, Ashby, Workable and Recruitee and prints the ones that answer with jobs. The assistant can add good ones to the user's `target_companies`.
 
+- `--known FILE` drops every job whose URL is a line in FILE (one URL per line; host lower-cased, query, fragment and trailing slash ignored) before it is written to the output or stream; `--stats` prints `known_skipped=N`.
 - `--out found.jsonl` the final file, written at the end. `--stream PATH` where jobs are saved as they are found (default `found.jsonl.stream`, or `hunt_stream.jsonl` when `--out` is stdout). `--resume` continues a stopped run. `--max-minutes 15` (default; 0 = no limit) and `--max-sources N` stop the run cleanly when spent.
 
 ## Long runs: results stream, runs resume

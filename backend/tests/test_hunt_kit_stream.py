@@ -214,3 +214,17 @@ def test_stream_mode_keeps_no_job_records_in_memory(monkeypatch: pytest.MonkeyPa
     sink.close()
     assert col.results == [] and sink.count == 1  # the description lives on disk, not in the list
     assert "Build agents for a." in net.stream.read_text(encoding="utf-8")
+
+
+def test_known_file_drops_matching_urls_before_output_and_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    net = Net(["a", "b"], monkeypatch, tmp_path)
+    known = tmp_path / "known.txt"
+    # same job as boards.example/a/0, written with an upper-case host, a query, a fragment and a trailing slash
+    known.write_text("HTTPS://Boards.Example/a/0/?utm=x#top\n\nnot a url\n", encoding="utf-8")
+    assert hk.main(net.argv("--known", str(known), "--stats")) == 0
+    assert net.urls(net.out) == ["https://boards.example/b/0"]
+    assert net.urls(net.stream) == ["https://boards.example/b/0"]
+    assert "known_skipped=1" in capsys.readouterr().err
+    assert hk.norm_known_url("https://A.io/x/?q=1#f") == hk.norm_known_url("https://a.io/x")
