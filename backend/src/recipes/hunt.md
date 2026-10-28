@@ -49,7 +49,7 @@ Job360 never searches, ranks or recommends jobs. YOU search, then bring only the
    and ask the user. Never guess - "not mentioned" is an answer. A minimum of years far above the profile is a
    stretch: say so. Duplicate hard stop: a job already in `list_applications`, or with the application kit's
    `duplicate.flag`, is not brought again. Check the posting is still open.
-5. **Bring only the fits.** For each one: `bring_job` (`origin` "ai_hunt", or "your_mail" from step 0; `queue` true: the batch; title, company, location, ad, URL,
+5. **Bring only the fits.** First ONE Doctor check on all of them plus 5 of your skips (`get_recipe("doctor")`, row Fit and bring; a skip you re-check is never brought if it is already in Job360). For each one: `bring_job` (`origin` "ai_hunt", or "your_mail" from step 0; `queue` true: the batch; title, company, location, ad, URL,
    and `posted_at` / `employer_published_at` as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you
    know: `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on` (`indeed`, `linkedin`,
    `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`); people the ad

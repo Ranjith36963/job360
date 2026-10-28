@@ -13,7 +13,8 @@ Send nothing except step 6. Full payload rules: `get_recipe("rules")`.
    (same_thread, contact_email, sender_domain_in_email_senders,
    company_in_subject): facts, not a verdict. Read the email and choose. Several
    or none: ONE `ask_user` (no `application_id`), record nothing. A wrong
-   record: add a correcting event (`corrects_event_id`), never erase.
+   record: add a correcting event (`corrects_event_id`), never erase. Before you record: the Doctor
+   (`get_recipe("doctor")`, row Email match).
 2. **Then record the outcome at once. Do not ask first.** `record_event` with
    `rejected`, `offer`, `hired`, `offer_declined` or `withdrawn` (or
    `replied` / `interview_*`). Always pass `source` (kind `email`, or `pasted`
@@ -30,7 +31,7 @@ Send nothing except step 6. Full payload rules: `get_recipe("rules")`.
    Write ONE `post_mortem` note: `outcome_event_id`, `what_was_sent`,
    `what_to_change`, `proposed_lessons`. With few applications say "a guess,
    not a cause". **Done when** the note is saved.
-4. **Lessons need a yes.** Tell the owner the proposed lessons in chat.
+4. **Lessons need a yes.** The Doctor checks them first (row Lessons). Tell the owner the proposed lessons in chat.
    Record a `lesson` only for each one they say yes to. One they later
    disagree with: `record_event` `note` with `corrects_event_id` = the
    lesson's event id ("removed: <why>"). Never record a lesson the owner did
@@ -44,12 +45,12 @@ Send nothing except step 6. Full payload rules: `get_recipe("rules")`.
    (profile name), reply in the SAME thread to the rejection's sender, thank
    them, ask what would have made the application stronger. Ask even if they
    said they give no feedback. Never argue, never ask them to reconsider, no
-   attachments, no claim the profile or answers do not contain. Voice and
+   attachments, no claim the profile or answers do not contain. The Doctor checks it (`get_recipe("doctor")`). Voice and
    payload: `get_recipe("rules")` "Automatic employer emails". Then
    `record_event` `feedback_asked` with `to`, `thread_id`, `subject`, `text`,
    `to_kind`. `ask`: make a Gmail draft and one `ask_user`. `stop`: do nothing,
    say the reason. A no-reply sender: `auto_email_skipped` "no-reply sender".
-7. **Good news.** An interview invite or positive recruiter reply: Gmail DRAFT a
+7. **Good news.** An interview invite or positive recruiter reply: the Doctor first, then Gmail DRAFT a
    reply within 1 day; after each interview a thank-you DRAFT. Each draft plus
    one `ask_user` (Needs you). Never send these automatically.
 

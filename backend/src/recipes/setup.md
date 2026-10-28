@@ -56,7 +56,7 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
 2. **Fix the profile from `raw`** (`get_profile(include_raw=true)`: CV, LinkedIn,
    GitHub). Write `cv_data.cv_positions`, `cv_data.cv_projects` (one per real
    GitHub project), links, summary when missing or wrong (`"source": "agent_inferred"`: you
-   read these). Never invent a fact; never overwrite a target the user gave.
+   read these). Never invent a fact; never overwrite a target the user gave. The Doctor checks the values before you write them (`get_recipe("doctor")`, row Profile writes).
 3. **Check your tools.** From your OWN tool list, call `report_capabilities` (which of gmail, calendar,
    job_search, people_lookup... you have, and any needing sign-in); tell the user what it says is missing.
    Job360 never connects these - you do; their Home shows the links. **Done when** you reported and said it.

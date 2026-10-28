@@ -211,3 +211,48 @@ async def test_the_doctor_not_proven_fit_is_left_unscored(authenticated_async_co
         redo = await client.put(f"/api/applications/{a}/fit", json={"verdict": "not proven: visa claim cut"})
         assert redo.status_code == 200, redo.text
         assert redo.json()["fit"]["score"] is None
+
+
+_POINTER_RECIPES = ("hunt", "research", "apply", "batch", "forms", "reach", "daily", "feedback", "prep", "debrief",
+                    "review", "own_browser", "setup", "rules")
+_ROWS_NAMED = {"hunt": {"Fit and bring"}, "research": {"Still open", "Facts and rounds"},
+               "apply": {"Applied proof", "Still open", "Form answers"}, "batch": {"Applied proof"},
+               "forms": {"Form answers"}, "reach": {"People"}, "daily": {"Email match"},
+               "feedback": {"Email match", "Lessons"}, "debrief": {"Facts and rounds"},
+               "review": {"Facts and rounds", "Lessons"}, "setup": {"Profile writes"}}
+
+
+def _row_names(text: str) -> set[str]:
+    """Names in a pointer "(..., row A, B)" or "(..., rows A, B; more)": the marker follows ", " or ": " and the
+    names end at ")" or ";" (plain scans, no regex)."""
+    names: set[str] = set()
+    for marker in (", row ", ": row ", ", rows ", ": rows ", "(row "):
+        at = text.find(marker)
+        while at != -1:
+            start = at + len(marker)
+            ends = [e for e in (text.find(")", start), text.find(";", start)) if e != -1]
+            if ends:
+                names.update(n.strip() for n in text[start:min(ends)].split(","))
+            at = text.find(marker, start)
+    return names
+
+
+def test_every_recipe_that_judges_or_drafts_points_to_the_doctor():
+    from src.api.routes.recipes import load_recipe
+
+    for name in _POINTER_RECIPES:
+        text = load_recipe(name).text
+        assert 'get_recipe("doctor")' in text, name
+        assert "second_look" not in text, name
+        assert name == "rules" or len(text.splitlines()) <= 70, name
+    assert len(load_recipe("daily").text.splitlines()) == 70
+
+
+def test_every_row_a_recipe_names_exists_in_the_doctor_table():
+    from src.api.routes.recipes import load_recipe
+
+    kinds = {r[0] for r in _table_rows()}
+    for name in _POINTER_RECIPES:
+        found = _row_names(load_recipe(name).text)
+        assert found <= kinds, (name, found - kinds)
+        assert found == _ROWS_NAMED.get(name, set()), (name, found)

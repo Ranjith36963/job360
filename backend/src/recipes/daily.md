@@ -26,7 +26,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    employer replies, confirmation emails and replies from people you reached out to; skip a message id already recorded as a `source` or listed in `whats_new` `inbox_items`.
 3. **Read the WHOLE email, then record.** Never decide from the subject or preview ("we'd like to schedule a call" and
    "thanks for applying" look alike there). Match each email to ONE open application with `match_email` (stored facts:
-   thread, contact, sender domain, company; you decide from the body). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
+   thread, contact, sender domain, company; you decide from the body), then ONE Doctor check on this run's matches (`get_recipe("doctor")`, row Email match). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
    replied, interview requested or scheduled (`scheduled_at`), rejected, offer. A rejection/offer is recorded at once,
    then `get_recipe("feedback")` (verbatim words, post-mortem). Always pass `source` (message id, sender,
    subject, received time). Set `follow_up_on` when news is promised by a date. A reply from a person we sent outreach to:
@@ -43,7 +43,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
 5. **Proof.** Thank-you page text: `record_event` `proof_text` {text, page_host};
    a confirmation email is `applied` + its `source` (stored as the "submission confirmed" note).
 5b. **Due emails.** doctor `auto_emails.violations` not empty: STOP sending, tell the owner. Else for each `auto_emails.due`
-   row call `check_auto_email(application_id, kind)` and follow it (`get_recipe("rules")` "Automatic employer emails").
+   row call `check_auto_email(application_id, kind)` and follow it (`get_recipe("rules")` "Automatic employer emails"; the Doctor checks each email before it goes: `get_recipe("doctor")`).
    `checkin` = 7 days after applying, to the person who emailed about the application, else the company's own listed
    careers@/jobs@ address; never guess one, none: `auto_email_skipped` "no contact, no careers address".
    `feedback_followup` = ONE follow-up 7 days after the ask with no answer, then stop. Interview invite or positive

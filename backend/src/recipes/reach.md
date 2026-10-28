@@ -23,7 +23,7 @@ and role a week), then `mark_done("reach", application_ids)`. It never sends: th
    sources you tried (put "tried: ..." in `notes`, or `record_event` `note` on
    the application). A person with no email is still worth recording: you
    can draft a LinkedIn message for them.
-2. **Check first:** the kit's `known_people` and `list_people(company=...)`, so you never add someone twice.
+2. **Check first:** the kit's `known_people` and `list_people(company=...)`, so you never add someone twice. Then ONE Doctor check on everyone you found (`get_recipe("doctor")`, row People).
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `company_team_page`,
    `linkedin`, `apollo` (also Vibe Prospecting, Sprouts), `email_finder`,
@@ -34,7 +34,7 @@ and role a week), then `mark_done("reach", application_ids)`. It never sends: th
    If the user knows them, pass `relationship` and `shared` (the get_profile
    path of the job or school you share) - never guess.
 4. **Write the message yourself** - short, specific to this job, true facts
-   only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
+   only. The Doctor checks it first (`get_recipe("doctor")`), then save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft.
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `settings.outreach_send` from `get_profile` (its `effective`; the Gmail

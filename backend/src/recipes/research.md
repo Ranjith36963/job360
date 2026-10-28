@@ -9,7 +9,7 @@ Use this for one application, after the user decided to apply and before
 outreach. Every fact you save must say where it came from.
 
 1. **Read.** `get_application` (the job, your fit verdict) and `get_profile`.
-2. **Is the job still open?** Open the apply link yourself. If it is gone,
+2. **Is the job still open?** Open the apply link yourself. If it is gone (the Doctor first: `get_recipe("doctor")`, row Still open),
    `record_event` `withdrawn` with detail "posting closed" and stop.
 3. **Research with your own tools**: what the company does, the team this role
    sits in, recent news, and whether the company has sponsored visas before
@@ -17,7 +17,7 @@ outreach. Every fact you save must say where it came from.
    is an answer. Also `stats(view="company", company=<company>)` and add one fact line
    "Job360 history: <label> (<n> applications) - source: Job360 stats". If a silence might be an unlogged reply, ask
    the user. It is never a reason to skip the company or a follow-up.
-4. **Save it** as one `record_event` `note` on the application: 3-6 short
+4. **Doctor it** (row Facts and rounds), **then save it** as one `record_event` `note` on the application: 3-6 short
    lines, each externally researched fact ending with its source URL (the
    Job360 history line cites the stats result instead, never a URL). Visa facts go in `save_fit`'s visa
    fields only when a source states them.
