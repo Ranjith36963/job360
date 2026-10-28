@@ -335,3 +335,10 @@ async def test_save_reply_carries_cv_entry_mismatch(authenticated_async_context,
         assert r.status_code == 201, r.text
         hit = [c for c in r.json()["checks"] if c["code"] == "cv_entry_mismatch"]
         assert len(hit) == 1 and "Jan 2020 - Present" in hit[0]["detail"]
+
+
+def test_date_range_split_has_no_regex_on_caller_text():
+    # CodeQL #1364: the old split regex was polynomial on runs of tabs; a word split is linear.
+    assert cc._date_range("Mar 2023\t\t\t-\tPresent") is not None
+    assert cc._date_range("\t" * 280 + "2020 to 2021") is not None
+    assert cc._date_range("2019 - 2020 - 2021") is None

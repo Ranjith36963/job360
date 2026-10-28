@@ -444,7 +444,8 @@ _LEGAL_SUFFIXES = frozenset(
         "gmbh", "co", "company", "ag", "sa", "bv", "pty", "the",
     }
 )
-_RANGE_SPLIT_RE = re.compile(r"\s*[-‐-―−]\s*|\s+to\s+", re.I)
+# Every dash kind becomes " - ": a range is then split word by word, with no regex on caller text.
+_DASHES = {ord(c): " - " for c in "-\u2010\u2011\u2012\u2013\u2014\u2015\u2212"}
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _ENTRY_LINE_MAX = 300
 _EXPERIENCE_WORDS = ("experience", "employment", "work history", "career history")
@@ -477,8 +478,12 @@ def _date_range(text: str) -> Optional[tuple[_DatePoint, _DatePoint]]:
     """Both ends of ``Mar 2023 - Present`` (any dash, or ``to``); ``None`` unless both ends read."""
     if len(text) > _ENTRY_LINE_MAX:
         return None
-    parts = [p for p in _RANGE_SPLIT_RE.split(text.strip()) if p.strip()]
-    if len(parts) != 2:
+    words = text.translate(_DASHES).split()
+    cuts = [i for i, w in enumerate(words) if w == "-" or w.casefold() == "to"]
+    if len(cuts) != 1:
+        return None
+    parts = [" ".join(words[: cuts[0]]), " ".join(words[cuts[0] + 1 :])]
+    if not all(parts):
         return None
     start, end = _date_point(parts[0]), _date_point(parts[1])
     if start[0] or start[1] is None or not (end[0] or end[1] is not None):
