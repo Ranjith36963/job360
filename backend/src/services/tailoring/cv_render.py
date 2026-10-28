@@ -132,6 +132,9 @@ def _rgb(color: Any, fallback: tuple[int, int, int] = (0, 0, 0)) -> tuple[int, i
     return fallback
 
 
+_DATE_DASHES = {ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"}
+
+
 def _is_date(seg: str) -> bool:
     """True if ``seg`` looks like a date range (months / years / Present)."""
     low = seg.lower().strip()
@@ -216,7 +219,10 @@ def _parse(
         elif " | " in s:
             parts = [p.strip() for p in s.split(" | ") if p.strip()]
             if len(parts) > 1 and _is_date(parts[-1]):
-                blocks.append(("entry", (" | ".join(parts[:-1]), parts[-1])))
+                # Owner 2026-10-28: dates print with a plain hyphen; some hiring software drops a
+                # date joined by a long dash (cv_checks.pdf_date_dash).
+                dates = parts[-1].translate(_DATE_DASHES)
+                blocks.append(("entry", (" | ".join(parts[:-1]), dates)))
             else:
                 blocks.append(("entry", (" | ".join(parts), "")))
         else:

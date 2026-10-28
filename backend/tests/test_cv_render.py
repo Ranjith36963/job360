@@ -91,8 +91,8 @@ def test_heading_navy_with_rule_below(pdf_bytes: bytes) -> None:
 def test_date_is_right_aligned(pdf_bytes: bytes) -> None:
     with _open(pdf_bytes) as pdf:
         page = pdf.pages[0]
-        # The real en dash is kept (Unicode font).
-        row = next(r for r in _rows(page) if r[0].endswith(DATE))
+        # Entry dates print with a plain hyphen (owner 2026-10-28; cv_checks.pdf_date_dash).
+        row = next(r for r in _rows(page) if r[0].endswith(DATE.replace("\u2013", "-")))
         last = max(c["x1"] for c in row[1])
         right_margin = page.width - 15 * 72 / 25.4
         assert abs(last - right_margin) < 2 * 72 / 25.4
@@ -345,7 +345,7 @@ def test_wrapped_bullet_is_left_aligned_not_justified(pdf2: bytes) -> None:
 def test_real_en_dash_and_round_bullet_glyphs(pdf2: bytes) -> None:
     with _open(pdf2) as pdf:
         text = pdf.pages[0].extract_text()
-        assert "June 2025 – September 2025" in text
+        assert "June 2025 - September 2025" in text  # entry dates: plain hyphen (owner 2026-10-28)
         assert "•" in text
         assert all("Liberation" in c["fontname"] for c in pdf.pages[0].chars)
 
