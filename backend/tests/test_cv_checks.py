@@ -441,3 +441,50 @@ def test_date_range_split_has_no_regex_on_caller_text():
     assert cc._date_range("Mar 2023\t\t\t-\tPresent") is not None
     assert cc._date_range("\t" * 280 + "2020 to 2021") is not None
     assert cc._date_range("2019 - 2020 - 2021") is None
+
+
+# -- keyword coverage (PR 8): advisory, per requirement of the saved fit ------
+
+_KW_PDF = "Ranjith Example\nSKILLS\nLanguages: Python, Docker, Django\n"
+_KW_SOURCE = "Python Docker Django Kubernetes Terraform"
+
+
+def test_keyword_coverage_three_statuses():
+    got = cc.keyword_coverage(_KW_PDF, _KW_SOURCE, ["python", "Kubernetes", "Haskell"])
+    assert got is not None and got["code"] == "keyword_coverage" and got["severity"] == "info"
+    detail = got["detail"]
+    assert "covered: python" in detail
+    assert "missing (have it): Kubernetes" in detail
+    assert "missing (gap): Haskell" in detail
+    assert "Never stuff keywords" in detail and "a gap stays missing" in detail
+
+
+def test_keyword_coverage_matches_whole_tokens_only():
+    # "Go" is inside "Django" but is not a token of the PDF: it must not read as covered.
+    got = cc.keyword_coverage(_KW_PDF, _KW_SOURCE, ["Go"])
+    assert got is not None and "missing (gap): Go" in got["detail"] and "covered:" not in got["detail"]
+
+
+def test_long_requirements_left_to_the_assistant():
+    long_req = "Experience leading a platform team through a cloud migration"
+    got = cc.keyword_coverage(_KW_PDF, _KW_SOURCE, [long_req, "Python"])
+    assert got is not None
+    assert "1 longer requirement(s) left for you to judge" in got["detail"] and long_req not in got["detail"]
+    assert cc.keyword_coverage(_KW_PDF, _KW_SOURCE, [long_req]) is None
+
+
+def test_keyword_coverage_silent_without_fit_or_profile():
+    assert cc.keyword_coverage(_KW_PDF, _KW_SOURCE, []) is None
+    assert cc.keyword_coverage(_KW_PDF, "", ["Python"]) is None
+    pdf = render_cv_pdf(TINY, None)
+    assert "keyword_coverage" not in {c["code"] for c in cc.check_pdf(pdf, TINY, template_pages=1)}
+
+
+def test_check_pdf_reads_the_rendered_text_layer():
+    pdf = render_cv_pdf(TINY, None)
+    found = {
+        c["code"]: c
+        for c in cc.check_pdf(pdf, TINY, template_pages=1, requirements=["Docker", "Rust"], source=TINY + " Rust")
+    }
+    detail = found["keyword_coverage"]["detail"]
+    assert "covered: Docker" in detail and "missing (have it): Rust" in detail

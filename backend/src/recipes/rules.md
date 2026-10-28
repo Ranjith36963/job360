@@ -972,7 +972,7 @@ Job360 counts what you saved; it never ranks or recommends a job. `save_fit` sto
 - No score = unscored (null), never a low score. Say how many fits you left unscored. Without a score `verdict`
   is optional (200 characters).
 - `gaps`: plain strings, or `{"text", "kind": "hard"|"soft"}`. hard = a must-have the profile lacks.
-- `jd_requirements`: the ad's requirements, same item shape, read off the ad (at most 50).
+- `jd_requirements`: the ad's requirements, same item shape, read off the ad (at most 50). One skill or tool per item where the ad lists them (e.g. "Python", "Kubernetes"): the CV save checks each against the rendered PDF.
 - Four optional extras read off the ad: `archetype` (your short name for the role type, 80 chars),
   `remote_policy` (`remote` | `hybrid` | `onsite`), `team_size` (people, a whole number) and `via`
   (`agency` | `direct`). Unknown = leave out; never guess.
