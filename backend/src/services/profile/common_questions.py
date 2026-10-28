@@ -27,7 +27,11 @@ _SAVE_PATH = {
     "right_to_work": "user_info.right_to_work", "salary": "preferences.salary_by_country",
 }
 _SAVE_PATH_EXACT = {"contact.name": "cv_data.name", "contact.github_url": "cv_data.links"}
-GROUPS: tuple[str, ...] = ("you", "experience", "work", "pay", "form", "equality")
+# "experience" left with the CV-answered rows (plan B1): the CV answers title / years / education.
+GROUPS: tuple[str, ...] = ("you", "work", "pay", "form", "equality")
+# Ids whose answer is sensitive (plan section 5): visa, salary, address, birth date; equality is a group.
+_SENSITIVE_IDS = frozenset(
+    {"visa_type", "visa_expires", "expected_salary", "current_salary", "address", "date_of_birth"})
 _COUNTRY_KEYS = ("{cc}",)
 
 
@@ -79,10 +83,25 @@ def save_path(row: dict[str, Any]) -> str:
     return _SAVE_PATH_EXACT.get(key) or _SAVE_PATH[key.split(".", 1)[0]]
 
 
-def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str]) -> dict[str, Any]:
+def _is_sensitive(q: dict[str, Any]) -> bool:
+    return q["group"] == "equality" or q["id"] in _SENSITIVE_IDS
+
+
+def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str],
+         edit: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """``edit`` = the newest overlay row for the path the answer is saved to (who wrote it, when)."""
+    from src.services.profile.edits import WEB_ACTOR  # noqa: PLC0415
+
     text = q["question"].replace("{country}", country or "")
+    sensitive = _is_sensitive(q)
+    set_by = (str(edit.get("set_by") or "") or None) if edit else None
     verified = item is not None and item.get("state") == "confirmed" and (
         item.get("source") != "approved_text" or bool(item.get("by_user")))
+    # Forge closure (plan B1): a sensitive row is the user's own only when the WEB wrote it; an assistant
+    # passing source=user_said is a guess on this page (the kit already holds such an item back).
+    if sensitive and edit is not None and set_by != WEB_ACTOR:
+        verified = False
+    label = "not_known" if item is None else ("memory" if verified else "guessed")
     return {
         "id": q["id"] if country is None else f"{q['id']}.{country}",
         "group": q["group"], "question": text, "country": country,
@@ -96,8 +115,16 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         "verified": verified,
         # Owner 2026-10-26: "memory" (the user's own), "guessed" (anything else the assistant drafted), or
         # "not_known" until the assistant drafts it (get_profile common_questions_open).
-        "label": "not_known" if item is None else ("memory" if verified else "guessed"),
+        "label": label,
         "seen": int(q.get("seen") or 0),
+        "per_job": bool(q.get("per_job")),
+        "save_to": save_path({"kit_key": q.get("kit_key")}),
+        "sensitive": sensitive,
+        # Who wrote the newest saved value and when (the overlay's newest row); None when nothing is saved.
+        "set_by": set_by if item is not None else None,
+        "set_at": (str(edit["set_at"]) if edit and edit.get("set_at") else None) if item is not None else None,
+        # How an assistant's draft got here (agent_inferred / user_said); None unless the row reads guessed.
+        "guess_source": (str(edit.get("source") or "") or None) if label == "guessed" and edit else None,
     }
 
 
@@ -124,20 +151,26 @@ def common_questions(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[s
     def by_topic(answers: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
         return {**drafts, **{str(i["topic"]): i for i in answers.get("approved_text", []) if i.get("topic")}}
 
+    newest = {str(r["path"]): r for r in overlay if isinstance(r, dict) and r.get("path")}
     rows: list[dict[str, Any]] = []
     for q in catalog():
         key = q.get("kit_key")
+        # Who wrote it comes from the newest history row of the BLOCK a kit row lives in. A topic row
+        # shares one list (user_info.answers) with every other saved answer, so its newest row says
+        # nothing about this answer: no edit for it.
+        edit = newest.get(save_path(q)) if key else None
         if key and "{cc}" in key:
-            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc) for cc in countries]
+            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc, edit) for cc in countries]
         elif key:
-            rows.append(_row(q, items(plain).get(key), None))
+            rows.append(_row(q, items(plain).get(key), None, edit))
         else:
-            rows.append(_row(q, by_topic(plain).get(q["topic"]), None))
+            rows.append(_row(q, by_topic(plain).get(q["topic"]), None, edit))
     return rows
 
 
 def summary(rows: list[dict[str, Any]]) -> dict[str, int]:
-    """How many rows are verified, saved but not verified, and not answered yet."""
+    """How many rows are verified, saved but not verified, and not answered yet (per-job rows skipped)."""
+    rows = [r for r in rows if not r.get("per_job")]
     verified = sum(1 for r in rows if r["verified"])
     missing = sum(1 for r in rows if r["answer"] is None)
     return {"total": len(rows), "verified": verified, "to_verify": len(rows) - verified - missing, "missing": missing}
@@ -149,5 +182,5 @@ def open_questions(profile: Any) -> list[dict[str, str]]:
     return [
         {"id": r["id"], "question": r["question"], "save_to": save_path(r),
          **({"topic": r["topic"]} if r.get("topic") else {"kit_key": r["kit_key"]})}
-        for r in common_questions(profile, []) if r["answer"] is None
+        for r in common_questions(profile, []) if r["answer"] is None and not r["per_job"]
     ]
