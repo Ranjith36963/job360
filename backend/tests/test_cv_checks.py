@@ -213,3 +213,116 @@ def test_linkedin_note_too_long_premium_limit_is_300():
 def test_check_text_has_no_channel_check():
     codes = [c["code"] for c in cc.check_text("outreach", _li(400), None)]
     assert "linkedin_note_too_long" not in codes
+
+
+# ── cv_entry_mismatch: entry lines vs cv_positions (advisory) ───────────────
+
+_ENTRY_PROFILE_POSITIONS = [
+    {"company": "Calnex Solutions Ltd", "title": "Software Engineer", "dates": "Mar 2023 - Present", "bullets": []},
+    {"company": "Job360 (job360.uk)", "title": "Founder", "dates": "2021 - 2023", "bullets": []},
+]
+
+
+def _entry_profile(positions=None) -> UserProfile:
+    pos = _ENTRY_PROFILE_POSITIONS if positions is None else positions
+    return UserProfile(cv_data=CVData(raw_text="x", name="A B", cv_positions=pos), preferences=UserPreferences())
+
+
+def _entry(*lines: str) -> str:
+    return "A B\nEngineer\n\nEXPERIENCE\n" + "\n".join(lines) + "\n\nSKILLS\nPython\n"
+
+
+def test_entry_matching_the_profile_is_silent():
+    text = _entry(
+        "Calnex Solutions | Software Engineer | Stevenage | 03/2023 – Now",
+        "- Led a team of 12.",
+        "Job360 | Founder | London | 2021 — 2023",
+    )
+    assert cc.cv_entry_mismatch(text, _entry_profile()) is None
+
+
+def test_entry_dates_differ_from_profile():
+    text = _entry("Calnex Solutions | Software Engineer | Stevenage | Jan 2020 - Present")
+    issue = cc.cv_entry_mismatch(text, _entry_profile())
+    assert issue is not None and issue["code"] == "cv_entry_mismatch" and issue["severity"] == "warn"
+    assert 'dates: CV says "Jan 2020 - Present", profile says "Mar 2023 - Present"' in issue["detail"]
+    assert "title:" not in issue["detail"]
+
+
+def test_entry_end_date_present_vs_closed_differs():
+    text = _entry("Job360 | Founder | London | 2021 - Present")
+    issue = cc.cv_entry_mismatch(text, _entry_profile())
+    assert issue is not None and 'CV says "2021 - Present", profile says "2021 - 2023"' in issue["detail"]
+
+
+def test_entry_title_differs():
+    text = _entry("Calnex Solutions | Data Scientist | Stevenage | Mar 2023 - Present")
+    issue = cc.cv_entry_mismatch(text, _entry_profile())
+    assert issue is not None
+    assert 'title: CV says "Data Scientist", profile says "Software Engineer"' in issue["detail"]
+    assert "dates:" not in issue["detail"]
+
+
+def test_entry_employer_not_in_profile():
+    text = _entry("Initech | Engineer | Leeds | 2019 - 2020", "Job360 | Founder | London | 2021 - 2023")
+    issue = cc.cv_entry_mismatch(text, _entry_profile())
+    assert issue is not None
+    assert "\"Initech\": employer is in none of the profile's positions" in issue["detail"]
+    assert "Job360" not in issue["detail"]
+
+
+def test_fuzzy_company_suffix_case_and_month_names_match():
+    text = _entry(
+        "CALNEX SOLUTIONS INC. | senior software engineer | Stevenage | March 2023 - Current",
+        "Founder | job360 | London | Jan 2021 - Dec 2023",
+    )
+    assert cc.cv_entry_mismatch(text, _entry_profile()) is None
+
+
+def test_en_dash_and_hyphen_dates_compare_equal():
+    a = cc.cv_entry_mismatch(_entry("Job360 | Founder | London | 2021 – 2023"), _entry_profile())
+    b = cc.cv_entry_mismatch(_entry("Job360 | Founder | London | 2021 - 2023"), _entry_profile())
+    assert a is None and b is None
+
+
+def test_bullets_and_other_sections_are_not_checked():
+    text = _entry("Job360 | Founder | London | 2021 - 2023", "- Initech | Engineer | 2010 - 2011") + (
+        "PROJECTS\nInitech | Rust, Go | 2012 - 2013\n"
+    )
+    assert cc.cv_entry_mismatch(text, _entry_profile()) is None
+
+
+def test_no_positions_is_silent():
+    text = _entry("Initech | Engineer | Leeds | 2019 - 2020")
+    assert cc.cv_entry_mismatch(text, _entry_profile([])) is None
+    assert cc.cv_entry_mismatch(text, None) is None
+    assert "cv_entry_mismatch" not in [c["code"] for c in cc.check_text("cv", text, _entry_profile([]))]
+
+
+def test_profile_position_without_dates_or_title_skips_that_part():
+    pos = [{"company": "Initech", "title": "", "dates": ""}]
+    assert cc.cv_entry_mismatch(_entry("Initech | Anything | Leeds | 2019 - 2020"), _entry_profile(pos)) is None
+
+
+def test_cv_entry_mismatch_runs_in_check_text_for_cv_only_and_does_not_gate_submit():
+    from src.services.applications import kit
+
+    text = _entry("Initech | Engineer | Leeds | 2019 - 2020")
+    assert "cv_entry_mismatch" in [c["code"] for c in cc.check_text("cv", text, _entry_profile())]
+    assert "cv_entry_mismatch" not in [c["code"] for c in cc.check_text("cover_letter", text, _entry_profile())]
+    assert "cv_entry_mismatch" not in kit._UNSUPPORTED_CODES  # advisory: check_submit never asks on it
+
+
+@pytest.mark.asyncio
+async def test_save_reply_carries_cv_entry_mismatch(authenticated_async_context, fixture_user_id):
+    from src.services.profile.storage import save_profile
+    from tests.test_application_spine import _AD
+
+    async with authenticated_async_context() as client:
+        save_profile(_entry_profile(), fixture_user_id, source_action="cv_upload")
+        app_id = (await client.post("/api/jobs/bring", json=_AD)).json()["application_id"]
+        text = _entry("Calnex Solutions | Software Engineer | Stevenage | Jan 2020 - Present")
+        r = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": text})
+        assert r.status_code == 201, r.text
+        hit = [c for c in r.json()["checks"] if c["code"] == "cv_entry_mismatch"]
+        assert len(hit) == 1 and "Jan 2020 - Present" in hit[0]["detail"]
