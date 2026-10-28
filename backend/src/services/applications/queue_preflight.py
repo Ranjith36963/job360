@@ -215,7 +215,7 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
         reason = str(p.get("reason") or "")
         by_browser = p.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
         route = routing.browser_for(
-            url=urls.get(app_id, ""),
+            url=urls.get(app_id, ""), queue_kind="application",
             job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
             page_stop="otp_needed" if reason == "otp_needed" else "",
         )

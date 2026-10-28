@@ -8,6 +8,7 @@ import { JobCard } from "./JobCard";
 const answerAsk = vi.fn();
 const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
+const markOutreachSkipped = vi.fn();
 const answerAskQuestions = vi.fn();
 const rememberAnswers = vi.fn();
 const saveAskRowAnswers = vi.fn();
@@ -15,6 +16,7 @@ vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   markOutreachSent: (...a: unknown[]) => markOutreachSent(...a),
+  markOutreachSkipped: (...a: unknown[]) => markOutreachSkipped(...a),
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
   rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
   saveAskRowAnswers: (...a: unknown[]) => saveAskRowAnswers(...a),
@@ -47,6 +49,7 @@ beforeEach(() => {
   answerAsk.mockReset().mockResolvedValue({});
   markCvSeen.mockReset().mockResolvedValue({});
   markOutreachSent.mockReset().mockResolvedValue({});
+  markOutreachSkipped.mockReset().mockResolvedValue({});
   answerAskQuestions.mockReset().mockResolvedValue({});
   rememberAnswers.mockReset().mockResolvedValue(undefined);
   saveAskRowAnswers.mockReset().mockResolvedValue({});
@@ -314,6 +317,26 @@ describe("JobCard", () => {
     await waitFor(() => expect(screen.queryByTestId("person-1")).toBeNull()); // sent: off the card
     fireEvent.click(within(screen.getByTestId("person-2")).getByRole("button", { name: "Skip" }));
     await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(reminder.id, "Skip: do not send it."));
+    expect(markOutreachSkipped).toHaveBeenCalledWith(2);
+  });
+
+  it("Skip on a job card saves the skip first, then hides the person", async () => {
+    const person = { contact: { id: 7, name: "Ana Ruiz", role: "", found_via: null }, message: "Hi Ana", linkedinUrl: "https://www.linkedin.com/in/ana" } as unknown as JobCardData["people"][number];
+    render(<JobCard card={card([], { people: [person] })} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId("skip-7"));
+    await waitFor(() => expect(screen.queryByTestId("person-7")).toBeNull());
+    expect(markOutreachSkipped).toHaveBeenCalledWith(7);
+    expect(markOutreachSent).not.toHaveBeenCalled();
+  });
+
+  it("keeps the person on a job card when saving the skip fails", async () => {
+    markOutreachSkipped.mockRejectedValue(new Error("nope"));
+    const person = { contact: { id: 7, name: "Ana Ruiz", role: "", found_via: null }, message: "Hi Ana", linkedinUrl: "https://www.linkedin.com/in/ana" } as unknown as JobCardData["people"][number];
+    render(<JobCard card={card([], { people: [person] })} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId("skip-7"));
+    await waitFor(() => expect(markOutreachSkipped).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("skip-7")).not.toBeDisabled());
+    expect(screen.getByTestId("person-7")).toBeInTheDocument();
   });
 
   it("renders assistant text as text, never HTML", () => {

@@ -652,6 +652,8 @@ class ContactOutreachOut(BaseModel):
     sent: list[OutreachEntryOut]
     replies: list[OutreachEntryOut]
     bounced: list[OutreachEntryOut] = Field(default_factory=list)
+    # True when the user skipped the newest drafted note (a newer draft clears it). Not a send.
+    skipped: bool = False
     message_count: int
     last_sent: Optional[OutreachEntryOut]
     replied: bool
@@ -941,7 +943,7 @@ class ApplicationSummaryOut(BaseModel):
     # user's whole open queue; both null when it is not on the queue.
     queued_at: Optional[str] = None
     queue_position: Optional[int] = None
-    # Where the job came from (owner ask 2026-10-18): ai_hunt / user_link / user_paste, else
+    # Where the job came from (owner ask 2026-10-18): ai_hunt / user_link / user_paste / your_mail, else
     # user (brought on the web) / ai (an assistant brought it).
     origin: str = ""
     # Bulk-apply Q1: derived problems of a queued row (queued=true only; null otherwise).
@@ -1713,6 +1715,7 @@ class PersonOut(BaseModel):
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
+    skipped: bool = False  # the user skipped this person's newest drafted note
     last_sent: Optional[OutreachEntryOut]
     replied: bool
     last_reply: Optional[OutreachEntryOut]

@@ -11,11 +11,14 @@ import {
   kindTag,
   mergeQueue,
   originLabel,
+  ownBrowserExtras,
   preflightProblems,
   queueSummaryLine,
+  withExtras,
 } from "@/lib/batch-queue";
-import type { QueueBrowserFilter, QueueSummary } from "@/lib/batch-queue";
-import { decideOwnBrowserSend } from "@/lib/browser-contract";
+import type { OwnTask, QueueBrowserFilter, QueueSummary } from "@/lib/batch-queue";
+import { decideOwnBrowserSend, getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
+import { onChanges } from "@/lib/live-changes";
 import { QueueBrowserChip, QueueBrowserFilterRow } from "./QueueBrowser";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
@@ -32,6 +35,8 @@ type QueueRow = {
   job_company?: string | null;
   preflight?: Record<string, unknown> | null;
   browser?: Browser;
+  /** An own-browser task that was never batch-queued: nothing to Remove. */
+  extra?: boolean;
 };
 
 type OutreachRow = {
@@ -53,7 +58,9 @@ function personHref(o: OutreachRow): string {
 }
 
 /** One queue (owner, 2026-10-26): the jobs your assistant applies to AND the LinkedIn sends you said yes to,
- *  in the order you said yes, each with the browser that runs it. Names are untrusted: React text only. */
+ *  in the order you said yes, each with the browser that runs it. Names are untrusted: React text only.
+ *  It also lists the own-browser queue (owner, 2026-10-27), merged in once each; its Run now button
+ *  sits on Needs you (RunNowPanel): a trigger, not a permission. */
 export function BatchQueueCard() {
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [outreach, setOutreach] = useState<OutreachRow[]>([]);
@@ -63,8 +70,11 @@ export function BatchQueueCard() {
   const [busy, setBusy] = useState<string | null>(null);
   // Client-side over the loaded rows (the card loads the first 50); the counts come from the whole queue.
   const [browserFilter, setBrowserFilter] = useState<QueueBrowserFilter>("all");
+  // The own-browser queue (null: failed or not loaded): its tasks join the list once each.
+  const [own, setOwn] = useState<OwnBrowserQueue | null>(null);
 
   const load = useCallback(async () => {
+    void getOwnBrowserQueue().then((q) => q && setOwn(q)); // a failed read keeps the last good tasks
     try {
       const res = await listApplications({ queued: true, limit: 50 });
       setRows(res.applications as QueueRow[]);
@@ -81,6 +91,9 @@ export function BatchQueueCard() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     void load();
   }, [load]);
+
+  // Live: re-read when the assistant moves anything (the queue spans jobs and people); a failed read keeps the rows.
+  useEffect(() => onChanges(() => void load()), [load]);
 
   async function remove(id: number) {
     setBusy(`application:${id}`);
@@ -109,9 +122,11 @@ export function BatchQueueCard() {
     }
   }
 
-  const items = rows === null ? [] : mergeQueue(rows, outreach, order);
+  // Every own-browser task once: the ones the batch list lacks join it (dedupe by application and contact id).
+  const extras = ownBrowserExtras(rows ?? [], outreach, own?.tasks as OwnTask[] | undefined);
+  const items = rows === null ? [] : mergeQueue<QueueRow, OutreachRow>([...rows, ...extras.apps], [...outreach, ...extras.outreach], order);
   const place = new Map(items.map((it, i) => [it.key, i + 1]));
-
+  const filterSummary = withExtras(summary, extras.apps.length, extras.outreach.length);
   return (
     <section
       aria-labelledby="batch-queue"
@@ -148,7 +163,7 @@ export function BatchQueueCard() {
               {queueSummaryLine(summary)}
             </p>
           )}
-          <QueueBrowserFilterRow summary={summary} total={items.length} value={browserFilter} onChange={setBrowserFilter} />
+          <QueueBrowserFilterRow summary={filterSummary} total={items.length} value={browserFilter} onChange={setBrowserFilter} />
           <ul className="flex flex-col" data-testid="batch-queue-list">
             {filterByBrowser(items, browserFilter).map((it) => {
               const pos = <span className="mr-1.5 font-mono text-xs text-faint">#{place.get(it.key)}</span>;
@@ -210,15 +225,17 @@ export function BatchQueueCard() {
                       </ul>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    data-testid={`batch-remove-${r.id}`}
-                    disabled={busy === it.key}
-                    onClick={() => void remove(r.id)}
-                    className={BTN}
-                  >
-                    {busy === it.key ? "Removing…" : "Remove"}
-                  </button>
+                  {!r.extra && (
+                    <button
+                      type="button"
+                      data-testid={`batch-remove-${r.id}`}
+                      disabled={busy === it.key}
+                      onClick={() => void remove(r.id)}
+                      className={BTN}
+                    >
+                      {busy === it.key ? "Removing…" : "Remove"}
+                    </button>
+                  )}
                 </li>
               );
             })}

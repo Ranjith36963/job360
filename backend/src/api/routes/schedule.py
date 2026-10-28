@@ -37,7 +37,7 @@ RunReason = Literal[
 class DueItemOut(BaseModel):
     duty: Duty
     recipe: Literal["hunt", "daily", "batch", "reach"]
-    reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications"]
+    reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications", "run_now"]
     # Only on `reach`: the applications to find people for this run (newest first).
     application_ids: Optional[list[int]] = None
 
@@ -52,6 +52,8 @@ class WhatsDueOut(BaseModel):
     waiting_on_you: int = 0
     # Owner 2026-10-25: why the hunt is not due although its time came (closed set: queue_full).
     hunt_hold: Optional[Literal["queue_full"]] = None
+    # Owner 2026-10-27: duties due because the user pressed Run now in Job360 (reason `run_now`).
+    run_now: list[Duty] = Field(default_factory=list)
     last_done_at: dict[str, Optional[str]]
     last_tick_at: Optional[str] = None
     # Owner 2026-10-25: failed runs in a row per duty (a failing duty waits 2h, 4h, 8h... at most 24h).

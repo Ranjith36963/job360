@@ -195,6 +195,42 @@ PAUSE_REFUSED_TOOLS = frozenset({
 PAUSE_ALLOWED_EVENT_TYPES = frozenset({"note", "withdrawn", "submit_declined", "ask_withdrawn", "applied"})
 # Recipes that start work: while paused, get_recipe puts the pause first.
 PAUSE_WORK_RECIPES = frozenset({"apply", "batch", "daily", "hunt", "own_browser", "reach"})
+# The same decision on the REST door (src/api/pause_gate.py): an assistant can call /api/... directly with
+# its j360_ token or OAuth grant. Keyed on (HTTP method, "<routes module>.<endpoint>"); the value is the
+# MCP tool the route backs, or None for a REST-only door to the same work. Only bearer calls are gated, never
+# the user's web session. record_event is refused unless its body's event_type is in
+# PAUSE_ALLOWED_EVENT_TYPES; own_browser.release, record_application's routes, profile writes,
+# answer/withdraw an ask and mark_done stay open, like their tools. tests/test_pause_rest.py holds this
+# table against PAUSE_REFUSED_TOOLS and makes every token-reachable write route pick a side.
+PAUSE_REFUSED_ROUTES: dict[tuple[str, str], Optional[str]] = {
+    ("POST", "bring.bring_job"): "bring_job",
+    ("POST", "bring.fetch_url_route"): None,  # the web form's fetch that starts a bring
+    ("POST", "asks.create_ask"): "ask_user",
+    ("POST", "asks.resolve_inbox_item"): None,  # matching a stored email, like match_email
+    ("POST", "applications.match_email"): "match_email",
+    ("POST", "applications.mark_inbox_checked"): "mark_inbox_checked",
+    ("POST", "applications.record_events"): "record_events",
+    ("POST", "applications.record_event"): "record_event",
+    ("POST", "applications.save_artifact"): "save_artifact",
+    ("PUT", "applications.save_fit"): "save_fit",
+    ("PUT", "applications.set_visa"): None,  # a fit-side judgement, like save_fit
+    ("POST", "applications.add_contact"): "add_contact",
+    ("POST", "applications.add_person"): None,
+    ("POST", "applications.add_contacts_batch"): None,
+    ("PATCH", "applications.update_contact"): "update_contact",
+    ("POST", "applications.record_outreach"): None,  # a message version or a sent mark
+    ("PATCH", "applications.update_job_facts"): "update_job",
+    ("GET", "applications.outreach_check"): "check_outreach",
+    ("GET", "applications.auto_email_check"): "check_auto_email",
+    ("POST", "applications.check_application_form"): "check_form",
+    ("GET", "applications.get_application_kit"): "get_application_kit",
+    ("POST", "browser.browser_action"): "browser",
+    ("GET", "own_browser.queue"): "own_browser_queue",
+    ("POST", "own_browser.take"): "own_browser_queue",
+    ("POST", "templates.save_template"): None,
+    ("PATCH", "tailor.save_edit"): None,  # a new CV / letter version
+    ("POST", "tailor.keep"): None,
+}
 
 
 def pause_blocks(name: str, arguments: Mapping[str, Any]) -> bool:
@@ -977,8 +1013,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
-        the application id to work against. It does NOT judge the fit — that is your
-        job; record your own verdict with `save_fit`. Bringing the same title+company
+        the application id to work against. It never judges fit: record your verdict
+        with `save_fit`. Bringing the same title+company
         again returns the existing job (existing=true); a different link/location/country
         is a 409 saying what to do. Never use this to search.
 
@@ -1003,7 +1039,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         full ad first; if the host is unknown, tell the user. They never block a bring.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
-        `origin`: "ai_hunt" (you found it), "user_link" or "user_paste"; `queue`=true puts it in the batch.
+        `origin`: "ai_hunt" (you found it), "your_mail" (a job-alert email), "user_link" or
+        "user_paste"; `queue`=true puts it in the batch.
         `listed_people` (max 10): people the ad names (hiring team), each {"name", "role",
         "linkedin_url"}; saved as this job's contacts, found_via "job_ad".
         `known_people`: see rules. `client_key`: retry = first reply."""

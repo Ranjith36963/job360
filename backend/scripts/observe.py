@@ -89,6 +89,8 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("contact_edits", "user_id"),
     # The browser agent's saved job-site sign-ins (migration 0065, encrypted cookies only).
     ("browser_sign_ins", "user_id"),
+    # What each visit of Job360's browser met: closed values and the host only (migration 0092).
+    ("browser_route_attempts", "user_id"),
     # "Send starts my assistant": the user's start link, token encrypted (migration 0066).
     ("assistant_duty_triggers", "user_id"),
     ("assistant_triggers", "user_id"),

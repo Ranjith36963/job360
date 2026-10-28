@@ -120,7 +120,7 @@ def test_the_answer_holds_closed_values_only_never_instructions():
     answer = schedule.due_now(_facts(hunt_every_hours=6, inbox_mode="auto", apply_on_own=True, queued=1), NOW)
     assert set(answer) == {
         "due", "nothing_due", "next_due_at", "batch_hold", "last_done_at", "last_tick_at", "expected_every_hours",
-        "checked_at", "failures_in_row", "running", "held_by_running", "hunt_hold", "waiting_on_you",
+        "checked_at", "failures_in_row", "running", "held_by_running", "hunt_hold", "waiting_on_you", "run_now",
     }
     for item in answer["due"]:
         assert item["duty"] in settings.SCHEDULE_DUTIES
@@ -307,3 +307,86 @@ def test_a_duty_a_few_minutes_short_of_its_time_is_due():
     assert [d["duty"] for d in near["due"]] == ["hunt"]
     early = schedule.due_now(_facts(hunt_every_hours=1, stamps={"hunt": NOW - timedelta(minutes=45)}), NOW)
     assert early["due"] == [] and early["nothing_due"] is True
+
+
+# ── Run now (owner 2026-10-27): a press in Job360 makes that duty due now ─────
+
+
+def _pressed(minutes_ago: int, **kw: Any) -> schedule.DueFacts:
+    return _facts(forced={kw.pop("duty", "hunt"): NOW - timedelta(minutes=minutes_ago)}, **kw)
+
+
+def test_run_now_hunt_ignores_interval_and_queue_full():
+    f = _pressed(2, hunt_every_hours=6, queued=settings.HUNT_QUEUE_MAX, stamps={"hunt": NOW - timedelta(minutes=10)})
+    answer = schedule.due_now(f, NOW)
+    assert answer["due"] == [{"duty": "hunt", "recipe": "hunt", "reason": "run_now"}]
+    assert answer["hunt_hold"] == "queue_full" and answer["run_now"] == ["hunt"]
+
+
+def test_run_now_ends_after_the_window_a_later_done_or_hunt_off():
+    base = {"hunt_every_hours": 6, "stamps": {"hunt": NOW - timedelta(minutes=10)}}
+    assert schedule.due_now(_pressed(20, **base), NOW)["due"] == []
+    before_done = _facts(forced={"hunt": NOW - timedelta(minutes=12)}, **base)  # pressed, then a run finished
+    assert schedule.due_now(before_done, NOW)["due"] == []
+    assert schedule.due_now(_pressed(2, hunt_every_hours=None), NOW)["due"] == []
+
+
+def test_run_now_hunt_beats_failure_backoff():
+    f = _pressed(1, hunt_every_hours=6, stamps={"hunt": NOW - timedelta(minutes=30)}, failures={"hunt": 3})
+    assert schedule.due_now(f, NOW)["due"][0]["reason"] == "run_now"
+
+
+def test_run_now_batch_over_waiting_and_hours_but_not_paused():
+    on = {"apply_on_own": True, "queued": 3, "duty": "batch"}
+    waiting = schedule.due_now(_pressed(1, waiting_on_you=3, **on), NOW)
+    assert waiting["due"] == [{"duty": "batch", "recipe": "batch", "reason": "run_now"}]
+    assert _duties(schedule.due_now(_pressed(1, inside_hours=False, **on), NOW)) == ["batch"]
+    for hold in ({"paused": True}, {"queued": 0}, {"daily_left": 0}, {"weekly_left": 0}):
+        assert schedule.due_now(_pressed(1, **{**on, **hold}), NOW)["due"] == []
+    assert schedule.due_now(_pressed(1, **{**on, "apply_on_own": False}), NOW)["due"] == []
+
+
+def test_run_now_reach_needs_ids_and_inbox_needs_auto_mode():
+    assert schedule.due_now(_pressed(1, duty="reach", people_hunt=True), NOW)["due"] == []
+    reach = schedule.due_now(_pressed(1, duty="reach", people_hunt=True, reach_ids=[4, 5]), NOW)
+    assert reach["due"] == [{"duty": "reach", "recipe": "reach", "reason": "run_now", "application_ids": [4, 5]}]
+    stamps = {"inbox": NOW - timedelta(hours=1)}
+    inbox = schedule.due_now(_pressed(1, duty="inbox", inbox_mode="auto", stamps=stamps), NOW)
+    assert inbox["due"] == [{"duty": "inbox", "recipe": "daily", "reason": "run_now"}]
+    assert schedule.due_now(_pressed(1, duty="inbox", inbox_mode="ask"), NOW)["due"] == []
+
+
+def test_run_now_keeps_run_order_and_lists_a_duty_once():
+    f = _facts(hunt_every_hours=6, inbox_mode="auto", forced={"hunt": NOW, "inbox": NOW}, stamps={})
+    assert _duties(schedule.due_now(f, NOW)) == ["inbox", "hunt"]
+
+
+@pytest.mark.asyncio
+async def test_run_now_press_writes_the_slot_and_whats_due_lists_it(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    from src.services.browser_agent import duty_trigger
+
+    fired: list[str] = []
+
+    async def fake_fire(db, user_id, duty, *, cause, resolve):
+        fired.append(cause)
+        return {"fired": True, "duty": duty}
+
+    monkeypatch.setattr(duty_trigger, "fire", fake_fire)
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        await _patch(client, HUNT, 6)
+        await client.post("/api/schedule/done", json={"duty": "hunt"})  # hunt is not due now
+        base = _row_count()
+        assert (await client.post("/api/assistant-duty-triggers/hunt/run", json={"test": True})).status_code == 200
+        assert _row_count() == base  # Test is check-only: nothing written
+        assert (await _due(client))["nothing_due"] is True
+        assert (await client.post("/api/assistant-duty-triggers/hunt/run")).status_code == 200
+        assert _row_count() == base + 1  # the run_now:hunt slot
+        answer = await _due(client)
+        assert [(d["duty"], d["reason"]) for d in answer["due"]] == [("hunt", "run_now")]
+        assert answer["run_now"] == ["hunt"]
+        await client.post("/api/schedule/done", json={"duty": "hunt"})  # the run ends the force by itself
+        assert (await _due(client))["nothing_due"] is True
+    assert fired == ["test", "run_now"]

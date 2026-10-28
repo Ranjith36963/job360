@@ -1,8 +1,8 @@
 "use client";
 
-import { CHIPS, SORTS, summaryLine } from "@/lib/needs-you-items";
+import { CHIPS, GROUP_NAMES, SORTS, summaryLine } from "@/lib/needs-you-items";
 import type { Chip, NeedsYouCount, SortKey } from "@/lib/needs-you-items";
-import { cn } from "@/lib/utils";
+import { cn, relativeTime } from "@/lib/utils";
 
 /** The ?show= chip in the address bar; "all" when absent or unknown. */
 export function readShow(): Chip {
@@ -26,9 +26,32 @@ export function writeShow(chip: Chip): void {
   }
 }
 
-/** The summary line, the filter chips (single select, hidden at 0 except All) and the sort menu with
- *  one grey line saying what the order means (owner plan §2.1, §2.4-§2.6). */
-export function NeedsYouControls({ count, settled, show, onShow, sort, onSort }: {
+// The row's own group names (the status chip on each job), so the gauges and the rows read alike.
+const GAUGE_NAMES = GROUP_NAMES.slice(0, 4);
+const linkBtn = "rounded px-1.5 py-1 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
+
+/** The quiet gauge row under the summary (owner 2026-10-27, "cockpit"): jobs per group, then how long
+ *  the oldest item has waited. Plain text, no cards; a group at 0 is left out. */
+function Gauges({ tiers, oldest }: { tiers: number[]; oldest: string }) {
+  const parts = GAUGE_NAMES.map((name, i) => ({ name, n: tiers[i] ?? 0 })).filter((g) => g.n > 0);
+  const age = relativeTime(oldest).replace(/ ago$/, "");
+  if (parts.length === 0 && !age) return null;
+  return (
+    <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground" data-testid="needs-you-gauges">
+      {parts.map((g) => (
+        <span key={g.name}>
+          {g.name} <span className="font-mono font-medium text-foreground">{g.n}</span>
+        </span>
+      ))}
+      {age && <span>Oldest waiting <span className="font-mono font-medium text-foreground">{age}</span></span>}
+    </p>
+  );
+}
+
+/** The summary line with its gauges, the filter chips (single select, hidden at 0 except All) and one
+ *  row holding the sort menu, Expand all / Fold all and the grey line saying what the order means
+ *  (owner plan §2.1, §2.4-§2.6; one row since 2026-10-27). */
+export function NeedsYouControls({ count, settled, show, onShow, sort, onSort, gauges, onFoldAll }: {
   count: NeedsYouCount;
   /** False while parts of the page are still loading: a 0 then is not yet "nothing". */
   settled: boolean;
@@ -36,13 +59,20 @@ export function NeedsYouControls({ count, settled, show, onShow, sort, onSort }:
   onShow: (chip: Chip) => void;
   sort: SortKey;
   onSort: (key: SortKey) => void;
+  /** Jobs per group and the oldest open item (the job list reports them). */
+  gauges?: { tiers: number[]; oldest: string };
+  /** Expand all (true) / Fold all (false); absent = no job rows, no buttons. */
+  onFoldAll?: (open: boolean) => void;
 }) {
   const line = SORTS.find((s) => s.key === sort)?.line;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="needs-you-controls">
-      <p className="text-sm text-muted-foreground" data-testid="needs-you-summary">
-        {count.n === 0 && !settled ? "Checking what needs you…" : summaryLine(count.n)}
-      </p>
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-medium" data-testid="needs-you-summary">
+          {count.n === 0 && !settled ? "Checking what needs you…" : summaryLine(count.n)}
+        </p>
+        {gauges && <Gauges tiers={gauges.tiers} oldest={gauges.oldest} />}
+      </div>
       {count.n > 0 && (
         <div role="group" aria-label="Show" className="-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 pb-1" data-testid="needs-you-chips">
           {CHIPS.filter((c) => c.key === "all" || count.byChip[c.key] > 0).map((c) => (
@@ -62,7 +92,7 @@ export function NeedsYouControls({ count, settled, show, onShow, sort, onSort }:
           ))}
         </div>
       )}
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <label className="flex items-center gap-1.5 text-sm">
           <span className="text-muted-foreground">Sort:</span>
           <select
@@ -76,6 +106,13 @@ export function NeedsYouControls({ count, settled, show, onShow, sort, onSort }:
             ))}
           </select>
         </label>
+        {onFoldAll && (
+          <span className="flex items-center">
+            <button type="button" className={linkBtn} data-testid="expand-all" onClick={() => onFoldAll(true)}>Expand all</button>
+            <span aria-hidden className="text-faint">·</span>
+            <button type="button" className={linkBtn} data-testid="fold-all" onClick={() => onFoldAll(false)}>Fold all</button>
+          </span>
+        )}
         <p className="text-xs text-muted-foreground" data-testid="needs-you-sort-line">{line}</p>
       </div>
     </div>

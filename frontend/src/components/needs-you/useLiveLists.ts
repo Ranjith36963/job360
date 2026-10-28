@@ -37,7 +37,8 @@ export function useLiveRefresh(refetch: (d: ChangesDetail) => void): void {
 }
 
 const jobKey = (h: { id: number }) => String(h.id);
-const jobTestids = (h: { id: number }) => [`job-card-${h.id}`, `job-header-${h.id}`, `ready-section-${h.id}`];
+// `job-row-<id>` is the folded row: unfolding it (its + is a panel toggle) holds it like an opened panel.
+const jobTestids = (h: { id: number }) => [`job-row-${h.id}`, `job-card-${h.id}`, `job-header-${h.id}`, `ready-section-${h.id}`];
 
 /** The job cards as shown: the card the user is in keeps its place and stays until they finish. */
 export function useLiveJobs<T extends { id: number }>(jobs: T[]): T[] {

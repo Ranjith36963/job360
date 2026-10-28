@@ -673,7 +673,9 @@ CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 —
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 # contact_outreach.entry — free TEXT in the DB, closed here. `bounced` (pack #7): a
 # delivery failure for an outreach email; its `text` is the address that bounced.
-OUTREACH_ENTRIES = ("message", "sent", "reply", "bounced")
+# `skipped` (owner 2026-10-27): the user pressed Skip on the person's newest drafted note. It is a
+# ledger-only fact: no timeline event, never a send. A newer message brings the person back.
+OUTREACH_ENTRIES = ("message", "sent", "reply", "bounced", "skipped")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
 # LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
 # "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the

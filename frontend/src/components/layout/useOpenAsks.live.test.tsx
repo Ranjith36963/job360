@@ -3,42 +3,65 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { CHANGES_EVENT } from "@/lib/live-changes";
 import { useOpenAsks } from "./useOpenAsks";
 
-// The badge, live (PR 6): it re-counts on job360:changes, except on Needs you, where the page
-// re-reads on the same event and announces its own full count (a cheaper count would jump).
+// The badge, live: off Needs you it shows the server's exact total (GET /api/needs-you-count) and
+// re-reads it on job360:changes. On Needs you the page re-reads on the same event and announces its
+// own total (the same number), so the hook reads nothing there.
 
-const listAsks = vi.fn();
+const getNeedsYouCount = vi.fn();
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
-  listAsks: (...a: unknown[]) => listAsks(...a),
-  getReadyToSend: async () => ({ total: 0 }),
+  getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
 }));
-vi.mock("@/lib/assistant-state", () => ({ fetchSettingsShared: async () => ({ waiting: [] }) }));
 
-const ask = (id: number) => ({ id, application_id: 100 + id, question: "Q?", context: "", job_title: "Dev", job_company: "Acme" });
+const total = (n: number) => ({ n, jobs: n, other: 0 });
 const changed = () =>
   act(() => {
     window.dispatchEvent(new CustomEvent(CHANGES_EVENT, { detail: { areas: ["asks"], full: false, seq: Math.random() } }));
   });
 
 beforeEach(() => {
-  listAsks.mockReset().mockResolvedValue({ asks: [ask(1)] });
+  getNeedsYouCount.mockReset().mockResolvedValue(total(1));
 });
 
 describe("useOpenAsks live", () => {
-  it("re-counts quietly when the assistant changes something", async () => {
+  it("shows the endpoint's number off Needs you, and re-counts quietly when the assistant changes something", async () => {
     const { result } = renderHook(() => useOpenAsks(true, "/"));
     await waitFor(() => expect(result.current).toBe(1));
-    listAsks.mockResolvedValue({ asks: [ask(1), ask(2)] });
+    getNeedsYouCount.mockResolvedValue(total(2));
     changed();
     await waitFor(() => expect(result.current).toBe(2));
   });
 
-  it("does not re-count on Needs you (the page announces its own count)", async () => {
-    renderHook(() => useOpenAsks(true, "/needs-you"));
+  it("a failed live re-count keeps the badge as it was", async () => {
+    const { result } = renderHook(() => useOpenAsks(true, "/profile"));
+    await waitFor(() => expect(result.current).toBe(1));
+    getNeedsYouCount.mockRejectedValue(new Error("down"));
     changed();
     await act(async () => {
       await new Promise((r) => setTimeout(r, 30));
     });
-    expect(listAsks).not.toHaveBeenCalled();
+    expect(result.current).toBe(1);
+  });
+
+  it("does not read the endpoint on Needs you: the page announces its own total", async () => {
+    const { result } = renderHook(() => useOpenAsks(true, "/needs-you"));
+    changed();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(getNeedsYouCount).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("job360:asks-changed", { detail: 7 }));
+    });
+    expect(result.current).toBe(7);
+  });
+
+  it("reads nothing when signed out", async () => {
+    const { result } = renderHook(() => useOpenAsks(false, "/"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(getNeedsYouCount).not.toHaveBeenCalled();
+    expect(result.current).toBe(0);
   });
 });

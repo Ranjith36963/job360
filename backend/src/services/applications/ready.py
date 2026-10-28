@@ -23,10 +23,13 @@ from src.services.profile.regions import region_of
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
 
-_READY_SQL = (
+_READY_SELECT = (
     "SELECT a.id AS application_id, a.job_id, a.job_title, a.job_company, a.job_location, a.job_country, "
     "a.job_url, a.fit_score, a.fit_recorded_by, f.id AS form_filled_event_id, "
     "f.recorded_at AS filled_at, f.recorded_by AS filled_by, f.payload "
+)
+# The rest of the query is shared with ``ready_ids`` (the badge's count), so the two never disagree.
+_READY_REST = (
     "FROM applications a JOIN application_events f "
     "ON f.application_id = a.id AND f.user_id = a.user_id AND f.event_type = 'form_filled' "
     "AND f.id = (SELECT MAX(x.id) FROM application_events x WHERE x.application_id = a.id "
@@ -41,6 +44,16 @@ _READY_SQL = (
     "WHERE y.application_id = a.id AND y.user_id = a.user_id AND y.event_type IN ('blocked', 'unblocked'))) "
     "ORDER BY f.id DESC LIMIT ?"
 )
+_READY_SQL = _READY_SELECT + _READY_REST
+
+
+async def ready_ids(db: JobDatabase, user_id: str) -> list[int]:
+    """The application ids of the caller's ready-to-send cards (at most READY_TO_SEND_MAX): the same
+    rows as ``ready_rows``, with no payload read. For the Needs-you badge."""
+    cur = await db._db.execute(
+        "SELECT a.id AS application_id " + _READY_REST.format(only=""), (user_id, settings.READY_TO_SEND_MAX)
+    )
+    return [int(r["application_id"]) for r in await cur.fetchall()]
 
 
 async def ready_rows(

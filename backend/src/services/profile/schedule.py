@@ -43,6 +43,10 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 
 TICK = "tick"
 RUNNING = "running:"  # + duty: the slot that says a run has this duty now (owner 2026-10-25)
+# + duty: the user pressed Run now in Job360 (owner 2026-10-27). For RUN_NOW_MINUTES the duty is due now,
+# past its interval, the hunt queue hold and any back-off, until its next mark_done.
+RUN_NOW = "run_now:"
+RUN_NOW_MINUTES = 15
 INBOX_AUTO_MODES = frozenset({"auto", "scheduled"})
 INBOX_DEFAULT_HOURS = 24
 _EVERY_RE = re.compile(r"^(\d{1,3})h$")
@@ -113,6 +117,8 @@ class DueFacts:
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
     running: dict[str, datetime] = field(default_factory=dict)
+    # Duties the user pressed Run now for: {duty: pressed_at} (RUN_NOW slots).
+    forced: dict[str, datetime] = field(default_factory=dict)
 
 
 def inbox_every_hours(mode: str, check_every: str) -> Optional[int]:
@@ -163,6 +169,14 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
             return True
         return False
 
+    def is_forced(duty: str) -> bool:
+        """Run now pressed within RUN_NOW_MINUTES and not yet answered by a later mark_done of the duty."""
+        at, last = f.forced.get(duty), f.stamps.get(duty)
+        if at is None or now - at >= timedelta(minutes=RUN_NOW_MINUTES):
+            return False
+        return last is None or at > last
+
+    forced_due: set[str] = set()
     intervals = {"inbox": inbox_every_hours(f.inbox_mode, f.check_every), "hunt": f.hunt_every_hours}
     # Back-pressure: no new jobs while the queue is already full; due again as it drains.
     hunt_hold = "queue_full" if f.hunt_every_hours is not None and f.queued >= settings.HUNT_QUEUE_MAX else None
@@ -175,16 +189,27 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
             every = backoff_hours(f.failures[duty])
         nxt = now if last is None else last + timedelta(hours=every)
         next_due[duty] = _iso(nxt)
+        if is_forced(duty):  # the user pressed Run now: run it now (hunt off / inbox not on its own: no)
+            forced_due.add(duty)
+            due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty], "reason": "run_now"})
+            continue
         if duty == "hunt" and hunt_hold:
             continue
         if nxt - DUE_GRACE <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
-    if f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
+    if f.people_hunt and f.reach_ids and is_forced("reach"):
+        forced_due.add("reach")
+        due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
+                    "reason": "run_now", "application_ids": list(f.reach_ids)})
+    elif f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
     hold = batch_hold(f)
-    if hold is None and not waiting_after_failure("batch"):
+    if is_forced("batch") and hold in (None, "waiting_on_you", "outside_hours"):
+        forced_due.add("batch")
+        due.append({"duty": "batch", "recipe": settings.SCHEDULE_DUTY_RECIPES["batch"], "reason": "run_now"})
+    elif hold is None and not waiting_after_failure("batch"):
         due.append({"duty": "batch", "recipe": settings.SCHEDULE_DUTY_RECIPES["batch"], "reason": "queue_waiting"})
     live = {d: at for d, at in f.running.items() if now - at < timedelta(minutes=settings.DUTY_CLAIM_MINUTES)}
     held = [d["duty"] for d in due if d["duty"] in live]
@@ -198,6 +223,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         "batch_hold": hold,
         "waiting_on_you": f.waiting_on_you,
         "hunt_hold": hunt_hold,
+        "run_now": sorted(forced_due),
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
         "last_tick_at": _iso(f.stamps.get(TICK)),
         "failures_in_row": {d: int(f.failures.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
@@ -221,6 +247,16 @@ async def load_stamps(db: JobDatabase, user_id: str) -> dict[str, datetime]:
             continue
         out[str(r["duty"])] = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
     return out
+
+
+async def press_run_now(db: JobDatabase, user_id: str, duty: str, now: datetime) -> None:
+    """Record that the user pressed Run now for ``duty`` (one slot per duty, replaced; rule #12: by user)."""
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+        (user_id, RUN_NOW + duty, now.astimezone(timezone.utc).isoformat(timespec="microseconds")),
+    )
+    await db._db.commit()
 
 
 async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime) -> set[str]:
@@ -454,6 +490,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         inside_hours=inside,
         stamps=stamps,
         running={k[len(RUNNING):]: v for k, v in stamps.items() if k.startswith(RUNNING)},
+        forced={k[len(RUN_NOW):]: v for k, v in stamps.items() if k.startswith(RUN_NOW)},
         failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
         people_hunt=cfg.people_hunt,
         reach_ids=await _reach_ids(db, user_id, now) if cfg.people_hunt else [],

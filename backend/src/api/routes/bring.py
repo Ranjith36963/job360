@@ -235,8 +235,9 @@ class BringJobRequest(BaseModel):
     employer_published_at: Optional[str] = Field(None, max_length=10)
     # Owner ask 2026-10-18: where this job came from, shown as a tag on every job - ``ai_hunt`` (your
     # assistant found it), ``user_link`` (the user gave the link), ``user_paste`` (the user pasted the
-    # ad). Stored on the ``brought`` event of a NEW application; omitted = not said (rule #29).
-    origin: Optional[Literal["ai_hunt", "user_link", "user_paste"]] = None
+    # ad), ``your_mail`` (owner 2026-10-27: a job-alert email in the user's own inbox). Stored on the
+    # ``brought`` event of a NEW application; omitted = not said (rule #29).
+    origin: Optional[Literal["ai_hunt", "user_link", "user_paste", "your_mail"]] = None
     # Owner ask 2026-10-18: put it straight into the batch (a ``queued`` event) when it is open.
     queue: bool = Field(False, strict=True)
     # Outreach pack #15 — people the ad names; stored as job_ad contacts on THIS application. Omitted = none.
@@ -648,7 +649,8 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         queued, queue_note = await applications_spine.queue_if_open(
             db, user.id, birth["application_id"], recorded_by=actor_for(user)
         )
-        if queued and body.origin == "ai_hunt":  # Ignition: a hunted job queued starts reach and the batch
+        # Ignition: a job the assistant found (hunt or the user's mail), once queued, starts reach and the batch
+        if queued and body.origin in ("ai_hunt", "your_mail"):
             from src.services.browser_agent import duty_trigger  # noqa: PLC0415
 
             await duty_trigger.ignite(

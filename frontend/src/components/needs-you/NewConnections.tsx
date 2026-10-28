@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getPerson, markOutreachSent } from "@/lib/api";
+import { getPerson, markOutreachSent, markOutreachSkipped } from "@/lib/api";
 import type { ListPeopleResult } from "@/lib/api";
 import { PACE_TEXT } from "@/lib/browser-labels";
 import { personToReach } from "@/lib/job-cards";
@@ -21,7 +21,7 @@ export const MAX_NEW_CONNECTIONS = 25;
  *  own, and a failed read just leaves that person out. */
 export async function newConnections(people: Person[]): Promise<PersonToReach[]> {
   const ids = people
-    .filter((p) => p.jobs.length === 0 && p.message_count > 0 && !p.last_sent)
+    .filter((p) => p.jobs.length === 0 && p.message_count > 0 && !p.last_sent && !p.skipped)
     .flatMap((p) => p.contact_ids)
     .slice(0, MAX_NEW_CONNECTIONS);
   const rows = await Promise.all(ids.map((id) => getPerson(id).catch(() => null)));
@@ -29,7 +29,7 @@ export async function newConnections(people: Person[]): Promise<PersonToReach[]>
 }
 
 /** "New connections" on Needs you (owner 2026-10-26): the same row and actions a person on a job card gets.
- *  `onDone` hides a person at once (sent or skipped); nothing shows when the list is empty. */
+ *  `onDone` hides a person at once (sent or skipped, both saved first); nothing shows when the list is empty. */
 export function NewConnections({
   people,
   onDone,
@@ -55,6 +55,18 @@ export function NewConnections({
     }
   }
 
+  async function skip(contactId: number) {
+    setBusy(true);
+    try {
+      await markOutreachSkipped(contactId);
+      onDone(contactId); // skipped and saved: stays gone after a reload
+    } catch (err) {
+      toast.apiError(err, "Couldn't save the skip"); // the row stays
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section
       aria-labelledby="new-connections"
@@ -73,7 +85,7 @@ export function NewConnections({
           busy={busy}
           onChanged={onChanged}
           onSent={() => void sent(p.contact.id)}
-          onSkip={() => onDone(p.contact.id)}
+          onSkip={() => void skip(p.contact.id)}
         />
       ))}
     </section>

@@ -253,3 +253,60 @@ describe("one card per job (owner 2026-10-26)", () => {
     expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-20", "card-10", "card-30", "card-40"]);
   });
 });
+
+describe("folded rows (owner 2026-10-27: + unfolds the card)", () => {
+  const brought = { id: 9, event_type: "brought", recorded_by: "agent:Helper", occurred_at: "2026-10-25T09:00:00+00:00" };
+  function emplay(id: number, asks: Ask[] = []) {
+    return { ...detail(id, asks), created_at: "2026-10-24T09:00:00+00:00", events: [brought], fit: { score: 74 },
+      job: { job_company: "Emplay", job_title: "Associate AI Engineer", job_url: "https://wellfound.com/jobs/1",
+        job_location: "Bengaluru", country: "IN", found_on: "linkedin" } };
+  }
+
+  it("every job starts folded: one summary line with company, role, place, age, who brought it, when, where from, fit and the next step", async () => {
+    getApplication.mockImplementation(async (id: number) => emplay(id));
+    render(<JobCards open={[ask(1, 3, { kind: "question", asked_at: new Date(Date.now() - 86400000).toISOString() })]} onChanged={async () => {}} />);
+    const row = await screen.findByTestId("job-summary-3");
+    expect(screen.getByTestId("job-row-3-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("card-3").parentElement).not.toBeVisible();
+    for (const text of ["Emplay", "Associate AI Engineer", "Bengaluru", "since 1 d ago", "by Helper · 25 Oct · LinkedIn", "Fit 74", "Waiting on your answer", "Check 1 answer"])
+      expect(row).toHaveTextContent(text);
+    expect(row.textContent).not.toMatch(/APP-/);
+  });
+
+  it("+ unfolds and − folds it again; a click on the row toggles too, a click on its link does not", async () => {
+    getApplication.mockImplementation(async (id: number) => emplay(id));
+    render(<JobCards open={[ask(1, 3)]} onChanged={async () => {}} />);
+    await screen.findByTestId("job-summary-3");
+    const toggle = screen.getByTestId("job-row-3-toggle");
+    expect(toggle).toHaveAccessibleName("Unfold Emplay, Associate AI Engineer");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("card-3")).toBeVisible();
+    fireEvent.click(screen.getByTestId("job-summary-3"));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByTestId("row-title-3"));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a live refresh never folds a card the user has open", async () => {
+    getApplication.mockImplementation(async (id: number) => emplay(id));
+    const { rerender } = render(<JobCards open={[ask(1, 3), ask(2, 4)]} onChanged={async () => {}} />);
+    await screen.findByTestId("job-summary-3");
+    fireEvent.click(screen.getByTestId("job-row-3-toggle"));
+    rerender(<JobCards open={[ask(1, 3), ask(2, 4), ask(5, 6)]} onChanged={async () => {}} />);
+    await screen.findByTestId("job-row-6");
+    expect(screen.getByTestId("job-row-3-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("job-row-4-toggle")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a folded held form still offers Finish it here; a sign-in step offers Open the form", async () => {
+    getApplication.mockImplementation(async (id: number) => emplay(id));
+    const held = ask(1, 3, { kind: "captcha", finish_here: true, held_seconds: 600 } as Partial<Ask>);
+    render(<JobCards open={[held, ask(2, 4, { kind: "login" } as Partial<Ask>)]} onChanged={async () => {}} />);
+    expect(await screen.findByTestId("row-finish-3")).toHaveTextContent("Finish it here");
+    expect(screen.getByTestId("job-summary-3")).toHaveTextContent("Form open now");
+    expect(await screen.findByTestId("row-form-4")).toHaveAttribute("href", "https://wellfound.com/jobs/1");
+    fireEvent.click(screen.getByTestId("row-finish-3"));
+    expect(screen.getByTestId("job-row-3-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+});

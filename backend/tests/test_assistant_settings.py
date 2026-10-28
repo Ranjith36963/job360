@@ -1384,6 +1384,12 @@ async def test_logs_name_the_user_and_never_carry_free_text(
         token = await _mint_token(client)
         app_id = await _bring(client)
     async with _bearer_client(token) as agent:
+        # Before the pause below: once paused, the REST pause gate answers a token's events with 423 first.
+        await _fill(agent, app_id, "https://uk.indeed.com/x")
+        refused = await agent.post(
+            f"/api/applications/{app_id}/events", json={"event_type": "submit_mode_set", "payload": AUTO}
+        )
+        assert refused.status_code == 403
         resp = await _patch(
             agent, _e(PAUSE, until), _e(REASON, secret_reason), _e("preferences.assistant_notes", [secret_note]),
             _e(SCORE, 80),
@@ -1395,11 +1401,7 @@ async def test_logs_name_the_user_and_never_carry_free_text(
         waiting_id = resp.json()["waiting"][0]["id"]
         bad = await _patch(agent, _e(CAP, 0))
         assert bad.status_code == 422
-        refused = await agent.post(
-            f"/api/applications/{app_id}/events", json={"event_type": "submit_mode_set", "payload": AUTO}
-        )
-        assert refused.status_code == 403
-        await _check(agent, app_id, "https://uk.indeed.com/x")
+        await _check(agent, app_id, "https://uk.indeed.com/x", fill=False)
     async with authenticated_async_context() as client:
         assert (await client.get("/api/assistant-settings")).status_code == 200
         assert (await client.post(f"/api/assistant-settings/requests/{waiting_id}/confirm")).status_code == 200

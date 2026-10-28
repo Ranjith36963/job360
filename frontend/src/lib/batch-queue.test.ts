@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { browserReasonWords, preflightProblems, queueSummaryLine } from "./batch-queue";
+import { browserReasonWords, preflightProblems, queueSummaryLine, originLabel } from "./batch-queue";
 
 describe("queueSummaryLine", () => {
   it("reads as one line", () => {
@@ -45,5 +45,15 @@ describe("browserReasonWords", () => {
     expect(browserReasonWords("link_unclear")).toBe("The apply link has no clear web address");
     expect(browserReasonWords("linkedin_own_browser")).toBe("");
     expect(browserReasonWords("some_new_code")).toBe("");
+  });
+});
+
+describe("originLabel", () => {
+  it("names every source a job can come from (owner 2026-10-27: Your mail)", () => {
+    expect(originLabel("ai_hunt")).toBe("AI hunt");
+    expect(originLabel("your_mail")).toBe("Your mail");
+    expect(originLabel("user_link")).toBe("Your link");
+    expect(originLabel("scraped")).toBe("");
+    expect(originLabel(null)).toBe("");
   });
 });

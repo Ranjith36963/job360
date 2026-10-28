@@ -361,7 +361,7 @@ async def _application_tasks(
     linked = [i for i, a in apps.items() if i not in blocks and routing.is_linkedin(str(a.get("job_url") or ""))]
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
-        routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]))))
+        routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application")))
     out: list[dict[str, Any]] = []
     for app_id, route in routes:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:

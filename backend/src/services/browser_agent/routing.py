@@ -23,9 +23,9 @@ from urllib.parse import urlsplit
 # Pure helpers only (stdlib + ipaddress; the module's aiohttp import is for its resolver type): one host test.
 from src.services.fetch.guard import canonical_host, is_linkedin_host
 
-# Open owner decision (PR D): may Job360's server read a public LinkedIn job page, signed out? False = no, the
-# own browser (the stricter choice) until the owner answers.
-LINKEDIN_GUEST_READS = False
+# Owner decision (2026-10-26, PR D): Job360's server reads a public LinkedIn job page, signed out
+# (services/browser_agent/linkedin_guest.py); the user's signed-in LinkedIn stays in their own browser.
+LINKEDIN_GUEST_READS = True
 
 BrowserKind = Literal["job360", "own_browser", "human"]
 

@@ -78,6 +78,7 @@ export function personToReach(c: Contact, company: string): PersonToReach | null
   if (!last || !last.text.trim()) return null;
   const sent = c.outreach.last_sent;
   if (sent && sent.occurred_at >= last.occurred_at) return null;
+  if (c.outreach.skipped) return null; // the user skipped this newest note (a newer draft clears it)
   return { contact: c, message: last.text, linkedinUrl: linkedinFor(c, company) };
 }
 

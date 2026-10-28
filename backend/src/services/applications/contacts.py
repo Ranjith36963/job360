@@ -1442,7 +1442,7 @@ def _serialize_outreach(row: dict[str, Any], *, include_text: bool = True) -> di
 
 
 # Outreach pack #5/#6 (2026-10-20): the ledger entries beyond message/sent/reply.
-_OUTREACH_ENTRIES = settings.OUTREACH_ENTRIES  # message/sent/reply/bounced
+_OUTREACH_ENTRIES = settings.OUTREACH_ENTRIES  # message/sent/reply/bounced/skipped
 _NEW_ENTRIES = settings.CONTACT_INTERACTION_ENTRIES + settings.CONTACT_REFERRAL_ENTRIES
 
 
@@ -1460,7 +1460,12 @@ def _outreach_view(rows: list[dict[str, Any]], *, include_text: bool = True) -> 
     sent = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "sent"]
     replies = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "reply"]
     bounced = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "bounced"]
+    # Skipped (owner 2026-10-27): the user skipped the NEWEST drafted note. Rows are in id order, so a
+    # later message (a higher id) clears it and the person can come back. Never counts as sent.
+    last_message_id = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
+    last_skip_id = max((int(r["id"]) for r in rows if r["entry"] == "skipped"), default=0)
     return {
+        "skipped": last_message_id > 0 and last_skip_id > last_message_id,
         "messages": messages,
         "sent": sent,
         "replies": replies,
@@ -1689,6 +1694,19 @@ async def record_outreach(
     if entry == "referral_given" and contact.get("application_id") is None:
         raise SpineError(422, "referral_given needs a contact linked to the job; add_contact with application_id first")
 
+    if entry == "skipped":
+        if text or source_message_id:
+            raise SpineError(422, "a skip takes no text and no source")
+        rows = await _outreach_rows(db, contact_id)
+        last_message_id = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
+        if not last_message_id:
+            raise SpineError(422, "nothing to skip: this person has no drafted message")
+        # Idempotent: a second skip of the same note writes nothing.
+        done = [r for r in rows if r["entry"] == "skipped" and int(r["id"]) > last_message_id]
+        if done:
+            return {"outreach": _serialize_outreach(done[-1]), "already_existed": True, "event_id": None,
+                    "follow_up_on": None}
+
     if source_message_id and entry not in ("sent", "reply", "bounced"):
         raise SpineError(422, "source_message_id is only meaningful on 'sent'/'reply'/'bounced' entries")
 
@@ -1844,7 +1862,7 @@ async def record_outreach(
                     ),
                 )
                 outreach_id = int(cur.lastrowid or 0)
-                if application_id is not None and entry != "bounced":
+                if application_id is not None and entry not in ("bounced", "skipped"):
                     event_type = settings.CONTACT_LEDGER_EVENT_TYPES[entry]
                     event = await append_event(
                         db, user_id=user_id, application_id=application_id, event_type=event_type,
@@ -2372,6 +2390,7 @@ async def list_people(
                 "reachable": any(is_reachable(r) for r in group_rows),
                 "jobs": jobs,
                 "message_count": summary["message_count"],
+                "skipped": summary["skipped"],
                 "last_sent": summary["last_sent"],
                 "replied": summary["replied"],
                 "last_reply": summary["last_reply"],

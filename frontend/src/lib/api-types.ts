@@ -2458,6 +2458,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/needs-you-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Needs You Count Route
+         * @description The number "N things need you" shows, for the menu badge on every page. Read-only: no audit
+         *     line is written, so a navigation never moves ``/api/changes``.
+         */
+        get: operations["needs_you_count_route_api_needs_you_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/oauth/authorize": {
         parameters: {
             query?: never;
@@ -4802,7 +4823,7 @@ export interface components {
              */
             location: string;
             /** Origin */
-            origin?: ("ai_hunt" | "user_link" | "user_paste") | null;
+            origin?: ("ai_hunt" | "user_link" | "user_paste" | "your_mail") | null;
             /** Posted At */
             posted_at?: string | null;
             /**
@@ -5347,6 +5368,11 @@ export interface components {
             replies: components["schemas"]["OutreachEntryOut"][];
             /** Sent */
             sent: components["schemas"]["OutreachEntryOut"][];
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
         };
         /** ControlsAutofillOut */
         ControlsAutofillOut: {
@@ -5832,7 +5858,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "never_done" | "interval_elapsed" | "queue_waiting" | "new_applications";
+            reason: "never_done" | "interval_elapsed" | "queue_waiting" | "new_applications" | "run_now";
             /**
              * Recipe
              * @enum {string}
@@ -7319,6 +7345,15 @@ export interface components {
             sent: components["schemas"]["TallyBucket"];
             waiting: components["schemas"]["TallyBucket"];
         };
+        /** NeedsYouCountOut */
+        NeedsYouCountOut: {
+            /** Jobs */
+            jobs: number;
+            /** N */
+            n: number;
+            /** Other */
+            other: number;
+        };
         /**
          * NextStepOut
          * @description What to do next on this application — a state machine over the stored
@@ -7688,6 +7723,11 @@ export interface components {
             role: string;
             /** Shared */
             shared?: string | null;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
             /** Source Url */
             source_url?: string | null;
         };
@@ -10322,6 +10362,8 @@ export interface components {
             };
             /** Nothing Due */
             nothing_due: boolean;
+            /** Run Now */
+            run_now?: ("hunt" | "inbox" | "batch" | "reach")[];
             /** Running */
             running?: {
                 [key: string]: string | null;
@@ -14548,6 +14590,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MorningCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    needs_you_count_route_api_needs_you_count_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedsYouCountOut"];
                 };
             };
             /** @description Validation Error */

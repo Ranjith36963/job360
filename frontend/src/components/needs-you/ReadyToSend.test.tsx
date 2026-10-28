@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { JobCards } from "./JobCards";
 import type { JobCardsReport } from "./JobCards";
 
@@ -49,7 +49,8 @@ describe("Ready to send", () => {
     getReadyToSend.mockResolvedValue(payload([card(64)]));
     render(<ReadyToSend />);
     const el = await screen.findByTestId("ready-card-64");
-    expect(screen.getByText("Ready to send")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("job-row-64-toggle")); // every job row starts folded
+    expect(within(screen.getByTestId("ready-section-64")).getByText("Ready to send")).toBeInTheDocument();
     expect(el.textContent).toContain(`APP-064 · brought by Claude · ${dayMonth("2026-10-08T07:00:00+00:00", true)}`);
     expect(el).toHaveTextContent("AI Engineer, Agents");
     expect(el).toHaveTextContent("Poolside · Paris · score 82, set by Claude");

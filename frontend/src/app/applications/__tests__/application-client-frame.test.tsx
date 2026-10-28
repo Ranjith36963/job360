@@ -7,6 +7,7 @@ import type { ApplicationDetail } from "@/lib/api";
 const getApplication = vi.fn();
 const getAlignment = vi.fn();
 const listAsks = vi.fn();
+const getNeedsYouCount = vi.fn().mockResolvedValue({ n: 3, jobs: 2, other: 1 });
 const answerAsk = vi.fn();
 
 vi.mock("@/lib/api", () => ({
@@ -19,6 +20,8 @@ vi.mock("@/lib/api", () => ({
   // The badge counts asks + waiting setting changes + ready to send (S5d).
   getAssistantSettings: vi.fn().mockResolvedValue({ waiting: [{ id: 1 }], paused: false }),
   getReadyToSend: vi.fn().mockResolvedValue({ paused: false, total: 2, unflagged: 2, items: [] }),
+  // The badge's exact total comes from the server (GET /api/needs-you-count).
+  getNeedsYouCount: (...args: unknown[]) => getNeedsYouCount(...args),
   recordApplicationReceipt: vi.fn(),
   setApplicationVisa: vi.fn(),
   addContact: vi.fn(),
@@ -156,7 +159,7 @@ describe("ApplicationClient frame", () => {
     expect(screen.queryByRole("heading", { name: "Needs you" })).toBeNull();
   });
 
-  it("answering reloads the application and announces the fresh full count (asks + waiting + ready)", async () => {
+  it("answering reloads the application and announces the server's exact Needs-you total", async () => {
     getApplication.mockResolvedValueOnce(detail({ asks: [ask()] })).mockResolvedValue(detail({ asks: [] }));
     answerAsk.mockResolvedValue(ask({ status: "answered", answer: "Yes" }));
     listAsks.mockResolvedValue({ asks: [], open_count: 0 });
@@ -171,7 +174,7 @@ describe("ApplicationClient frame", () => {
     await waitFor(() => expect(seen).toEqual([3]));
     expect(answerAsk).toHaveBeenCalledWith(7, "Yes");
     expect(getApplication).toHaveBeenCalledTimes(2);
-    expect(listAsks).toHaveBeenCalledWith("open");
+    expect(getNeedsYouCount).toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByTestId("app-asks")).toBeNull());
     window.removeEventListener("job360:asks-changed", onEvent);
   });
