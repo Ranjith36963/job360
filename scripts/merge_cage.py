@@ -1404,9 +1404,10 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
     "security": ("gitleaks (secret scan)", "bandit (python static analysis)",
                  "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
                  "reviewer-security"),
-    # The eyes: the two ci-offline.yml jobs that really start the app.
-    # `offline-suite` boots the backend and calls the real routes (Q1-Q3);
-    # `frontend-e2e` drives a real browser (Playwright). The old verify-live.yml
+    # The eyes: two ci-offline.yml jobs. `offline-suite` runs the whole backend
+    # test suite on a real Postgres (routes called in-process, no booted server);
+    # `frontend-e2e` drives a real browser against a MOCKED API. The real-stack
+    # journey is `fullstack-e2e`, not part of this tag yet. The old verify-live.yml
     # jobs (`verify / backend`, `verify / frontend`) only deferred to these two
     # and were deleted 2026-10-28 (owner); the tag name stays, because the
     # merge-policy `requires:` lists name it.
