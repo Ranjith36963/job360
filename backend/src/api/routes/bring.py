@@ -240,6 +240,9 @@ class BringJobRequest(BaseModel):
     origin: Optional[Literal["ai_hunt", "user_link", "user_paste", "your_mail"]] = None
     # Owner ask 2026-10-18: put it straight into the batch (a ``queued`` event) when it is open.
     queue: bool = Field(False, strict=True)
+    # Owner 2026-10-29: a developer or practice job. A NEW application gets a `simulation` mark as its
+    # first event, so lists, Needs you, /asks and whats_new leave it out (services/applications/test_marker.py).
+    test: bool = Field(False, strict=True)
     # Outreach pack #15 — people the ad names; stored as job_ad contacts on THIS application. Omitted = none.
     listed_people: Optional[list[ListedPerson]] = None
     # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the same
@@ -524,7 +527,7 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
     }
     birth = await applications_spine.birth_application(
         db, user_id=user.id, job_id=job_id, job_row=own_paste, recorded_by=actor_for(user),
-        origin=body.origin,
+        origin=body.origin, test=body.test,
     )
     if not birth["existing"] and not inserted:
         # The catalog key already existed (another user's paste, a re-titled

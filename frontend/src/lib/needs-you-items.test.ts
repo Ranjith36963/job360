@@ -75,17 +75,17 @@ describe("filter chips", () => {
       ask(1, 10, { kind: "captcha", held_seconds: 60 } as Partial<Ask>), // form open now
       ask(2, 11), // a free question
       ask(3, null), // not about a job: Other
-      ask(4, 12, { question: "SIMULATION: practice" }), // practice: never counted
+      ask(4, 12, { question: "SIMULATION: practice" }), // counted: the server, not the words, drops test apps
     ];
     const cards = [ready(20), ready(11)];
     const cvRows = [cvRow(30), cvRow(20)];
     const people = [{ application_id: 40, job_company: "Co40", job_title: "Dev" }];
     const headers = jobHeaders(open, cards, cvRows, people);
-    expect(headers.map((h) => h.id).sort()).toEqual([10, 11, 20, 30, 40]);
+    expect(headers.map((h) => h.id).sort()).toEqual([10, 11, 12, 20, 30, 40]);
     const chips = headers.map((h) => jobChip(h));
     expect(chips.every((c) => ["ready", "waiting", "checks"].includes(c))).toBe(true);
     const c = countNeedsYou({ open, ready: cards, cvRows, people, connections: 2, waiting: 1, outcomes: 1, mail: 1 });
-    expect(c.byChip).toEqual({ all: 11, ready: 0, waiting: 2, checks: 3, other: 6 });
+    expect(c.byChip).toEqual({ all: 12, ready: 0, waiting: 3, checks: 3, other: 6 });
     expect(c.byChip.ready + c.byChip.waiting + c.byChip.checks + c.byChip.other).toBe(c.byChip.all);
     expect(c.jobs).toBe(headers.length);
   });

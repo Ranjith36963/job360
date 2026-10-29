@@ -4007,6 +4007,11 @@ export interface components {
             inbox_checked_at?: string | null;
             /** Interview At */
             interview_at: string | null;
+            /**
+             * Is Test
+             * @default false
+             */
+            is_test: boolean;
             job: components["schemas"]["ApplicationJobOut"];
             /** Job Id */
             job_id: number;
@@ -4833,6 +4838,11 @@ export interface components {
             queue: boolean;
             /** Remote */
             remote?: boolean | null;
+            /**
+             * Test
+             * @default false
+             */
+            test: boolean;
             /** Title */
             title: string;
             /** Visa Country */

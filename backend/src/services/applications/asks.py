@@ -916,10 +916,12 @@ async def list_asks(
     application_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
+    exclude_test: bool = False,
 ) -> list[dict[str, Any]]:
     """The caller's asks, newest first (open ones first when ``status="all"``,
     which also lists withdrawn ones). ``offset`` pages further back — the
-    answered history is never capped, only paged."""
+    answered history is never capped, only paged. ``exclude_test`` leaves out the asks of a
+    test application (test_marker.py; GET /asks and whats_new)."""
     if status not in STATUS_FILTERS:
         raise SpineError(422, f"status must be one of {list(STATUS_FILTERS)}")
     where = ["k.user_id = ?"]
@@ -931,6 +933,12 @@ async def list_asks(
     if application_id is not None:
         where.append("k.application_id = ?")
         params.append(application_id)
+    if exclude_test:
+        from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
+        test_sql, test_params = TEST_APP_SQL("a")  # `a` is the LEFT JOINed application; no job = not a test
+        where.append(f"NOT {test_sql}")
+        params.extend(test_params)
     limit = max(1, int(limit))
     offset = max(0, int(offset))
     cur = await db._db.execute(

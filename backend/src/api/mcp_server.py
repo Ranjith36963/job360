@@ -1026,6 +1026,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         queue: bool = False,
         listed_people: Optional[list[dict[str, Any]]] = None,
         client_key: Optional[str] = None,
+        test: bool = False,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
@@ -1042,17 +1043,16 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Job facts (pass them whenever you know them): `country` = the job's ISO alpha-2 code ("FR", "US"),
         `remote` = true/false, `found_on` = where the ad was found — one of
         "indeed", "linkedin", "company_careers", "job_board", "referral",
-        "visa_sponsor_list", "pasted_by_user", "other". Leave out what you do
-        not know. Fix them later with update_job.
+        "visa_sponsor_list", "pasted_by_user", "other". Fix them later with update_job.
 
         Ad dates (pass them when the ad shows them, YYYY-MM-DD): `posted_at` =
         the listing's posted date, `employer_published_at` = the date on the
-        employer's own posting.
+        employer's own posting. `test`=true: a developer/practice job, kept off lists.
 
         The reply carries `checks`: plain facts about this ad (full ad or only a
         title/teaser, the apply link's site, ad age, repost, pay or sponsorship
         mentioned). Read them: if the text is title_only or partial, fetch the
-        full ad first; if the host is unknown, tell the user. They never block a bring.
+        full ad first; if the host is unknown, tell the user.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
         `origin`: "ai_hunt" (you found it), "your_mail" (a job-alert email), "user_link" or
@@ -1068,7 +1068,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
                 country=country, remote=remote, found_on=found_on,
                 posted_at=posted_at, employer_published_at=employer_published_at,
-                origin=origin, queue=queue, listed_people=listed_people,  # type: ignore[arg-type]  # the model validates the closed set and item shape
+                origin=origin, queue=queue, test=test, listed_people=listed_people,  # type: ignore[arg-type]  # the model validates the closed set and item shape
                 client_key=client_key,
             )
         except ValidationError as exc:
@@ -1728,8 +1728,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Append an event.
 
-        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op;
-        quote = deciding line, verbatim. Unsure: outcome_suggested (rules).
+        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
+        Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
@@ -1754,7 +1754,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped, note?}.
-        proof_text {text, page_host}; simulation {} = test app; unqueued {reason?};
+        proof_text {text, page_host}; simulation {} = mark a test (prefer bring_job test); unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)

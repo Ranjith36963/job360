@@ -18,6 +18,7 @@ import { useSalaryFacts } from "@/components/needs-you/useSalaryFacts";
 import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { BatchButton } from "@/components/applications/BatchButton";import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
+import { TestApplicationBanner } from "@/components/applications/TestApplicationBanner";
 import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
@@ -275,6 +276,14 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       </header>
 
       {unconfirmed && <SubmitUnconfirmedBanner applicationId={detail.id} onChanged={reloadAfterAsk} />}
+
+      {detail.is_test && (
+        <TestApplicationBanner
+          applicationId={detail.id}
+          markEventId={detail.events.findLast((e) => e.event_type === "simulation" && !e.superseded)?.id ?? null}
+          onChanged={reloadAfterAsk}
+        />
+      )}
 
       {detail.hold && (
         <section

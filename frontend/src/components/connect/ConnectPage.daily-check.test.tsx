@@ -95,7 +95,8 @@ describe("ConnectAgentPage — daily check status", () => {
     render(<ConnectAgentPage />);
     // Wait for the saved mode, not just the button: it renders before the settings load.
     await waitFor(() => expect(screen.getByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true"));
-    getAssistantSettings.mockResolvedValueOnce(settings({ inbox_mode: "ask" }));
+    // Every reload after the click reads "ask" (a second load would otherwise get the default and flake).
+    getAssistantSettings.mockResolvedValue(settings({ inbox_mode: "ask" }));
     fireEvent.click(screen.getByTestId("inbox-ask"));
     await waitFor(() =>
       expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "ask" }])

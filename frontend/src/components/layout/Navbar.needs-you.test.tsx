@@ -87,20 +87,20 @@ describe("Navbar drawer — Needs you badge", () => {
     expect(screen.queryByTestId("needs-you-badge")).toBeNull();
   });
 
-  it("counts jobs, not asks: many asks on one job are one, practice asks are left out, no-job asks count each", async () => {
+  it("counts jobs, not asks: many asks on one job are one, no-job asks count each", async () => {
     const asks = [
       ask(1, 7), ask(2, 7), ask(3, 7), ask(4, 8),
-      ask(5, 9, { question: "SIMULATION: do not apply" }),
+      ask(5, 9, { question: "SIMULATION: do not apply" }), // words never hide a job (the server drops test apps)
       ask(6, null), ask(7, null),
     ] as never[];
-    // The page's rule (what the server mirrors) gives 4, and the badge shows exactly the server's number.
+    // The page's rule (what the server mirrors) gives 5, and the badge shows exactly the server's number.
     const rule = countNeedsYou({ open: asks, ready: [], waiting: 0 });
-    expect(rule).toMatchObject({ n: 4, jobs: 2, other: 2 });
+    expect(rule).toMatchObject({ n: 5, jobs: 3, other: 2 });
     getNeedsYouCount.mockResolvedValue({ n: rule.n, jobs: rule.jobs, other: rule.other });
     render(<Navbar />);
     await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
-    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("5");
   });
 
   it("reads every page of open asks", async () => {

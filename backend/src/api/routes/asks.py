@@ -129,7 +129,7 @@ async def list_asks(
     try:
         if actor_for(user) == "web" and status == "open":  # the user's own page tidies old duplicates once
             await asks_service.tidy_open_asks(db, user.id)
-        rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
+        rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset, exclude_test=True)
         if actor_for(user) == "web" and status == "open":
             rows = _with_saved_answers(user.id, rows)
         # The hand-off fields, shared with the application page (GET /applications/{id}).

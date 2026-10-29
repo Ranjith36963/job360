@@ -18,7 +18,6 @@ const BLOCKER_RULES: [BlockerKind, RegExp][] = [
   ["safety", /safety (?:block|check|stop)|\bblocked\b/i],
 ];
 const OUTREACH = /linkedin (?:message|note|dm)|connection (?:request|note)|send (?:this|the) (?:message|note|dm)/i;
-const SIMULATION = /\bsimulation\b|lifecycle test|do not apply/i;
 const YES_NO = /^(?:do|does|did|are|is|was|were|can|could|will|would|have|has|had|should)\b[^?\n]*\?$/i;
 // "...? Yes or No?" / "Reply yes or no." at the end of a longer question.
 const ENDS_YES_NO = /\byes or no[?.]?\s*$/i;
@@ -47,11 +46,6 @@ export function hasFormHandoff(kind: RowKind): boolean {
 /** This card shows a FormHandoff, so the application page shows no second one (owner 2026-10-26). */
 export function cardShowsFormHandoff(card: Pick<JobCardData, "asks">): boolean {
   return card.asks.some((a) => hasFormHandoff(a.kind));
-}
-
-/** A practice ask (a SIMULATION run, a test job) never belongs on the real list. */
-export function isSimulation(ask: Ask): boolean {
-  return [ask.question, ask.context, ask.job_title ?? "", ask.job_company ?? ""].some((t) => SIMULATION.test(t));
 }
 
 export const BLOCKER_TITLE: Record<BlockerKind, string> = {
@@ -111,12 +105,12 @@ export type JobCardData = {
   ownBrowser: boolean;
 };
 
-/** Open asks grouped by job (one card each), the rest (no job) left over. Practice asks dropped. */
+/** Open asks grouped by job (one card each), the rest (no job) left over. A test job's asks never
+ *  arrive: GET /api/asks leaves them out (an uncorrected `simulation` mark), so no words are read here. */
 export function groupAsks(open: Ask[]): { byJob: Map<number, Ask[]>; general: Ask[] } {
   const byJob = new Map<number, Ask[]>();
   const general: Ask[] = [];
   for (const ask of open) {
-    if (isSimulation(ask)) continue;
     if (ask.application_id == null) general.push(ask);
     else byJob.set(ask.application_id, [...(byJob.get(ask.application_id) ?? []), ask]);
   }
