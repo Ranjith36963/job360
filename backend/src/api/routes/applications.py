@@ -3342,8 +3342,7 @@ async def _hide_call(db: JobDatabase, user: CurrentUser, application_id: int, ru
     try:
         return {"event_id": await run}
     except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 @router.post(
