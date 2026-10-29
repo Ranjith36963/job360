@@ -240,7 +240,7 @@ def parse_hn_comment(raw_html: str, comment_id: Any, created_at: str = "") -> Jo
     if not raw_html:
         return None
     links = [_html.unescape(u) for u in re.findall(r'href="([^"]+)"', raw_html) if u.lower().startswith("http")]
-    # Owner's PC smoke test 2026-10-20: the first link is often a homepage or a repo, not the posting. Use a link
+    # Observed live: the first link is often a homepage or a repo, not the posting. Use a link
     # that points at a job (an ATS host or a jobs/careers/apply path); else the HN comment itself is the ad.
     jobish = [u for u in links if _HN_JOB_LINK.search(u)]
     link = jobish[0] if jobish else ""

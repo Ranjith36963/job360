@@ -596,7 +596,7 @@ def test_p2a_check_live_and_main_survive(monkeypatch: pytest.MonkeyPatch, tmp_pa
     col2.results = [row]
     monkeypatch.setattr(hk, "run", lambda a: col2)
     monkeypatch.setattr(hk, "check_live", explode)
-    assert hk.main(["--check-live", "--out", str(out), "--history", str(hist)]) == 0
+    assert hk.main(["--titles", "ai engineer", "--check-live", "--out", str(out), "--history", str(hist)]) == 0
     assert out.read_text(encoding="utf-8").strip()
     assert json.loads(hist.read_text())["urls"] == ["https://a/1"]
 
@@ -870,3 +870,27 @@ def test_xml_reads_html_named_entities_but_still_refuses_declarations() -> None:
     root = kx.safe_fromstring("<rss><item><title>Dev&nbsp;Lead &amp; Co &mdash; x</title></item></rss>")
     assert root is not None and root.find("item/title").text == "Dev Lead & Co — x"
     assert kx.safe_fromstring('<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>') is None
+
+
+def test_cli_without_titles_exits_2_with_the_message(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    rc = hk.main(["--sources", "hn", "--history", "none", "--out", str(tmp_path / "f.jsonl")])
+    assert rc == 2
+    assert "pass --titles" in capsys.readouterr().err
+
+
+def test_cli_titles_given_means_no_ai_default_applies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+    col = hk.Collector(_args())
+
+    def fake_run(a: object) -> object:
+        seen["titles"] = a.titles  # type: ignore[attr-defined]
+        seen["exclude"] = a.exclude_title_words  # type: ignore[attr-defined]
+        return col
+
+    monkeypatch.setattr(hk, "run", fake_run)
+    rc = hk.main(["--titles", "data analyst", "--out", str(tmp_path / "o.jsonl"), "--history", "none"])
+    assert rc == 0
+    assert seen == {"titles": "data analyst", "exclude": ""}
+    matcher = hk.make_title_matcher("data analyst", "")
+    assert matcher("Data Analyst") and matcher("Senior Data Analyst")
+    assert not matcher("AI Engineer")

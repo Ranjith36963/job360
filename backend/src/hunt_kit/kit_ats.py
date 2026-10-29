@@ -1423,7 +1423,7 @@ def fetch_eightfold(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> l
             return []
         host = f"{tenant}.eightfold.ai"
         dq = f"domain={quote(domain, safe='')}&" if domain else ""
-        # NOT IN REFERENCE (live, owner's PC 2026-10-18): PCSX answers 422 "domain: Missing data for required
+        # Not in the reference; observed live: PCSX answers 422 "domain: Missing data for required
         # field" without one. career-ops takes it from careers_url; a row without one tries <tenant>.com.
         pq = f"domain={quote(domain or tenant + '.com', safe='')}&"
         # career-ops eightfold.mjs:392 sends a browser-like User-Agent on every call; its header (:44-48) says

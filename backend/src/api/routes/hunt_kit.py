@@ -1,8 +1,6 @@
 """Hunt kit — a static download the user's OWN assistant runs to find jobs.
 
-Owner decision 2026-10-13: hunts must be as wide as career-ops / jobsync /
-ai-job-search (company job boards + open feeds, no login, never LinkedIn,
-Indeed or Glassdoor). Product rule 4 still holds: Job360 never searches. The
+Product rule 4 holds: Job360 never searches. The
 server only hands out fixed files from ``src/hunt_kit/``; it fetches nothing,
 runs nothing and keeps no per-user state. The assistant downloads the kit,
 runs it on the user's machine, judges every job itself and brings only fits
@@ -103,10 +101,38 @@ class KitIndex(BaseModel):
     files: list[KitFile]
 
 
+def _strip_comments(text: str) -> str:
+    """Drop every ``<!-- ... -->`` block (maintainer markers) from a Markdown text.
+
+    A bounded ``find`` loop, never a regex over the text. An unclosed block is kept as it is.
+    """
+    out: list[str] = []
+    pos = 0
+    while True:
+        start = text.find("<!--", pos)
+        if start < 0:
+            break
+        end = text.find("-->", start + 4)
+        if end < 0:
+            break
+        out.append(text[pos:start])
+        pos = end + 3
+        if text[pos:pos + 1] == "\n" and (not out or out[-1].endswith("\n") or not out[-1]):
+            pos += 1  # the block stood on its own line: drop the line break too
+    out.append(text[pos:])
+    return "".join(out)
+
+
 @cache
 def _read(name: str) -> bytes:
-    """One kit file's bytes (cached: the files only change with a deploy)."""
-    return _SOURCES.get(name, HUNT_KIT_DIR / name).read_bytes()
+    """One kit file's bytes (cached: the files only change with a deploy).
+
+    A ``.md`` file is served without its ``<!-- ... -->`` blocks; ``_index`` hashes these served bytes.
+    """
+    data = _SOURCES.get(name, HUNT_KIT_DIR / name).read_bytes()
+    if name.endswith(".md"):
+        return _strip_comments(data.decode("utf-8")).encode("utf-8")
+    return data
 
 
 @router.get("/hunt-kit", response_model=KitIndex)
