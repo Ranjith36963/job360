@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationDetail, Ask } from "@/lib/api";
-import { buildCard, fallbackGuess, initialRow, groupAsks, isSensitiveQuestion, isSimulation, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards, splitAskText, waitSummary } from "./job-cards";
+import { buildCard, fallbackGuess, initialRow, groupAsks, isSensitiveQuestion, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards, splitAskText, waitSummary } from "./job-cards";
 
 let nextId = 1;
 function ask(over: Partial<Ask> = {}): Ask {
@@ -47,16 +47,16 @@ describe("rowKind with a stored kind", () => {
 });
 
 describe("groupAsks", () => {
-  it("puts every ask for one job on one card, keeps job-less asks apart and drops practice asks", () => {
+  it("keeps an ask whose words say simulation (the server filters test apps)", () => {
     const a = ask({ application_id: 7 });
     const b = ask({ application_id: 7, question: "Solve the CAPTCHA" });
     const general = ask({ application_id: null });
-    const sim = ask({ application_id: 9, question: "SIMULATION lesson: have numbers ready" });
+    const sim = ask({ application_id: 9, question: "SIMULATION lesson: have numbers ready", job_title: "Simulation Engineer - do not apply via agencies" });
     const { byJob, general: rest } = groupAsks([a, b, general, sim]);
-    expect([...byJob.keys()]).toEqual([7]);
+    expect([...byJob.keys()]).toEqual([7, 9]);
     expect(byJob.get(7)).toEqual([a, b]);
+    expect(byJob.get(9)).toEqual([sim]);
     expect(rest).toEqual([general]);
-    expect(isSimulation(ask({ job_title: "LIFECYCLE TEST - do not apply" }))).toBe(true);
   });
 });
 

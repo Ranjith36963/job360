@@ -69,6 +69,7 @@ export default function BringJobPage() {
         // Where it came from, for the tag on the job: a link we fetched, or an ad you pasted.
         origin: fetchOutcome === "ok" ? "user_link" : "user_paste",
         queue: toBatch,
+        test: false,
       });
       if (res.existing) {
         toast.success("Already brought — opening it.");

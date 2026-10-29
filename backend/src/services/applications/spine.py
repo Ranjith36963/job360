@@ -1153,11 +1153,13 @@ async def append_event(
 
 async def birth_application(
     db: JobDatabase, *, user_id: str, job_id: int, job_row: Mapping[str, Any], recorded_by: str,
-    origin: Optional[str] = None,
+    origin: Optional[str] = None, test: bool = False,
 ) -> dict[str, Any]:
     """Upsert-by-read: bringing the same job twice returns the SAME
     application_id and appends NO second `brought` event. ``origin`` (ai_hunt / user_link /
-    user_paste, already validated by the route) lands in that event's payload."""
+    user_paste, already validated by the route) lands in that event's payload. ``test`` (owner
+    2026-10-29) writes the ``simulation`` mark FIRST, before ``brought`` (test_marker.py); a
+    re-bring never adds or removes it."""
     existing = await get_application_by_job(db, user_id, job_id)
     if existing is not None:
         return {"application_id": existing["id"], "status": existing["status"], "existing": True}
@@ -1176,6 +1178,11 @@ async def birth_application(
         ),
     )
     application_id = int(cur.lastrowid or 0)
+    if test:
+        await append_event(
+            db, user_id=user_id, application_id=application_id, event_type=settings.SIMULATION_EVENT_TYPE,
+            occurred_at=now, recorded_by=recorded_by, detail="Brought as a test application.",
+        )
     await append_event(
         db, user_id=user_id, application_id=application_id, event_type="brought",
         occurred_at=now, recorded_by=recorded_by, payload={"origin": origin} if origin else None,
@@ -2516,6 +2523,10 @@ async def get_application_detail(
         "inbox_checked_at": app_row.get("inbox_checked_at"),
     }
     detail["form_state"] = derive_form_state(events, detail["receipts"])
+    # Owner 2026-10-29: a test application (test_marker.py) - the page shows a banner, never hides it.
+    detail["is_test"] = any(
+        e["event_type"] == settings.SIMULATION_EVENT_TYPE and not e["superseded"] for e in events
+    )
     # The same hand-off fields as Needs you: which browser, finish here, refill (blocked imports this module).
     from src.services.applications.blocked import with_hand_off  # noqa: PLC0415
 
@@ -2640,8 +2651,12 @@ async def list_applications(
     if origin is not None and origin not in ORIGINS:
         raise SpineError(422, f"origin must be one of: {', '.join(ORIGINS)}")
 
-    where = ["user_id = ?"]
-    params: list[Any] = [user_id]
+    from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
+    # Owner 2026-10-29: a test application (an uncorrected `simulation` mark) is never listed.
+    test_sql, test_params = TEST_APP_SQL("applications")
+    where = ["user_id = ?", f"NOT {test_sql}"]
+    params: list[Any] = [user_id, *test_params]
     if status:
         where.append("status = ?")
         params.append(status)
@@ -2936,8 +2951,15 @@ async def whats_new(
     # of the AND, so it is skipped on this page AND on the next ("since" moved
     # past it), forever. The correct predicate paginates on the PAIR:
     # everything strictly after (recorded_at, id) in that lexicographic order.
+    from src.services.applications.test_marker import test_app_ids  # noqa: PLC0415
+
+    # Owner 2026-10-29: a test application's events never show here (nor its asks, below).
+    tests = sorted(await test_app_ids(db, user_id))
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
+    if tests:
+        where.append(f"application_id NOT IN ({','.join('?' for _ in tests)})")
+        params.extend(tests)
     if after_id is not None:
         where.append("(recorded_at > ? OR (recorded_at = ? AND id > ?))")
         params.extend([since_val, since_val, after_id])
@@ -2994,7 +3016,7 @@ async def whats_new(
     # unanswered question does not expire because the cursor moved past it.
     from src.services.applications.asks import list_asks  # noqa: PLC0415
 
-    open_asks = await list_asks(db, user_id, "open", limit=settings.ASKS_WHATS_NEW_MAX)
+    open_asks = await list_asks(db, user_id, "open", limit=settings.ASKS_WHATS_NEW_MAX, exclude_test=True)
     # S7 - likewise carried: an applied job still without proof (the assistant asks once).
     from src.services.applications.proof import proof_missing  # noqa: PLC0415
 

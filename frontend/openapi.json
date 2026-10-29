@@ -967,6 +967,11 @@
             ],
             "title": "Interview At"
           },
+          "is_test": {
+            "default": false,
+            "title": "Is Test",
+            "type": "boolean"
+          },
           "job": {
             "$ref": "#/components/schemas/ApplicationJobOut"
           },
@@ -3246,6 +3251,11 @@
               }
             ],
             "title": "Remote"
+          },
+          "test": {
+            "default": false,
+            "title": "Test",
+            "type": "boolean"
           },
           "title": {
             "maxLength": 300,

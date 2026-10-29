@@ -6,7 +6,7 @@ This module computes the same number on the server, so the badge is exact on eve
 reading the full cards. Read-only, always scoped by ``user_id`` (rules #12/#25).
 
 JOBS (a job counts once however many of these it has):
-* an open, non-withdrawn ask tied to a job (a practice / simulation ask never counts);
+* an open, non-withdrawn ask tied to a job;
 * a ready-to-send card (``ready.ready_ids``, the same SQL as the card list);
 * a CV to approve (``ready.cv_to_approve``, the same service the page reads);
 * a person with a drafted note not yet sent, linked to a job (see ``_unsent_contacts``).
@@ -17,14 +17,16 @@ OTHER items (each counts once):
 
 The page caps some lists (50 outcome suggestions, 50 unmatched mail, 25 new connections, 500
 contacts); the same caps are applied here so the two totals agree to the last unit.
+
+A TEST application (``test_marker.py``, owner 2026-10-29) counts nowhere: its asks, ready card, CV
+and people are left out. Nothing is judged by its words: a real "Simulation Engineer" job counts.
 """
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from src.core import settings
-from src.services.applications import inbox_items, outcome_suggestions, ready
+from src.services.applications import inbox_items, outcome_suggestions, ready, test_marker
 from src.services.profile import setting_requests
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -34,9 +36,6 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 # read at most 25 full records (``MAX_NEW_CONNECTIONS`` in NewConnections.tsx).
 MAIL_LIST_MAX = 50
 NEW_CONNECTIONS_MAX = 25
-
-# ``isSimulation`` in frontend/src/lib/job-cards.ts: a practice ask never belongs on the real list.
-_SIMULATION = re.compile(r"\bsimulation\b|lifecycle test|do not apply", re.IGNORECASE)
 
 _OPEN_ASKS_SQL = (
     "SELECT k.application_id, k.question, k.context, a.job_title, a.job_company, a.status AS app_status "
@@ -61,8 +60,8 @@ _UNSENT_SQL = (
 )
 
 
-async def _open_ask_jobs(db: JobDatabase, user_id: str) -> tuple[set[int], int]:
-    """(job ids with an open ask, open asks tied to no job), practice asks left out. An ask on a job
+async def _open_ask_jobs(db: JobDatabase, user_id: str, tests: set[int]) -> tuple[set[int], int]:
+    """(job ids with an open ask, open asks tied to no job), a test job's asks left out. An ask on a job
     that is closed is not counted: the page closes those on load (``tidy_open_asks``), except the
     ``proof_missing:`` ones, which it leaves open."""
     cur = await db._db.execute(_OPEN_ASKS_SQL, (user_id,))
@@ -70,11 +69,10 @@ async def _open_ask_jobs(db: JobDatabase, user_id: str) -> tuple[set[int], int]:
     general = 0
     for r in await cur.fetchall():
         row = dict(r)
-        text = [row["question"], row["context"], row["job_title"] or "", row["job_company"] or ""]
-        if any(_SIMULATION.search(str(t or "")) for t in text):
-            continue
         if row["application_id"] is None:
             general += 1
+            continue
+        if int(row["application_id"]) in tests:
             continue
         closed = row["app_status"] in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
         if closed and not str(row["context"] or "").startswith("proof_missing:"):
@@ -100,11 +98,12 @@ async def _unsent_contacts(db: JobDatabase, user_id: str) -> tuple[set[int], int
 
 async def needs_you_count(db: JobDatabase, user_id: str) -> dict[str, Any]:
     """``{"n", "jobs", "other"}``: n = jobs + other, the Needs-you page's own total."""
-    ask_jobs, general = await _open_ask_jobs(db, user_id)
+    tests = await test_marker.test_app_ids(db, user_id)
+    ask_jobs, general = await _open_ask_jobs(db, user_id, tests)
     ready_jobs = set(await ready.ready_ids(db, user_id))
     cv_jobs = {int(r["application_id"]) for r in await ready.cv_to_approve(db, user_id)}
     person_jobs, connections = await _unsent_contacts(db, user_id)
-    jobs = len(ask_jobs | ready_jobs | cv_jobs | person_jobs)
+    jobs = len((ask_jobs | ready_jobs | cv_jobs | person_jobs) - tests)
     suggestions, _ = await outcome_suggestions.open_suggestions(db, user_id, settings.OUTCOME_SUGGESTIONS_LIST_MAX)
     other = (
         general

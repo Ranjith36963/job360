@@ -117,7 +117,7 @@ export const jobChip = (j: JobRankInput) => chipOfTier(jobTier(j));
 // ---- One count ----
 
 export type NeedsYouInputs = {
-  /** Every open ask (all pages). Practice asks are left out here. */
+  /** Every open ask (all pages). The server already left a test job's asks out. */
   open: Ask[];
   /** The ready cards, or only their total when the cards were not read. The badge no longer counts here
    *  (it reads GET /api/needs-you-count, which applies these same rules on the server). */

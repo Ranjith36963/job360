@@ -889,6 +889,8 @@ class ApplicationDetailOut(BaseModel):
     stage: str = ""
     # Weak spot #1b (c): derived from `form_filled` + a receipt, never stored. null = no form_filled.
     form_state: Optional[Literal["filled", "submitted"]] = None
+    # Owner 2026-10-29: a test application (an uncorrected `simulation` mark): left out of every list.
+    is_test: bool = False
 
 
 class ApplicationSummaryOut(BaseModel):

@@ -4,13 +4,13 @@ Real Postgres, real HTTP doors. The number must be the Needs-you page's own tota
 (``countNeedsYou`` in the frontend): distinct JOBS with anything open + the OTHER items. Pinned:
 * each kind counts once, in the right bucket, with a real seeded row (value asserts, rule #21);
 * one job with an ask AND a ready card AND a CV to approve counts ONCE;
-* withdrawn, answered and practice (simulation) asks, sent notes and another user's rows do not count;
+* withdrawn and answered asks, asks on a test job (bring test=true), sent notes and another user's rows
+  do not count;
 * the total equals the page's rules re-run over the page's own HTTP reads (parity);
 * session only, and it writes no audit row (a navigation must never move /api/changes).
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -169,11 +169,16 @@ async def test_withdrawn_answered_and_practice_asks_do_not_count(authenticated_a
         job_a, job_b = await _bring(client, 1), await _bring(client, 2)
         withdrawn = await _ask(client, job_a, "Withdrawn one?")
         answered = await _ask(client, None, "Answered one?")
-        await _ask(client, None, "SIMULATION run: fill this in")
-        await _ask(client, job_b, "Lifecycle test question")
+        practice = await client.post("/api/jobs/bring", json={
+            "title": "Practice", "company": "Testco", "description": "A test job.", "test": True,
+        })
+        assert practice.status_code == 200, practice.text
+        await _ask(client, int(practice.json()["application_id"]), "Practice question")
         assert (await client.post(f"/api/asks/{withdrawn}/withdraw", json={})).status_code == 200
         assert (await client.post(f"/api/asks/{answered}/answer", json={"answer": "yes"})).status_code == 200
         assert await _count(client) == {"n": 0, "jobs": 0, "other": 0}
+        await _ask(client, job_b, "Lifecycle test question")  # a real job: its words never hide it
+        assert await _count(client) == {"n": 1, "jobs": 1, "other": 0}
 
 
 @pytest.mark.asyncio
@@ -262,9 +267,7 @@ async def test_the_total_equals_the_pages_rules_over_the_pages_own_reads(authent
         _mail(user_id)
         await _suggest(client, jobs[6])
 
-        sim = re.compile(r"\bsimulation\b|lifecycle test|do not apply", re.IGNORECASE)
-        asks = [a for a in (await client.get("/api/asks")).json()["asks"]
-                if not any(sim.search(str(t or "")) for t in (a["question"], a["context"], a["job_title"], a["job_company"]))]
+        asks = (await client.get("/api/asks")).json()["asks"]  # the server leaves test jobs out
         people = (await client.get("/api/people")).json()["people"]
         unsent = [p for p in people if p["message_count"] > 0 and not p["last_sent"]]
         job_ids = (
