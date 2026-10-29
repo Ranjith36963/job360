@@ -27,7 +27,7 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 | Logs (backend, frontend, Postgres) | `railway logs --service <name>` |
 | Database | `railway run -s Postgres python <script>` using `DATABASE_PUBLIC_URL` (plain `DATABASE_URL` only resolves inside Railway) |
 | Product analytics | PostHog MCP (EU) |
-| Deploys | `railway deployment list --service <svc> --json` |
+| Deploys | `railway deployment list --service <svc> --json`, or merge-commit statuses `job360 - frontend`/`- backend` |
 
 **Two traps that cost real time:** `railway logs` *streams*, so piping to `tail` returns nothing and looks exactly like "no access" — always `| head -N` with a `timeout`. And **never print secret values** (`railway variables` once dumped a live API key into a transcript); filter to key NAMES only.
 
@@ -62,6 +62,10 @@ python -m src.cli setup-profile --cv cv.pdf --linkedin li.pdf --github user
 python -m pytest -q -p no:randomly                   # canonical run (needs Postgres up)
 python -m pytest tests/test_receipts.py::test_name -v  # single test
 python -m migrations.runner up | status | down       # migrations
+
+# Commit: two separate calls (never `&&`), then commit with no edits between
+git add -A -- backend frontend
+bash scripts/agent-gate.sh                            # --full for plumbing
 
 # Frontend — run from frontend/  (⚠️ Next.js 16: `params` is a Promise — async since 15, sync access gone in 16; await it)
 npm run dev | build | lint | type-check | test:unit | test:e2e
