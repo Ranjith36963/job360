@@ -144,6 +144,11 @@ async def test_developer_notes_and_internal_codes_are_refused_in_an_ask(authenti
         ok = await client.post("/api/asks", json={"question": "Req #12345: approve the CV?",
                                                   "application_id": app_id})
         assert ok.status_code == 201, ok.text
+        ask_id = ok.json()["id"]
+        bad = await client.post(f"/api/asks/{ask_id}/withdraw", json={"reason": "see PR 1180"})
+        assert bad.status_code == 422, bad.text
+        good = await client.post(f"/api/asks/{ask_id}/withdraw", json={"reason": "the job closed"})
+        assert good.status_code == 200, good.text
 
 
 @pytest.mark.asyncio

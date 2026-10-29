@@ -870,8 +870,6 @@ async def withdraw_ask(
     asked (403 otherwise), and only with a ``reason`` (422 when empty). The
     reason is stored on the ask and shown on the application's timeline."""
     clean_reason = clean_withdraw_reason(reason)
-    if (talk := plain_words.refusal(clean_reason)) is not None:
-        raise SpineError(422, talk)
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
         raise SpineError(404, "ask not found")

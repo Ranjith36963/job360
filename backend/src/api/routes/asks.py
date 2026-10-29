@@ -21,6 +21,7 @@ from src.services import idempotency
 from src.services.applications import asks as asks_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import inbox_items as inbox_items_service
+from src.services.applications import plain_words
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
@@ -254,9 +255,13 @@ async def withdraw_ask(
     (the MCP ``answer_ask`` ``withdraw``) may withdraw only an ask it asked itself, and must say why
     (owner, 2026-10-23); an ask the user or another assistant raised stays the user's to close."""
     actor = actor_for(user)
+    reason = body.reason if body else ""
+    # Caller-written reasons only: Job360's own withdrawals (an unblocked note, a later upload) skip this.
+    if (talk := plain_words.refusal(reason)) is not None:
+        raise HTTPException(status_code=422, detail=talk)
     try:
         return await asks_service.withdraw_ask(
-            db, user.id, ask_id, actor, body.reason if body else "", own_only=actor != "web"
+            db, user.id, ask_id, actor, reason, own_only=actor != "web"
         )
     except SpineError as exc:
         _raise(exc)
