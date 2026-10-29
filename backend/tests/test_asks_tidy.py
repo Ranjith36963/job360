@@ -91,11 +91,13 @@ async def test_paste_the_question_rows_go_and_the_job_gets_a_note(authenticated_
         assert every[gone]["withdrawn_by"] == "system"
         for job in (app_id, only):
             events = (await client.get(f"/api/applications/{job}")).json()["events"]
-            notes = [e for e in events if e["event_type"] == "note"]
-            assert len(notes) == 1 and "Read this form" in notes[0]["detail"]
+            # S9: an instruction to the assistant goes in its work log, hidden from the user's timeline.
+            notes = [e for e in events if e["event_type"] == "process_log"]
+            assert len(notes) == 1 and "Read this form" in notes[0]["detail"] and notes[0]["process"] is True
+            assert [e for e in events if e["event_type"] == "note"] == []
         await client.get("/api/asks")  # a second read writes nothing more
         assert len([e for e in (await client.get(f"/api/applications/{only}")).json()["events"]
-                    if e["event_type"] == "note"]) == 1
+                    if e["event_type"] == "process_log"]) == 1
 
 
 @pytest.mark.asyncio

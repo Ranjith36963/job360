@@ -4054,6 +4054,11 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+            /**
+             * Process
+             * @default false
+             */
+            process: boolean;
             /** Recorded At */
             recorded_at: string;
             /** Recorded By */
@@ -10437,6 +10442,11 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+            /**
+             * Process
+             * @default false
+             */
+            process: boolean;
             /** Recorded At */
             recorded_at: string;
             /** Recorded By */

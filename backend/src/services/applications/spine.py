@@ -735,6 +735,9 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
                 "scheduled_at": r["scheduled_at"] or None,
             }
         )
+    from src.services.applications import process_log  # noqa: PLC0415 - it imports this module
+
+    process_log.mark(out, process_log.logged_in(rows))  # S9: the assistant's work log, by type
     owner = await db._db.execute("SELECT user_id FROM applications WHERE id = ?", (application_id,))
     owner_row = await owner.fetchone()
     await _attach_contact_names(db, owner_row["user_id"] if owner_row else None, out)
@@ -2998,6 +3001,10 @@ async def whats_new(
             app_ids.append(r["application_id"])
 
     await _attach_contact_names(db, user_id, events)
+    from src.services.applications import process_log  # noqa: PLC0415 - it imports this module
+
+    # S9: a note moved to the work log may have been moved on a later page, so ask the table.
+    process_log.mark(events, await process_log.logged_ids(db, user_id, [int(e["id"]) for e in events]))
 
     applications: list[dict[str, Any]] = []
     if app_ids:

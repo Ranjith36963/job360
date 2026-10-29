@@ -63,6 +63,12 @@
     "document_uploaded",
     "email_drafted",
     "outcome_suggested",
-    "outcome_dismissed"
+    "outcome_dismissed",
+    "process_log"
+  ],
+  "process": [
+    "process_log",
+    "kit_read",
+    "ask_withdrawn"
   ]
 }

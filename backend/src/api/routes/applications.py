@@ -56,7 +56,14 @@ from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
 from src.services.applications import inbox_items as inbox_items_service
-from src.services.applications import interview_payloads, outcome_suggestions, plain_words, queue_preflight, spine
+from src.services.applications import (
+    interview_payloads,
+    outcome_suggestions,
+    plain_words,
+    process_log,
+    queue_preflight,
+    spine,
+)
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
@@ -513,6 +520,8 @@ class ApplicationEventOut(BaseModel):
     superseded: bool
     source: Optional[EventSourceOut]
     scheduled_at: Optional[str]
+    # S9: the assistant's work log (process_log, kit_read, ask_withdrawn, or a note a process_log moved).
+    process: bool = False
 
 
 class ApplicationArtifactOut(BaseModel):
@@ -1208,6 +1217,8 @@ class WhatsNewEventOut(BaseModel):
     corrects_event_id: Optional[int]
     source: Optional[EventSourceOut]
     scheduled_at: Optional[str]
+    # S9: the same work-log flag as ApplicationEventOut.process.
+    process: bool = False
 
 
 class WhatsNewApplicationOut(BaseModel):
@@ -3798,6 +3809,11 @@ async def _record_event(
             _check_submit_mode_event(user, application_id, payload)
         if body.event_type == "answer_corrected":
             _check_answer_corrected(user, application_id, payload)
+        if body.event_type == process_log.PROCESS_LOG:
+            await process_log.check(
+                db, user, application_id, payload=payload, source=source,
+                follow_up_on=body.follow_up_on, corrects_event_id=body.corrects_event_id,
+            )
         if body.event_type in _QUEUE_EVENT_TYPES:
             await _check_queue_event(db, user, application_id, body.event_type, payload, body.corrects_event_id)
         if body.event_type in kit_service.KIT_EVENT_TYPES:

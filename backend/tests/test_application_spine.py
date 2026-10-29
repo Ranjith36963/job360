@@ -462,6 +462,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "email_drafted",
         # Feature 9 (2026-10-20).
         "outcome_suggested", "outcome_dismissed",
+        # S9 (2026-10-29) - the assistant's work log.
+        "process_log",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types
