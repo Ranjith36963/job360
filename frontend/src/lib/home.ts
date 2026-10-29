@@ -74,13 +74,15 @@ export function daysAgoIso(n: number, now: Date = new Date()): string {
 
 // ---- Events ---------------------------------------------------------------
 
-/** Events written by an assistant (anything that is not the user in the browser). */
-export function assistantEvents<T extends { recorded_by: string }>(events: readonly T[]): T[] {
-  return events.filter((e) => e.recorded_by !== "web");
+/** Events written by an assistant (anything that is not the user in the browser).
+ * Process events (the assistant's own work log) are left out: they stay out of
+ * Activity and out of the "wrote N records" count. */
+export function assistantEvents<T extends { recorded_by: string; process?: boolean }>(events: readonly T[]): T[] {
+  return events.filter((e) => e.recorded_by !== "web" && !e.process);
 }
 
 /** The distinct assistant names behind a set of events, in first-seen order. */
-export function assistantNames(events: readonly { recorded_by: string }[]): string[] {
+export function assistantNames(events: readonly { recorded_by: string; process?: boolean }[]): string[] {
   const names: string[] = [];
   for (const e of assistantEvents(events)) {
     const name = whoLabel(e.recorded_by).name;
@@ -122,7 +124,7 @@ export function joinNames(names: readonly string[]): string {
  * through, so the count shows as "N+". `openAsks` is how many questions wait.
  */
 export function buildSentence(args: {
-  events: readonly { recorded_by: string }[];
+  events: readonly { recorded_by: string; process?: boolean }[];
   truncated: boolean;
   openAsks: number;
 }): SentencePart[] {

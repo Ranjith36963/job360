@@ -218,3 +218,13 @@ describe("dayAt", () => {
     expect(dayAt("not a date", now)).toBe("");
   });
 });
+
+describe("process events stay out of Activity", () => {
+  it("selectFeed and buildSentence skip process events", () => {
+    const events = [ev(1, "agent:Claude"), ev(2, "agent:Claude", { event_type: "process_log", process: true })];
+    const apps = [{ id: 1, job_company: "Acme", job_title: "Dev" }] as never;
+    expect(selectFeed(events, apps)).toHaveLength(1);
+    const text = sentenceText(buildSentence({ events, truncated: false, openAsks: 0 }));
+    expect(text).toContain("wrote 1 record ");
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { Timeline } from "./Timeline";
 import type { ApplicationEvent } from "@/lib/api";
 
@@ -20,6 +20,7 @@ function makeEvent(overrides: Partial<ApplicationEvent> = {}): ApplicationEvent 
     superseded: false,
     source: null,
     scheduled_at: null,
+    process: false,
     ...overrides,
   };
 }
@@ -129,5 +130,29 @@ describe("Timeline", () => {
 
     expect(screen.getByTestId("event-interview").textContent).toBe("System design · 45 min · Leeds office");
     expect(screen.queryByTestId("event-offer")).toBeNull();
+  });
+
+  it("folds process events behind a toggle and never strikes them through", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({ id: 1, event_type: "note", detail: "old note", superseded: true, process: true }),
+          makeEvent({ id: 2, event_type: "process_log", detail: "checked the form", process: true }),
+          makeEvent({ id: 3, event_type: "replied", detail: "visible" }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByTestId("timeline-event")).toHaveLength(1);
+    const toggle = screen.getByTestId("work-log-toggle");
+    expect(toggle).toHaveTextContent("Show the assistant's work log (2)");
+    fireEvent.click(toggle);
+    expect(screen.getAllByTestId("timeline-event")).toHaveLength(3);
+    expect(screen.getByText("checked the form")).toBeInTheDocument();
+    expect(screen.getByText("Assistant's work log")).toBeInTheDocument();
+  });
+
+  it("shows no toggle when there are no process events", () => {
+    render(<Timeline events={[makeEvent()]} />);
+    expect(screen.queryByTestId("work-log-toggle")).toBeNull();
   });
 });

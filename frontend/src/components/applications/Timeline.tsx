@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { ApplicationEvent } from "@/lib/api";
 import { eventTitle, interviewDetails, offerFigures } from "@/lib/event-detail";
 import { actorLabel } from "@/lib/event-labels";
@@ -15,13 +16,31 @@ function suggestedQuote(payload: unknown): string {
  * superseded event (retired by a correcting event, spec R3) is shown struck
  * through rather than hidden — the log itself never drops a row. */
 export function Timeline({ events }: { events: ApplicationEvent[] }) {
+  const [showLog, setShowLog] = useState(false);
+  // Process events (the assistant's work log, and notes it moved there) are
+  // folded behind one toggle; they are never struck through in the main list.
+  const logCount = events.filter((e) => e.process).length;
+  const shown = showLog ? events : events.filter((e) => !e.process);
+
   if (events.length === 0) {
     return <p className="text-sm text-muted-foreground">No events yet.</p>;
   }
 
   return (
+    <>
+      {logCount > 0 && (
+        <button
+          type="button"
+          data-testid="work-log-toggle"
+          aria-expanded={showLog}
+          onClick={() => setShowLog((v) => !v)}
+          className="mb-2 text-xs text-muted-foreground underline underline-offset-2"
+        >
+          {showLog ? "Hide" : "Show"} the assistant&apos;s work log ({logCount})
+        </button>
+      )}
     <ol className="flex flex-col">
-      {events.map((event) => (
+      {shown.map((event) => (
         <li
           key={event.id}
           data-testid="timeline-event"
@@ -90,5 +109,6 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
         </li>
       ))}
     </ol>
+    </>
   );
 }
