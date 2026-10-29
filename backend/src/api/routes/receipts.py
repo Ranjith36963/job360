@@ -262,8 +262,9 @@ async def list_receipts(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> ReceiptListResponse:
-    rows = await db.list_receipts(user.id, job_id=job_id, limit=limit, offset=offset)
-    total = await db.count_receipts(user.id, job_id=job_id)
+    # S7b: a test application's receipt is left out of the list; GET /receipts/{id} still opens it.
+    rows = await db.list_receipts(user.id, job_id=job_id, limit=limit, offset=offset, exclude_test=True)
+    total = await db.count_receipts(user.id, job_id=job_id, exclude_test=True)
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user.id, sorted({int(r["application_id"]) for r in rows if r.get("application_id")}))

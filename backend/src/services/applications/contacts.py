@@ -2254,6 +2254,7 @@ async def list_people(
     email: Optional[str] = None,
     company: Optional[str] = None,
     exclude_application_id: Optional[int] = None,
+    exclude_test: bool = False,
 ) -> dict[str, Any]:
     """``GET /api/people`` / the ``list_people`` MCP tool.
 
@@ -2274,6 +2275,8 @@ async def list_people(
     job's company) has the same company_key as jobs; it scans ALL the user's
     contacts (never truncated). ``exclude_application_id`` is internal
     (known_people): a person already on that application is left out.
+    ``exclude_test`` (S7b, the route) drops the rows linked to a test application,
+    so a person whose only job is a test is not listed (``known_people`` keeps them).
 
     With ``contact_id`` — the full record for that ONE row (not merged):
     message versions, sent/reply marks, detail-edit history. Each person's
@@ -2331,6 +2334,11 @@ async def list_people(
         for r in rows:
             _apply_current_fields(r, edits_by_contact.get(r["id"], {}))
 
+    if exclude_test:
+        from src.services.applications.test_marker import test_app_ids  # noqa: PLC0415
+
+        tests = await test_app_ids(db, user_id)
+        rows = [r for r in rows if r["application_id"] is None or int(r["application_id"]) not in tests]
     want = company_key(clean_company) if clean_company else ""
 
     groups: dict[str, list[dict[str, Any]]] = {}

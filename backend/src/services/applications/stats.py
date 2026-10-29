@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications.spine import SpineError, receipt_channel_key
+from src.services.applications.test_marker import TEST_APP_SQL, TEST_ID_SQL
 from src.services.auth import rate_limit
 
 if TYPE_CHECKING:  # pragma: no cover — type-only, same reasoning as spine.py
@@ -229,6 +230,7 @@ def _group_by(
 
 # An application marked by a `simulation` event that no later event corrects is a
 # test: it counts nowhere (owner decision 2026-10-15). `{app}` is the SQL for its id.
+# Stats itself reads test_marker (S7b); this copy is kept for the modules that import it.
 _SIMULATED_SQL = (
     "EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = {app} AND s.user_id = ? "
     "AND s.event_type = ? AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = s.id))"
@@ -248,8 +250,9 @@ async def _contact_found_via_groups(
     (same shape)."""
     if field not in ("found_via", "relationship"):
         raise ValueError(field)
-    where = ["ac.user_id = ?", "NOT " + _SIMULATED_SQL.format(app="ac.application_id")]
-    where_params: list[Any] = [user_id, user_id, settings.SIMULATION_EVENT_TYPE]
+    test_sql, test_params = TEST_ID_SQL("ac.application_id", "ac.user_id")
+    where = ["ac.user_id = ?", f"NOT {test_sql}"]
+    where_params: list[Any] = [user_id, *test_params]
     if since_val:
         where.append("ac.created_at >= ?")
         where_params.append(since_val)
@@ -314,8 +317,9 @@ async def _outreach_variant_groups(
     of its newest message version saved BEFORE its first sent mark ('' / none =
     "Not set"), and whether any reply mark exists. Grouped in Python on
     ``lower(trim(label))``; sorted by count; capped at ``STATS_MAX_GROUPS``."""
-    where = ["ac.user_id = ?", "NOT " + _SIMULATED_SQL.format(app="ac.application_id")]
-    where_params: list[Any] = [user_id, user_id, settings.SIMULATION_EVENT_TYPE]
+    test_sql, test_params = TEST_ID_SQL("ac.application_id", "ac.user_id")
+    where = ["ac.user_id = ?", f"NOT {test_sql}"]
+    where_params: list[Any] = [user_id, *test_params]
     if since_val:
         where.append("ac.created_at >= ?")
         where_params.append(since_val)
@@ -472,16 +476,16 @@ async def compute_stats(
     if since_val:
         where.append("a.created_at >= ?")
         where_params.append(since_val)
+    test_sql, test_params = TEST_APP_SQL("a")
     # Count the test applications, then leave them out BEFORE the row cap so they
     # can never crowd a real application out of the counted set.
     cur = await db._db.execute(
-        f"SELECT COUNT(*) FROM applications a WHERE {' AND '.join(where)} AND "  # noqa: S608 - constants only
-        + _SIMULATED_SQL.format(app="a.id"),
-        [*where_params, user_id, settings.SIMULATION_EVENT_TYPE],
+        f"SELECT COUNT(*) FROM applications a WHERE {' AND '.join(where)} AND {test_sql}",  # noqa: S608 - constants only
+        [*where_params, *test_params],
     )
     simulations_excluded = int((await cur.fetchone())[0] or 0)
-    where.append("NOT " + _SIMULATED_SQL.format(app="a.id"))
-    where_params.extend([user_id, settings.SIMULATION_EVENT_TYPE])
+    where.append(f"NOT {test_sql}")
+    where_params.extend(test_params)
     where_sql = " AND ".join(where)
 
     # S6 — read one more than the cap so "there were more" is a fact, not a

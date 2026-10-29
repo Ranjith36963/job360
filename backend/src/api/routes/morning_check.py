@@ -23,6 +23,7 @@ from src.services.applications import ready as ready_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.blocked import BLOCKED_REASONS
 from src.services.applications.kit import _json
+from src.services.applications.test_marker import TEST_APP_SQL, TEST_ID_SQL
 from src.services.profile import assistant_settings as rules
 from src.services.profile import edits as profile_edits
 from src.services.profile.models import UserProfile
@@ -100,15 +101,21 @@ def _item(d: dict[str, Any], at: str, receipt_id: Optional[int] = None) -> Tally
     )
 
 
+# S7b: a test application (test_marker.py) is in no bucket.
+_TEST_RECEIPT, _TEST_PARAMS = TEST_ID_SQL("application_receipts.application_id", "application_receipts.user_id")
+_TEST_APP = TEST_APP_SQL("a")[0]
+
+
 async def _sent(db: JobDatabase, user_id: str, since: str) -> TallyBucket:
     cur = await db._db.execute(
-        "SELECT COUNT(*) FROM application_receipts WHERE user_id = ? AND sent_at > ?", (user_id, since)
+        f"SELECT COUNT(*) FROM application_receipts WHERE user_id = ? AND sent_at > ? AND NOT {_TEST_RECEIPT}",  # noqa: S608
+        (user_id, since, *_TEST_PARAMS),
     )
     row = await cur.fetchone()
     cur = await db._db.execute(
-        "SELECT id, application_id, job_company, job_title, sent_at FROM application_receipts "
-        "WHERE user_id = ? AND sent_at > ? ORDER BY sent_at DESC, id DESC LIMIT ?",
-        (user_id, since, ITEMS_PER_BUCKET),
+        "SELECT id, application_id, job_company, job_title, sent_at FROM application_receipts "  # noqa: S608
+        f"WHERE user_id = ? AND sent_at > ? AND NOT {_TEST_RECEIPT} ORDER BY sent_at DESC, id DESC LIMIT ?",
+        (user_id, since, *_TEST_PARAMS, ITEMS_PER_BUCKET),
     )
     items = [_item(d, d["sent_at"], d["id"]) for d in (dict(r) for r in await cur.fetchall())]
     return TallyBucket(count=int(row[0]) if row else 0, items=items)
@@ -117,11 +124,11 @@ async def _sent(db: JobDatabase, user_id: str, since: str) -> TallyBucket:
 async def _stopped(db: JobDatabase, user_id: str, since: str) -> tuple[TallyBucket, TallyBucket]:
     """(blocked, failed): distinct applications; the newest event names the row."""
     cur = await db._db.execute(
-        "SELECT e.application_id, e.event_type, e.payload, e.recorded_at, a.job_company, a.job_title "
+        "SELECT e.application_id, e.event_type, e.payload, e.recorded_at, a.job_company, a.job_title "  # noqa: S608
         "FROM application_events e JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
         "WHERE e.user_id = ? AND e.event_type IN ('account_needed', 'blocked', 'hold_released') AND e.recorded_at > ? "
-        "ORDER BY e.id DESC LIMIT ?",
-        (user_id, since, _EVENT_SCAN),
+        f"AND NOT {_TEST_APP} ORDER BY e.id DESC LIMIT ?",
+        (user_id, since, *_TEST_PARAMS, _EVENT_SCAN),
     )
     seen: dict[str, dict[int, TallyItem]] = {"blocked": {}, "failed": {}}
     why: dict[int, str] = {}
@@ -136,11 +143,11 @@ async def _stopped(db: JobDatabase, user_id: str, since: str) -> tuple[TallyBuck
                 why[d["application_id"]] = got if got in BLOCKED_REASONS or got == "account_needed" else "other"
     # Bulk-apply D1: a started submit that is still unconfirmed counts as failed.
     cur = await db._db.execute(
-        "SELECT e.application_id, e.event_type, e.payload, e.recorded_at, a.job_company, a.job_title "
+        "SELECT e.application_id, e.event_type, e.payload, e.recorded_at, a.job_company, a.job_title "  # noqa: S608
         "FROM application_events e JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
         "WHERE e.user_id = ? AND e.event_type = 'submit_attempted' AND e.recorded_at > ? "
-        "ORDER BY e.id DESC LIMIT ?",
-        (user_id, since, _EVENT_SCAN),
+        f"AND NOT {_TEST_APP} ORDER BY e.id DESC LIMIT ?",
+        (user_id, since, *_TEST_PARAMS, _EVENT_SCAN),
     )
     checked: set[int] = set()
     for d in (dict(r) for r in await cur.fetchall()):

@@ -13,6 +13,7 @@ from typing import Any
 
 from src.core.settings import DB_PATH
 from src.repositories import pgsync
+from src.services.applications.test_marker import TEST_ID_SQL
 
 _COLS = (
     "e.id, e.application_id, a.job_title, a.job_company, e.detail, e.occurred_at, e.recorded_by"
@@ -21,18 +22,20 @@ _COLS = (
 # A lesson some later event `corrects_event_id`-points at is superseded — the
 # same rule `spine.list_events_for_display` applies on the timeline.
 _NOT_SUPERSEDED = "NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id)"
+# S7b: a lesson on a test application is not a lesson (test_marker.py).
+_TEST_SQL, _TEST_PARAMS = TEST_ID_SQL("e.application_id", "e.user_id")
 
 # Both statements are assembled from the constants above only — no caller
 # input ever reaches the SQL text; every value goes through a `?` parameter.
 _SELECT_PAGE = (
     f"SELECT {_COLS} FROM application_events e "  # noqa: S608
     "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
-    f"WHERE e.user_id = ? AND e.event_type = 'lesson' AND {_NOT_SUPERSEDED} "
+    f"WHERE e.user_id = ? AND e.event_type = 'lesson' AND {_NOT_SUPERSEDED} AND NOT {_TEST_SQL} "
     "ORDER BY e.occurred_at DESC, e.id DESC LIMIT ? OFFSET ?"
 )
 _SELECT_TOTAL = (
     "SELECT COUNT(*) FROM application_events e "  # noqa: S608
-    f"WHERE e.user_id = ? AND e.event_type = 'lesson' AND {_NOT_SUPERSEDED}"
+    f"WHERE e.user_id = ? AND e.event_type = 'lesson' AND {_NOT_SUPERSEDED} AND NOT {_TEST_SQL}"
 )
 
 
@@ -46,9 +49,9 @@ def list_lessons(user_id: str, *, limit: int, offset: int = 0) -> tuple[list[dic
     lend its title.
     """
     with pgsync.connect(str(DB_PATH)) as conn:
-        cur = conn.execute(_SELECT_PAGE, (user_id, limit, offset))
+        cur = conn.execute(_SELECT_PAGE, (user_id, *_TEST_PARAMS, limit, offset))
         rows = cur.fetchall()
-        cur = conn.execute(_SELECT_TOTAL, (user_id,))
+        cur = conn.execute(_SELECT_TOTAL, (user_id, *_TEST_PARAMS))
         total_row = cur.fetchone()
     total = int(total_row[0]) if total_row else 0
     return [

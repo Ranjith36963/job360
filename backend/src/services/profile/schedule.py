@@ -385,14 +385,17 @@ def status(f: DueFacts, answer: dict[str, Any], runs: dict[str, dict[str, Any]])
 async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
     """Applications in the batch queue that are still ``considering`` (as the batch list shows it)."""
     from src.services.applications import spine  # noqa: PLC0415 - spine imports the profile package
+    from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
 
     queued = await spine.queued_at_by_app(db, user_id)
     if not queued:
         return []
     marks = ",".join("?" for _ in queued)
+    test_sql, test_params = TEST_APP_SQL("applications")  # S7b: a test job is never a duty
     cur = await db._db.execute(
-        f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' AND id IN ({marks})",  # noqa: S608
-        (user_id, *queued),
+        f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' AND id IN ({marks}) "  # noqa: S608
+        f"AND NOT {test_sql}",
+        (user_id, *queued, *test_params),
     )
     return [int(dict(r)["id"]) for r in await cur.fetchall()]
 
@@ -427,17 +430,20 @@ async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -
 
 async def _reach_ids(db: JobDatabase, user_id: str, now: datetime) -> list[int]:
     """Open applications for the people hunt this run (see the module docstring), newest first."""
+    from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
     since = (now - timedelta(days=settings.REACH_WINDOW_DAYS)).astimezone(timezone.utc).isoformat()
+    test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
-        "SELECT a.id FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "
+        "SELECT a.id FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "  # noqa: S608
         "AND (a.created_at >= ? OR EXISTS (SELECT 1 FROM application_events e WHERE e.application_id = a.id "
         "     AND e.user_id = a.user_id AND e.event_type = 'applied' AND e.occurred_at >= ?)) "
         "AND NOT EXISTS (SELECT 1 FROM application_contacts c WHERE c.application_id = a.id "
         "     AND c.user_id = a.user_id AND c.added_by <> 'web') "
         "AND NOT EXISTS (SELECT 1 FROM assistant_duty_runs r WHERE r.user_id = a.user_id "
         "     AND r.duty = 'reach:' || a.id) "
-        "ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
-        (user_id, since, since, settings.REACH_MAX_PER_RUN * 4),
+        f"AND NOT {test_sql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
+        (user_id, since, since, *test_params, settings.REACH_MAX_PER_RUN * 4),
     )
     candidates = [int(dict(r)["id"]) for r in await cur.fetchall()]
     pending_only = await _pending_only(db, user_id, candidates)

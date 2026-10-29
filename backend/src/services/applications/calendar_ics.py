@@ -199,6 +199,12 @@ async def live_interviews(
     if application_id is not None:
         sql += " AND id = ?"
         params.append(application_id)
+    else:  # S7b: the whole-account feed and agenda leave a test application out (test_marker.py)
+        from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
+        test_sql, test_params = TEST_APP_SQL("applications")
+        sql += f" AND NOT {test_sql}"
+        params.extend(test_params)
     cur = await db._db.execute(sql, tuple(params))
     apps = [dict(r) for r in await cur.fetchall() if r["status"] not in closed]
     if not apps:

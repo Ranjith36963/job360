@@ -550,12 +550,22 @@ async def _get_ask(db: JobDatabase, user_id: str, ask_id: int) -> Optional[dict[
     return _serialize(dict(row)) if row else None
 
 
-async def count_open_asks(db: JobDatabase, user_id: str) -> int:
-    """How many asks of this user are still open (not answered, not withdrawn)."""
-    cur = await db._db.execute(
-        "SELECT COUNT(*) FROM application_asks WHERE user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL",
-        (user_id,),
+async def count_open_asks(db: JobDatabase, user_id: str, *, exclude_test: bool = False) -> int:
+    """How many asks of this user are still open (not answered, not withdrawn). The per-user cap and
+    doctor count EVERY open ask (safety); ``exclude_test`` (GET /asks' ``open_count``, the number the
+    user sees) leaves out the asks of a test application, as the list beside it does (S7b)."""
+    sql = (
+        "SELECT COUNT(*) FROM application_asks k "
+        "WHERE k.user_id = ? AND k.answered_at IS NULL AND k.withdrawn_at IS NULL"
     )
+    params: list[Any] = [user_id]
+    if exclude_test:
+        from src.services.applications.test_marker import TEST_ID_SQL  # noqa: PLC0415
+
+        test_sql, test_params = TEST_ID_SQL("k.application_id", "k.user_id")
+        sql += f" AND NOT {test_sql}"
+        params.extend(test_params)
+    cur = await db._db.execute(sql, params)
     row = await cur.fetchone()
     return int(row[0]) if row else 0
 

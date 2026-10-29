@@ -3160,8 +3160,12 @@ async def export_history(
     ):
         raise SpineError(429, "export rate limit exceeded; try again in an hour")
 
-    where = ["user_id = ?"]
-    params: list[Any] = [user_id]
+    from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
+    # S7b: a test application is not part of the assistant's history (the GDPR export keeps it).
+    test_sql, test_params = TEST_APP_SQL("applications")
+    where = ["user_id = ?", f"NOT {test_sql}"]
+    params: list[Any] = [user_id, *test_params]
     if since:
         where.append("updated_at >= ?")
         params.append(since)

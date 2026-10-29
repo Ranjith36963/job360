@@ -194,13 +194,18 @@ async def _dismiss(
 
 
 async def open_suggestions(db: JobDatabase, user_id: Any, limit: int) -> tuple[list[dict[str, Any]], bool]:
-    """Open = not ignored and its email not yet recorded on that application (newest first)."""
+    """Open = not ignored and its email not yet recorded on that application (newest first). A test
+    application's suggestions are left out (S7b, test_marker.py)."""
+    from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
+    test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
-        "SELECT e.id, e.application_id, e.payload, e.occurred_at, e.recorded_at, e.recorded_by, "
+        "SELECT e.id, e.application_id, e.payload, e.occurred_at, e.recorded_at, e.recorded_by, "  # noqa: S608
         "a.job_title, a.job_company, a.status FROM application_events e "
         "JOIN applications a ON a.id = e.application_id "
-        "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'outcome_suggested' ORDER BY e.id DESC",
-        (user_id, user_id),
+        f"WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'outcome_suggested' AND NOT {test_sql} "
+        "ORDER BY e.id DESC",
+        (user_id, user_id, *test_params),
     )
     rows = [dict(r) for r in await cur.fetchall()]
     if not rows:  # most users have none: skip the two reads below (every page's badge asks)

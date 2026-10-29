@@ -134,7 +134,7 @@ async def list_asks(
             rows = _with_saved_answers(user.id, rows)
         # The hand-off fields, shared with the application page (GET /applications/{id}).
         rows = await blocked_service.with_hand_off(db, user.id, rows)
-        return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}
+        return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id, exclude_test=True)}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core import settings
 from src.services.applications import kit, spine
 from src.services.applications.kit import _json
+from src.services.applications.test_marker import TEST_APP_SQL
 from src.services.profile import edits as profile_edits
 from src.services.profile import user_info
 from src.services.profile.edits import is_assistant_actor
@@ -45,13 +46,17 @@ _READY_REST = (
     "ORDER BY f.id DESC LIMIT ?"
 )
 _READY_SQL = _READY_SELECT + _READY_REST
+# S7b: the list (no ``application_id``) leaves a test application out; one named card still reads.
+_TEST_SQL, _TEST_PARAMS = TEST_APP_SQL("a")
+_NOT_TEST = f"AND NOT {_TEST_SQL} "
 
 
 async def ready_ids(db: JobDatabase, user_id: str) -> list[int]:
     """The application ids of the caller's ready-to-send cards (at most READY_TO_SEND_MAX): the same
     rows as ``ready_rows``, with no payload read. For the Needs-you badge."""
     cur = await db._db.execute(
-        "SELECT a.id AS application_id " + _READY_REST.format(only=""), (user_id, settings.READY_TO_SEND_MAX)
+        "SELECT a.id AS application_id " + _READY_REST.format(only=_NOT_TEST),
+        (user_id, *_TEST_PARAMS, settings.READY_TO_SEND_MAX),
     )
     return [int(r["application_id"]) for r in await cur.fetchall()]
 
@@ -66,8 +71,10 @@ async def ready_rows(
     cap = max(0, min(int(limit), settings.READY_TO_SEND_MAX))
     if cap == 0:
         return []
-    only = "" if application_id is None else "AND a.id = ? "
-    params: tuple[Any, ...] = (user_id, cap) if application_id is None else (user_id, application_id, cap)
+    only = _NOT_TEST if application_id is None else "AND a.id = ? "
+    params: tuple[Any, ...] = (
+        (user_id, *_TEST_PARAMS, cap) if application_id is None else (user_id, application_id, cap)
+    )
     cur = await db._db.execute(_READY_SQL.format(only=only), params)
     out: list[dict[str, Any]] = []
     for r in await cur.fetchall():
@@ -81,13 +88,14 @@ async def ready_rows(
 # not seen yet - neither a cv_seen nor a submit_approved names it, from chat or from the web.
 CV_TO_APPROVE_MAX = 50
 _CV_TO_APPROVE_SQL = (
-    "SELECT a.id AS application_id, a.job_title, a.job_company, c.id AS artifact_id, c.version_no, c.text, "
+    "SELECT a.id AS application_id, a.job_title, a.job_company, c.id AS artifact_id, c.version_no, c.text, "  # noqa: S608
     "c.created_at, c.made_by FROM applications a JOIN application_artifacts c "
     "ON c.application_id = a.id AND c.user_id = a.user_id AND c.kind = 'cv' "
     "AND c.version_no = (SELECT MAX(v.version_no) FROM application_artifacts v WHERE v.application_id = a.id "
     "AND v.user_id = a.user_id AND v.kind = 'cv') "
     "WHERE a.user_id = ? AND a.status = 'considering' "
     "AND NOT EXISTS (SELECT 1 FROM application_receipts r WHERE r.application_id = a.id AND r.user_id = a.user_id) "
+    + _NOT_TEST +
     "ORDER BY c.id DESC LIMIT ?"
 )
 
@@ -95,7 +103,7 @@ _CV_TO_APPROVE_SQL = (
 async def cv_to_approve(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     """The caller's open applications whose newest CV has no seen mark (``kit.cv_mark_matches``, the
     test the gate's ``cv_not_seen`` uses), newest CV first, at most ``CV_TO_APPROVE_MAX``."""
-    cur = await db._db.execute(_CV_TO_APPROVE_SQL, (user_id, CV_TO_APPROVE_MAX * 4))
+    cur = await db._db.execute(_CV_TO_APPROVE_SQL, (user_id, *_TEST_PARAMS, CV_TO_APPROVE_MAX * 4))
     out: list[dict[str, Any]] = []
     for r in await cur.fetchall():
         row = dict(r)

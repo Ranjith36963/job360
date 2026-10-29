@@ -18,6 +18,16 @@ from src.utils.logger import get_logger  # noqa: E402
 _log = get_logger("db.repo")  # job360.db.repo → data/logs/
 
 
+def _not_test_receipts(sql: str, params: list[Any], exclude_test: bool) -> tuple[str, list[Any]]:
+    """S7b: leave out the receipts of a test application (``test_marker``) when asked."""
+    if not exclude_test:
+        return sql, params
+    from src.services.applications.test_marker import TEST_ID_SQL  # noqa: PLC0415 - services import this module
+
+    test_sql, test_params = TEST_ID_SQL("application_receipts.application_id", "application_receipts.user_id")
+    return f"{sql} AND NOT {test_sql}", [*params, *test_params]
+
+
 class JobDatabase:
     def __init__(self, db_path: str):
         self._path = db_path
@@ -625,7 +635,8 @@ class JobDatabase:
     )
 
     async def list_receipts(
-        self, user_id: str, *, job_id: int | None = None, limit: int = 50, offset: int = 0
+        self, user_id: str, *, job_id: int | None = None, limit: int = 50, offset: int = 0,
+        exclude_test: bool = False,
     ) -> list[dict[str, Any]]:
         """The user's receipts, newest first; optionally only for one job.
 
@@ -642,6 +653,7 @@ class JobDatabase:
         if job_id is not None:
             sql += " AND job_id = ?"
             params.append(job_id)
+        sql, params = _not_test_receipts(sql, params, exclude_test)
         sql += " ORDER BY sent_at DESC, id DESC LIMIT ? OFFSET ?"
         params += [max(1, int(limit)), max(0, int(offset))]
         cursor = await self._db.execute(sql, params)
@@ -658,13 +670,14 @@ class JobDatabase:
             out.append(d)
         return out
 
-    async def count_receipts(self, user_id: str, *, job_id: int | None = None) -> int:
+    async def count_receipts(self, user_id: str, *, job_id: int | None = None, exclude_test: bool = False) -> int:
         """How many receipts `list_receipts` would page through."""
         sql = "SELECT COUNT(*) FROM application_receipts WHERE user_id = ?"
         params: list[Any] = [user_id]
         if job_id is not None:
             sql += " AND job_id = ?"
             params.append(job_id)
+        sql, params = _not_test_receipts(sql, params, exclude_test)
         cursor = await self._db.execute(sql, params)
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
