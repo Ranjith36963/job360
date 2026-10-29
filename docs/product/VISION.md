@@ -139,7 +139,7 @@ That persistent, agent-accessible record is the product.
 | OAuth 2.1 so ChatGPT / Grok / any client can connect | Our own LLM, our own general agent |
 | Cheap counts (reply rate per CV version / role) + full `export_history` | Charts-heavy analytics; the agent analyses the export |
 | Bring a job by **link or pasted text**, both, on the web | Chrome extensions, iOS/Android |
-| A web page that is the **record** (home = your applications) | A web page that is the product |
+| A web page that is the **record** | A web page that is the product |
 
 Recruiter side: later, consent-first only, never selling candidate access.
 Pricing: free for seekers and recruiters until value is proven. No credits,
