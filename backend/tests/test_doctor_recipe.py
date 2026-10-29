@@ -59,7 +59,7 @@ def test_second_look_pins_fix_save_lessons_alert():
                   "at most 3 per review", "never a fact about the user", "never ad text", "corrects_event_id",
                   "came back n times", "keep this lesson?", "take it back", "cold contact",
                   "saved by yourself", "instructions are what the user told you", "lessons are",
-                  "what they edited or took back wins", "never re-add a lesson they took back", "lesson taken back.", "owner decision 2026-10-28", "doctor | <doc> | <reason>: <rule>"):
+                  "what they edited or took back wins", "never re-add a lesson they took back", "lesson taken back.", "tell the user in chat and `ask_user`", "doctor | <doc> | <reason>: <rule>"):
         assert words in text, words
 
 
@@ -245,7 +245,7 @@ def test_every_recipe_that_judges_or_drafts_points_to_the_doctor():
         assert 'get_recipe("doctor")' in text, name
         assert "second_look" not in text, name
         assert name == "rules" or len(text.splitlines()) <= 70, name
-    assert len(load_recipe("daily").text.splitlines()) == 70
+    assert len(load_recipe("daily").text.splitlines()) == 69  # 70 file lines less the unserved doc comment
 
 
 def test_every_row_a_recipe_names_exists_in_the_doctor_table():

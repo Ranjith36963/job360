@@ -284,7 +284,7 @@ def test_the_recipes_send_linkedin_to_the_own_browser_and_company_forms_to_job36
         return " ".join(load_recipe(name).text.lower().split())
 
     hunt, apply, batch = flat("hunt"), flat("apply"), flat("batch")
-    assert "only in the user's own browser (never job360's; owner 2026-10-26)" in hunt
+    assert "only in the user's own browser (never job360's)" in hunt
     assert "at most 5 searches a day, read each result slowly" in hunt
     assert "a scheduled cloud run skips linkedin" in hunt
     assert "easy apply runs only in the user's own browser" in apply and "same `check_submit` rule" in apply

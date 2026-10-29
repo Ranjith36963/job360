@@ -330,6 +330,6 @@ def test_recipes_teach_unmatched_mail():
 
     daily = load_recipe("daily").text
     assert "record_events" in daily and "inbox_items" in daily and "match_email" in daily
-    assert len(daily.splitlines()) == 70
+    assert len(daily.splitlines()) == 69  # 70 file lines less the unserved doc comment
     rules = load_recipe("rules").text
     assert "UNMATCHED MAIL" in rules and "dismissed" in rules

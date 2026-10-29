@@ -63,10 +63,28 @@ def _log_read(user: CurrentUser, recipe: str, result: str) -> None:
     )
 
 
+def _strip_comments(text: str) -> str:
+    """Drop every `<!-- ... -->` block: file notes are for maintainers, not the reader.
+    A `find` loop, not a regex; an unclosed block is kept as written."""
+    out: list[str] = []
+    pos = 0
+    while True:
+        start = text.find("<!--", pos)
+        end = text.find("-->", start + 4) if start != -1 else -1
+        if start == -1 or end == -1:
+            out.append(text[pos:])
+            break
+        out.append(text[pos:start])
+        pos = end + 3
+        if text.startswith("\n", pos) and (not out[-1] or out[-1].endswith("\n")):
+            pos += 1  # the comment owned its line: drop the line break too
+    return "".join(out)
+
+
 @cache
 def load_recipe(name: str) -> Recipe:
-    """Read one recipe file. Its first line (`# ...`) is the title."""
-    text = (RECIPES_DIR / f"{name}.md").read_text(encoding="utf-8")
+    """Read one recipe file. Its first line (`# ...`) is the title. Comments are not served."""
+    text = _strip_comments((RECIPES_DIR / f"{name}.md").read_text(encoding="utf-8"))
     first = text.splitlines()[0] if text else ""
     return Recipe(name=name, title=first.lstrip("# ").strip(), text=text)
 
