@@ -50,7 +50,7 @@ def test_ats_recipe_is_registered_short_and_marks_every_row_with_its_source():
     assert "Print this checklist and tick each step:" in text
     rows = [ln for ln in text.splitlines() if ln.startswith("| ") and not ln.startswith(("| Site", "|---"))]
     assert rows
-    assert all("BORROWED" in r or "SEEN" in r or "blocked" in r for r in rows), rows
+    assert all("unconfirmed" in r or "SEEN" in r or "blocked" in r for r in rows), rows
     for needle in ("Workday", "react-select", "1000+", "fresh", "SuccessFactors", "Ashby", "Never invent an alias",
                    "CAPTCHA", "site_limit_reached"):
         assert needle in text, needle

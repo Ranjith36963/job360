@@ -455,3 +455,35 @@ def test_the_own_browser_recipe_runs_linkedin_in_the_own_browser_only_and_keeps_
     # nothing else in the recipe speaks of an assistant brand
     head = text.split("**Other assistants**")[0]
     assert not re.search(r"claude|chatgpt|gemini|atlas|chrome", head, re.I)
+
+
+def test_served_recipes_carry_no_development_text():
+    """Owner decision 2026-10-29: process text never reaches the reader. No comment block, no
+    project-owner word, no decision date, no reference-project name. Word scan, no regex."""
+    from src.api.routes.recipes import RECIPE_NAMES, RECIPES_DIR, load_recipe
+
+    # closed tokens kept until the reason values are renamed; the backticked value `owner` too
+    closed = {"owner_clicked", "needs_owner_click", "`owner`"}
+    for name in RECIPE_NAMES:
+        text = load_recipe(name).text
+        assert "<!--" not in text and "-->" not in text, f"{name}: a comment block is served"
+        for raw in text.split():
+            word = raw.strip(".,;:()[]{}\"'*?!")
+            if word in closed:
+                continue
+            bare = word.strip("`")
+            assert bare.lower() != "owner", f"{name}: {raw}"
+            assert bare not in ("VISION", "BORROWED"), f"{name}: {raw}"
+            assert "career-ops" not in bare.lower(), f"{name}: {raw}"
+            is_date = (len(bare) == 10 and bare[4] == "-" and bare[7] == "-"
+                       and bare[:4].isdigit() and bare[5:7].isdigit() and bare[8:].isdigit())
+            assert not is_date, f"{name}: decision date {raw}"
+    raw_ats = (RECIPES_DIR / "ats.md").read_text(encoding="utf-8")
+    assert "<!--" in raw_ats, "the file keeps its doc header; only the served text drops it"
+
+
+def test_comment_stripping_keeps_text_and_unclosed_blocks():
+    from src.api.routes.recipes import _strip_comments
+
+    assert _strip_comments("# T\n<!-- a -->\nbody <!-- b --> end\n") == "# T\nbody  end\n"
+    assert _strip_comments("x <!-- never closed") == "x <!-- never closed"

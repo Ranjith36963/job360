@@ -42,7 +42,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    with its message id as `source`, or when the user says it went.
 5. **Proof.** Thank-you page text: `record_event` `proof_text` {text, page_host};
    a confirmation email is `applied` + its `source` (stored as the "submission confirmed" note).
-5b. **Due emails.** doctor `auto_emails.violations` not empty: STOP sending, tell the owner. Else for each `auto_emails.due`
+5b. **Due emails.** doctor `auto_emails.violations` not empty: STOP sending, tell the user. Else for each `auto_emails.due`
    row call `check_auto_email(application_id, kind)` and follow it (`get_recipe("rules")` "Automatic employer emails"; the Doctor checks each email before it goes: `get_recipe("doctor")`).
    `checkin` = 7 days after applying, to the person who emailed about the application, else the company's own listed
    careers@/jobs@ address; never guess one, none: `auto_email_skipped` "no contact, no careers address".

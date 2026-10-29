@@ -31,17 +31,17 @@ Send nothing except step 6. Full payload rules: `get_recipe("rules")`.
    Write ONE `post_mortem` note: `outcome_event_id`, `what_was_sent`,
    `what_to_change`, `proposed_lessons`. With few applications say "a guess,
    not a cause". **Done when** the note is saved.
-4. **Lessons need a yes.** The Doctor checks them first (row Lessons). Tell the owner the proposed lessons in chat.
+4. **Lessons need a yes.** The Doctor checks them first (row Lessons). Tell the user the proposed lessons in chat.
    Record a `lesson` only for each one they say yes to. One they later
    disagree with: `record_event` `note` with `corrects_event_id` = the
-   lesson's event id ("removed: <why>"). Never record a lesson the owner did
+   lesson's event id ("removed: <why>"). Never record a lesson the user did
    not agree to. Lessons are about their own CV, habits and targeting, never
    about ranking jobs. STOP until they answer.
 5. **Hired:** congratulate them. **Offer declined:** record their reason
    words in `reasons`.
 
 6. **Ask for feedback (after a rejection).** `check_auto_email(app,
-   "feedback_request")`. `send`: write ONE short polite email in the owner's name
+   "feedback_request")`. `send`: write ONE short polite email in the user's name
    (profile name), reply in the SAME thread to the rejection's sender, thank
    them, ask what would have made the application stronger. Ask even if they
    said they give no feedback. Never argue, never ask them to reconsider, no
