@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import Link from "next/link";
 import { Users } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
-import { addPerson, getPerson, listPeople } from "@/lib/api";
-import type { Person, PersonFull } from "@/lib/api";
+import { addPerson, getPerson, listContactDuplicates, listPeople, markContactDuplicate } from "@/lib/api";
+import type { ContactDuplicate, Person, PersonFull } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { toast } from "@/lib/toast";
 import { closedSetLabel } from "@/lib/closed-sets";
@@ -72,7 +72,7 @@ function PersonHistory({ details }: { details: PersonFull[] }) {
   );
 }
 
-function PersonRow({ p }: { p: Person }) {
+function PersonRow({ p, others, onChanged }: { p: Person; others: Person[]; onChanged: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<PersonFull[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,6 +97,18 @@ function PersonRow({ p }: { p: Person }) {
       inFlight.current = false;
       setLoading(false);
     }
+  }
+
+  // S11b: the user's own "Duplicate of ..." mark; every row of this person points at the one kept.
+  async function markDuplicate(kept: number) {
+    const keep = others.find((o) => o.contact_ids[0] === kept);
+    if (!keep || !window.confirm(`Mark ${p.name} as a duplicate of ${keep.name}? Your assistant will not message them. You can undo it.`)) return;
+    try {
+      for (const id of p.contact_ids) await markContactDuplicate(id, kept);
+    } catch (err) {
+      toast.apiError(err, "Could not mark this person as a duplicate.");
+    }
+    await onChanged();
   }
 
   const via = p.last_sent ? (CHANNEL_LABEL[p.last_sent.channel] ?? p.last_sent.channel) : "";
@@ -162,6 +174,24 @@ function PersonRow({ p }: { p: Person }) {
       >
         History
       </button>
+      {others.length > 0 && (
+        <label className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+          Duplicate of
+          <select
+            data-testid="person-duplicate-of"
+            value=""
+            onChange={(e) => void markDuplicate(Number(e.target.value))}
+            className="rounded border border-border bg-card px-1 py-0.5 text-xs"
+          >
+            <option value="">…</option>
+            {others.map((o) => (
+              <option key={o.contact_ids[0]} value={o.contact_ids[0]}>
+                {o.name} ({o.contact_ids[0]})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {open && loading && !details && (
         <p data-testid="person-history-loading" aria-busy="true" className="mt-1 text-xs text-muted-foreground">
           Loading history…
@@ -174,6 +204,7 @@ function PersonRow({ p }: { p: Person }) {
 
 export function PeopleClient() {
   const [rows, setRows] = useState<Person[] | null>(null);
+  const [duplicates, setDuplicates] = useState<ContactDuplicate[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -183,9 +214,10 @@ export function PeopleClient() {
 
   const load = useCallback(async (isCancelled: () => boolean = () => false) => {
     try {
-      const res = await listPeople();
+      const [res, dups] = await Promise.all([listPeople(), listContactDuplicates().catch(() => [])]);
       if (isCancelled()) return;
       setRows(res.people ?? []);
+      setDuplicates(dups);
       setTruncated(Boolean(res.truncated));
       setLoadFailed(false);
     } catch (err) {
@@ -265,9 +297,34 @@ export function PeopleClient() {
       ) : (
         <ul data-testid="people-list" className="flex flex-col gap-2">
           {rows.map((p) => (
-            <PersonRow key={p.contact_ids.join("-")} p={p} />
+            <PersonRow key={p.contact_ids.join("-")} p={p} others={rows.filter((o) => o !== p)} onChanged={() => load()} />
           ))}
         </ul>
+      )}
+
+      {duplicates.length > 0 && (
+        <div data-testid="people-duplicates" className="text-xs text-muted-foreground">
+          <p className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">Marked as duplicates</p>
+          <ul className="mt-1 flex flex-col gap-1">
+            {duplicates.map((d) => (
+              <li key={d.contact_id} data-testid="people-duplicate-row">
+                {d.name} is a duplicate of {d.duplicate_of_name} ({d.duplicate_of}).{" "}
+                <button
+                  type="button"
+                  data-testid="people-duplicate-undo"
+                  onClick={() =>
+                    void markContactDuplicate(d.contact_id, null)
+                      .catch((err) => toast.apiError(err, "Could not undo."))
+                      .then(() => load())
+                  }
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  Undo
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {truncated && (

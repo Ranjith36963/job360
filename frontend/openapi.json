@@ -4485,6 +4485,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          },
           "edit_history": {
             "additionalProperties": {
               "items": {
@@ -5800,6 +5811,50 @@
           "reason"
         ],
         "title": "DueItemOut",
+        "type": "object"
+      },
+      "DuplicateOut": {
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "duplicate_of": {
+            "title": "Duplicate Of",
+            "type": "integer"
+          },
+          "duplicate_of_name": {
+            "title": "Duplicate Of Name",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_id",
+          "name",
+          "duplicate_of",
+          "duplicate_of_name"
+        ],
+        "title": "DuplicateOut",
+        "type": "object"
+      },
+      "DuplicatesOut": {
+        "properties": {
+          "duplicates": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateOut"
+            },
+            "title": "Duplicates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "duplicates"
+        ],
+        "title": "DuplicatesOut",
         "type": "object"
       },
       "DutyRunIn": {
@@ -9261,6 +9316,24 @@
         "title": "MarkDoneOut",
         "type": "object"
       },
+      "MarkDuplicateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          }
+        },
+        "title": "MarkDuplicateRequest",
+        "type": "object"
+      },
       "MatchEmailCandidateOut": {
         "properties": {
           "application_id": {
@@ -10212,6 +10285,17 @@
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
           },
           "edit_history": {
             "additionalProperties": {
@@ -25970,6 +26054,91 @@
         ]
       }
     },
+    "/api/contacts/{contact_id}/duplicate": {
+      "post": {
+        "description": "S11b \"Duplicate of ...\" / Undo: an appended ``contact_edits`` row (``duplicate_of``); the base row is\nnever touched. A marked person leaves list_people, Needs you and check_outreach. Session only; no MCP twin.",
+        "operationId": "mark_contact_duplicate_api_contacts__contact_id__duplicate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkDuplicateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Contact Duplicate",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/contacts/{contact_id}/outreach": {
       "post": {
         "description": "The one shared door for a contact's outreach ledger \u2014 a drafted\nmessage VERSION, or a ``sent``/``reply`` mark. ``save_artifact``\n(``kind=\"outreach\"`` + ``contact_id``) and ``record_event``\n(``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to\nthe SAME service function this route calls (M5 parity) \u2014 this route is\nthe one door that works for a COLD contact too, since it carries no\n``application_id`` in its URL. A ``client_key`` lives in the key space of\nthe tool that calls this door: ``save_artifact`` for a message version,\n``record_event`` for a sent/reply mark.",
@@ -27893,6 +28062,72 @@
           }
         },
         "summary": "List People",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/people/duplicates": {
+      "get": {
+        "description": "S11b: the people the user marked as duplicates (and who was kept), for the People page's Undo.",
+        "operationId": "list_contact_duplicates_api_people_duplicates_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DuplicatesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Contact Duplicates",
         "tags": [
           "applications"
         ]

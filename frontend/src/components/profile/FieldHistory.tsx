@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { getProfileEditHistory, type ProfileEditHistoryRow } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
-import { actorName, formatEditValue, formatEditedDate } from "@/lib/agent-edits";
+import { actorName, formatEditValue, formatEditedDate, isAssistantActor } from "@/lib/agent-edits";
 
 interface FieldHistoryProps {
   /** One or more editable paths shown as one field (salary = min + max), or
@@ -19,7 +19,44 @@ interface FieldHistoryProps {
   buttonLabel?: string;
 }
 
-type Row = ProfileEditHistoryRow & { path: string };
+type Row = ProfileEditHistoryRow & { path: string; takenBack?: boolean };
+
+/** S11b: an assistant's change followed directly by the user's take-back (a web clear) reads as ONE
+ *  line, "Changed and taken back", with the assistant's value behind a toggle. Structural only: who
+ *  wrote each row and whether it cleared, never the words. `rows` is one path's list, newest first. */
+export function foldTakenBack(rows: Row[]): Row[] {
+  const out: Row[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const back = rows[i];
+    const change = rows[i + 1];
+    const isClear = back.value === null || back.value === undefined;
+    if (isClear && back.set_by === "web" && change && isAssistantActor(change.set_by) && change.value != null) {
+      out.push({ ...change, set_at: back.set_at, takenBack: true });
+      i++;
+    } else {
+      out.push(back);
+    }
+  }
+  return out;
+}
+
+function TakenBackValue({ row }: { row: Row }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <>
+      Changed and taken back{" "}
+      <button
+        type="button"
+        data-testid="field-history-taken-back-toggle"
+        onClick={() => setShown((v) => !v)}
+        className="underline-offset-2 hover:text-foreground hover:underline"
+      >
+        {shown ? "hide value" : "show value"}
+      </button>
+      {shown && <> · {formatEditValue(row.value, row.path)}</>}
+    </>
+  );
+}
 
 /** A small "History" link that opens an inline, newest-first list of every
  * change to one field — the human's own saves and the assistant's edits, one
@@ -44,7 +81,7 @@ export function FieldHistory({ paths, label, pathLabels, buttonLabel }: FieldHis
     try {
       const lists = await Promise.all(
         paths.map(async (path) =>
-          (await getProfileEditHistory(path)).map((r) => ({ ...r, path }))
+          foldTakenBack((await getProfileEditHistory(path)).map((r) => ({ ...r, path })))
         )
       );
       const merged = lists.flat().sort((a, b) => (a.set_at < b.set_at ? 1 : a.set_at > b.set_at ? -1 : 0));
@@ -79,9 +116,13 @@ export function FieldHistory({ paths, label, pathLabels, buttonLabel }: FieldHis
                 <li key={`${r.path}-${r.set_at}-${i}`} data-testid="field-history-row">
                   {actorName(r.set_by)} · {formatEditedDate(r.set_at)} ·{" "}
                   {pathLabels?.[r.path] ? `${pathLabels[r.path]} ` : ""}
-                  {r.value === null || r.value === undefined
-                    ? "cleared"
-                    : formatEditValue(r.value, r.path)}
+                  {r.takenBack ? (
+                    <TakenBackValue row={r} />
+                  ) : r.value === null || r.value === undefined ? (
+                    "cleared"
+                  ) : (
+                    formatEditValue(r.value, r.path)
+                  )}
                 </li>
               ))}
             </ul>

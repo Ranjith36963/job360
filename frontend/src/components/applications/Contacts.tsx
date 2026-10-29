@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { addContact, confirmContact, updateContact } from "@/lib/api";
+import { addContact, confirmContact, markContactDuplicate, updateContact } from "@/lib/api";
 import type { ApplicationDetail, Contact } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { Input } from "@/components/ui/input";
@@ -392,6 +392,16 @@ export function Contacts({
     }
   }, []);
 
+  // S11b: Undo the user's own "Duplicate of" mark (made on the People page).
+  const undoDuplicate = useCallback(async (id: number) => {
+    try {
+      const updated = await markContactDuplicate(id, null);
+      setList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Could not undo the duplicate mark."));
+    }
+  }, []);
+
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
@@ -530,6 +540,19 @@ export function Contacts({
                 added by {addedByLabel(contact.added_by)} ·{" "}
                 {formatDate(contact.created_at)}
               </p>
+              {contact.duplicate_of != null && (
+                <p data-testid="contact-duplicate" className="mt-0.5 font-mono text-[11px] text-faint">
+                  Duplicate of person {contact.duplicate_of}: your assistant will not message them.{" "}
+                  <button
+                    type="button"
+                    data-testid="contact-duplicate-undo"
+                    onClick={() => void undoDuplicate(contact.id)}
+                    className="underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Undo
+                  </button>
+                </p>
+              )}
               {contact.confirmed === false && (
                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
                   <span data-testid="contact-unconfirmed" className="font-mono text-[11px] text-faint">

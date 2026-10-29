@@ -2105,6 +2105,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contacts/{contact_id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Contact Duplicate
+         * @description S11b "Duplicate of ..." / Undo: an appended ``contact_edits`` row (``duplicate_of``); the base row is
+         *     never touched. A marked person leaves list_people, Needs you and check_outreach. Session only; no MCP twin.
+         */
+        post: operations["mark_contact_duplicate_api_contacts__contact_id__duplicate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contacts/{contact_id}/outreach": {
         parameters: {
             query?: never;
@@ -2754,6 +2775,26 @@ export interface paths {
          *     ``company`` keeps only people whose company (or linked job's company) has the same company key as jobs (rule #1).
          */
         get: operations["list_people_api_people_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/people/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Contact Duplicates
+         * @description S11b: the people the user marked as duplicates (and who was kept), for the People page's Undo.
+         */
+        get: operations["list_contact_duplicates_api_people_duplicates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5389,6 +5430,8 @@ export interface components {
             confirmed: boolean;
             /** Created At */
             created_at: string;
+            /** Duplicate Of */
+            duplicate_of?: number | null;
             /** Edit History */
             edit_history?: {
                 [key: string]: components["schemas"]["ContactEditOut"][];
@@ -5944,6 +5987,22 @@ export interface components {
              * @enum {string}
              */
             recipe: "hunt" | "daily" | "batch" | "reach";
+        };
+        /** DuplicateOut */
+        DuplicateOut: {
+            /** Contact Id */
+            contact_id: number;
+            /** Duplicate Of */
+            duplicate_of: number;
+            /** Duplicate Of Name */
+            duplicate_of_name: string;
+            /** Name */
+            name: string;
+        };
+        /** DuplicatesOut */
+        DuplicatesOut: {
+            /** Duplicates */
+            duplicates: components["schemas"]["DuplicateOut"][];
         };
         /** DutyRunIn */
         DutyRunIn: {
@@ -7301,6 +7360,11 @@ export interface components {
              */
             outcome: "done" | "partial" | "failed";
         };
+        /** MarkDuplicateRequest */
+        MarkDuplicateRequest: {
+            /** Duplicate Of */
+            duplicate_of?: number | null;
+        };
         /** MatchEmailCandidateOut */
         MatchEmailCandidateOut: {
             /** Application Id */
@@ -7705,6 +7769,8 @@ export interface components {
             confirmed: boolean;
             /** Created At */
             created_at: string;
+            /** Duplicate Of */
+            duplicate_of?: number | null;
             /** Edit History */
             edit_history?: {
                 [key: string]: components["schemas"]["ContactEditOut"][];
@@ -14212,6 +14278,45 @@ export interface operations {
             };
         };
     };
+    mark_contact_duplicate_api_contacts__contact_id__duplicate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkDuplicateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     record_outreach_api_contacts__contact_id__outreach_post: {
         parameters: {
             query?: never;
@@ -15188,6 +15293,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListPeopleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_contact_duplicates_api_people_duplicates_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicatesOut"];
                 };
             };
             /** @description Validation Error */

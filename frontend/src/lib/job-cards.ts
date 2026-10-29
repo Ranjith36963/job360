@@ -67,6 +67,7 @@ export function linkedinFor(contact: Contact, company: string): string {
 
 /** One contact's newest drafted message, unless it is empty or was marked sent since. */
 export function personToReach(c: Contact, company: string): PersonToReach | null {
+  if (c.duplicate_of != null) return null; // the user marked this person a duplicate (S11b)
   const messages = c.outreach.messages;
   const last = messages[messages.length - 1];
   if (!last || !last.text.trim()) return null;

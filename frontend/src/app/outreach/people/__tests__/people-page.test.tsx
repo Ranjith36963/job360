@@ -4,15 +4,17 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const { listPeople, getPerson, addPerson, apiError, sonnerToast } = vi.hoisted(() => ({
+const { listPeople, getPerson, addPerson, apiError, sonnerToast, listContactDuplicates, markContactDuplicate } = vi.hoisted(() => ({
   listPeople: vi.fn(),
+  listContactDuplicates: vi.fn(),
+  markContactDuplicate: vi.fn(),
   getPerson: vi.fn(),
   addPerson: vi.fn(),
   apiError: vi.fn(),
   sonnerToast: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({ listPeople, getPerson, addPerson }));
+vi.mock("@/lib/api", () => ({ listPeople, getPerson, addPerson, listContactDuplicates, markContactDuplicate }));
 vi.mock("@/lib/toast", () => ({ toast: { apiError } }));
 vi.mock("sonner", () => ({ toast: sonnerToast }));
 
@@ -71,6 +73,8 @@ const P2 = {
 beforeEach(() => {
   vi.clearAllMocks();
   listPeople.mockResolvedValue({ people: [P1, P2], person: null, truncated: false });
+  listContactDuplicates.mockResolvedValue([]);
+  markContactDuplicate.mockResolvedValue({});
 });
 
 async function rows() {
@@ -223,5 +227,32 @@ describe("/people", () => {
     expect(screen.queryByText("No people yet")).toBeNull();
     expect(apiError).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("people-add-toggle")).toBeInTheDocument();
+  });
+
+  it("marks every row of a person as a duplicate of the one kept, after a confirm (S11b)", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<PeopleClient />);
+    const sam = (await rows())[1];
+    await userEvent.selectOptions(within(sam).getByTestId("person-duplicate-of"), "11");
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Mark Sam Okafor as a duplicate of Priya Raman?"));
+    await waitFor(() => expect(markContactDuplicate).toHaveBeenCalledWith(31, 11));
+    await waitFor(() => expect(listPeople).toHaveBeenCalledTimes(2));
+    confirm.mockReturnValue(false);
+    const priya = (await rows())[0];
+    await userEvent.selectOptions(within(priya).getByTestId("person-duplicate-of"), "31");
+    expect(markContactDuplicate).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
+  });
+
+  it("lists marked duplicates with an Undo that clears the mark", async () => {
+    listContactDuplicates.mockResolvedValue([
+      { contact_id: 103, name: "Lucas P.", duplicate_of: 101, duplicate_of_name: "Lucas Pecorino" },
+    ]);
+    render(<PeopleClient />);
+    const row = await screen.findByTestId("people-duplicate-row");
+    expect(row).toHaveTextContent("Lucas P. is a duplicate of Lucas Pecorino (101).");
+    await userEvent.click(within(row).getByTestId("people-duplicate-undo"));
+    await waitFor(() => expect(markContactDuplicate).toHaveBeenCalledWith(103, null));
+    await waitFor(() => expect(listContactDuplicates).toHaveBeenCalledTimes(2));
   });
 });
