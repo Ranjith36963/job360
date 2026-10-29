@@ -718,7 +718,16 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
         (application_id,),
     )
     rows = [dict(r) for r in await cur.fetchall()]
-    superseded_ids = {r["corrects_event_id"] for r in rows if r.get("corrects_event_id") is not None}
+    # S11a: a hide (a work-log move, or a hidden document version) the user undid supersedes nothing.
+    kinds = {r["id"]: r["event_type"] for r in rows}
+    undone = {r["corrects_event_id"] for r in rows if r.get("corrects_event_id") is not None}
+    superseded_ids = {
+        r["corrects_event_id"] for r in rows
+        if r.get("corrects_event_id") is not None and not (
+            r["id"] in undone
+            and (r["event_type"] == "process_log" or kinds.get(r["corrects_event_id"]) == "artifact_saved")
+        )
+    }
     out = []
     for r in rows:
         out.append(
@@ -1406,12 +1415,16 @@ async def latest_artifact(
     "the current one", and the same row ``_resolve_receipt_artifact`` freezes
     into a receipt when the caller names no version.
     """
+    from src.services.applications.hiding import hidden_artifact_ids  # noqa: PLC0415 - it imports this module
+
+    hidden = sorted(await hidden_artifact_ids(db, user_id, application_id))  # S11a: never the current one
+    skip = f"AND id NOT IN ({','.join('?' for _ in hidden)}) " if hidden else ""
     cur = await db._db.execute(
-        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at, "
+        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at, "  # noqa: S608
         "ats_score, ats_notes "
-        "FROM application_artifacts WHERE application_id = ? AND user_id = ? AND kind = ? "
+        f"FROM application_artifacts WHERE application_id = ? AND user_id = ? AND kind = ? {skip}"
         "ORDER BY version_no DESC LIMIT 1",
-        (application_id, user_id, kind),
+        (application_id, user_id, kind, *hidden),
     )
     row = await cur.fetchone()
     return dict(row) if row else None
@@ -1425,6 +1438,10 @@ async def _list_artifacts(db: JobDatabase, application_id: int, *, with_text: bo
         (application_id,),
     )
     rows = [dict(r) for r in await cur.fetchall()]
+    from src.services.applications.hiding import hidden_artifact_ids  # noqa: PLC0415 - it imports this module
+
+    owner = await (await db._db.execute("SELECT user_id FROM applications WHERE id = ?", (application_id,))).fetchone()
+    hidden = await hidden_artifact_ids(db, owner["user_id"], application_id) if owner else set()
     cap_bytes = max(1, settings.EXPORT_HISTORY_MAX_BYTES // 4)
     used = 0
     out = []
@@ -1433,9 +1450,9 @@ async def _list_artifacts(db: JobDatabase, application_id: int, *, with_text: bo
             "id": r["id"], "kind": r["kind"], "version_no": r["version_no"], "made_by": r["made_by"],
             "model": r.get("model"), "profile_version": r.get("profile_version"), "label": r.get("label") or "",
             "chars": r["chars"], "created_at": r["created_at"], "text": None, "truncated": False,
-            "ats_score": r.get("ats_score"), "ats_notes": r.get("ats_notes"),
+            "ats_score": r.get("ats_score"), "ats_notes": r.get("ats_notes"), "hidden": r["id"] in hidden,
         }
-        if with_text:
+        if with_text and not entry["hidden"]:  # S11a: a hidden version's text is read one at a time
             size = len((r["text"] or "").encode("utf-8"))
             if used + size <= cap_bytes:
                 entry["text"] = r["text"]

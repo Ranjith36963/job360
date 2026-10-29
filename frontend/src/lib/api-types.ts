@@ -387,6 +387,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/artifacts/{artifact_id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hide Artifact Version
+         * @description S11a "Hide this version" / "Show again": a web note correcting the version's ``artifact_saved``
+         *     event (or the hide). A hidden version is never the current CV or letter. Session only; no MCP twin.
+         */
+        post: operations["hide_artifact_version_api_applications__application_id__artifacts__artifact_id___action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/auto-email-check": {
         parameters: {
             query?: never;
@@ -624,6 +645,27 @@ export interface paths {
         put?: never;
         /** Record Event */
         post: operations["record_event_api_applications__application_id__events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/events/{event_id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hide Timeline Note
+         * @description S11a "Hide from timeline" / "Show in timeline": a web ``process_log`` correcting one plain note
+         *     (S9's work log), undone by a web note correcting it. Session only; no MCP twin.
+         */
+        post: operations["hide_timeline_note_api_applications__application_id__events__event_id___action__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3912,6 +3954,11 @@ export interface components {
             chars: number;
             /** Created At */
             created_at: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Id */
             id: number;
             /** Kind */
@@ -6459,6 +6506,11 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /** HiddenOut */
+        HiddenOut: {
+            /** Event Id */
+            event_id: number;
         };
         /**
          * InboxCheckedIn
@@ -11163,6 +11215,43 @@ export interface operations {
             };
         };
     };
+    hide_artifact_version_api_applications__application_id__artifacts__artifact_id___action__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                artifact_id: number;
+                action: "hide" | "show";
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HiddenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     auto_email_check_api_applications__application_id__auto_email_check_get: {
         parameters: {
             query?: {
@@ -11568,6 +11657,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hide_timeline_note_api_applications__application_id__events__event_id___action__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                event_id: number;
+                action: "hide" | "show";
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HiddenOut"];
                 };
             };
             /** @description Validation Error */

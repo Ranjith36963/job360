@@ -55,8 +55,8 @@ from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
-from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import (
+    hiding,
     interview_payloads,
     outcome_suggestions,
     plain_words,
@@ -64,6 +64,7 @@ from src.services.applications import (
     queue_preflight,
     spine,
 )
+from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
@@ -543,6 +544,8 @@ class ApplicationArtifactOut(BaseModel):
     # (null when none was given).
     ats_score: Optional[int] = None
     ats_notes: Optional[str] = None
+    # S11a: the user hid this version on the web (never the current one; its text is not listed).
+    hidden: bool = False
 
 
 class ApplicationArtifactRowOut(BaseModel):
@@ -3329,6 +3332,54 @@ async def mark_cv_seen(
     return await _controls(db, user, application_id)
 
 
+class HiddenOut(BaseModel):
+    event_id: int
+
+
+async def _hide_call(db: JobDatabase, user: CurrentUser, application_id: int, run: Any) -> dict[str, Any]:
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    try:
+        return {"event_id": await run}
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post(
+    "/applications/{application_id}/artifacts/{artifact_id}/{action}", response_model=HiddenOut,
+    status_code=201, dependencies=AUTH_FIRST,
+)
+async def hide_artifact_version(
+    application_id: int,
+    artifact_id: int,
+    action: Literal["hide", "show"],
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """S11a "Hide this version" / "Show again": a web note correcting the version's ``artifact_saved``
+    event (or the hide). A hidden version is never the current CV or letter. Session only; no MCP twin."""
+    run = (hiding.hide_artifact if action == "hide" else hiding.show_artifact)(db, user, application_id, artifact_id)
+    return await _hide_call(db, user, application_id, run)
+
+
+@router.post(
+    "/applications/{application_id}/events/{event_id}/{action}", response_model=HiddenOut,
+    status_code=201, dependencies=AUTH_FIRST,
+)
+async def hide_timeline_note(
+    application_id: int,
+    event_id: int,
+    action: Literal["hide", "show"],
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """S11a "Hide from timeline" / "Show in timeline": a web ``process_log`` correcting one plain note
+    (S9's work log), undone by a web note correcting it. Session only; no MCP twin."""
+    run = (hiding.hide_event if action == "hide" else hiding.show_event)(db, user, application_id, event_id)
+    return await _hide_call(db, user, application_id, run)
+
+
 # Statuses at which "Send this one" / "Don't send" no longer make sense: the
 # application is already applied (or further along), or closed. The pre-submit
 # approval step only exists while the status is still `considering`.
@@ -3809,6 +3860,8 @@ async def _record_event(
             _check_submit_mode_event(user, application_id, payload)
         if body.event_type == "answer_corrected":
             _check_answer_corrected(user, application_id, payload)
+        # S11a: a version's artifact_saved event and a hide are corrected only by the user's buttons.
+        await hiding.refuse_correction(db, user.id, application_id, body.corrects_event_id)
         if body.event_type == process_log.PROCESS_LOG:
             await process_log.check(
                 db, user, application_id, payload=payload, source=source,

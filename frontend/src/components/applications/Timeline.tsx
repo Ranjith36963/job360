@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { setHidden } from "@/lib/api";
 import type { ApplicationEvent } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { eventTitle, interviewDetails, offerFigures } from "@/lib/event-detail";
 import { actorLabel } from "@/lib/event-labels";
 import { WhoChip } from "@/components/applications/WhoChip";
@@ -15,8 +17,35 @@ function suggestedQuote(payload: unknown): string {
 /** The whole append-only event log, in `occurred_at` order (spec R3/R11). A
  * superseded event (retired by a correcting event, spec R3) is shown struck
  * through rather than hidden — the log itself never drops a row. */
-export function Timeline({ events }: { events: ApplicationEvent[] }) {
+/** S11a: a plain note the user may hide (S9's work-log rule), or show again once hidden. */
+function hideAction(event: ApplicationEvent): "hide" | "show" | null {
+  if (event.event_type !== "note" || event.corrects_event_id != null || event.source) return null;
+  if (Object.keys(event.payload ?? {}).length > 0) return null;
+  if (event.process) return "show";
+  return event.superseded ? null : "hide";
+}
+
+export function Timeline({
+  events,
+  applicationId,
+  onChanged,
+}: {
+  events: ApplicationEvent[];
+  /** S11a: with both, each plain note gets "Hide from timeline" / "Show in timeline". */
+  applicationId?: number;
+  onChanged?: () => void | Promise<void>;
+}) {
   const [showLog, setShowLog] = useState(false);
+
+  async function toggle(event: ApplicationEvent, action: "hide" | "show") {
+    if (applicationId == null) return;
+    try {
+      await setHidden(applicationId, { eventId: event.id }, action);
+      await onChanged?.();
+    } catch (err) {
+      toast.apiError(err, "Could not change the timeline");
+    }
+  }
   // Process events (the assistant's work log, and notes it moved there) are
   // folded behind one toggle; they are never struck through in the main list.
   const logCount = events.filter((e) => e.process).length;
@@ -59,6 +88,16 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
             </span>
             {event.superseded && (
               <span className="font-mono text-[11px] text-faint">superseded</span>
+            )}
+            {applicationId != null && hideAction(event) && (
+              <button
+                type="button"
+                data-testid="event-hide"
+                onClick={() => void toggle(event, hideAction(event) as "hide" | "show")}
+                className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                {hideAction(event) === "hide" ? "Hide from timeline" : "Show in timeline"}
+              </button>
             )}
           </div>
           {event.detail && (

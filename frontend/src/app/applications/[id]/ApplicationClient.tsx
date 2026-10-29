@@ -350,6 +350,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               receipts={detail.receipts}
               controls={controls}
               onControls={setControls}
+              onChanged={load}
             />
             <div className="mt-4">
               {!hasCvArtifact && (
@@ -383,7 +384,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             </button>
             {historyOpen && (
               <>
-                <Timeline events={detail.events} />
+                <Timeline events={detail.events} applicationId={detail.id} onChanged={load} />
                 <NoteForm applicationId={detail.id} onRecorded={load} />
               </>
             )}

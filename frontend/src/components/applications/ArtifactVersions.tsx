@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { downloadApplicationArtifact, getApplicationArtifact, getArtifactDiff } from "@/lib/api";
+import { downloadApplicationArtifact, getApplicationArtifact, getArtifactDiff, setHidden } from "@/lib/api";
 import type { TailorFormat } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { CopyButton } from "@/components/applications/CopyButton";
@@ -83,6 +83,7 @@ export function ArtifactVersions({
   receipts = [],
   controls = null,
   onControls,
+  onChanged,
 }: {
   applicationId: number;
   artifacts: ApplicationArtifact[];
@@ -90,6 +91,8 @@ export function ArtifactVersions({
   /** S3: the decision state. When given, the LATEST CV shows "I've checked this CV". */
   controls?: ApplicationControls | null;
   onControls?: (next: ApplicationControls) => void;
+  /** S11a: re-read the application after a Hide / Show again. */
+  onChanged?: () => void | Promise<void>;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [texts, setTexts] = useState<Record<number, string>>({});
@@ -160,6 +163,20 @@ export function ArtifactVersions({
       }
     },
     [applicationId]
+  );
+
+  const toggleHidden = useCallback(
+    async (artifact: ApplicationArtifact) => {
+      const hide = !artifact.hidden;
+      if (hide && !window.confirm(`Hide v${artifact.version_no}? Your assistant will not use it. You can show it again.`)) return;
+      try {
+        await setHidden(applicationId, { artifactId: artifact.id }, hide ? "hide" : "show");
+        await onChanged?.();
+      } catch (err) {
+        toast.apiError(err, hide ? "Could not hide this version" : "Could not show this version");
+      }
+    },
+    [applicationId, onChanged]
   );
 
   // Every diff fetch is numbered; a response that is not the newest request
@@ -254,9 +271,22 @@ export function ArtifactVersions({
                           Applied
                         </span>
                       )}
+                      {artifact.hidden && (
+                        <span data-testid="artifact-hidden-badge" className="ml-2 font-mono text-[11px] text-faint">
+                          Hidden by you
+                        </span>
+                      )}
                       <span className="ml-2 text-[12.5px] text-muted-foreground">
                         {describeMadeBy(artifact.made_by)} · {pageCount(artifact.chars)}
                       </span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="artifact-hide"
+                      onClick={() => void toggleHidden(artifact)}
+                      className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      {artifact.hidden ? "Show again" : "Hide this version"}
                     </button>
                     <span className="shrink-0 font-mono text-xs tabular-nums text-faint">
                       {formatDate(artifact.created_at)}
