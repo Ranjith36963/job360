@@ -26,7 +26,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 
 ## B. Auth (full lifecycle)
 > Every route in this section lives under `/api/auth/` — the router is `backend/src/api/routes/auth.py`. Read each path off it; do not infer one from the item text.
-- [ ] 3. Register → 201, `users` row lands, cookie issued
+- [ ] 3. Register → the contract (status, the `users` row, and no session cookie) is `backend/tests/test_auth_routes.py::test_register_creates_user_but_does_not_auto_login`
 - [ ] 4. Email verify — the request, confirm and email-verified routes; enforcement is ON by default and blocks the tailor routes (`tests/test_email_enforcement.py`) — so verify this user before exercising those
 - [ ] 5. Login + session — `GET /api/auth/me` resolves the exact user from the cookie
 - [ ] 6. Password reset **request** → 204 (send is SMTP-conditional)

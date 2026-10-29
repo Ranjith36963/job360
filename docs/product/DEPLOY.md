@@ -71,7 +71,7 @@ railway domain --service backend     # → public API URL
 
 # Frontend service
 railway add --service frontend
-railway variables --service frontend --set "NEXT_PUBLIC_API_URL=https://<backend-url>" ...
+# Frontend vars: the ARG lines in frontend/Dockerfile (never NEXT_PUBLIC_API_URL — see frontend/.env.local.example)
 cd frontend && railway up --service frontend --detach && cd ..
 railway domain --service frontend    # → public site URL
 

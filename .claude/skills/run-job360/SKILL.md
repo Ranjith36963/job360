@@ -15,7 +15,7 @@ description: How to build, launch and sign in to Job360 locally (Postgres, backe
 - Frontend: `cd frontend && npm ci` first.
 
 ## Start
-- Backend, from `backend/`: `python main.py` (127.0.0.1:8000; migrations auto-apply on boot). Not bare `uvicorn`. `./run-backend.sh` wraps it.
+- Backend, from `backend/`: `python main.py` (127.0.0.1:8000; migrations auto-apply on boot). Not bare `uvicorn`. `run-backend.sh` at the repo root wraps it.
 - Frontend dev: `cd frontend && npm run dev` (:3000; `/api/*` proxies to `BACKEND_ORIGIN`, default `http://localhost:8000`).
 - Frontend production build: `npm run build && npm run start`.
 - If `npm run dev` changes `frontend/AGENTS.md`, the installed Next differs from the commit: run `npm ci`. If it still changes, commit the new block (frontend/AGENTS.md says so).

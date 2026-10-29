@@ -42,14 +42,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 - **Read-back** — `get_application` (one job, everything), `export_history` (the whole hunt), `stats`, `list_people`, `list_receipts`, `whats_new`.
 
 ### For you (web app at job360.uk)
-- **Home** — one line on what your assistant did since you were last here, what needs you, your applications ledger, and what is due.
-- **Application page** — the job, fit and visa, every document version with **Copy / Word / PDF**, the ATS opinion, the timeline with who wrote each line, people and messages, receipts, editable job details.
-- **Needs you** — open questions from your assistant, answered in place.
-- **Receipts** — each one a white sheet you can save as a PDF.
-- **Stats** — counts plus reply and interview rates, split by country, where you found the job, how you applied, CV version, role, and where you found the person. Numbers only — your assistant does the judging.
-- **Profile** — what Job360 extracted and what your assistant edited, with history and "take back".
-- **Connect** — the address, per-assistant steps, the inbox mode and frequency, connected apps and personal tokens.
-- Light and dark mode; magic-link or password login.
+Every page and the one question it answers: [`docs/product/VISION.md`](./docs/product/VISION.md) → "Every page has one purpose". Light and dark mode; magic-link or password login.
 
 ### What Job360 deliberately does not do
 - Search, rank, score or recommend jobs.
