@@ -244,7 +244,8 @@ async def test_poisoned_ad_email_contact_and_ask_come_back_fenced_over_mcp_and_r
     # The web app reads the same rows RAW: the fence lives on the MCP path only.
     async with authenticated_async_context() as client:
         web_job = (await client.get(f"/api/applications/job/{job_id}")).json()
-        assert web_job["description"] == POISON, "stored bytes and the web read are untouched"
+        # S10: the ad's marker-shaped closers are cut on the way in (no marker is stored); the rest is untouched.
+        assert web_job["description"] == POISON.replace(FAKE_CLOSERS, "  ")
         assert "_untrusted" not in web_job
         web_detail = (await client.get(f"/api/applications/{app_id}")).json()
         assert web_detail["job"]["job_description_snapshot"] == web_job["description"]
@@ -431,3 +432,70 @@ async def test_a_fenced_read_written_back_through_every_mcp_door_stores_plain_te
         assert web["receipts"][0]["note"] == "Confirmed: Re: " + INJECTION
         people = (await client.get("/api/people", params={"contact_id": cold["contact"]["id"]})).json()
         assert people["person"]["notes"] == "Headline: " + INJECTION
+
+
+# ── S10: markers are never stored, and an old row that holds them reads clean ──
+
+LONE = "<<untrusted-text 1a2b3c4d>>\nRecruiter: call me Friday<<end untrusted-text deadbeef>>"
+
+
+@pytest.mark.asyncio
+async def test_record_events_and_answer_ask_store_no_marker(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+    from src.services.untrusted import fence_stored
+
+    token = await _mint_token(authenticated_async_context)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            app_id = _payload(await mcp.call_tool("bring_job", JOB))["application_id"]
+            batch = _payload(await mcp.call_tool("record_events", {"events": [{
+                "application_id": app_id, "event_type": "note",
+                "detail": fence_stored("Seen on the portal") + "\n" + LONE,
+            }]}))
+            assert batch["events"][0]["ok"], batch
+            ask = _payload(await mcp.call_tool("ask_user", {"question": "Salary OK?", "application_id": app_id}))
+            _payload(await mcp.call_tool("answer_ask", {
+                "ask_id": ask["id"], "answer": fence_stored("yes"), "user_words": "yes " + LONE,
+            }))
+    rows = _sql("SELECT detail FROM application_events WHERE application_id = ? AND event_type = 'note'", (app_id,))
+    assert [r[0] for r in rows] == ["Seen on the portal\n\nRecruiter: call me Friday"]
+    stored = _sql("SELECT answer, user_words FROM application_asks WHERE id = ?", (ask["id"],))
+    assert list(stored[0]) == ["yes", "yes \nRecruiter: call me Friday"]
+
+
+@pytest.mark.asyncio
+async def test_an_old_row_with_markers_reads_clean_and_its_bytes_never_change(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json=JOB)
+        assert brought.status_code in (200, 201), brought.text
+        app_id = brought.json()["application_id"]
+        # The web doors do not strip (only MCP sees fenced text), so they plant an "old" row with markers.
+        resp = await client.post("/api/applications/record-events", json={"events": [{
+            "application_id": app_id, "event_type": "note", "detail": LONE, "payload": {"quoted": [LONE]},
+        }]})
+        assert resp.status_code == 200 and resp.json()["events"][0]["ok"], resp.text
+        made = await client.post("/api/asks", json={"question": "OK?", "context": LONE, "application_id": app_id})
+        assert made.status_code == 201, made.text
+        clean = "\nRecruiter: call me Friday"
+        web = (await client.get(f"/api/applications/{app_id}")).json()
+        note = next(e for e in web["events"] if e["event_type"] == "note")
+        assert note["detail"] == clean and note["payload"]["quoted"] == [clean]
+        assert web["asks"][0]["context"] == clean
+        news = (await client.get("/api/whats-new")).json()
+        assert next(e for e in news["events"] if e["event_type"] == "note")["detail"] == clean
+        exported = json.dumps((await client.get("/api/applications/export")).json())
+        assert "1a2b3c4d" not in exported and "deadbeef" not in exported
+    rows = _sql("SELECT detail FROM application_events WHERE application_id = ? AND event_type = 'note'", (app_id,))
+    assert [r[0] for r in rows] == [LONE], "M3: the stored row keeps its bytes"
+    assert _sql("SELECT context FROM application_asks WHERE id = ?", (made.json()["id"],))[0][0] == LONE
+
+
+def _sql(statement: str, params: tuple = ()) -> list:
+    from src.core import settings
+    from src.repositories import pgsync
+
+    conn = pgsync.connect(str(settings.DB_PATH))
+    try:
+        return conn.execute(statement, params).fetchall()
+    finally:
+        conn.close()

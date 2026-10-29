@@ -56,6 +56,7 @@ from src.services.applications.templates import clean_variant_label
 from src.services.auth import rate_limit
 from src.services.browser_agent import routing as browser_routing
 from src.services.profile import assistant_settings as settings_rules
+from src.services.untrusted import strip_markers, strip_markers_deep
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover — type-only, same reasoning as spine.py
@@ -433,7 +434,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "role": row.get("role") or "",
         "email": row.get("email") or "",
         "linkedin_url": row.get("linkedin_url") or "",
-        "notes": row.get("notes") or "",
+        "notes": strip_markers(row.get("notes") or ""),  # S10: an old row's guard markers, cut on read
         # None when unset (rule #29) — never a default source.
         "found_via": row.get("found_via") or None,
         "source_url": row.get("source_url") or None,
@@ -1081,8 +1082,8 @@ async def _edit_history(db: JobDatabase, user_id: str, contact_id: int) -> dict[
     for r in rows:
         by_field.setdefault(r["field"], []).append(
             {
-                "value": r["value"], "recorded_at": r["recorded_at"], "recorded_by": r["recorded_by"],
-                "is_initial": bool(r.get("is_initial")),
+                "value": strip_markers_deep(r["value"]), "recorded_at": r["recorded_at"],
+                "recorded_by": r["recorded_by"], "is_initial": bool(r.get("is_initial")),
             }
         )
     return by_field
@@ -2173,7 +2174,7 @@ async def _latest_edits_for_user(db: JobDatabase, user_id: str) -> dict[int, dic
     rows = [dict(r) for r in await cur.fetchall()]
     by_contact: dict[int, dict[str, str]] = {}
     for r in rows:
-        by_contact.setdefault(r["contact_id"], {})[r["field"]] = r["value"]
+        by_contact.setdefault(r["contact_id"], {})[r["field"]] = strip_markers_deep(r["value"])  # S10
     return by_contact
 
 

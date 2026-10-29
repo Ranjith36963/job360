@@ -571,7 +571,11 @@ class JobDatabase:
             "cv_text", "cv_origin", "cover_letter_text", "cover_letter_origin",
             "profile_version", "channel", "note", "created_at",
         )
-        return dict(zip(keys, row))
+        out = dict(zip(keys, row))
+        from src.services.untrusted import strip_markers_deep  # noqa: PLC0415 - S10: old rows read clean
+
+        out["note"] = strip_markers_deep(out["note"])
+        return out
 
     async def insert_receipt(
         self,
