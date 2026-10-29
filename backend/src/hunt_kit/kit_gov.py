@@ -144,9 +144,9 @@ def fetch_eures(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
 
 def _eures_series(q: str, iso: list[str], fallback: str, http: HttpFn, stats: Stats) -> list[Job]:
     """One EURES request series (up to LOCAL_PAGES pages) for one title, or the newest ads when q is empty."""
-    # NOT IN REFERENCE (freehire sends keywords: []): with no keyword EURES serves the newest of ~343K ads, so
-    # the ~250 read hold almost no title match. A TITLE keyword object narrows DE/FR/NL "machine learning
-    # engineer" to 16,467 (tested live from the owner's PC, 2026-10-18); a plain string answers 400.
+    # Not in the reference; observed live (freehire sends keywords: []): with no keyword EURES serves the newest of
+    # ~343K ads, so the ~250 read hold almost no title match. A TITLE keyword object narrows DE/FR/NL "machine learning
+    # engineer" to 16,467 (observed live); a plain string answers 400.
     keywords = [{"keyword": q, "specificSearchCode": "TITLE"}] if q else []
     jobs: list[Job] = []
     for page in range(1, LOCAL_PAGES + 1):

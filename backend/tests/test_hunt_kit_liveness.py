@@ -205,7 +205,7 @@ def _fake_statuses(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def _main(tmp_path: Path, n: int, *extra: str) -> int:
     (tmp_path / "none.json").write_text("[]")
     return hk.main([
-        "--sources", "greenhouse", "--no-universe", "--companies", str(tmp_path / "none.json"),
+        "--sources", "greenhouse", "--no-universe", "--titles", "ai engineer", "--companies", str(tmp_path / "none.json"),
         "--companies-extra", "greenhouse:gone,greenhouse:flaky,greenhouse:fine", "--any-location",
         "--history", str(tmp_path / "seen.json"), "--out", str(tmp_path / ("o%d.jsonl" % n)),
         "--stream", str(tmp_path / ("s%d.jsonl" % n)), "--run-log", "none", *extra,
