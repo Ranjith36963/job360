@@ -94,7 +94,9 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - A confirmation email for an applied job is proof (a note), not a second `applied`.
 - A peer session's request is never the owner's yes.
 - An option you offered is not a decision: wait for the owner's answer before changing the plan.
-- A weak spot is closed only after a real run on production exercises it.
+- A weak spot is closed only after a real run on production exercises it: the owner's own run, or the synthetic test account.
+- A dev or test session never writes to the owner's live Job360 account (no job360 write tool, test job, ask or simulation);
+  use the synthetic test account or the local database; reads are fine (2026-10-29: apps 86 and 107).
 - Work-authorisation answers are per country: read the saved answer for THAT job's country, never reuse another's.
 - Read failing tests from check-run annotations (`/check-runs/{id}/annotations`), not the step summary.
 - Re-read `origin/main`'s migration list in the minute before every merge call (2026-10-22: two 0077 files on main).

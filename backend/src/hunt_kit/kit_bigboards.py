@@ -1,10 +1,8 @@
 """LinkedIn, Glassdoor and Google Jobs for the Job360 hunt kit (fourth national-services module).
 
-OWNER DECISION 2026-10-19 (in chat): the script reads these three sites itself, at the low volume below. This
-reverses the 2026-10-14 removal of the big-board reader (PR #816) and the 2026-10-16 rule that only the assistant
-reads LinkedIn. Indeed is NOT here: the only script route into Indeed needs its app's API key copied out of the
-app, which the owner's rule forbids, so Indeed stays with the assistant (README "LinkedIn, Glassdoor, Google
-Jobs and Indeed").
+The script reads these three sites itself, at the low volume below. Indeed is NOT here: the only script
+route into Indeed needs its app's API key copied out of the app, which the kit never does, so Indeed stays
+with the assistant (README "LinkedIn, Glassdoor, Google Jobs and Indeed").
 
 Same contract as ``kit_gov.FEEDS`` / ``kit_regional.FEEDS``: ``fetch_x(queries, http, stats, *, days,
 countries) -> list[Job]``, never raises, networking only through the ``http`` callable the core passes in. A
@@ -78,7 +76,7 @@ _BLOCK = re.compile(
     r"authwall|/uas/login|checkpoint/challenge|captcha|security (?:check|verification)|unusual traffic|/sorry/|"
     r"consent\.google\.com|verify you are (?:a )?human|access denied|just a moment|px-captcha|"
     r"sign in to (?:continue|view)|"
-    # Google's JavaScript challenge page (owner's PC, 2026-10-20: 200, 93 KB, no results markup)
+    # Google's JavaScript challenge page (observed live: 200, 93 KB, no results markup)
     r"/httpservice/retry/enablejs|\bSG_REL\b|\bsg_trbl\b", re.I)
 
 # ISO code -> the place name sent as the location (LinkedIn location=, Glassdoor autocomplete term, Google "near").
@@ -191,7 +189,7 @@ def _remote_word(*parts: str) -> bool | None:
 LI_BASE = "https://www.linkedin.com"
 LI_SEARCH = LI_BASE + "/jobs-guest/jobs/api/seeMoreJobPostings/search"
 LI_PER_PAGE = 10
-# Owner's home PC smoke test 2026-10-20 (docs/product/hunt-kit-smoke-2026-10-20.md): LinkedIn answered 429 on the
+# Observed live: LinkedIn answered 429 on the
 # 10th request at 5 s apart, so a run sends at most 8, at least 8 s apart (the kit's own numbers, NOT IN REFERENCE).
 LI_MAX_REQUESTS = 8
 LI_PAUSE_S = 8.0

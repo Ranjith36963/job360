@@ -1652,7 +1652,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         via: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record YOUR OWN fit judgement for this application — never computed
-        by Job360 (VISION rule 4). Overwrites the current verdict; the log
+        by Job360, which never scores or ranks a job. Overwrites the current verdict; the log
         keeps every past judgement too. A `score` needs `verdict` = your
         one-line reason (1-140 chars) and `score_source`: "full_ad" (you read
         the whole ad), "listing" (only a listing or teaser) or "owner" (the
@@ -2401,7 +2401,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         """Call before any automatic employer email. `kind` = checkin (7 days after
         applying) | feedback_request (after a rejection) | feedback_followup (7 days
         after the request, once). send = the gate is open, no more: you still write in
-        the owner's name, reply in the same thread, then record the checkin_sent /
+        the user's name, reply in the same thread, then record the checkin_sent /
         feedback_asked / feedback_followup_sent event with the exact text. ask = save a
         Gmail draft and ask_user; stop = send nothing. Stop reasons: paused, unknown_kind,
         already_sent, already_skipped, daily_cap_reached, not_due, application_moved_on,
@@ -2428,7 +2428,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`),
         `ghosted_now` (application ids auto-marked ghosted by this call),
         `auto_emails` (on, sent_today, last sends, due, violations: if violations
-        is not empty, send no automatic email and tell the owner),
+        is not empty, send no automatic email and tell the user),
         `silent_after_interview` (interview-stage jobs with no word for over 30 days
         since the last interview_done; confirm with the user before any nudge),
         `interviews` {upcoming, just_passed} (same as whats_new), `connectors` (your last
@@ -2458,7 +2458,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
 
     @mcp.tool()
     async def report_missing_tool(name: str, why: str = "") -> dict[str, Any]:
-        """Tell the owner a tool you needed does not exist; it does nothing else.
+        """Tell the user a tool you needed does not exist; it does nothing else.
         `name` = the tool you wished for, like `list_interviews` (lowercase
         letters, digits and _, 2-60 chars); `why` = one line, at most 280
         characters. Then carry on with what you have, or ask_user."""
@@ -2640,7 +2640,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Every question carries an answer: source profile|memory|cv = the user said it or a saved fact;
         guess|draft = your best guess (consent = Yes, referred by an employee = No) or text you drafted
         from profile facts. Only if you cannot even guess: source not_known, answer empty; any other empty or
-        stand-in answer ("owner to supply") and source none are refused; a guess is never memory. Type a
+        stand-in answer ("user to supply") and source none are refused; a guess is never memory. Type a
         draft only once approved; save approved written answers to user_info.answers with company and topic.
         `question` says exactly what the user must do, with the link. Set job facts yourself (update_job,
         e.g. country); never ask to confirm a fact the profile holds. `kind` = question, or

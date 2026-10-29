@@ -151,10 +151,10 @@ def decide(
         return verdict
     if cfg.auto_employer_emails:
         return AutoVerdict(
-            "send", "auto_on", "Automatic employer emails are on. Write it in the owner's name, same thread."
+            "send", "auto_on", "Automatic employer emails are on. Write it in the user's name, same thread."
         )
     return AutoVerdict(
-        "ask", "auto_off", "Automatic employer emails are off: save a Gmail draft and ask the owner; do not send."
+        "ask", "auto_off", "Automatic employer emails are off: save a Gmail draft and ask the user; do not send."
     )
 
 

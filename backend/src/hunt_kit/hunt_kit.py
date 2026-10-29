@@ -6,9 +6,8 @@ Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio, Teamtailor, Bamboo
 Workday) plus open job feeds (freehire.me, Himalayas, Remotive, Arbeitnow, RemoteOK,
 Jobicy, Working Nomads, We Work Remotely, The Muse, Hacker News "Who is hiring").
 Official keyed APIs (Adzuna, Jooble) run only if you set their env vars.  It never
-reads Indeed or other big job sites (the assistant opens Indeed itself, slowly). Since the owner's
-decision of 2026-10-19 it does read LinkedIn, Glassdoor and Google Jobs, at low volume (kit_bigboards.py;
-README "LinkedIn, Glassdoor, Google Jobs and Indeed").
+reads Indeed (the assistant opens Indeed itself, slowly). It reads LinkedIn, Glassdoor and Google Jobs
+at low volume (kit_bigboards.py; README "LinkedIn, Glassdoor, Google Jobs and Indeed").
 
 It never logs in.  Standard library only (Python 3.10+).  It never ranks or scores:
 it filters by words and sorts newest first.  Your assistant reads each kept job's
@@ -2335,7 +2334,7 @@ def run(args: argparse.Namespace) -> Collector:
     if run_log is not None:
         run_log.col = col  # lets the failure-path snapshot see the live counters
     sources = select_sources(args.sources)
-    queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
+    queries = split_csv(args.titles or "")[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
     # "*" lets the country-gated national services run everywhere when on-site jobs abroad count
     # (--visa-onsite, the default): their ads are then kept only when they say they sponsor a visa.
@@ -2816,7 +2815,7 @@ def board_register(b: dict[str, Any]) -> tuple[str, frozenset[str]]:
     """A board row's official sponsor registers and their countries ("GB-HO,NL-IND", {"GB", "NL"}).
 
     Only a board matched by the employer's own company NAME carries the register into the hunt:
-    a slug-only match can be a different company with the same short name (review 2026-10-19:
+    a slug-only match can be a different company with the same short name (for example
     "Academia Limited" -> Academia.edu's board), so it is searched like any board, never tagged.
     """
     if str(b.get("match") or "") == "slug":
@@ -2855,7 +2854,7 @@ def _track_board(col: Collector, key: str, work: Callable[[], None]) -> None:
 # The idea (a closed verdict set, one proposed change, never edits config) follows career-ops
 # coverage-check.mjs (MIT) :1-11 and its GAPS :40-50; the ATS-from-URL table follows atsFromUrl :54-82
 # (greenhouse, lever, ashby, workable, workday, icims) and, for the other boards the kit reads, the
-# patterns in backend/scripts/harvest_hunt_boards.py (SLUG_PATTERNS, TALEO_RE, ORACLE_RE, WORKDAY_RE).
+# patterns in the board-address tables of the readers (SLUG_PATTERNS, TALEO_RE, ORACLE_RE, WORKDAY_RE).
 # The verdict names are the kit's own (NOT IN REFERENCE).
 WHY_VERDICTS = {
     "not_a_board_url": "a job-search site or aggregator; the kit never reads these",
@@ -2903,7 +2902,7 @@ _FEED_HOSTS = (
     ("tecla", re.compile(r"^(?:app|api)\.tecla\.io$", re.I)),
     ("japandev", re.compile(r"^japan-dev\.com$", re.I)),
     ("bdjobs", re.compile(r"^(?:www\.)?bdjobs\.com$", re.I)),
-    # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
+    # the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
     ("amazon", re.compile(r"(?:^|\.)amazon\.jobs$", re.I)),
@@ -3454,8 +3453,11 @@ def format_stats(col: Collector, skipped_seen: int = 0) -> str:
 def build_parser() -> argparse.ArgumentParser:
     """CLI definition."""
     p = argparse.ArgumentParser(description="Job360 hunt kit: public job boards + open feeds. No logins. No ranking.")
-    p.add_argument("--titles", default=None, help="comma list of job titles to keep (default: AI/LLM/agent titles)")
-    p.add_argument("--exclude-title-words", default=DEFAULT_EXCLUDE, help="comma list of words that drop a title")
+    p.add_argument(
+        "--titles", default=None,
+        help="comma list of job titles to keep (required: the user's target titles from get_profile)",
+    )
+    p.add_argument("--exclude-title-words", default=None, help="comma list of words that drop a title (default: none)")
     p.add_argument("--work-countries", default="", help="ISO2 list where you need NO visa, e.g. IN,PT")
     p.add_argument(
         "--remote",
@@ -3564,6 +3566,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
+    if not args.discover and not args.why_missed and not split_csv(args.titles or ""):
+        print("pass --titles: the user's target titles from get_profile", file=sys.stderr)
+        return 2
+    if args.exclude_title_words is None:
+        args.exclude_title_words = ""  # a run drops only the words the user's level calls for
     if args.discover:
         for hit in discover(split_csv(args.discover)):
             print(json.dumps(hit, ensure_ascii=False))

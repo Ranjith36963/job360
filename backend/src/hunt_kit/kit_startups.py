@@ -268,7 +268,7 @@ def fetch_wellfound(queries: list[str], http: HttpFn, stats: Stats, *, days: int
 # RFC3339, company_name, locations_for_search (take the first plain string, :178; some records hold nested-array
 # garbage), search_path = the canonical job URL, else https://www.workatastartup.com/jobs/<id>; a hit with no id or no
 # company is dropped, :154), :19-20 (a hit carries the full posting: no detail call). WHY NOT RUN BY DEFAULT: the kit
-# takes no key out of a login (the owner's rule that also keeps Indeed with the assistant). The reader therefore sends
+# takes no key out of a login (the rule that also keeps Indeed with the assistant). The reader therefore sends
 # NO request unless the user set WAAS_ALGOLIA_KEY themselves. NOT IN REFERENCE: sending the search title as Algolia
 # ``query`` and reading a second page with ``page`` (freehire sends an empty query and bisects an id window instead;
 # ``query`` and ``page`` are standard Algolia search parameters).
