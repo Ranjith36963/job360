@@ -81,3 +81,31 @@ def test_hunt_recipe_sends_the_assistant_to_the_kit_and_keeps_the_rules():
     assert "never log in for the user or type a password" in hunt
     # A relocation line is not a visa line (owner hunt 2026-10-13).
     assert '"relocation support" alone is not visa sponsorship' in hunt
+
+
+def _word_tokens(text: str) -> list[str]:
+    return [w.strip(".,;:()[]`\"'*") for w in text.split()]
+
+
+def _is_date(word: str) -> bool:
+    parts = word.split("-")
+    return len(parts) == 3 and [len(x) for x in parts] == [4, 2, 2] and all(x.isdigit() for x in parts) and parts[0][:2] == "20"
+
+
+@pytest.mark.asyncio
+async def test_served_readme_and_notice_carry_no_maintainer_text_and_index_hashes_served_bytes():
+    from src.api.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
+        index = (await anon.get("/api/hunt-kit")).json()
+        hashes = {f["name"]: f["sha256"] for f in index["files"]}
+        for name in ("README.md", "NOTICE.md"):
+            got = await anon.get(f"/api/hunt-kit/{name}")
+            assert got.status_code == 200
+            text = got.text
+            assert "<!--" not in text and "-->" not in text, name
+            words = _word_tokens(text)
+            assert "owner" not in [w.lower() for w in words], name
+            assert not [w for w in words if _is_date(w)], name
+            assert "IN REFERENCE" not in text, name
+            assert hashlib.sha256(got.content).hexdigest() == hashes[name]
