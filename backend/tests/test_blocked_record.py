@@ -186,15 +186,16 @@ async def test_blocked_opens_one_ask_dedups_and_unblocked_closes_it(authenticate
         asks = await _open_asks(agent, app_id)
         assert len(asks) == 1
         assert asks[0]["question"] == (
-            "Your assistant got stuck: a CAPTCHA at upload CV on jobs.northwind.example. "
+            "Your assistant got stuck: a CAPTCHA on jobs.northwind.example. "
             "Open the form on jobs.northwind.example, solve the check and press Submit yourself, then mark this resolved."
         )
         # Same reason again while the ask is open: no second ask.
         assert (await _event(agent, app_id, "blocked", _blocked(step="submit"))).status_code == 201
         assert len(await _open_asks(agent, app_id)) == 1
-        # A different reason is a different ask.
+        # A different reason replaces it: one open blocker per job (owner 2026-10-29).
         assert (await _event(agent, app_id, "blocked", _blocked(reason="login_needed"))).status_code == 201
-        assert len(await _open_asks(agent, app_id)) == 2
+        [open_one] = await _open_asks(agent, app_id)
+        assert "sign-in page" in open_one["question"]
         check = await _check(agent, app_id)
         assert (check["decision"], check["reason"]) == ("ask", "blocked")
         assert (await _event(agent, app_id, "unblocked", {"resolution": "skipped"})).status_code == 201
@@ -204,6 +205,20 @@ async def test_blocked_opens_one_ask_dedups_and_unblocked_closes_it(authenticate
         assert (await _event(agent, app_id, "unblocked", {"resolution": "retried"})).status_code == 409
     async with authenticated_async_context() as client:
         assert (await client.get(f"/api/applications/{app_id}/controls")).json()["blocked"] is None
+
+
+@pytest.mark.asyncio
+async def test_unblocked_with_a_developer_note_still_closes_the_ask(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _event(agent, app_id, "blocked", _blocked())).status_code == 201
+        assert len(await _open_asks(agent, app_id)) == 1
+        note = {"resolution": "skipped", "note": "fixed in #12, ran check_submit"}
+        resp = await _event(agent, app_id, "unblocked", note)
+        assert resp.status_code == 201, resp.text
+        assert await _open_asks(agent, app_id) == []
 
 
 # ── the web "Mark resolved" ──────────────────────────────────────────────────

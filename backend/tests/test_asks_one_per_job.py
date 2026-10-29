@@ -118,6 +118,40 @@ async def test_a_sentence_only_ask_is_kept_as_a_row_and_a_blocker_is_its_own_car
 
 
 @pytest.mark.asyncio
+async def test_a_captcha_ask_and_a_login_ask_on_one_job_leave_one_open(authenticated_async_context):
+    """Owner 2026-10-29: every blocker kind is one family; the newest closes the older, in plain words."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        one = (await client.post("/api/asks", json={"question": "Solve the CAPTCHA.", "application_id": app_id,
+                                                    "kind": "captcha"})).json()
+        two = (await client.post("/api/asks", json={"question": "Sign in on the site.", "application_id": app_id,
+                                                    "kind": "login"})).json()
+        assert two["merged_from"] == [one["id"]]
+        [left] = await _open(client, app_id)
+        assert left["id"] == two["id"]
+        detail = await client.get(f"/api/applications/{app_id}")
+        withdrawn = [e for e in detail.json()["events"] if e["event_type"] == "ask_withdrawn"]
+        assert [e["detail"] for e in withdrawn] == ["Replaced by a newer question."]
+
+
+@pytest.mark.asyncio
+async def test_developer_notes_and_internal_codes_are_refused_in_an_ask(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        for text in ("Fixed in #1180, please check", "The gate said cv_not_seen"):
+            resp = await client.post("/api/asks", json={"question": text, "application_id": app_id})
+            assert resp.status_code == 422, text
+        ok = await client.post("/api/asks", json={"question": "Req #12345: approve the CV?",
+                                                  "application_id": app_id})
+        assert ok.status_code == 201, ok.text
+        ask_id = ok.json()["id"]
+        bad = await client.post(f"/api/asks/{ask_id}/withdraw", json={"reason": "see PR 1180"})
+        assert bad.status_code == 422, bad.text
+        good = await client.post(f"/api/asks/{ask_id}/withdraw", json={"reason": "the job closed"})
+        assert good.status_code == 200, good.text
+
+
+@pytest.mark.asyncio
 async def test_a_sentence_only_ask_merged_into_rows_keeps_its_sentence(authenticated_async_context):
     """Review of #1215: a sentence-only ask on a job whose open ask has rows lost its own question."""
     async with authenticated_async_context() as client:

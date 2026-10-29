@@ -135,7 +135,7 @@ _GENERIC = "Check the form on h.example and finish it or tell your assistant wha
 def test_ask_question_tells_the_user_what_to_do(reason, tail):
     q = blocked.ask_question({"reason": reason, "step": "submit", "page_host": "h.example"})
     assert q.startswith("Your assistant got stuck: ")
-    assert " at submit on h.example. " in q
+    assert " on h.example. " in q and " at submit" not in q
     assert q.endswith(tail)
     assert "What should it do?" not in q
 

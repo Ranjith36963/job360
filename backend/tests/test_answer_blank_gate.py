@@ -170,6 +170,9 @@ async def test_an_ask_row_the_assistant_cannot_guess_is_not_known(authenticated_
         stand_in = await _ask(client, app_id, [{"key": "postcode", "question": "Postcode",
                                                 "answer": "unknown, owner to supply", "source": "guess"}])
         assert stand_in.status_code == 422 and "not_known" in stand_in.text
+        user_variant = await _ask(client, app_id, [{"key": "postcode", "question": "Postcode",
+                                                    "answer": "unknown, user to supply", "source": "guess"}])
+        assert user_variant.status_code == 422 and "not_known" in user_variant.text
         with_text = await _ask(client, app_id, [{"key": "postcode", "question": "Postcode", "answer": "E1",
                                                  "source": "not_known"}])
         assert with_text.status_code == 422
