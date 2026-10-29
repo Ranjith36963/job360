@@ -56,6 +56,7 @@ from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
 from src.services.applications import (
+    duplicates,
     hiding,
     interview_payloads,
     outcome_suggestions,
@@ -715,6 +716,8 @@ class ContactOut(BaseModel):
     phone: Optional[str] = None
     links: list[str] = Field(default_factory=list)
     confirmed: bool = False  # the user confirmed this person on the web (web-added = confirmed)
+    # S11b: the user marked this person a duplicate of that contact id on the web (null = not marked).
+    duplicate_of: Optional[int] = None
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     # Owner 2026-10-24 - LINKEDIN_STATES; null = unknown (rule #29).
@@ -2817,6 +2820,47 @@ async def confirm_contact(
         raise AssertionError("unreachable")  # _raise always raises
 
 
+class MarkDuplicateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duplicate_of: Optional[int] = None  # the person to keep; null = Undo
+
+
+class DuplicateOut(BaseModel):
+    contact_id: int
+    name: str
+    duplicate_of: int
+    duplicate_of_name: str
+
+
+class DuplicatesOut(BaseModel):
+    duplicates: list[DuplicateOut]
+
+
+@router.post("/contacts/{contact_id}/duplicate", response_model=ContactOut, dependencies=AUTH_FIRST)
+async def mark_contact_duplicate(
+    contact_id: int,
+    body: MarkDuplicateRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """S11b "Duplicate of ..." / Undo: an appended ``contact_edits`` row (``duplicate_of``); the base row is
+    never touched. A marked person leaves list_people, Needs you and check_outreach. Session only; no MCP twin."""
+    try:
+        return await duplicates.mark(db, user.id, contact_id, actor_for(user), body.duplicate_of)
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+@router.get("/people/duplicates", response_model=DuplicatesOut, dependencies=AUTH_FIRST)
+async def list_contact_duplicates(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the People page's own list (session only)
+) -> dict[str, Any]:
+    """S11b: the people the user marked as duplicates (and who was kept), for the People page's Undo."""
+    return {"duplicates": await duplicates.list_marked(db, user.id)}
+
+
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
 async def update_contact(
     contact_id: int,
@@ -2913,6 +2957,13 @@ async def outreach_check(
         contact = await contacts_service.get_owned_contact(db, user.id, contact_id)
         if contact is None:
             raise SpineError(404, "contact not found")
+        kept = await duplicates.current(db, user.id, contact_id)
+        if kept is not None:  # S11b: the user marked this person a duplicate; never a person to message
+            return {
+                "decision": "stop", "reason": "duplicate_contact", "sent_today": 0,
+                "detail": f"The user marked this person a duplicate of contact {kept}. Do not send to this one.",
+                "daily_max": settings.OUTREACH_AUTO_SENDS_MAX_PER_DAY,
+            }
         now = datetime.now(timezone.utc)
         profile = load_profile(user.id) or UserProfile()
         cfg = settings_rules.effective(profile.assistant_settings)

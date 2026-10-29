@@ -6,11 +6,13 @@ import type { Contact } from "@/lib/api";
 const addContact = vi.fn();
 const updateContact = vi.fn();
 const confirmContact = vi.fn();
+const markContactDuplicate = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   addContact: (...args: unknown[]) => addContact(...args),
   updateContact: (...args: unknown[]) => updateContact(...args),
   confirmContact: (...args: unknown[]) => confirmContact(...args),
+  markContactDuplicate: (...args: unknown[]) => markContactDuplicate(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -364,6 +366,15 @@ describe("Contacts", () => {
     fireEvent.click(screen.getByTestId("contact-confirm"));
     await waitFor(() => expect(confirmContact).toHaveBeenCalledWith(1));
     await waitFor(() => expect(screen.queryByTestId("contact-confirm")).toBeNull());
+  });
+
+  it("a person marked as a duplicate says so, and Undo clears the mark (S11b)", async () => {
+    markContactDuplicate.mockResolvedValue(makeContact({ duplicate_of: null }));
+    render(<Contacts applicationId={42} contacts={[makeContact({ duplicate_of: 7 })]} />);
+    expect(screen.getByTestId("contact-duplicate")).toHaveTextContent("Duplicate of person 7");
+    fireEvent.click(screen.getByTestId("contact-duplicate-undo"));
+    await waitFor(() => expect(markContactDuplicate).toHaveBeenCalledWith(1, null));
+    await waitFor(() => expect(screen.queryByTestId("contact-duplicate")).toBeNull());
   });
 
   it("no Confirm for a confirmed contact", () => {

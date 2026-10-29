@@ -145,6 +145,7 @@ NOT_A_LIST: dict[str, str] = {
     "/api/applications/{application_id}/proof": "one application by id",
     "/api/applications/{application_id}/proof/screenshots/{screenshot_id}": "one screenshot by id",
     "/api/applications/{application_id}/calendar.ics": "one application by id",
+    "/api/people/duplicates": "the user's own duplicate marks, for Undo (S11b); a mark they made stays undoable",
     "/api/schedule/problems": "duty runs, no applications",
     "/api/schedule/status": "duty runs, no applications",
 }

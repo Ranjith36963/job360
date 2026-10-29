@@ -74,6 +74,12 @@ describe("people to reach", () => {
     expect(ids).toEqual([1, 3]);
   });
 
+  it("never lists a person the user marked as a duplicate (S11b)", () => {
+    const drafted = contact({ outreach: { messages: [msg("Hi Ada", "2026-10-20T10:00:00Z")], last_sent: null } });
+    const twin = contact({ id: 2, duplicate_of: 1, outreach: { messages: [msg("Hi", "2026-10-20T10:00:00Z")], last_sent: null } });
+    expect(peopleToReach(detail({ contacts: [drafted, twin] })).map((p) => p.contact.id)).toEqual([1]);
+  });
+
   it("opens the saved LinkedIn profile, else a people search for name and company", () => {
     expect(linkedinFor(contact({ linkedin_url: "https://www.linkedin.com/in/ada" }) as never, "Acme")).toBe("https://www.linkedin.com/in/ada");
     expect(linkedinFor(contact({ linkedin_url: "javascript:alert(1)" }) as never, "Acme")).toBe(

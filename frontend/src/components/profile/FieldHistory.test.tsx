@@ -38,6 +38,26 @@ describe("FieldHistory", () => {
     ]);
   });
 
+  it("folds an assistant change the user took back into one line, value behind a toggle (S11b)", async () => {
+    getProfileEditHistory.mockResolvedValue([
+      { value: null, set_by: "web", set_at: "2026-10-22T16:41:00Z" },
+      { value: "TEST - please take back", set_by: "agent:Claude", set_at: "2026-10-22T16:40:00Z" },
+      { value: null, set_by: "agent:Claude", set_at: "2026-10-19T15:23:00Z" },
+      { value: "Keep it short", set_by: "agent:Claude", set_at: "2026-10-19T15:22:00Z" },
+    ]);
+    render(<FieldHistory label="Notes" paths={["preferences.assistant_notes"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "History of Notes" }));
+    const rows = await screen.findAllByTestId("field-history-row");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringMatching(/^Claude · .*2026 · Changed and taken back show value$/),
+      expect.stringMatching(/^Claude · .*2026 · cleared$/),
+      expect.stringMatching(/^Claude · .*2026 · Keep it short$/),
+    ]);
+    expect(rows[0].textContent).not.toContain("TEST - please take back");
+    fireEvent.click(screen.getByTestId("field-history-taken-back-toggle"));
+    expect(rows[0].textContent).toMatch(/hide value · TEST - please take back$/);
+  });
+
   it("merges several paths into one list, labelled, newest first", async () => {
     getProfileEditHistory.mockImplementation(async (path?: string) =>
       String(path).endsWith("_min")

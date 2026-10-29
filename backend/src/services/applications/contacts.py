@@ -1101,7 +1101,8 @@ def _validators_by_field() -> dict[str, Any]:
 
 async def _count_edits(db: JobDatabase, contact_id: int) -> int:
     cur = await db._db.execute(
-        "SELECT COUNT(*) FROM contact_edits WHERE contact_id = ? AND field <> 'confirmed'", (contact_id,)
+        "SELECT COUNT(*) FROM contact_edits WHERE contact_id = ? AND field NOT IN ('confirmed', 'duplicate_of')",
+        (contact_id,),
     )
     row = await cur.fetchone()
     return int(row[0]) if row else 0
@@ -2119,6 +2120,9 @@ async def _full_contact_view(
     view["confirmed"] = base["added_by"] == _WEB_ACTOR or (
         bool(confirm_edits) and confirm_edits[-1]["value"] == "true"
     )
+    # S11b: the user's web-only "Duplicate of" mark (the newest ``duplicate_of`` row; '' = undone).
+    dup_edits = edits.get("duplicate_of") or []
+    view["duplicate_of"] = _duplicate_of(dup_edits[-1]["value"]) if dup_edits else None
     view["reachable"] = is_reachable(view)
     rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
@@ -2200,6 +2204,13 @@ def _apply_current_fields(row: dict[str, Any], edits: dict[str, str]) -> None:
     if "links" in edits:
         row["links"] = _decode_links(edits["links"])
     row["confirmed"] = row.get("added_by") == _WEB_ACTOR or edits.get("confirmed") == "true"
+    row["duplicate_of"] = _duplicate_of(edits.get("duplicate_of"))
+
+
+def _duplicate_of(value: Any) -> Optional[int]:
+    """S11b (``duplicates.py``): the kept contact's id, or None (never marked, or undone with '')."""
+    text = str(value or "").strip()
+    return int(text) if text.isdigit() else None
 
 
 async def _contacts_by_current_email(db: JobDatabase, user_id: str, email: str) -> list[dict[str, Any]]:
@@ -2335,6 +2346,7 @@ async def list_people(
         for r in rows:
             _apply_current_fields(r, edits_by_contact.get(r["id"], {}))
 
+    rows = [r for r in rows if r.get("duplicate_of") is None]  # S11b: a marked duplicate is not listed
     if exclude_test:
         from src.services.applications.test_marker import test_app_ids  # noqa: PLC0415
 

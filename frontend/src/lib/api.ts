@@ -1336,6 +1336,21 @@ export async function confirmContact(contactId: number): Promise<Contact> {
   return request(`/api/contacts/${contactId}/confirm`, { method: "POST" });
 }
 
+/** The user's own "Duplicate of ..." mark (session only); `null` is Undo. A marked person leaves People and Needs you. */
+export async function markContactDuplicate(contactId: number, duplicateOf: number | null): Promise<Contact> {
+  return request(`/api/contacts/${contactId}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify({ duplicate_of: duplicateOf }),
+  });
+}
+
+export type ContactDuplicate = _Schemas["DuplicateOut"];
+
+/** The people the user marked as duplicates (and who was kept), for the People page's Undo. */
+export async function listContactDuplicates(): Promise<ContactDuplicate[]> {
+  return (await request<_Schemas["DuplicatesOut"]>("/api/people/duplicates")).duplicates;
+}
+
 // ---- Morning check (S5b) ----
 export type MorningCheck = _Schemas["MorningCheckOut"];
 
