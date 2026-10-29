@@ -517,7 +517,10 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     user_words = row.get("user_words") or ""
     confirmed_at = row.get("confirmed_at")
     relayed = bool(answered_at) and row.get("answered_by") != "web" and bool(user_words)
-    return {
+    from src.services.untrusted import strip_markers_deep  # noqa: PLC0415
+
+    # S10: an old row's guard markers are cut on the way out; the row itself is never rewritten.
+    clean: dict[str, Any] = strip_markers_deep({
         "id": row["id"],
         "application_id": row.get("application_id"),
         "job_title": row.get("job_title"),
@@ -553,7 +556,8 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "kind": row.get("kind") or "",
         "questions": _json_or(row.get("questions"), []),
         "answers": _json_or(row.get("answers"), {}),
-    }
+    })
+    return clean
 
 
 _SELECT = (

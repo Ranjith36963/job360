@@ -35,6 +35,7 @@ from src.services.applications.status import (
     status_for_event,
 )
 from src.services.auth import rate_limit
+from src.services.untrusted import strip_markers_deep
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover — type-only; avoids a runtime import of
@@ -724,14 +725,14 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
             {
                 "id": r["id"],
                 "event_type": r["event_type"],
-                "detail": r["detail"],
-                "payload": _display_payload(r["event_type"], r["payload"]),
+                "detail": strip_markers_deep(r["detail"]),
+                "payload": strip_markers_deep(_display_payload(r["event_type"], r["payload"])),
                 "occurred_at": r["occurred_at"],
                 "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"],
                 "corrects_event_id": r["corrects_event_id"],
                 "superseded": r["id"] in superseded_ids,
-                "source": _event_source(r),
+                "source": strip_markers_deep(_event_source(r)),
                 "scheduled_at": r["scheduled_at"] or None,
             }
         )
@@ -2228,6 +2229,7 @@ async def _list_receipts_for_application(
     )
     rows = [dict(r) for r in await cur.fetchall()]
     for row in rows:
+        row["note"] = strip_markers_deep(row.get("note"))  # S10: an old row's guard markers, cut on read
         row["answers"] = _receipt_answers(row.get("answers"))
         row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
         frozen = bool(row.pop("_letter_frozen", None))
@@ -2990,10 +2992,12 @@ async def whats_new(
         events.append(
             {
                 "id": r["id"], "application_id": r["application_id"], "event_type": r["event_type"],
-                "detail": r["detail"], "payload": _display_payload(r["event_type"], r["payload"]),
+                # S10: an old row's guard markers are cut on the way out (the row is never rewritten, M3).
+                "detail": strip_markers_deep(r["detail"]),
+                "payload": strip_markers_deep(_display_payload(r["event_type"], r["payload"])),
                 "occurred_at": r["occurred_at"], "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"], "corrects_event_id": r["corrects_event_id"],
-                "source": _event_source(r), "scheduled_at": r["scheduled_at"] or None,
+                "source": strip_markers_deep(_event_source(r)), "scheduled_at": r["scheduled_at"] or None,
             }
         )
         if r["application_id"] not in seen:
