@@ -302,6 +302,7 @@ _PASTE_RE = re.compile(r"\bpaste\b", re.IGNORECASE)
 READ_FORM_NOTE = (
     "Read this form's free-text questions yourself and draft the answers; do not ask the user to paste them."
 )
+MOVED_TO_LOG_DETAIL = "Moved to the assistant's work log."
 
 
 async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
@@ -311,6 +312,7 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     deleted. Returns how many asks it closed."""
     from src.core.settings import APPLICATION_FOLLOW_UP_CLOSED_STATUSES  # noqa: PLC0415
 
+    await _log_read_form_notes(db, user_id)
     cur = await db._db.execute(
         "SELECT k.id, a.status AS app_status FROM application_asks k JOIN applications a "
         "ON a.id = k.application_id AND a.user_id = k.user_id WHERE k.user_id = ? AND k.answered_at IS NULL "
@@ -366,13 +368,31 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     return closed
 
 
+async def _log_read_form_notes(db: JobDatabase, user_id: str) -> None:
+    """S9 (owner 2026-10-29): READ_FORM_NOTE is an instruction to the assistant, not news for the user. Older
+    ones were written as a ``note``; move each into the work log once, with a ``process_log`` that corrects it
+    (append-only: the note stays). Matched by our own constant, exactly, and our own actor - never by words."""
+    cur = await db._db.execute(
+        "SELECT e.id, e.application_id FROM application_events e WHERE e.user_id = ? AND e.event_type = 'note' "
+        "AND e.recorded_by = ? AND e.detail = ? "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        (user_id, TIDY_ACTOR, READ_FORM_NOTE),
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    for r in await cur.fetchall():
+        await append_event(
+            db, user_id=user_id, application_id=int(r["application_id"]), event_type="process_log",
+            detail=MOVED_TO_LOG_DETAIL, occurred_at=now, recorded_by=TIDY_ACTOR, corrects_event_id=int(r["id"]),
+        )
+
+
 def _rows_of_all(asks_: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [q for a in asks_ for q in _rows_of(a)]
 
 
 async def _drop_paste_rows(db: JobDatabase, user_id: str, ask_id: int, now: str) -> int:
-    """Take the "paste the question" rows off an open ask and leave the job a note to read the form. An ask
-    with no row left closes. Returns 1 when the ask closed, else 0."""
+    """Take the "paste the question" rows off an open ask and leave the job a work-log line (``process_log``,
+    S9) to read the form. An ask with no row left closes. Returns 1 when the ask closed, else 0."""
     ask = await _get_ask(db, user_id, ask_id)
     if ask is None:
         return 0
@@ -381,7 +401,7 @@ async def _drop_paste_rows(db: JobDatabase, user_id: str, ask_id: int, now: str)
     if len(kept) == len(rows):
         return 0
     await append_event(
-        db, user_id=user_id, application_id=int(ask["application_id"]), event_type="note",
+        db, user_id=user_id, application_id=int(ask["application_id"]), event_type="process_log",
         detail=READ_FORM_NOTE, occurred_at=now, recorded_by=TIDY_ACTOR,
     )
     if kept:

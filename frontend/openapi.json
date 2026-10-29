@@ -1082,6 +1082,11 @@
             "title": "Payload",
             "type": "object"
           },
+          "process": {
+            "default": false,
+            "title": "Process",
+            "type": "boolean"
+          },
           "recorded_at": {
             "title": "Recorded At",
             "type": "string"
@@ -18116,6 +18121,11 @@
             "additionalProperties": true,
             "title": "Payload",
             "type": "object"
+          },
+          "process": {
+            "default": false,
+            "title": "Process",
+            "type": "boolean"
           },
           "recorded_at": {
             "title": "Recorded At",

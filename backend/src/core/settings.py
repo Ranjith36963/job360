@@ -400,8 +400,15 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # on Needs you; `outcome_dismissed` {suggestion_event_id} is the user's Ignore. Note-family:
     # neither moves the status. Checked in services/applications/outcome_suggestions.py.
     "outcome_suggested", "outcome_dismissed",
+    # Owner decision 2026-10-29 (S9): the assistant's own work log (a Doctor self-review, a
+    # reach run that found no one). No payload; checked in services/applications/process_log.py.
+    "process_log",
 )
 SIMULATION_EVENT_TYPE = "simulation"
+# S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
+# Read-side only: every row stays, and the export keeps them. A `process_log` that corrects an
+# assistant's own note moves that note into the log the same way (process_log.py).
+APPLICATION_PROCESS_EVENT_TYPES = ("process_log", "kit_read", "ask_withdrawn")
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
 APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())

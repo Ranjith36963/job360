@@ -121,6 +121,8 @@ export const EVENT_LABEL: Record<string, string> = {
   email_drafted: "Email application drafted",
   outcome_suggested: "Outcome suggested (waiting for your OK)",
   outcome_dismissed: "Suggested outcome ignored",
+  // S9 (2026-10-29): the assistant's own work log, hidden from the timeline by type.
+  process_log: "Assistant's work log",
 };
 
 function relayedWords(payload: unknown): boolean {
