@@ -241,6 +241,19 @@ delete a lesson; if one stops being true, say so on its line and why.
   and sponsorship answers belong to one country. Read the saved answer for that
   job's country (the kit or the ask), and never reuse another country's. Even a
   test pick on a live form uses the owner's real answer for that form.
+- 2026-10-29: the owner asked "Batch test of 3 real jobs: nothing submitted?" and
+  found dev sessions had been testing inside his live account: simulation
+  applications 86 and 107, an artifact (20) saved on a real application, lesson
+  252, test asks, a NEGATIVE TEST CV, PR numbers in his application history
+  (events 607 and 647) and "TEST" profile edits. The product then hid them with a
+  word regex that also hid real jobs. **Rule:** a dev or test session never
+  writes to the owner's live Job360 account: no job360 write tool (bring_job,
+  record_event(s), save_*, ask_user, answer_ask, update_*, add_contact, mark_*,
+  browser, check_*, get_application_kit, report_*, whats_due), no test job, ask
+  or simulation. Prove a change on the local stack (docker-compose.dev.yml) or the
+  synthetic account (synthetic@job360.uk); reads are fine. This narrows "a weak
+  spot is closed only after a real run on production": that run is the owner's
+  own, or on the synthetic account.
 
 ## Reference index (open these before "borrowing" anything)
 
@@ -271,7 +284,9 @@ Apify web-fetch tool, before you build. Never cite from memory.
   others: clone them), cite file:line in the PR, and mirror the mechanism.
 - Fixes were "proven" by unit tests, then a real application broke the same
   area in a new way. **Rule:** a weak spot is closed only after a real
-  lifecycle run on production exercises it.
+  lifecycle run on production exercises it. (Amended 2026-10-29: the run is the
+  owner's own, or one on the synthetic test account, never a dev session writing
+  to the owner's account; see the 2026-10-29 lesson under "Real applications".)
 - Known traps were not in the workers' prompts, so each worker rediscovered
   them. **Rule:** every worker prompt starts with "read session-lessons".
 - 2026-10-15: PR #840 failed CI on one line over 120 chars (ruff E501).
