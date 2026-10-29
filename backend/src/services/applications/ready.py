@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications import kit, spine
+from src.services.applications import hiding, kit, spine
 from src.services.applications.kit import _json
 from src.services.applications.test_marker import TEST_APP_SQL
 from src.services.profile import edits as profile_edits
@@ -92,7 +92,7 @@ _CV_TO_APPROVE_SQL = (
     "c.created_at, c.made_by FROM applications a JOIN application_artifacts c "
     "ON c.application_id = a.id AND c.user_id = a.user_id AND c.kind = 'cv' "
     "AND c.version_no = (SELECT MAX(v.version_no) FROM application_artifacts v WHERE v.application_id = a.id "
-    "AND v.user_id = a.user_id AND v.kind = 'cv') "
+    "AND v.user_id = a.user_id AND v.kind = 'cv' {hidden}) "
     "WHERE a.user_id = ? AND a.status = 'considering' "
     "AND NOT EXISTS (SELECT 1 FROM application_receipts r WHERE r.application_id = a.id AND r.user_id = a.user_id) "
     + _NOT_TEST +
@@ -103,7 +103,11 @@ _CV_TO_APPROVE_SQL = (
 async def cv_to_approve(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     """The caller's open applications whose newest CV has no seen mark (``kit.cv_mark_matches``, the
     test the gate's ``cv_not_seen`` uses), newest CV first, at most ``CV_TO_APPROVE_MAX``."""
-    cur = await db._db.execute(_CV_TO_APPROVE_SQL, (user_id, *_TEST_PARAMS, CV_TO_APPROVE_MAX * 4))
+    hidden = sorted(await hiding.hidden_artifact_ids(db, user_id))  # S11a: a hidden CV is not the one to approve
+    skip = f"AND v.id NOT IN ({','.join('?' for _ in hidden)})" if hidden else ""
+    cur = await db._db.execute(
+        _CV_TO_APPROVE_SQL.replace("{hidden}", skip), (*hidden, user_id, *_TEST_PARAMS, CV_TO_APPROVE_MAX * 4)
+    )
     out: list[dict[str, Any]] = []
     for r in await cur.fetchall():
         row = dict(r)

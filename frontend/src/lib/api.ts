@@ -1104,6 +1104,19 @@ export async function markCvSeen(applicationId: number, artifactId?: number): Pr
   });
 }
 
+/** S11a: the user's own "Hide this version" / "Show again" (a CV or letter
+ * version) and "Hide from timeline" / "Show in timeline" (a note). Session
+ * only; each appends one event, nothing is deleted. */
+export async function setHidden(
+  applicationId: number,
+  target: { artifactId: number } | { eventId: number },
+  action: "hide" | "show",
+): Promise<{ event_id: number }> {
+  const path =
+    "artifactId" in target ? `artifacts/${target.artifactId}` : `events/${target.eventId}`;
+  return request(`/api/applications/${applicationId}/${path}/${action}`, { method: "POST" });
+}
+
 /** "Send this one" - the user says yes to sending with the latest CV. `seen`
  * (S5d) names the CV and the fill on screen: if either is no longer the newest
  * the server answers 409 and records nothing. */

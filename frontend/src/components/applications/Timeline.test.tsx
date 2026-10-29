@@ -1,7 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Timeline } from "./Timeline";
 import type { ApplicationEvent } from "@/lib/api";
+
+const setHidden = vi.fn().mockResolvedValue({ event_id: 9 });
+vi.mock("@/lib/api", () => ({ setHidden: (...args: unknown[]) => setHidden(...args) }));
+vi.mock("@/lib/toast", () => ({ toast: { apiError: vi.fn() } }));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -154,5 +158,41 @@ describe("Timeline", () => {
   it("shows no toggle when there are no process events", () => {
     render(<Timeline events={[makeEvent()]} />);
     expect(screen.queryByTestId("work-log-toggle")).toBeNull();
+  });
+});
+
+describe("Timeline — Hide from timeline (S11a)", () => {
+  it("offers Hide on a plain note only, and Show in timeline on a hidden one", async () => {
+    const onChanged = vi.fn();
+    render(
+      <Timeline
+        applicationId={108}
+        onChanged={onChanged}
+        events={[
+          makeEvent({ id: 1, event_type: "applied" }),
+          makeEvent({ id: 2, event_type: "note", detail: "Doctor self-review." }),
+          makeEvent({ id: 3, event_type: "note", payload: { by: "x" } }),
+        ]}
+      />,
+    );
+    const buttons = screen.getAllByTestId("event-hide");
+    expect(buttons.map((b) => b.textContent)).toEqual(["Hide from timeline"]);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(setHidden).toHaveBeenCalledWith(108, { eventId: 2 }, "hide");
+  });
+
+  it("shows a hidden note again from the work log", async () => {
+    render(
+      <Timeline applicationId={108} events={[makeEvent({ id: 5, event_type: "note", process: true })]} />,
+    );
+    fireEvent.click(screen.getByTestId("work-log-toggle"));
+    fireEvent.click(screen.getByTestId("event-hide"));
+    await waitFor(() => expect(setHidden).toHaveBeenCalledWith(108, { eventId: 5 }, "show"));
+  });
+
+  it("shows no hide buttons without an application id", () => {
+    render(<Timeline events={[makeEvent({ event_type: "note" })]} />);
+    expect(screen.queryByTestId("event-hide")).toBeNull();
   });
 });

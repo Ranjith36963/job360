@@ -628,6 +628,11 @@
             "title": "Created At",
             "type": "string"
           },
+          "hidden": {
+            "default": false,
+            "title": "Hidden",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -7214,6 +7219,19 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HiddenOut": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_id"
+        ],
+        "title": "HiddenOut",
         "type": "object"
       },
       "InboxCheckedIn": {
@@ -19869,6 +19887,103 @@
         ]
       }
     },
+    "/api/applications/{application_id}/artifacts/{artifact_id}/{action}": {
+      "post": {
+        "description": "S11a \"Hide this version\" / \"Show again\": a web note correcting the version's ``artifact_saved``\nevent (or the hide). A hidden version is never the current CV or letter. Session only; no MCP twin.",
+        "operationId": "hide_artifact_version_api_applications__application_id__artifacts__artifact_id___action__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "enum": [
+                "hide",
+                "show"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HiddenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hide Artifact Version",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/auto-email-check": {
       "get": {
         "description": "THE one gate before an automatic employer email (feedback loop slice 2).\n\n``kind``: checkin | feedback_request | feedback_followup. Answers ``send`` / ``ask`` / ``stop`` with a\nclosed ``reason`` through ``auto_emails.decide`` (the same function for this route and the MCP\n``check_auto_email`` tool). ``send`` only means the gate is open. Read-only apart from one audit line.\n404 for an application that is not the caller's (rule #12).",
@@ -20759,6 +20874,103 @@
           }
         },
         "summary": "Record Event",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/events/{event_id}/{action}": {
+      "post": {
+        "description": "S11a \"Hide from timeline\" / \"Show in timeline\": a web ``process_log`` correcting one plain note\n(S9's work log), undone by a web note correcting it. Session only; no MCP twin.",
+        "operationId": "hide_timeline_note_api_applications__application_id__events__event_id___action__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "enum": [
+                "hide",
+                "show"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HiddenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hide Timeline Note",
         "tags": [
           "applications"
         ]

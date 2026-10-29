@@ -6,11 +6,13 @@ import type { ApplicationArtifact, ArtifactDiff } from "@/lib/api";
 const getArtifactDiff = vi.fn();
 const getApplicationArtifact = vi.fn();
 const downloadApplicationArtifact = vi.fn();
+const setHidden = vi.fn();
 const toastSuccess = vi.fn();
 vi.mock("@/lib/api", () => ({
   getApplicationArtifact: (...args: unknown[]) => getApplicationArtifact(...args),
   getArtifactDiff: (...args: unknown[]) => getArtifactDiff(...args),
   downloadApplicationArtifact: (...args: unknown[]) => downloadApplicationArtifact(...args),
+  setHidden: (...args: unknown[]) => setHidden(...args),
 }));
 vi.mock("@/lib/toast", () => ({
   toast: { success: (m: string) => toastSuccess(m), apiError: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -31,6 +33,7 @@ function artifact(id: number, version_no: number): ApplicationArtifact {
     created_at: "2026-09-10T00:00:00Z",
     text: null,
     truncated: false,
+    hidden: false,
   };
 }
 
@@ -186,5 +189,39 @@ describe("ArtifactVersions — Copy / Word / PDF", () => {
     await waitFor(() => expect(screen.queryByTestId("artifact-downloading")).toBeNull());
     fireEvent.click(screen.getAllByTestId("artifact-download-pdf")[0]);
     expect(downloadApplicationArtifact).toHaveBeenLastCalledWith(7, 901, "pdf", "cv-v1");
+  });
+});
+
+describe("ArtifactVersions — Hide this version (S11a)", () => {
+  beforeEach(() => setHidden.mockReset().mockResolvedValue({ event_id: 1 }));
+
+  it("hides a version after the user confirms, then re-reads the application", async () => {
+    const onChanged = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ArtifactVersions applicationId={64} artifacts={[artifact(20, 1)]} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId("artifact-hide"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(setHidden).toHaveBeenCalledWith(64, { artifactId: 20 }, "hide");
+    confirm.mockRestore();
+  });
+
+  it("records nothing when the user cancels the confirm", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<ArtifactVersions applicationId={64} artifacts={[artifact(20, 1)]} />);
+    fireEvent.click(screen.getByTestId("artifact-hide"));
+    expect(setHidden).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("marks a hidden version and offers Show again without a confirm", async () => {
+    const onChanged = vi.fn();
+    render(
+      <ArtifactVersions applicationId={64} artifacts={[{ ...artifact(20, 1), hidden: true }]} onChanged={onChanged} />,
+    );
+    expect(screen.getByTestId("artifact-hidden-badge")).toHaveTextContent("Hidden by you");
+    expect(screen.getByTestId("artifact-hide")).toHaveTextContent("Show again");
+    fireEvent.click(screen.getByTestId("artifact-hide"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(setHidden).toHaveBeenCalledWith(64, { artifactId: 20 }, "show");
   });
 });

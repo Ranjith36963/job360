@@ -31,9 +31,11 @@ MOVABLE_TYPES = ("note",)
 
 def logged_in(rows: Iterable[dict[str, Any]]) -> set[int]:
     """The ids a ``process_log`` among ``rows`` corrects (moved into the work log)."""
+    rows = list(rows)
+    undone = {r.get("corrects_event_id") for r in rows}  # S11a: a corrected process_log moves nothing
     return {
         int(r["corrects_event_id"]) for r in rows
-        if r.get("event_type") == PROCESS_LOG and r.get("corrects_event_id") is not None
+        if r.get("event_type") == PROCESS_LOG and r.get("corrects_event_id") is not None and r["id"] not in undone
     }
 
 
@@ -44,7 +46,8 @@ async def logged_ids(db: JobDatabase, user_id: str, event_ids: list[int]) -> set
     marks = ",".join("?" for _ in event_ids)
     cur = await db._db.execute(
         f"SELECT corrects_event_id FROM application_events WHERE user_id = ? AND event_type = ? "  # noqa: S608
-        f"AND corrects_event_id IN ({marks})",
+        f"AND corrects_event_id IN ({marks}) "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = application_events.id)",
         [user_id, PROCESS_LOG, *event_ids],
     )
     return {int(r[0]) for r in await cur.fetchall()}
@@ -69,7 +72,8 @@ async def check(
         return
     cur = await db._db.execute(
         "SELECT e.event_type, e.recorded_by, e.payload, e.corrects_event_id, e.source_message_id, "
-        "EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) AS corrected "
+        "EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id AND NOT EXISTS "
+        "(SELECT 1 FROM application_events u WHERE u.corrects_event_id = c.id)) AS corrected "
         "FROM application_events e WHERE e.id = ? AND e.user_id = ? AND e.application_id = ?",
         (corrects_event_id, user.id, application_id),
     )
