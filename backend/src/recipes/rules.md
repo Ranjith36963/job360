@@ -587,6 +587,7 @@ record_event appends one event to an application's history (append-only).
 it may not be implausibly in the future. A status event (applied/replied/
 interview_*/offer/rejected/withdrawn/ghosted) moves the application's status; a
 note-family event never does.
+`process_log {}` is your own work log (self-review, "no person found; tried ..."); the user's timeline hides it.
 
 Outcome events: `hired` (above offer) and `offer_declined` (closed, shown as
 rejected) are status events; `post_mortem` is a note. Outcome payload keys

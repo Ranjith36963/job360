@@ -1738,8 +1738,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
         Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`),
-        outreach_replied, contact_meeting|_call|_intro, referral_asked|_given, outreach_bounced
-        (bounce id as `source`); no application_id if cold.
+        outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
+        outreach_bounced; no application_id if cold.
 
         Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
@@ -1754,7 +1754,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped, note?}.
-        proof_text {text, page_host}; simulation {} = mark a test (prefer bring_job test); unqueued {reason?};
+        proof_text {text, page_host}; simulation {};
+        process_log {} = your work log (hidden from the user's timeline); unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
