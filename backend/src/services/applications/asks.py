@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
+from src.services.applications import plain_words
 from src.services.applications.spine import SpineError, append_event, get_owned_application
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -87,6 +88,9 @@ CANONICAL_KEYS: dict[str, tuple[str, ...]] = {
 }
 _ALIAS_TO_KEY = {alias: key for key, aliases in CANONICAL_KEYS.items() for alias in aliases}
 QUESTION_FAMILY = ("", "question")  # an older ask without a kind is a question ask
+# Owner 2026-10-29: a job shows ONE blocker at a time, whichever way it is stuck (a CAPTCHA, then a sign-in
+# page, is one problem the user clears on the form), so every blocker kind is one family.
+BLOCKER_FAMILY = tuple(k for k in ASK_KINDS if k not in QUESTION_FAMILY)
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Same banned set spine.validate_source uses (Cc/Zl/Zp + bidi overrides),
@@ -150,7 +154,7 @@ def unanswered_refusal(raw: Any) -> Optional[str]:
         "Every question in an ask carries an answer. Read the form yourself and fill each answer: a fact the "
         "user said or saved = source profile|memory|cv; otherwise draft your best guess, source guess (a choice "
         "or yes/no: data-processing consent = Yes, referred by an employee = No) or draft (free text you wrote). "
-        "Never leave an answer empty, never use source none, never type stand-in text like \"unknown, owner "
+        "Never leave an answer empty, never use source none, never type stand-in text like \"unknown, user "
         "to supply\"; only a question you cannot even guess is source not_known with an EMPTY answer. Never ask "
         "the user to paste or copy question text. Resend the whole ask in one call.",
         f"Valid example question: {json.dumps(_UNANSWERED_EXAMPLE)}",
@@ -257,9 +261,9 @@ def _sentence_row(key: str, text: str) -> dict[str, Any]:
 async def _open_family(
     db: JobDatabase, user_id: str, application_id: int, kind: str, asked_by: str
 ) -> list[dict[str, Any]]:
-    """This job's OPEN asks of the same family as ``kind`` (a question ask, or that one blocker), oldest first.
+    """This job's OPEN asks of the same family as ``kind`` (a question ask, or a blocker of any kind), oldest first.
     An assistant's ask never merges with (or closes) one the user wrote on the web, nor the other way round."""
-    kinds = QUESTION_FAMILY if kind in QUESTION_FAMILY else (kind,)
+    kinds = QUESTION_FAMILY if kind in QUESTION_FAMILY else BLOCKER_FAMILY
     marks = ",".join("?" for _ in kinds)
     side = "k.asked_by = 'web'" if asked_by == "web" else "k.asked_by <> 'web'"
     cur = await db._db.execute(
@@ -274,7 +278,8 @@ async def _open_family(
 async def supersede(
     db: JobDatabase, user_id: str, olds: list[dict[str, Any]], new_id: int, now: str, actor: str
 ) -> None:
-    """Close ``olds`` as replaced by ask ``new_id`` (append-only: they stay, withdrawn by "superseded")."""
+    """Close ``olds`` as replaced by ask ``new_id`` (append-only: they stay, withdrawn by "superseded").
+    The stored reason keeps the id for the record; the timeline line the user reads does not (owner 2026-10-29)."""
     for old in olds:
         reason = f"replaced by ask {new_id}"
         await db._db.execute(
@@ -285,12 +290,13 @@ async def supersede(
         if old["application_id"] is not None:
             await append_event(
                 db, user_id=user_id, application_id=int(old["application_id"]), event_type="ask_withdrawn",
-                detail=f"Why: {reason}. Asked: {old['question']}"[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
+                detail=SUPERSEDED_DETAIL,
                 payload={"ask_id": int(old["id"]), "reason": reason}, occurred_at=now, recorded_by=actor,
             )
 
 
 TIDY_ACTOR = "system"
+SUPERSEDED_DETAIL = "Replaced by a newer question."
 # A row that asks the user to paste the form's own question: the assistant reads the form itself (owner 2026-10-25).
 _PASTE_RE = re.compile(r"\bpaste\b", re.IGNORECASE)
 READ_FORM_NOTE = (
@@ -323,7 +329,7 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
         if r["app_status"] in APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
             closed_job.append(ask)
             continue
-        family = "question" if ask["kind"] in QUESTION_FAMILY else ask["kind"]
+        family = "question" if ask["kind"] in QUESTION_FAMILY else "blocker"
         side = "web" if ask["asked_by"] == "web" else "assistant"
         groups.setdefault((int(ask["application_id"]), family, side), []).append(ask)
     dupes = {k: v for k, v in groups.items() if len(v) > 1}
@@ -622,6 +628,8 @@ async def create_ask(
     clean_ctx = clean_text(context)
     if len(clean_ctx) > settings.ASKS_CONTEXT_MAX_CHARS:
         raise SpineError(422, f"context exceeds ASKS_CONTEXT_MAX_CHARS ({settings.ASKS_CONTEXT_MAX_CHARS} chars)")
+    if (talk := plain_words.refusal(clean_q, clean_ctx, *(q["question"] for q in clean_qs))) is not None:
+        raise SpineError(422, talk)
     app_row = await get_owned_application(db, user_id, application_id) if application_id is not None else None
     if application_id is not None and app_row is None:
         raise SpineError(404, "application not found")
@@ -862,6 +870,8 @@ async def withdraw_ask(
     asked (403 otherwise), and only with a ``reason`` (422 when empty). The
     reason is stored on the ask and shown on the application's timeline."""
     clean_reason = clean_withdraw_reason(reason)
+    if (talk := plain_words.refusal(clean_reason)) is not None:
+        raise SpineError(422, talk)
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
         raise SpineError(404, "ask not found")

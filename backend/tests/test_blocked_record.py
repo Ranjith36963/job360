@@ -186,15 +186,16 @@ async def test_blocked_opens_one_ask_dedups_and_unblocked_closes_it(authenticate
         asks = await _open_asks(agent, app_id)
         assert len(asks) == 1
         assert asks[0]["question"] == (
-            "Your assistant got stuck: a CAPTCHA at upload CV on jobs.northwind.example. "
+            "Your assistant got stuck: a CAPTCHA on jobs.northwind.example. "
             "Open the form on jobs.northwind.example, solve the check and press Submit yourself, then mark this resolved."
         )
         # Same reason again while the ask is open: no second ask.
         assert (await _event(agent, app_id, "blocked", _blocked(step="submit"))).status_code == 201
         assert len(await _open_asks(agent, app_id)) == 1
-        # A different reason is a different ask.
+        # A different reason replaces it: one open blocker per job (owner 2026-10-29).
         assert (await _event(agent, app_id, "blocked", _blocked(reason="login_needed"))).status_code == 201
-        assert len(await _open_asks(agent, app_id)) == 2
+        [open_one] = await _open_asks(agent, app_id)
+        assert "sign-in page" in open_one["question"]
         check = await _check(agent, app_id)
         assert (check["decision"], check["reason"]) == ("ask", "blocked")
         assert (await _event(agent, app_id, "unblocked", {"resolution": "skipped"})).status_code == 201

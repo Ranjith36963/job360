@@ -162,10 +162,10 @@ ASK_KIND_FOR_REASON: dict[str, str] = {
 
 
 def ask_question(stored: dict[str, Any]) -> str:
-    step = stored.get("step") or "a step"
+    # Owner 2026-10-29: no step name in the words the user reads ("at open_form"); it stays in the payload.
     host = stored.get("page_host") or "the job site"
     reason = stored["reason"]
-    return f"Your assistant got stuck: {BLOCKED_REASONS[reason]} at {step} on {host}. " + _USER_TODO.get(
+    return f"Your assistant got stuck: {BLOCKED_REASONS[reason]} on {host}. " + _USER_TODO.get(
         reason, "Check the form on {host} and finish it or tell your assistant what to do."
     ).format(host=host)
 

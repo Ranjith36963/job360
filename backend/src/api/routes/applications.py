@@ -56,7 +56,7 @@ from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
 from src.services.applications import inbox_items as inbox_items_service
-from src.services.applications import interview_payloads, outcome_suggestions, queue_preflight, spine
+from src.services.applications import interview_payloads, outcome_suggestions, plain_words, queue_preflight, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
@@ -77,6 +77,14 @@ router = APIRouter(tags=["applications"])
 
 def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _refuse_dev_talk(*texts: Optional[str]) -> None:
+    """422 when a caller-written note cites a PR or issue number (owner 2026-10-29). A route-level check, so
+    the MCP tool that calls the route function inherits it (M5); text Job360 writes itself never passes here."""
+    for text in texts:
+        if (talk := plain_words.dev_talk(text)) is not None:
+            raise HTTPException(status_code=422, detail=talk)
 
 
 # Optional fields added after keys were first stored: left out while unset, so an old key still matches.
@@ -2669,6 +2677,8 @@ async def _add_contact_once(
     """Both contact doors (per-application and ``POST /contacts``) share one
     ``add_contact`` key space: the key body always names ``application_id``."""
 
+    _refuse_dev_talk(body.notes)
+
     async def _write() -> dict[str, Any]:
         try:
             result = await contacts_service.add_contact(
@@ -2762,6 +2772,9 @@ async def add_contacts_batch(
             detail = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
             bad.append({"index": i, "status": 422, "detail": detail})
             continue
+        if (talk := plain_words.dev_talk(model.notes)) is not None:
+            bad.append({"index": i, "status": 422, "detail": talk})
+            continue
         valid.append({"index": i, **model.model_dump()})
     try:
         result = await contacts_service.add_contacts_batch(
@@ -2799,6 +2812,7 @@ async def update_contact(
     every provided field appends a ``contact_edits`` row (S12 — the base row
     is never touched); the response is the CURRENT view (base + latest edit
     per field) plus the full history. A foreign/unknown id reads 404 (S2)."""
+    _refuse_dev_talk(body.notes)
     try:
         return await contacts_service.update_contact(
             db, user.id, contact_id, actor_for(user),
@@ -3682,6 +3696,7 @@ async def record_event(
 async def _record_event(
     application_id: int, body: RecordEventRequest, db: JobDatabase, user: CurrentUser
 ) -> dict[str, Any]:
+    _refuse_dev_talk(body.detail)  # every caller-written detail, agent and web alike (owner 2026-10-29)
     try:
         if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
             raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
@@ -4024,6 +4039,7 @@ async def record_application_receipt(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    _refuse_dev_talk(body.note, body.confirmation)
     try:
         fields_filled = body.clamp_fields_filled()
         applied_at = spine.parse_occurred_at(body.applied_at, field="applied_at") if body.applied_at else None
