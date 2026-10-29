@@ -369,18 +369,19 @@ def proof_label(p: dict[str, Any]) -> str:
 
 async def proof_missing(db: JobDatabase, user_id: str, now: datetime) -> list[dict[str, Any]]:
     """Applied jobs with no proof after ``PROOF_NO_PROOF_AFTER_DAYS`` and no ask about it yet, oldest first."""
+    from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
+
     days = settings.PROOF_NO_PROOF_AFTER_DAYS
+    test_sql, test_params = TEST_APP_SQL("a")  # a test application needs no proof
     cur = await db._db.execute(
-        "SELECT e.application_id, MIN(e.occurred_at), a.job_company FROM application_events e "
+        "SELECT e.application_id, MIN(e.occurred_at), a.job_company FROM application_events e "  # noqa: S608
         "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
         "WHERE e.user_id = ? AND a.status = 'applied' AND e.event_type = 'applied' AND e.occurred_at <= ? "
         "AND e.id NOT IN "
         "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL) "
-        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
-        "AND s.user_id = e.user_id AND s.event_type = ? AND s.id NOT IN "
-        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL)) "
+        f"AND NOT {test_sql} "
         "GROUP BY e.application_id, a.job_company ORDER BY MIN(e.occurred_at), e.application_id",
-        (user_id, (now - timedelta(days=days)).isoformat(), user_id, settings.SIMULATION_EVENT_TYPE, user_id),
+        (user_id, (now - timedelta(days=days)).isoformat(), user_id, *test_params),
     )
     applied = [tuple(r) for r in await cur.fetchall()]
     if not applied:

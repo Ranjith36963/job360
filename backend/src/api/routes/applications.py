@@ -2980,7 +2980,9 @@ async def list_people(
     (message versions, sent/reply marks, detail-edit history), never merged.
     ``company`` keeps only people whose company (or linked job's company) has the same company key as jobs (rule #1)."""
     try:
-        return await contacts_service.list_people(db, user.id, contact_id=contact_id, email=email, company=company)
+        return await contacts_service.list_people(
+            db, user.id, contact_id=contact_id, email=email, company=company, exclude_test=True
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
