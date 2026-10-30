@@ -112,3 +112,37 @@ async def test_a_routine_for_one_job_takes_only_its_own(authenticated_async_cont
             again = (await agent.get("/api/schedule/due", params={"duties": ["hunt"]})).json()
             assert (again["nothing_due"], again["held_by_running"]) == (True, ["hunt"])  # never a silent nothing
             assert (await agent.get("/api/schedule/due", params={"duties": ["nap"]})).status_code == 422
+
+
+
+@pytest.mark.asyncio
+async def test_a_duty_is_stamped_when_its_run_started(migrated_db_path):
+    """Prod 2026-10-30: a hunt woke 20:11, ended 20:26, so the 21:11 wake read "not due" and the hourly hunt
+    ran every two hours. mark_done stamps the duty with its run's claim (the start), not the end."""
+    from src.repositories import pg as _pg
+    from src.repositories.database import JobDatabase
+
+    async with _pg.connect(migrated_db_path) as conn:
+        await conn.execute("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                           ("u-start", "start@example.com", "!", NOW.isoformat()))
+        await conn.commit()
+    db = JobDatabase(migrated_db_path)
+    await db.init_db()
+    try:
+        woke = NOW.replace(minute=11)
+        assert await schedule.claim(db, "u-start", ["hunt"], woke) == {"hunt"}
+        await schedule.mark(db, "u-start", "hunt", woke + timedelta(minutes=15))
+        assert (await schedule.load_stamps(db, "u-start"))["hunt"] == woke
+        next_wake = woke + timedelta(hours=1, minutes=1)
+        due = schedule.due_now(_facts(stamps={"hunt": woke}), next_wake)
+        assert [d["duty"] for d in due["due"]] == ["hunt"]
+        # a claim older than a run can last is not this run's start: stamped at mark_done
+        old = NOW - timedelta(hours=5)
+        assert await schedule.claim(db, "u-start", ["hunt"], old) == {"hunt"}
+        await schedule.mark(db, "u-start", "hunt", NOW)
+        assert (await schedule.load_stamps(db, "u-start"))["hunt"] == NOW
+        # no claim at all: stamped at mark_done
+        await schedule.mark(db, "u-start", "hunt", NOW + timedelta(minutes=1))
+        assert (await schedule.load_stamps(db, "u-start"))["hunt"] == NOW + timedelta(minutes=1)
+    finally:
+        await db.close()

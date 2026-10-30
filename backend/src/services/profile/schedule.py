@@ -63,6 +63,8 @@ BACKOFF_CAP_HOURS = 24
 # lands a few minutes after the next wake and the duty skipped a whole hour (prod 2026-10-25: hunt done
 # 19:15, wake 20:12 read nothing due). A duty this close to its time counts as due now.
 DUE_GRACE = timedelta(minutes=10)
+# A run's claim this old or older is not taken as the start of the run marking done now.
+_RUN_START_MAX_AGE = timedelta(hours=3)
 FAILURE_CARD_AT = 3
 # The plain words a problem card shows: what happened, and what the user can do.
 REASON_WORDS: dict[str, tuple[str, str]] = {
@@ -298,12 +300,30 @@ async def mark(
     ``application_ids`` (already checked to be this user's) unless the run failed."""
     stamp = now.astimezone(timezone.utc).isoformat()
     failed = outcome == "failed"
+    cur = await db._db.execute(
+        "SELECT done_at FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, RUNNING + duty)
+    )
+    row = await cur.fetchone()
+    started: Optional[datetime] = None
+    if row is not None:
+        try:
+            started = datetime.fromisoformat(str(dict(row)["done_at"]))
+        except ValueError:
+            started = None
+    if started is not None and started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if started is not None and not (now - _RUN_START_MAX_AGE <= started <= now):
+        started = None  # a stale claim (a run that never marked done) is not this run's start
+    # Prod 2026-10-30: a hunt that woke at 20:11 and ended 20:26 was due again at 21:26, so the 21:11 wake
+    # read "not due" and the duty ran every two hours. The duty is stamped when its run STARTED (its claim),
+    # so an hourly duty is due at the next hourly wake; the run's end still frees the claim below.
+    duty_stamp = started.astimezone(timezone.utc).isoformat() if started is not None else stamp
     await db._db.execute(
         "INSERT INTO assistant_duty_runs (user_id, duty, done_at, outcome, reason, failures) VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, outcome = EXCLUDED.outcome, "
         "reason = EXCLUDED.reason, "
         "failures = CASE WHEN EXCLUDED.outcome = 'failed' THEN assistant_duty_runs.failures + 1 ELSE 0 END",
-        (user_id, duty, stamp, outcome, reason, 1 if failed else 0),
+        (user_id, duty, duty_stamp, outcome, reason, 1 if failed else 0),
     )
     await db._db.execute(  # the run is over: the duty is free for the next run
         "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, RUNNING + duty)
