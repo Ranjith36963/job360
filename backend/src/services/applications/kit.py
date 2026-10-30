@@ -1166,6 +1166,7 @@ def _clean_answer(item: Any) -> dict[str, str]:
     if len(answer) > settings.USER_INFO_ANSWER_MAX_CHARS:
         raise SpineError(422, f"an answer is over {settings.USER_INFO_ANSWER_MAX_CHARS} characters")
     _refuse_description(question, answer, str(item["source"]))
+    _refuse_label_answer(question, answer)
     clean = {"question": question, "answer": answer, "source": str(item["source"])}
     if "key" in texts:
         key = spine._strip_control_chars(texts["key"], keep="").strip()
@@ -1173,6 +1174,33 @@ def _clean_answer(item: Any) -> dict[str, str]:
             raise SpineError(422, f"answer key must be 1 to {ANSWER_KEY_MAX} characters")
         clean["key"] = key
     return clean
+
+
+# 2026-10-29 (application 130, "Mission essay" saved as "drafted from profile facts (see typed text)"): an answer
+# that is only a LABEL for the text. Any source, short answers only; "drafted" alone or "drafted from/using/per"
+# only, so a real "Drafted 3 grant bids" is kept. Compared by words (punctuation -> space), never by a regex on
+# caller text. "Yes", "London", "2 years" are not here.
+_LABEL_ANSWER_MAX_CHARS = 120
+_LABEL_ANSWER_STARTS: tuple[tuple[str, ...], ...] = (
+    ("drafted", "from"), ("drafted", "using"), ("drafted", "per"), ("metrics", "from", "cv"),
+    ("see", "typed", "text"), ("see", "cv"), ("see", "profile"),
+    ("as", "typed"), ("from", "profile"), ("from", "cv"), ("tbd",), ("placeholder",), ("answer", "here"),
+)
+
+
+def _refuse_label_answer(question: str, answer: str) -> None:
+    """422 when an answer is a label ("drafted from profile", "see typed text", "<answer>") not the typed text."""
+    if not answer or len(answer) > _LABEL_ANSWER_MAX_CHARS:
+        return
+    if answer.lower() == "<answer>":
+        words = ["placeholder"]
+    else:
+        words = "".join(c if c.isalnum() else " " for c in answer.lower()).split()
+    if words == ["drafted"] or any(tuple(words[: len(start)]) == start for start in _LABEL_ANSWER_STARTS):
+        raise SpineError(422, (
+            f'answer for "{question[:80]}" is a label, not the text ("{answer[:60]}"): '
+            "retype the field with the exact full text you typed into it, word for word"
+        ))
 
 
 def _refuse_description(question: str, answer: str, source: str) -> None:
