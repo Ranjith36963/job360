@@ -128,3 +128,80 @@ async def test_the_mcp_tool_passes_outcome_and_reason(authenticated_async_contex
             assert (await client.get("/api/schedule/due")).json()["failures_in_row"]["inbox"] == 1
     finally:
         m._current_user.reset(token)
+
+
+# ── Owner 2026-10-30: needs_user does not end a batch run while a queued job needs no owner input ──────────
+
+
+async def _queued_job(client: AsyncClient, n: int) -> int:
+    resp = await client.post("/api/jobs/bring", json={
+        "title": f"Data Engineer {n}", "company": f"Northwind {n}", "location": "Remote", "queue": True,
+        "apply_url": f"https://northwind.example/careers/{n}", "description": "Build the pipelines. " * 8,
+    })
+    assert resp.status_code == 200 and resp.json()["queued"] is True, resp.text
+    return int(resp.json()["application_id"])
+
+
+async def _stop_batch(client: AsyncClient, **body: Any):
+    return await client.post("/api/schedule/done", json={
+        "duty": "batch", "outcome": "partial", "reason": "needs_user", **body})
+
+
+@pytest.mark.asyncio
+async def test_needs_user_is_refused_while_a_queued_job_needs_no_owner_input(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        first, second = await _queued_job(client, 1), await _queued_job(client, 2)
+        refused = await _stop_batch(client)
+        assert refused.status_code == 409, refused.text
+        detail = refused.json()["detail"]
+        assert "2 queued jobs still need no owner input" in detail
+        assert f"next: application {first} (Northwind 1)" in detail and str(second) in detail
+        # a form filled on the first row moves "next" to the second
+        filled = await client.post(f"/api/applications/{first}/events", json={
+            "event_type": "form_filled", "payload": {"form_url": "https://northwind.example/careers/1/apply",
+                                                     "fields_count": 3}})
+        assert filled.status_code == 201, filled.text
+        again = await _stop_batch(client)
+        assert again.status_code == 409 and f"next: application {second} (Northwind 2)" in again.json()["detail"]
+        assert "1 queued jobs" in again.json()["detail"]
+        # an open ask on the second row: now every queued job waits on the owner or is filled
+        ask = await client.post("/api/asks", json={"question": "Notice period?", "application_id": second})
+        assert ask.status_code in (200, 201), ask.text
+        ok = await _stop_batch(client)
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["outcome"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_job_no_longer_blocks_the_needs_user_stop(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id = await _queued_job(client, 3)
+        assert (await _stop_batch(client)).status_code == 409
+        stuck = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "blocked", "payload": {"reason": "captcha", "page_host": "jobs.northwind.example"}})
+        assert stuck.status_code == 201, stuck.text
+        assert (await _stop_batch(client)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_only_batch_partial_needs_user_is_ever_refused(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        await _queued_job(client, 4)
+        assert (await _stop_batch(client)).status_code == 409
+        for body in (
+            {"duty": "batch", "outcome": "done"},
+            {"duty": "batch", "outcome": "partial", "reason": "rate_limited"},
+            {"duty": "batch", "outcome": "failed", "reason": "needs_user"},
+            {"duty": "batch", "outcome": "partial", "reason": "no_work"},
+            {"duty": "batch", "outcome": "partial", "reason": "network_blocked"},
+            {"duty": "hunt", "outcome": "partial", "reason": "needs_user"},
+            {"duty": "inbox", "outcome": "partial", "reason": "needs_user"},
+        ):
+            resp = await client.post("/api/schedule/done", json=body)
+            assert resp.status_code == 200, (body, resp.text)
+            assert resp.json()["duty"] == body["duty"] and resp.json()["outcome"] == body["outcome"]

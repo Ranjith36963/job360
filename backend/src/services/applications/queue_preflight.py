@@ -117,6 +117,33 @@ async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tupl
     return sorted(fifo_ids, key=lambda i: (i in waiting, i in filled)), waiting
 
 
+async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+    """Queued rows a run can still work with NO owner input (2026-10-30), oldest queued first: Job360's own
+    browser runs them, no live hold, no open ask, no open block and no ``form_filled`` yet. Scoped by
+    ``user_id``; read-only. ``[{"id", "company"}]``."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    open_ids = await schedule._open_queue_ids(db, user_id)
+    if not open_ids:
+        return []
+    queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
+    ids = sorted(open_ids, key=lambda i: (str(queued_at.get(i) or ""), i))
+    skip = await _open_ask_apps(db, user_id, ids) | await _filled_apps(db, user_id, ids)
+    skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
+    skip |= set(await blocked_service.open_blocks(db, user_id, ids))
+    todo = [i for i in ids if i not in skip]
+    browsers = await queue_browsers(db, user_id, todo)
+    todo = [i for i in todo if browsers.get(i, {}).get("kind") == "job360"]
+    if not todo:
+        return []
+    cur = await db._db.execute(
+        f"SELECT id, job_company FROM applications WHERE user_id = ? AND id IN ({_marks(todo)})",  # noqa: S608
+        [user_id, *todo],
+    )
+    names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
+    return [{"id": i, "company": names.get(i, "")} for i in todo]
+
+
 def _days_since(iso: Optional[str], now: datetime) -> Optional[int]:
     if not iso:
         return None
