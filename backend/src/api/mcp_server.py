@@ -1025,17 +1025,17 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
         the application id to work against. It never judges fit: record your verdict
-        with `save_fit`. Bringing the same title+company
+        with `save_fit`. Same title+company
         again returns the existing job (existing=true); a different link/location/country
-        is a 409 saying what to do. Never use this to search.
+        is a 409. Never use this to search.
 
         Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
         `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`.
         If the ad is silent, leave it out.
 
-        Job facts (pass them whenever you know them): `country` = the job's ISO alpha-2 code ("FR", "US"),
-        `remote` = true/false, `found_on` = where the ad was found — one of
+        Job facts (pass when known): `country` = the job's ISO alpha-2 code ("FR", "US"),
+        `remote` = true/false, `found_on` = one of
         "indeed", "linkedin", "company_careers", "job_board", "referral",
         "visa_sponsor_list", "pasted_by_user", "other". Fix them later with update_job.
 
@@ -1053,7 +1053,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         "user_paste"; `queue`=true puts it in the batch.
         `listed_people` (max 10): people the ad names (hiring team), each {"name", "role",
         "linkedin_url"}; saved as this job's contacts, found_via "job_ad".
-        `known_people`: see rules. `client_key`: retry = first reply."""
+        `known_people`: see rules. `client_key`: retry = first reply.
+        `duplicate_of` = id of your open application for that role: nothing new made."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         description, visa_detail = _unfence_in(description), _unfence_in(visa_detail)
         try:
@@ -1088,6 +1089,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 ),
                 "known_people": resp.known_people.model_dump(),
                 "already_existed": resp.already_existed,
+                "duplicate_of": resp.duplicate_of,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )
