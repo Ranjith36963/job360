@@ -2630,7 +2630,8 @@ def form_check(
     control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
     flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
     A ``file`` question for the CV or the cover letter is answered by the application's newest saved
-    artifact of that kind (``documents``: kind -> artifact row), source ``artifact``; none saved = a gap.
+    artifact of that kind (``documents``: kind -> artifact row), source ``artifact``, even when a saved
+    answer matched; none saved = the saved answer, else a gap.
     Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
@@ -2678,10 +2679,13 @@ def form_check(
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
                 why = "no saved answer for this question"
-        kind = _file_kind(text) if ftype == "file" and item is None else None
-        if kind is not None:
+        # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
+        # answer (production 2026-10-30: a stale "CV v1, artifact 128" label won every form's "Resume");
+        # with none saved yet, the saved answer stands. A text question about the CV never gets here.
+        kind = _file_kind(text) if ftype == "file" and is_document_question(text) else None
+        doc = (documents or {}).get(kind) if kind is not None else None
+        if kind is not None and (item is None or doc is not None):
             label = _DOCUMENT_LABELS[kind]
-            doc = (documents or {}).get(kind)
             if doc is None:
                 why = f"no {label} saved for this application yet: save the {label} first (save_artifact kind {kind})"
             else:
