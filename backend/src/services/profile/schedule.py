@@ -17,7 +17,9 @@ Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
   ``assistant_settings.people_hunt`` is on: open applications (considering or
   applied) brought or applied in the last ``REACH_WINDOW_DAYS`` that have no assistant-added person and
   no ``reach:<id>`` stamp, newest first, at most ``REACH_MAX_PER_RUN``; listed as ``application_ids``.
-  An application whose only people are still an invite pending on LinkedIn is not listed.
+  An application whose only people are still an invite pending on LinkedIn is not listed. One whose
+  fit score is BELOW the user's own line (``assistant_settings.apply_min_score``, ``line_side``) is not
+  listed either; no score or no line stays in (rule 29: an empty shelf is silent).
 * ``batch`` (recipe ``batch``) - the queue holds open applications AND the assistant may apply
   on its own (``submit_mode`` ``auto_when_sure`` or a live auto grant) AND not paused AND the
   daily and weekly limits have room AND now is inside ``apply_hours``. No interval: it is due
@@ -428,14 +430,19 @@ async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -
     return {int(dict(r)["id"]) for r in await cur.fetchall()}
 
 
-async def _reach_ids(db: JobDatabase, user_id: str, now: datetime) -> list[int]:
-    """Open applications for the people hunt this run (see the module docstring), newest first."""
+# Newest-first rows read before the line filter, so a run of newer below-line jobs cannot starve the cap.
+REACH_SCAN_LIMIT = 200
+
+
+async def _reach_ids(db: JobDatabase, user_id: str, now: datetime, line: Optional[int] = None) -> list[int]:
+    """Open applications for the people hunt this run (see the module docstring), newest first.
+    ``line`` is the user's score line; applications scored below it are left out."""
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
 
     since = (now - timedelta(days=settings.REACH_WINDOW_DAYS)).astimezone(timezone.utc).isoformat()
     test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
-        "SELECT a.id FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "  # noqa: S608
+        "SELECT a.id, a.fit_score FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "  # noqa: S608
         "AND (a.created_at >= ? OR EXISTS (SELECT 1 FROM application_events e WHERE e.application_id = a.id "
         "     AND e.user_id = a.user_id AND e.event_type = 'applied' AND e.occurred_at >= ?)) "
         "AND NOT EXISTS (SELECT 1 FROM application_contacts c WHERE c.application_id = a.id "
@@ -443,9 +450,12 @@ async def _reach_ids(db: JobDatabase, user_id: str, now: datetime) -> list[int]:
         "AND NOT EXISTS (SELECT 1 FROM assistant_duty_runs r WHERE r.user_id = a.user_id "
         "     AND r.duty = 'reach:' || a.id) "
         f"AND NOT {test_sql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
-        (user_id, since, since, *test_params, settings.REACH_MAX_PER_RUN * 4),
+        (user_id, since, since, *test_params, REACH_SCAN_LIMIT),
     )
-    candidates = [int(dict(r)["id"]) for r in await cur.fetchall()]
+    candidates = [
+        int(row["id"]) for row in map(dict, await cur.fetchall())
+        if rules.line_side(row["fit_score"], line) != "below"
+    ]
     pending_only = await _pending_only(db, user_id, candidates)
     return [a for a in candidates if a not in pending_only][: settings.REACH_MAX_PER_RUN]
 
@@ -499,5 +509,5 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         forced={k[len(RUN_NOW):]: v for k, v in stamps.items() if k.startswith(RUN_NOW)},
         failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
         people_hunt=cfg.people_hunt,
-        reach_ids=await _reach_ids(db, user_id, now) if cfg.people_hunt else [],
+        reach_ids=await _reach_ids(db, user_id, now, cfg.apply_min_score) if cfg.people_hunt else [],
     )
