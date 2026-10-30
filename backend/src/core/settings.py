@@ -1250,7 +1250,7 @@ def validate_required_env() -> None:
 ASKS_QUESTION_MAX_CHARS = int(os.getenv("ASKS_QUESTION_MAX_CHARS", "1000"))
 ASKS_CONTEXT_MAX_CHARS = int(os.getenv("ASKS_CONTEXT_MAX_CHARS", "2000"))
 ASKS_ANSWER_MAX_CHARS = int(os.getenv("ASKS_ANSWER_MAX_CHARS", "4000"))
-ASKS_MAX_OPEN_PER_USER = int(os.getenv("ASKS_MAX_OPEN_PER_USER", "50"))
+ASKS_MAX_OPEN_PER_USER = int(os.getenv("ASKS_MAX_OPEN_PER_USER", "50"))  # Needs-you cards (jobs), not ask rows
 ASKS_WHATS_NEW_MAX = int(os.getenv("ASKS_WHATS_NEW_MAX", "20"))  # open asks whats_new carries
 
 

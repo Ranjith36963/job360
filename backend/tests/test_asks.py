@@ -191,6 +191,32 @@ async def test_open_cap_is_429(authenticated_async_context, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_open_cap_counts_jobs_not_ask_rows(authenticated_async_context, monkeypatch):
+    """Owner 2026-10-30: 50 asks on 32 jobs blocked every new job. The cap counts Needs-you cards: a job that
+    already has an open ask can take another (a blocker plus its questions), a new job cannot past the cap."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "ASKS_MAX_OPEN_PER_USER", 2)
+    async with authenticated_async_context() as client:
+        jobs = []
+        for n in range(3):
+            resp = await client.post("/api/jobs/bring", json={**_AD, "title": f"Engineer {n}",
+                                                              "apply_url": f"https://contoso.example/careers/{n}"})
+            assert resp.status_code == 200, resp.text
+            jobs.append(int(resp.json()["application_id"]))
+        assert (await _ask(client, application_id=jobs[0])).status_code == 201
+        assert (await _ask(client, application_id=jobs[1])).status_code == 201
+        # Job 0 already has a card: a blocker ask on it is not a new card, so the full cap does not stop it.
+        second = await _ask(client, application_id=jobs[0], question="Solve the CAPTCHA on the form", kind="captcha")
+        assert second.status_code == 201, second.text
+        # A third job would be a third card: refused.
+        blocked = await _ask(client, application_id=jobs[2])
+        assert blocked.status_code == 429 and "ASKS_MAX_OPEN_PER_USER" in blocked.text
+        # An ask tied to no job is its own card: refused too.
+        assert (await _ask(client, question="anything else")).status_code == 429
+
+
+@pytest.mark.asyncio
 async def test_events_appear_on_the_timeline_and_never_change_status(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
