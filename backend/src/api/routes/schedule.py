@@ -162,10 +162,15 @@ async def whats_due(
     return WhatsDueOut(**answer)
 
 
+# 2026-10-30 (17:42 run): refused needs_user, the run stopped with partial/error instead. A partial batch
+# stop with no outside blocker (rate limit, network, sign-in, plan, tool) is the same early stop.
+_NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
+
+
 async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
-    """2026-10-30: ``needs_user`` ends a batch run only when every queued job waits on the owner or is
-    blocked. While a queued row still needs no owner input (own browser, no hold, ask, block or filled form)
-    the run is refused with 409 and told which row to work next."""
+    """2026-10-30: a batch run stops early (partial, no outside blocker) only when every queued job waits
+    on the owner or is blocked. While a queued row still needs no owner input (own browser, no hold, ask,
+    block or filled form) the run is refused with 409 and told which row to work next."""
     from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
 
     rows = await queue_preflight.fillable_rows(db, user.id)
@@ -177,7 +182,8 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
         detail=(
             f"{len(rows)} queued jobs still need no owner input; next: application {first['id']} "
             f"({first['company'] or 'unknown company'}). Keep working: write its CV and fill its form. "
-            "needs_user ends a run only when every queued job is waiting on the owner or blocked. "
+            "A partial run ends only when every queued job is waiting on the owner or blocked. Large tool "
+            "outputs and outputs saved to a file are normal; they are not a reason to stop. "
             f"Ids: {', '.join(str(r['id']) for r in rows[:5])}."
         ),
     )
@@ -200,7 +206,7 @@ async def mark_done(
         raise HTTPException(status_code=422, detail="a failed run needs a reason (one of the closed list)")
     if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
         raise HTTPException(status_code=404, detail="application not found")
-    if body.duty == "batch" and body.outcome == "partial" and body.reason == "needs_user":
+    if body.duty == "batch" and body.outcome == "partial" and body.reason in _NOT_A_BLOCKER:
         await _refuse_early_batch_stop(db, user)
     now = datetime.now(timezone.utc)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")

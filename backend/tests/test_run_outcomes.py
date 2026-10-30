@@ -188,7 +188,20 @@ async def test_a_blocked_job_no_longer_blocks_the_needs_user_stop(authenticated_
 
 
 @pytest.mark.asyncio
-async def test_only_batch_partial_needs_user_is_ever_refused(authenticated_async_context, fixture_user_id):
+async def test_partial_with_error_or_no_work_is_the_same_early_stop(authenticated_async_context, fixture_user_id):
+    # 2026-10-30 17:42 run: refused needs_user, the run ended with partial/error after one job.
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id = await _queued_job(client, 5)
+        for reason in ("error", "no_work", None):
+            resp = await _stop_batch(client, reason=reason)
+            assert resp.status_code == 409, (reason, resp.text)
+            assert f"next: application {app_id} (Northwind 5)" in resp.json()["detail"]
+            assert "not a reason to stop" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_only_batch_partial_without_a_blocker_is_ever_refused(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         await _queued_job(client, 4)
@@ -197,7 +210,6 @@ async def test_only_batch_partial_needs_user_is_ever_refused(authenticated_async
             {"duty": "batch", "outcome": "done"},
             {"duty": "batch", "outcome": "partial", "reason": "rate_limited"},
             {"duty": "batch", "outcome": "failed", "reason": "needs_user"},
-            {"duty": "batch", "outcome": "partial", "reason": "no_work"},
             {"duty": "batch", "outcome": "partial", "reason": "network_blocked"},
             {"duty": "hunt", "outcome": "partial", "reason": "needs_user"},
             {"duty": "inbox", "outcome": "partial", "reason": "needs_user"},
