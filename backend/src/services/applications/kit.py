@@ -1177,11 +1177,13 @@ def _clean_answer(item: Any) -> dict[str, str]:
 
 
 # 2026-10-29 (application 130, "Mission essay" saved as "drafted from profile facts (see typed text)"): an answer
-# that is only a LABEL for the text. Any source, short answers only (a real essay may start "Drafted ..."). Compared
-# by words (punctuation -> space), never by a regex on caller text. "Yes", "London", "2 years" are not here.
+# that is only a LABEL for the text. Any source, short answers only; "drafted" alone or "drafted from/using/per"
+# only, so a real "Drafted 3 grant bids" is kept. Compared by words (punctuation -> space), never by a regex on
+# caller text. "Yes", "London", "2 years" are not here.
 _LABEL_ANSWER_MAX_CHARS = 120
 _LABEL_ANSWER_STARTS: tuple[tuple[str, ...], ...] = (
-    ("drafted",), ("metrics", "from", "cv"), ("see", "typed", "text"), ("see", "cv"), ("see", "profile"),
+    ("drafted", "from"), ("drafted", "using"), ("drafted", "per"), ("metrics", "from", "cv"),
+    ("see", "typed", "text"), ("see", "cv"), ("see", "profile"),
     ("as", "typed"), ("from", "profile"), ("from", "cv"), ("tbd",), ("placeholder",), ("answer", "here"),
 )
 
@@ -1194,7 +1196,7 @@ def _refuse_label_answer(question: str, answer: str) -> None:
         words = ["placeholder"]
     else:
         words = "".join(c if c.isalnum() else " " for c in answer.lower()).split()
-    if any(tuple(words[: len(start)]) == start for start in _LABEL_ANSWER_STARTS):
+    if words == ["drafted"] or any(tuple(words[: len(start)]) == start for start in _LABEL_ANSWER_STARTS):
         raise SpineError(422, (
             f'answer for "{question[:80]}" is a label, not the text ("{answer[:60]}"): '
             "retype the field with the exact full text you typed into it, word for word"

@@ -61,3 +61,9 @@ def test_short_real_answers_are_kept_for_every_source(answer):
 def test_a_real_essay_that_starts_with_drafted_is_kept():
     essay = "Drafted the first version of our grant proposal and then led it through review. " * 3
     assert kit.clean_answers([{"question": "Mission essay", "answer": essay.strip(), "source": "profile"}])
+
+
+@pytest.mark.parametrize("answer", ["Drafted 3 grant bids", "Drafted contracts and policies at Acme"])
+def test_a_short_real_answer_that_starts_with_drafted_is_kept(answer):
+    got = kit.clean_answers([{"question": "Q?", "answer": answer, "source": "profile"}])
+    assert got[0]["answer"] == answer
