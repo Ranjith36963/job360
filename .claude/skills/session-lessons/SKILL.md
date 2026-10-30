@@ -254,6 +254,13 @@ delete a lesson; if one stops being true, say so on its line and why.
   synthetic account (synthetic@job360.uk); reads are fine. This narrows "a weak
   spot is closed only after a real run on production": that run is the owner's
   own, or on the synthetic account.
+- 2026-10-30: a test session watching the owner's Apply routine called `whats_due(duties=["batch"])`
+  at 19:06 and 19:36 to see whether batch was due. Each call claimed batch for `DUTY_CLAIM_MINUTES` (30):
+  the 19:16 hunt-done ignition started no batch and the 19:41 scheduled run stopped with "held by a
+  running batch session (started 19:36)". Two runs lost, on the evening the fixes were being measured.
+  The rule above already named `whats_due`; the session read it as a read. **Rule:** `whats_due` with
+  `duties` from an assistant is a claim (`routes/schedule.py` `whats_due`); watch with no `duties`,
+  `whats_new`, or the run transcripts.
 
 ## Reference index (open these before "borrowing" anything)
 

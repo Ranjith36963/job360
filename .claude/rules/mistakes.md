@@ -97,6 +97,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - A weak spot is closed only after a real run on production exercises it: the owner's own run, or the synthetic test account.
 - A dev or test session never writes to the owner's live Job360 account (no job360 write tool, test job, ask or simulation);
   use the synthetic test account or the local database; reads are fine (2026-10-29: apps 86 and 107).
+- `whats_due` with `duties` is a write: it claims the duty for 30 minutes and the owner's scheduled run is refused.
+  Watch runs with `whats_due` (no duties), `whats_new` or the transcripts (2026-10-30: 19:16 and 19:41 apply blocked).
 - Work-authorisation answers are per country: read the saved answer for THAT job's country, never reuse another's.
 - Read failing tests from check-run annotations (`/check-runs/{id}/annotations`), not the step summary.
 - Re-read `origin/main`'s migration list in the minute before every merge call (2026-10-22: two 0077 files on main).
