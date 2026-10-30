@@ -4962,6 +4962,8 @@ export interface components {
             }[];
             /** Country */
             country?: string | null;
+            /** Duplicate Of */
+            duplicate_of?: number | null;
             /** Employer Published At */
             employer_published_at?: string | null;
             /** Existing */

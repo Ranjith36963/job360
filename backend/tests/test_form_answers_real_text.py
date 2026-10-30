@@ -34,3 +34,36 @@ def test_the_real_text_and_short_facts_are_kept():
     assert kit.clean_answers([_one("Yes", "guessed"), _one("No", "memory")])[1]["answer"] == "No"
     long = "My CV lists the projects; here is the one that matters most. " * 4  # a paragraph may name its CV
     assert kit.clean_answers([_one(long.strip())])[0]["answer"] == long.strip()
+
+
+# 2026-10-29, application 130 (Materiom): "Mission essay" was saved as a label under a non-written source.
+@pytest.mark.parametrize("source", ["profile", "memory", "approved", "written", "guessed"])
+@pytest.mark.parametrize("answer", [
+    "drafted from profile facts (see typed text)", "Drafted.", "metrics from CV", "see typed text",
+    "TBD", "<answer>", "placeholder", "Answer here",
+])
+def test_a_label_answer_is_refused_for_any_source_and_names_the_field(source, answer):
+    item = {"question": "Mission essay", "answer": answer, "source": source}
+    with pytest.raises(SpineError) as err:
+        kit.clean_answers([item])
+    assert err.value.status_code == 422
+    assert "Mission essay" in str(err.value.detail) and "word for word" in str(err.value.detail)
+    assert any("Mission essay" in p for p in kit.answer_problems([item]))
+
+
+@pytest.mark.parametrize("answer", ["Yes", "No", "London", "+44 7700 900123", "2 years", "N/A", "Answered in full below."])
+def test_short_real_answers_are_kept_for_every_source(answer):
+    for source in ("profile", "memory", "written"):
+        got = kit.clean_answers([{"question": "Q?", "answer": answer, "source": source}])
+        assert got[0]["answer"] == answer
+
+
+def test_a_real_essay_that_starts_with_drafted_is_kept():
+    essay = "Drafted the first version of our grant proposal and then led it through review. " * 3
+    assert kit.clean_answers([{"question": "Mission essay", "answer": essay.strip(), "source": "profile"}])
+
+
+@pytest.mark.parametrize("answer", ["Drafted 3 grant bids", "Drafted contracts and policies at Acme"])
+def test_a_short_real_answer_that_starts_with_drafted_is_kept(answer):
+    got = kit.clean_answers([{"question": "Q?", "answer": answer, "source": "profile"}])
+    assert got[0]["answer"] == answer

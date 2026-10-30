@@ -3359,6 +3359,17 @@
             ],
             "title": "Country"
           },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          },
           "employer_published_at": {
             "anyOf": [
               {

@@ -97,6 +97,26 @@ async def _open_ask_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[i
     return {int(r[0]) for r in await cur.fetchall()}
 
 
+async def _filled_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
+    if not ids:
+        return set()
+    cur = await db._db.execute(
+        f"SELECT DISTINCT application_id FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND event_type = 'form_filled' AND application_id IN ({_marks(ids)})",
+        [user_id, *ids],
+    )
+    return {int(r[0]) for r in await cur.fetchall()}
+
+
+async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tuple[list[int], set[int]]:
+    """The order the assistant works the queue (2026-10-30): rows not waiting on the owner first, unfilled
+    before already-filled, then rows with an OPEN ask to the owner last; first in first out inside each group
+    (a stable sort of ``fifo_ids``). Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
+    waiting = await _open_ask_apps(db, user_id, fifo_ids)
+    filled = await _filled_apps(db, user_id, fifo_ids)
+    return sorted(fifo_ids, key=lambda i: (i in waiting, i in filled)), waiting
+
+
 def _days_since(iso: Optional[str], now: datetime) -> Optional[int]:
     if not iso:
         return None
@@ -117,8 +137,9 @@ async def preflight_rows(
     ``kit_missing`` (the job-country keys memory lacks, same functions the Needs-you card uses),
     ``has_cv``, ``duplicate_flag`` ('' / same_job / same_role / same_company), ``company_left``
     (null = no company limit), ``avoided`` (the user's own never-apply list), ``blocked_count``,
-    ``queued_days`` and ``hold`` (another session's live hold, else null). ``profile`` / ``overlay``
-    are the caller's one ``load_profile_with_overlay`` read (never re-read here, never on the loop)."""
+    ``queued_days``, ``hold`` (another session's live hold, else null) and ``waiting_on_owner`` (an open
+    ask). ``profile`` / ``overlay`` are the caller's one ``load_profile_with_overlay`` read
+    (never re-read here, never on the loop)."""
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine cycle
     ids = [int(r["id"]) for r in rows]
     if not ids:
@@ -127,6 +148,7 @@ async def preflight_rows(
     blocked_n = await _blocked_counts(db, user_id, ids)
     cv_apps = await _with_kind(db, user_id, ids, "cv")
     cleared = await _cleared(db, user_id, ids)
+    waiting = await _open_ask_apps(db, user_id, ids)
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         app_id = int(r["id"])
@@ -152,6 +174,8 @@ async def preflight_rows(
             "blocked_count": blocked_n.get(app_id, 0),
             "queued_days": _days_since(queued_at.get(app_id), now),
             "hold": holds[app_id][0] if app_id in holds else None,
+            # An open ask to the owner (no answer, not withdrawn): skip the row until they answer.
+            "waiting_on_owner": app_id in waiting,
         }
     return out
 

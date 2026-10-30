@@ -172,6 +172,25 @@ async def test_a_run_gets_at_most_the_cap_newest_first(authenticated_async_conte
 
 
 @pytest.mark.asyncio
+async def test_an_application_below_the_users_line_is_not_listed(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        await _patch(client, PEOPLE, True)
+        await _patch(client, "assistant_settings.apply_min_score", 60)
+        above, unscored, below = [await _bring(client, _ad(n, company=f"Co{n}")) for n in range(3)]
+        for app_id, score in ((above, 80), (below, 20)):
+            fit = {"score": score, "verdict": "ok", "score_source": "full_ad"}
+            assert (await client.put(f"/api/applications/{app_id}/fit", json=fit)).status_code == 200
+        assert await _reach(client) == [unscored, above]
+        # Newer below-line jobs must not push above-line ones out of the cap.
+        newer = [await _bring(client, _ad(10 + n, company=f"Low{n}")) for n in range(settings.REACH_MAX_PER_RUN + 2)]
+        for app_id in newer:
+            fit = {"score": 20, "verdict": "weak", "score_source": "full_ad"}
+            assert (await client.put(f"/api/applications/{app_id}/fit", json=fit)).status_code == 200
+        assert await _reach(client) == [unscored, above]
+
+
+@pytest.mark.asyncio
 async def test_a_person_the_assistant_added_takes_the_application_off(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
