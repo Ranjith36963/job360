@@ -21,6 +21,7 @@ from src.services.profile.models import AssistantSettings, UserPreferences
 FORM = "https://careers.northwind.example/apply/7"
 PREFLIGHT_KEYS = {
     "kit_missing", "has_cv", "duplicate_flag", "company_left", "avoided", "blocked_count", "queued_days", "hold",
+    "waiting_on_owner",
 }
 SUMMARY_KEYS = {
     "queued", "ready_to_send", "asked", "blocked", "submitted_today", "daily_cap", "daily_left", "removed_today",
@@ -336,6 +337,41 @@ async def test_queue_summary_counts_the_whole_open_queue(authenticated_async_con
         # a page of 1 still summarises the whole queue
         page = (await client.get("/api/applications", params={"queued": True, "limit": 1})).json()
         assert len(page["applications"]) == 1 and page["queue_summary"]["queued"] == 4
+
+
+@pytest.mark.asyncio
+async def test_queue_works_unfilled_first_then_filled_then_waiting_on_owner(
+    authenticated_async_context, fixture_user_id
+):
+    """2026-10-30: an open ask sinks a row to the end and flags it; an answer or a withdrawal lifts it."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        ids = [await _bring(client, _ad(n, company=f"Company{n}")) for n in range(1, 6)]
+        for i in ids:
+            await _queue(client, i)
+        waiting, filled_waiting, filled, unfilled_a, unfilled_b = ids[0], ids[1], ids[2], ids[3], ids[4]
+        await _fill(client, filled_waiting)
+        await _fill(client, filled)
+        ask_w = await client.post("/api/asks", json={"question": "Notice period?", "application_id": waiting})
+        ask_fw = await client.post("/api/asks", json={"question": "Salary?", "application_id": filled_waiting})
+        assert ask_w.status_code == 201 and ask_fw.status_code == 201, ask_w.text
+        body = await _queued(client)
+        rows = body["applications"]
+        # unfilled + not waiting (FIFO), filled next, both waiting rows last (FIFO)
+        assert [r["id"] for r in rows] == [unfilled_a, unfilled_b, filled, waiting, filled_waiting]
+        assert {r["id"]: r["preflight"]["waiting_on_owner"] for r in rows} == {
+            unfilled_a: False, unfilled_b: False, filled: False, waiting: True, filled_waiting: True,
+        }
+        assert [r["queue_position"] for r in rows if r["id"] == waiting] == [1]   # FIFO place is kept
+        # a page of 2 still starts from the work order
+        page = (await client.get("/api/applications", params={"queued": True, "limit": 2})).json()
+        assert [r["id"] for r in page["applications"]] == [unfilled_a, unfilled_b]
+        # the owner answers one ask and the assistant withdraws the other: both rows are free again
+        assert (await client.post(f"/api/asks/{ask_w.json()['id']}/answer", json={"answer": "1 month"})).status_code == 200
+        assert (await client.post(f"/api/asks/{ask_fw.json()['id']}/withdraw", json={})).status_code == 200
+        after = await _queued(client)
+        assert [r["id"] for r in after["applications"]] == [waiting, unfilled_a, unfilled_b, filled_waiting, filled]
+        assert not any(r["preflight"]["waiting_on_owner"] for r in after["applications"])
 
 
 @pytest.mark.asyncio
