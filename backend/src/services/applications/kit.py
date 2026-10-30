@@ -1822,8 +1822,35 @@ def _mark_sensitive(out: dict[str, list[dict[str, Any]]]) -> None:
                 item.pop("confirmed_at", None)
 
 
+def _keep_job_country(out: dict[str, list[dict[str, Any]]], country: str) -> None:
+    """The kit is for ONE job in ONE country: keep the global keys and this country's items, drop every
+    other country's ``right_to_work.<CC>.*`` / ``logistics.<CC>.*`` / ``salary.<CC>`` (a prod kit hit
+    40k chars). Runs AFTER the region / "ANY" fallback, which reads those records. Unknown country: the
+    caller does not call this, so everything stays."""
+    own = country.upper()
+    for block in ("right_to_work", "logistics", "salary"):
+        out[block] = [i for i in out[block] if _is_global_or_own(str(i["key"]), block, own)]
+
+
+def _is_global_or_own(key: str, block: str, own: str) -> bool:
+    prefix = f"{block}."
+    if not key.startswith(prefix):
+        return True
+    rest = key[len(prefix):]
+    if block == "salary":
+        return rest.upper() == own or not _is_country_code(rest)
+    head, dot, _tail = rest.partition(".")
+    return not dot or not _is_country_code(head) or head.upper() == own
+
+
+def _is_country_code(token: str) -> bool:
+    """A saved record's place code, upper-case: GB, ANY, EUROPE, MIDDLE_EAST. Global fields are lower snake_case."""
+    return token.isupper() and token.replace("_", "").isalpha()
+
+
 def compute_answers(
-    profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None
+    profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None,
+    *, job_country_only: bool = False,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The answer blocks (every item tagged with its source) and the ``missing``
     list for ``country`` (the JOB's country; ``None`` = unknown). Empty / null =
@@ -1994,6 +2021,8 @@ def compute_answers(
                 )
             have = {i["key"] for block in out.values() for i in block}
         _mark_sensitive(out)
+        if job_country_only:  # the kit only: ready / form checks still look up any saved key
+            _keep_job_country(out, country)
     for block, items in out.items():
         for item in items:
             if _is_sensitive(block, str(item["key"])) and consented.get(_SENSITIVE_PATH.get(block, "")):
@@ -2288,15 +2317,15 @@ async def _job_company_key(db: JobDatabase, app_row: dict[str, Any]) -> str:
 
 
 async def _application_answers(
-    db: JobDatabase, user: CurrentUser, app_row: dict[str, Any]
+    db: JobDatabase, user: CurrentUser, app_row: dict[str, Any], *, job_country_only: bool = False
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The profile, the job's country and :func:`compute_answers` for ONE application - the single
     place the kit and the form check load them (same profile, overlay, country and company key)."""
-    return await _answers_for(db, user.id, app_row)
+    return await _answers_for(db, user.id, app_row, job_country_only=job_country_only)
 
 
 async def _answers_for(
-    db: JobDatabase, user_id: str, app_row: dict[str, Any]
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], *, job_country_only: bool = False
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """:func:`_application_answers` by user id (the receipt has no ``CurrentUser``)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
@@ -2306,7 +2335,8 @@ async def _answers_for(
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     job_company_key = await _job_company_key(db, app_row)
-    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    answers, missing = compute_answers(
+        profile, overlay, country, job_company_key or None, job_country_only=job_country_only)
     return profile, country, answers, missing
 
 
@@ -2358,7 +2388,7 @@ async def build_kit(
             429, f"too many kit reads this hour (KIT_READS_MAX_PER_HOUR = {settings.KIT_READS_MAX_PER_HOUR})"
         )
 
-    profile, country, answers, missing = await _application_answers(db, user, app_row)
+    profile, country, answers, missing = await _application_answers(db, user, app_row, job_country_only=True)
     missing = kit_missing(missing)
     answers_omitted = 0
     approved = answers["approved_text"]
