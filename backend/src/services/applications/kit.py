@@ -611,7 +611,7 @@ async def _sweep_report(db: JobDatabase, user_id: str, application_id: int) -> S
         # first form_filled, recorded once after the last page, does not.
         refill_id = fills[0]["id"] if len(fills) > 1 else None
         short, unreadable, incomplete = _paged_shortfalls(
-            events, filled if isinstance(filled, int) else None, refill_id
+            events, filled if isinstance(filled, int) else None, refill_id, skipped
         )
         # A mix of paged and unpaged events must never switch the unpaged checks OFF (review 2026-10-18):
         # the newest UNPAGED sweep's unreadable list counts, and so does its count against the newest unpaged
@@ -636,7 +636,7 @@ async def _sweep_report(db: JobDatabase, user_id: str, application_id: int) -> S
 
 
 def _paged_shortfalls(
-    events: list[dict[str, Any]], filled: Optional[int], refill_id: Optional[int] = None
+    events: list[dict[str, Any]], filled: Optional[int], refill_id: Optional[int] = None, skipped: int = 0
 ) -> tuple[bool, bool, bool]:
     """Bulk-apply F2, newest-first ``events`` of a multi-page form. Only events carrying a ``page`` count.
     N = ``pages_total`` of the newest paged event. For every page 1..N: the newest ``form_swept`` of that page
@@ -645,6 +645,10 @@ def _paged_shortfalls(
     read at least as many fields as its newest check listed), the unreadable list over every page's newest
     sweep, and the pages' sweeps together must reach the newest ``form_filled`` ``fields_count``. A page swept
     before ``refill_id`` (the newest of two or more ``form_filled``) is open again.
+    ``skipped`` is the length of the newest ``form_filled`` ``fields_skipped`` (the blanks left on purpose, each
+    already in the ask): exactly as in :func:`_flat_count` they count as checked. They are named once for the
+    whole form, not per page, so they cover the pages' deficits together: short only when the questions the
+    short pages are missing exceed ``skipped``.
     NOT IN REFERENCE as a gate: career-ops apply.md:315-342 repeats its sweep before every Next by prompt only."""
     paged = [e for e in events if _page_of(e) is not None]
     # The LARGEST pages_total ever declared (security review 2026-10-18): a later, smaller number cannot
@@ -663,7 +667,7 @@ def _paged_shortfalls(
         bucket = newest_check if e["event_type"] == "form_checked" else newest_sweep
         bucket.setdefault(page, e)
     incomplete = short = unreadable = False
-    swept_total = 0
+    swept_total = deficit = 0
     for page in range(1, total + 1):
         sweep, check = newest_sweep.get(page), newest_check.get(page)
         if (
@@ -678,8 +682,9 @@ def _paged_shortfalls(
         if isinstance(got, int):
             swept_total += got
             if isinstance(want, int) and got < want:
-                short = True
+                deficit += want - got
         unreadable = unreadable or bool(sweep["payload"].get("unreadable"))
+    short = deficit > skipped
     if filled is not None and not incomplete and swept_total < filled:
         short = True
     return short, unreadable, incomplete
