@@ -594,6 +594,29 @@ async def count_open_asks(db: JobDatabase, user_id: str, *, exclude_test: bool =
     return int(row[0]) if row else 0
 
 
+async def count_open_ask_cards(db: JobDatabase, user_id: str) -> int:
+    """What the per-user cap counts (owner 2026-10-30): CARDS, not ask rows. One per job with any open ask, plus
+    one per open ask tied to no job. A job's blocker and its questions are one card on Needs you, so a second
+    ask on a job that already has one never fills the cap (50 asks on 32 jobs had blocked every new job).
+    Test jobs still count (safety, as ``count_open_asks``)."""
+    cur = await db._db.execute(
+        "SELECT COUNT(DISTINCT k.application_id) + COUNT(*) FILTER (WHERE k.application_id IS NULL) "
+        "FROM application_asks k WHERE k.user_id = ? AND k.answered_at IS NULL AND k.withdrawn_at IS NULL",
+        (user_id,),
+    )
+    row = await cur.fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+async def _job_has_open_ask(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_asks WHERE user_id = ? AND application_id = ? "
+        "AND answered_at IS NULL AND withdrawn_at IS NULL LIMIT 1",
+        (user_id, application_id),
+    )
+    return await cur.fetchone() is not None
+
+
 def _log_no_proof_ask(user_id: str, application_id: Optional[int], result: str) -> None:
     get_audit_logger().info("no_proof_ask", extra={
         "event": "no_proof_ask", "user_id": safe_log_value(user_id),
@@ -684,8 +707,13 @@ async def create_ask(
         [] if is_proof or application_id is None
         else await _open_family(db, user_id, application_id, kind, asked_by)
     )
-    # A merge replaces asks, it never adds one: the cap only stops a NEW card.
-    if not family and await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
+    # A merge replaces asks, it never adds one: the cap only stops a NEW card. A job that already has an open ask
+    # is already a card, so its next ask never counts against the cap.
+    if (
+        not family
+        and not (application_id is not None and await _job_has_open_ask(db, user_id, application_id))
+        and await count_open_ask_cards(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER
+    ):
         raise SpineError(
             429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first. "
             "This ask was not filed and its job waits; keep working: write CVs and fill every other queued form. "
