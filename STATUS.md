@@ -10,8 +10,7 @@
 > We never source, rank or recommend jobs (product rule 4).
 >
 > **What runs on `main`:** Railway serves backend + frontend + Postgres only —
-> **worker and Redis were deleted 2026-09-02**, so nothing runs in the background
-> (no notifications, no crons; Redis-unreachable log lines are expected).
+> **worker and Redis were deleted 2026-09-02** (Redis-unreachable log lines are expected).
 >
 > **Slice order and what each one is: [`docs/product/VISION.md`](docs/product/VISION.md).**
 > A slice that has shipped is described by its code and its migration, not by a

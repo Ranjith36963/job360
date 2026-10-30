@@ -6,8 +6,7 @@
 **Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. Every merge ships to real users.** There is no manual deploy step and no staging gate. Merging is a release — never merge "to tidy up".
 
 Live at **job360.uk**. Three services: `backend`, `frontend`, `Postgres` — `worker`
-and `Redis` were deleted 2026-09-02, and `src/workers/` went with slice 5, so nothing
-runs in the background.
+and `Redis` were deleted 2026-09-02, and `src/workers/` went with slice 5.
 
 ### How to check what is actually deployed
 

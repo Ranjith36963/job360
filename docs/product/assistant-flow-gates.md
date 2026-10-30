@@ -94,7 +94,6 @@ All dated 2026-10-26 (owner).
 | Job360's server may read public LinkedIn job pages signed out (PR D). One block stops these reads for 7 days. | Built | `routing.LINKEDIN_GUEST_READS` (the switch), `browser_agent/linkedin_guest.BLOCK_FOR` (the block and its window). Test: `backend/tests/test_linkedin_guest.py`. |
 | A company form reached from a LinkedIn job is filled in Job360's browser. | Built | `test_linkedin_own_browser.py`. |
 | Easy Apply follows the same submit gate. Caps are the safe defaults (10 a day). | Built | `own_browser.py`. Easy Apply waits in the own-browser queue: `test_linkedin_own_browser.py`. |
-| Gmail outreach sends by itself. Owner said yes. It will be a setting in "Connect your assistant". | Planned. NOT built. | Today's setting is `outreach_send`, `draft_only` to `auto`; a riskier move needs the user's Confirm on the web: `assistant_settings.py`. The new Gmail auto-send setting: NOT FOUND. |
 | The browser acts as the user's agent and does not announce itself as "HeadlessChrome". | Built (2026-10-28). The context's User-Agent is the browser's own, read once from a blank page, with `HeadlessChrome` read as `Chrome`. No stealth, no `navigator.webdriver` patch, no `Sec-CH-UA` change (Playwright has no simple supported way). | `BrowserPool._desktop_user_agent` in `browser_agent/agent.py`; `test_browser_user_agent.py`. |
 | Route learning: switch a site to the own browser after 2 blocks in a row, then try Job360's browser again after 3 days (7 days if it repeats). | Planned (PR F1). Gated on 2 weeks of real data from the attempts table. | The attempts table is written by `browser_agent/route_book.record`. The learner and its 2/3/7 numbers: NOT FOUND; `learned_blocked`, `learned_login` and `probe` are chip names in `routing.ROUTE_REASONS` only. |
 
@@ -104,7 +103,6 @@ To build. None of these exist on the page yet.
 
 | Setting | What it does | Status |
 |---|---|---|
-| Gmail auto-send on/off | Lets the assistant send outreach email without the user's click. | To build. |
 | LinkedIn caps | Show, and let the user lower: 10 notes/messages a day, 2 minutes apart, 10 Easy Apply a day. | To build. Today these are code constants, not settings (`own_browser.py`). |
 | Browser routes view, with Reset | Show which sites run in the own browser and why. Reset clears what route learning learned. | To build, after PR F1. |
 
