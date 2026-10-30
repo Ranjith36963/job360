@@ -188,14 +188,15 @@ async def test_a_blocked_job_no_longer_blocks_the_needs_user_stop(authenticated_
 
 
 @pytest.mark.asyncio
-async def test_partial_with_error_or_no_work_is_the_same_early_stop(authenticated_async_context, fixture_user_id):
-    # 2026-10-30 17:42 run: refused needs_user, the run ended with partial/error after one job.
+async def test_partial_or_failed_without_a_blocker_is_the_same_early_stop(authenticated_async_context, fixture_user_id):
+    # 2026-10-30: refused needs_user, the 17:42 run ended with partial/error, the 20:26 run with failed/needs_user.
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id = await _queued_job(client, 5)
-        for reason in ("error", "no_work", None):
-            resp = await _stop_batch(client, reason=reason)
-            assert resp.status_code == 409, (reason, resp.text)
+        for outcome, reason in (("partial", "error"), ("partial", "no_work"), ("partial", None),
+                                ("failed", "needs_user"), ("failed", "error"), ("failed", "no_work")):
+            resp = await _stop_batch(client, outcome=outcome, reason=reason)
+            assert resp.status_code == 409, (outcome, reason, resp.text)
             assert f"next: application {app_id} (Northwind 5)" in resp.json()["detail"]
             assert "not a reason to stop" in resp.json()["detail"]
 
@@ -209,7 +210,7 @@ async def test_only_batch_partial_without_a_blocker_is_ever_refused(authenticate
         for body in (
             {"duty": "batch", "outcome": "done"},
             {"duty": "batch", "outcome": "partial", "reason": "rate_limited"},
-            {"duty": "batch", "outcome": "failed", "reason": "needs_user"},
+            {"duty": "batch", "outcome": "failed", "reason": "rate_limited"},
             {"duty": "batch", "outcome": "partial", "reason": "network_blocked"},
             {"duty": "hunt", "outcome": "partial", "reason": "needs_user"},
             {"duty": "inbox", "outcome": "partial", "reason": "needs_user"},

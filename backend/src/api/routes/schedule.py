@@ -162,8 +162,9 @@ async def whats_due(
     return WhatsDueOut(**answer)
 
 
-# 2026-10-30 (17:42 run): refused needs_user, the run stopped with partial/error instead. A partial batch
-# stop with no outside blocker (rate limit, network, sign-in, plan, tool) is the same early stop.
+# 2026-10-30 (17:42 run): refused needs_user, the run stopped with partial/error instead; the 20:26 run
+# then stopped with failed/needs_user. A partial or failed batch stop with no outside blocker (rate
+# limit, network, sign-in, plan, tool) is the same early stop.
 _NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
 
 
@@ -206,7 +207,7 @@ async def mark_done(
         raise HTTPException(status_code=422, detail="a failed run needs a reason (one of the closed list)")
     if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
         raise HTTPException(status_code=404, detail="application not found")
-    if body.duty == "batch" and body.outcome == "partial" and body.reason in _NOT_A_BLOCKER:
+    if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
         await _refuse_early_batch_stop(db, user)
     now = datetime.now(timezone.utc)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
