@@ -2782,7 +2782,12 @@ async def list_applications(
     )
     rows = [dict(r) for r in await cur.fetchall()]
     if queued:
-        rows.sort(key=lambda r: queue_position[r["id"]])
+        # Work order (2026-10-30): not waiting on the owner first, unfilled before filled, FIFO inside each.
+        from src.services.applications import queue_preflight as _qp  # noqa: PLC0415 - imports spine
+
+        work_ids, _waiting = await _qp.work_order(db, user_id, queue_order)
+        work_rank = {app_id: n for n, app_id in enumerate(work_ids)}
+        rows.sort(key=lambda r: work_rank[r["id"]])
         rows = rows[offset:offset + limit]
 
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
