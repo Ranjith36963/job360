@@ -380,6 +380,8 @@ def _answer_rows(
             _user_check(a, profile, saved, company_key, have, filled_at) if profile is not None
             else (False, None, None)
         )
+        if changed_to is not None and is_file_answer(a, changed_to):
+            changed_to = reason = None  # a CV / letter file is not typed text: never "changed" (2026-10-30)
         answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
                         "changed_to": changed_to, "changed_reason": reason, "check": answer_check(a)})
         if changed_to is not None:
@@ -639,7 +641,9 @@ async def refill_keeps_answers(
     before, after = _answers_by_question(was), _answers_by_question(now)
     if before is None or after is None or before.keys() != after.keys():
         return False
-    changed = [a for q, a in after.items() if _norm(a["answer"]) != _norm(before[q]["answer"])]
+    # A CV / letter file row is governed by the CV checks (cv_not_seen, document_uploaded), not compared here.
+    changed = [a for q, a in after.items() if _norm(a["answer"]) != _norm(before[q]["answer"])
+               and not is_file_answer(a, str(before[q]["answer"]))]
     if not changed:
         return True
     loaded, overlay = load_profile_with_overlay(user_id)
