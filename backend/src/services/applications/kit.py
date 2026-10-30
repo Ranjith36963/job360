@@ -2607,6 +2607,12 @@ def _file_kind(text: str) -> Optional[str]:
     return "cv" if is_cv and not is_letter else "cover_letter" if is_letter and not is_cv else None
 
 
+def is_document_question(text: str) -> bool:
+    """True when a question asks for the CV or a cover letter (either or both; :func:`_file_kind`'s wording)."""
+    low = text.casefold()
+    return bool(_CV_FILE_RE.search(low) or _LETTER_FILE_RE.search(low))
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
