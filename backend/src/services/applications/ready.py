@@ -546,6 +546,36 @@ async def blank_or_placeholder(
     return blank, placeholder
 
 
+# A file input holds a document, never typed words (production 2026-10-30, applications 327 and 329).
+_DOCUMENT_EXTENSIONS = frozenset({"pdf", "doc", "docx", "rtf", "odt", "txt", "pages"})
+
+
+def _names_a_file(text: str) -> bool:
+    """``text`` is what a file field holds: a bare file name with a document extension (a URL is typed
+    text, so any ``/`` rules it out) or check_form's artifact label ("CV v1 (artifact 128)", "CV v1,
+    artifact 128"). Scanned word by word, no regex on caller text."""
+    text = text.strip()
+    if not text:
+        return False
+    words = "".join(c if c.isalnum() else " " for c in text.casefold()).split()
+    if any(w == "artifact" and nxt.isdigit() for w, nxt in zip(words, words[1:])):
+        return True
+    head, dot, ext = text.rpartition(".")
+    return "/" not in text and bool(dot and head.strip()) and ext.casefold() in _DOCUMENT_EXTENSIONS
+
+
+def is_file_answer(answer: dict[str, Any], users_word: str) -> bool:
+    """True when ``answer`` is the form's CV or cover-letter FILE field, so the user's saved word for it can
+    never be typed in. Form events carry no ``field_type`` (their answer keys are closed), so the field is
+    known by check_form's own ``artifact.*`` key, or by a CV / letter question whose typed value or the
+    user's word names a file. A typed text field - even one asking about the CV - is never one."""
+    if str(answer.get("key") or "").split(".", 1)[0] == "artifact":
+        return True
+    if not kit.is_document_question(str(answer.get("question") or "")):
+        return False
+    return _names_a_file(str(answer.get("answer") or "")) or _names_a_file(users_word)
+
+
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
     """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
     on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill
@@ -646,8 +676,10 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     blocks, _ = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    # A CV / letter file field is not typed text: the file sent is the CV gates' (cv_not_seen,
+    # document_uploaded), so a saved label like "CV v1, artifact 128" is never demanded in it.
     pending = [{"question": a["question"], "answer": str(a["changed_to"])}
-               for a in answers if a["changed_to"] is not None]
+               for a in answers if a["changed_to"] is not None and not is_file_answer(a, str(a["changed_to"]))]
     if not pending:
         return []
     # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
