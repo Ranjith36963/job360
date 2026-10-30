@@ -319,3 +319,39 @@ def test_kit_missing_drops_only_salary():
         {"key": "salary", "why": "x"}, {"key": "user_info.equality", "why": "x"}, {"key": "contact.phone", "why": "x"},
     ]
     assert [m["key"] for m in kit.kit_missing(missing)] == ["user_info.equality", "contact.phone"]
+
+
+# ── 2b. The paged path counts the blank optional questions too (9fin, application 322, 2026-10-30) ─────────
+
+
+def _skipped(n: int) -> list[str]:
+    return [f"Owner-only question {i}" for i in range(n)]
+
+
+@pytest.mark.asyncio
+async def test_paged_sweep_counts_fields_skipped_like_the_unpaged_one(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _ok(client, app_id, "form_checked", {"questions_count": 14, "answered": 14, "missing": 0,
+                                                    "page": 1, "pages_total": 1})
+        await _ok(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 6,
+                                                   "fields_skipped": _skipped(8)})
+        await _ok(client, app_id, "form_swept", {"fields_checked": 6, "fixed": 0, "page": 1, "pages_total": 1})
+        assert (await _verdict(client, app_id))["reason"] != "form_count_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_paged_sweep_with_typed_plus_skipped_below_the_questions_still_reports_the_shortfall(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _ok(client, app_id, "form_checked", {"questions_count": 14, "answered": 14, "missing": 0,
+                                                    "page": 1, "pages_total": 1})
+        await _ok(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 6,
+                                                   "fields_skipped": _skipped(7)})
+        await _ok(client, app_id, "form_swept", {"fields_checked": 6, "fixed": 0, "page": 1, "pages_total": 1})
+        short = await _verdict(client, app_id)
+        assert (short["decision"], short["reason"]) == ("fill", "form_count_mismatch")
