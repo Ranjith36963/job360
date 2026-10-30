@@ -162,6 +162,27 @@ async def whats_due(
     return WhatsDueOut(**answer)
 
 
+async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
+    """2026-10-30: ``needs_user`` ends a batch run only when every queued job waits on the owner or is
+    blocked. While a queued row still needs no owner input (own browser, no hold, ask, block or filled form)
+    the run is refused with 409 and told which row to work next."""
+    from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
+
+    rows = await queue_preflight.fillable_rows(db, user.id)
+    if not rows:
+        return
+    first = rows[0]
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"{len(rows)} queued jobs still need no owner input; next: application {first['id']} "
+            f"({first['company'] or 'unknown company'}). Keep working: write its CV and fill its form. "
+            "needs_user ends a run only when every queued job is waiting on the owner or blocked. "
+            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}."
+        ),
+    )
+
+
 @router.post("/schedule/done", response_model=MarkDoneOut, dependencies=AUTH_FIRST)
 async def mark_done(
     body: MarkDoneIn,
@@ -179,6 +200,8 @@ async def mark_done(
         raise HTTPException(status_code=422, detail="a failed run needs a reason (one of the closed list)")
     if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
         raise HTTPException(status_code=404, detail="application not found")
+    if body.duty == "batch" and body.outcome == "partial" and body.reason == "needs_user":
+        await _refuse_early_batch_stop(db, user)
     now = datetime.now(timezone.utc)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
     _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "")
