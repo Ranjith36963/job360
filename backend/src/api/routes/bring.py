@@ -312,6 +312,10 @@ class BringJobResponse(BaseModel):
     # Slice 25 — true when this client_key was already used: the FIRST reply, nothing
     # written. Not ``existing`` (that is "you had this job before this bring").
     already_existed: bool = False
+    # Set (to the existing application's id) when an AGENT brought the same role at the same company
+    # as an application the user still has OPEN; nothing new was created and ``application_id`` is that
+    # one. Closed value: null or an application id. Web-session brings are never refused this way.
+    duplicate_of: Optional[int] = None
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -420,6 +424,33 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
             clean_people = contacts_service.validate_listed_people([p.model_dump() for p in body.listed_people])
         except SpineError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+    # Agent guard (2026-10-30, prod app 328 duplicated 126): same company + same role (location/suffix
+    # noise trimmed, see reposts.role_core) as an application this user still has OPEN -> return that
+    # one, create nothing. Code, not prompt: "never bring a job already in the list" got broken.
+    # Web sessions skip it so a human can deliberately re-bring.
+    if actor_for(user) != "web":
+        from src.services.applications import reposts as reposts_service  # noqa: PLC0415
+
+        dup_id = await reposts_service.open_duplicate_of(
+            db, user.id, company=body.company, title=body.title, location=body.location
+        )
+        if dup_id is not None:
+            dup_app = await applications_spine.get_owned_application(db, user.id, dup_id) or {}
+            dup_cat = await db.get_job_by_id(int(dup_app.get("job_id") or 0))
+            dup_facts = job_facts.job_facts_view(dup_app)
+            get_audit_logger().info(
+                "job_bring_duplicate",
+                extra={
+                    "event": "job_bring_duplicate", "user_id": user.id,
+                    "application_id": dup_id, "status": "refused",
+                },
+            )
+            return BringJobResponse(
+                job=application_job_response(dup_app, dict(dup_cat) if dup_cat else None),
+                existing=True, application_id=dup_id, status=str(dup_app.get("status") or ""),
+                duplicate_of=dup_id, **{k: dup_facts[k] for k in job_facts.JOB_FACT_FIELDS},
+            )
 
     now = datetime.now(timezone.utc).isoformat()
     job = Job(

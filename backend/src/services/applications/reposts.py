@@ -42,6 +42,54 @@ def title_identity_key(title: str) -> str:
     return " ".join(words)
 
 
+def role_core(title: str, location: str = "") -> str:
+    """The role name with trailing location noise removed, case-folded, spaces
+    collapsed. "AI Engineer I - Zonda - Glasgow, Scotland, United Kingdom" ->
+    "ai engineer i - zonda". Split on " - " (no regex on caller text): drop
+    trailing segments that contain a comma or equal ``location``, then one
+    trailing "(...)" group. A comparison key only; nothing here is stored."""
+    parts = [" ".join(seg.split()) for seg in (title or "").split(" - ")]
+    loc = " ".join((location or "").casefold().split())
+    while len(parts) > 1 and (not parts[-1] or "," in parts[-1] or parts[-1].casefold() == loc):
+        parts.pop()
+    core = " - ".join(parts)
+    if core.endswith(")") and "(" in core:
+        head = core[: core.rindex("(")].strip()
+        if head:
+            core = head
+    return " ".join(core.casefold().split())
+
+
+async def open_duplicate_of(
+    db: JobDatabase, user_id: str, *, company: str, title: str, location: str = ""
+) -> Optional[int]:
+    """The id of THIS user's earliest OPEN application (status not in
+    ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES``) at the same company (rule-1
+    company key) with the same ``role_core`` title, else None. Scoped by user
+    (rules 12/25). An application with exactly the same title is skipped: that
+    is a re-bring, which the normal path handles."""
+    from src.services.applications.kit import normalized_company_key  # noqa: PLC0415
+
+    want_company, want_core = normalized_company_key(company or ""), role_core(title, location)
+    if not want_company or not want_core:
+        return None
+    cur = await db._db.execute(
+        "SELECT id, status, job_company, job_title, job_location FROM applications WHERE user_id = ? ORDER BY id",
+        (user_id,),
+    )
+    for r in await cur.fetchall():
+        if str(r["status"]) in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
+            continue
+        have_title = str(r["job_title"] or "")
+        if have_title.strip().casefold() == (title or "").strip().casefold():
+            continue
+        if normalized_company_key(str(r["job_company"] or "")) != want_company:
+            continue
+        if role_core(have_title, str(r["job_location"] or "")) == want_core:
+            return int(r["id"])
+    return None
+
+
 def _parse(raw: Any) -> Optional[datetime]:
     if not raw:
         return None
