@@ -687,7 +687,9 @@ async def create_ask(
     # A merge replaces asks, it never adds one: the cap only stops a NEW card.
     if not family and await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
         raise SpineError(
-            429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first"
+            429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first. "
+            "This ask was not filed and its job waits; keep working: write CVs and fill every other queued form. "
+            "A full ask list never ends a run, only the submit waits",
         )
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
