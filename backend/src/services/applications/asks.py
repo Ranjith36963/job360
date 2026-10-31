@@ -648,8 +648,8 @@ async def withdraw_open_matching(
         try:
             await withdraw_ask(db, user_id, int(ask_id), by, reason)
             done += 1
-        except SpineError:  # pragma: no cover - answered or withdrawn in between
-            pass
+        except SpineError:  # answered or withdrawn in between: nothing left to close
+            continue
     return done
 
 
