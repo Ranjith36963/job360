@@ -2558,7 +2558,13 @@ async def get_application_detail(
     # reaches the web header and every agent calling get_application.
     from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
 
-    detail["next_step"] = next_step_for_detail(detail)
+    detail["next_step"] = next_step_for_detail(
+        detail,
+        approval_holds=await _approval_holds(
+            db, user_id, app_row,
+            [(int(e.get("id") or 0), str(e.get("event_type"))) for e in events if not e.get("superseded")],
+        ),
+    )
     from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
 
     held = (await kit_service.holds_for_apps(db, user_id, [application_id], datetime.now(timezone.utc))).get(
@@ -2591,6 +2597,29 @@ async def _artifact_counts_by_kind(db: JobDatabase, application_id: int) -> dict
         (application_id,),
     )
     return {r[0]: int(r[1]) for r in await cur.fetchall()}
+
+
+async def _approval_holds(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], events: list[tuple[int, str]]
+) -> bool:
+    """Does the user's yes still hold, as the submit gate reads it (kit ``controls_state``: not
+    expired, CV / letter / form unchanged)? Only asked when the events say the form is filled and
+    approved on a ``considering`` application, so no other row pays for it."""
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+    from src.services.applications.next_step import kit_flags  # noqa: PLC0415
+
+    filled, approved = kit_flags(events)
+    if app_row.get("status") != "considering" or not (filled and approved):
+        return True
+    state = await kit_service.controls_state(db, user_id, app_row, datetime.now(timezone.utc))
+    cv = state["cv"]
+    holds = cv is not None and cv["approved"] is not None and state["approval_stale"] is None
+    if not holds:
+        logging.getLogger("job360.spine").info(
+            "next_step_approval_lapsed",
+            extra={"application_id": app_row["id"], "reason": state["approval_stale"] or "cv_changed"},
+        )
+    return holds
 
 
 async def list_applications(
@@ -2935,6 +2964,7 @@ async def list_applications(
                     follow_up_due=follow_up_due,
                     form_filled=kit_flags(kit_events_by_app.get(app_id, []))[0],
                     submit_approved=kit_flags(kit_events_by_app.get(app_id, []))[1],
+                    approval_holds=await _approval_holds(db, user_id, r, kit_events_by_app.get(app_id, [])),
                 ),
             }
         )
