@@ -30,7 +30,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    `POST /api/applications/{id}/send/approve`) or a yes in chat naming this job. Show the user what you entered,
    including the salary band you chose. Then call `check_submit`. Submit only
    as the apply recipe says. **Done when** it says `submit`, or `ask` plus the user's yes for this one application.
-7. **Press Submit, then check the page changed.** Right before the click `record_event` `submit_attempted` (no payload). A confirmation or thank-you text means it worked. No change: scan
+7. **Press Submit, then check the page changed.** In Job360's browser the click records `submit_attempted` itself (never record it first); in any other browser record it (no payload) right before the click. A confirmation or thank-you text means it worked. No change: scan
    for required or invalid fields (`aria-invalid`, red text, below the fold), read ALL the errors, fix exactly those,
    then `blocked` {reason: site_error, detail: "field errors after submit"} and STOP: never click again without a fresh `check_submit` `submit` (the user clicks "It was not sent" on Job360 first). Still stuck: `blocked`, STOP. If your own tool, permission prompt or safety classifier
    refuses the Submit click: do NOT click again, do not try another way (keyboard, script, other tab). `record_event`
