@@ -716,8 +716,9 @@ async def create_ask(
     ):
         raise SpineError(
             429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first. "
-            "This ask was not filed and its job waits; keep working: write CVs and fill every other queued form. "
-            "A full ask list never ends a run, only the submit waits",
+            "This ask was not filed; keep working: fill THIS job's form anyway (best guesses marked source "
+            "guessed in form_filled), then write CVs and fill every other queued form. A full ask list never "
+            "ends a run, only the submit waits",
         )
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
