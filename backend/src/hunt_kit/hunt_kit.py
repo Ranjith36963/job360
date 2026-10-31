@@ -32,6 +32,7 @@ import functools
 import hashlib
 import html
 import importlib
+import importlib.util
 import ipaddress
 import itertools
 import json
@@ -566,8 +567,26 @@ _HTML_FINDINGS: dict[str, dict[str, Any]] = {}  # cleaned ad text -> what html_t
 _HTML_FINDINGS_MAX = 4096
 
 
+# Run from a job360 checkout (the scheduled hunt, 2026-10-31), the guard is the server's own file one folder up;
+# only a downloaded kit gets it as kit_guard.py next to the kit.
+_REPO_GUARD = HERE.parent / "services" / "ad_guard.py"
+
+
+def _guard_from_repo() -> Any:
+    """``services/ad_guard.py`` of the checkout this kit sits in, loaded as ``kit_guard``, or None."""
+    if not _REPO_GUARD.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("kit_guard", _REPO_GUARD)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _kit_guard() -> Any:
-    """The ad guard (kit_guard.py, downloaded next to the kit), or None: the kit then runs unguarded."""
+    """The ad guard (kit_guard.py next to the kit, else the checkout's services/ad_guard.py), or None: the kit
+    then runs unguarded."""
     global _KIT_GUARD
     if _KIT_GUARD is False:
         with _GUARD_NOTE:
@@ -577,8 +596,13 @@ def _kit_guard() -> Any:
                 try:
                     _KIT_GUARD = importlib.import_module("kit_guard")
                 except ImportError as e:
-                    print("note: kit_guard unavailable (%s); ads are not checked for hidden text" % e, file=sys.stderr)
-                    _KIT_GUARD = None
+                    try:
+                        _KIT_GUARD = _guard_from_repo()
+                    except Exception:  # noqa: BLE001 - a broken guard file never stops the hunt
+                        _KIT_GUARD = None
+                    if _KIT_GUARD is None:
+                        note = "note: kit_guard unavailable (%s); ads are not checked for hidden text" % e
+                        print(note, file=sys.stderr)
     return _KIT_GUARD
 
 

@@ -111,8 +111,9 @@ export type JobCardsReport = {
 };
 
 /** The ready-to-send part of a job's card: its label and the ReadyCard (answers, Send, Don't send). */
-function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: {
+export function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts, status, changes }: {
   card: ReadyCardData; asks: Ask[]; paused: boolean; embedded: boolean; onChanged: () => void;
+  status?: string; changes?: number;
   salaryFacts: ReturnType<typeof useSalaryFacts>;
 }) {
   return (
@@ -120,7 +121,7 @@ function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: 
       <h3 className={cn("font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint", paused && "opacity-70")}>
         {paused ? "Ready to send · on hold while paused" : "Ready to send"}
       </h3>
-      <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} onChanged={onChanged} salaryFacts={salaryFacts} />
+      <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} status={status} changes={changes} onChanged={onChanged} salaryFacts={salaryFacts} />
     </section>
   );
 }
