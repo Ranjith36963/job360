@@ -340,6 +340,24 @@ async def test_queue_summary_counts_the_whole_open_queue(authenticated_async_con
 
 
 @pytest.mark.asyncio
+async def test_a_queued_list_with_no_limit_is_the_whole_queue(authenticated_async_context, fixture_user_id):
+    """2026-10-31: every hourly apply run read 20 of 39-76 queued rows and never paged. No `limit` on a
+    queued list = the whole queue; any other list keeps 20; an explicit `limit` still pages."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        ids = [await _bring(client, _ad(n, company=f"Firm{n}")) for n in range(1, 24)]
+        for i in ids:
+            await _queue(client, i)
+        whole = await _queued(client)
+        assert whole["queue_summary"]["queued"] == 23
+        assert len(whole["applications"]) == 23 and set(_by_id(whole)) == set(ids)
+        plain = (await client.get("/api/applications")).json()
+        assert len(plain["applications"]) == 20
+        page = (await client.get("/api/applications", params={"queued": True, "limit": 5, "offset": 20})).json()
+        assert len(page["applications"]) == 3
+
+
+@pytest.mark.asyncio
 async def test_queue_works_unfilled_first_then_filled_then_waiting_on_owner(
     authenticated_async_context, fixture_user_id
 ):

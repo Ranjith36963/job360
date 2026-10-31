@@ -49,7 +49,10 @@ export function ApplicationDecisions({
   changesSinceApproved = 0,
   handoff,
   handoffShownAbove = false,
+  hideSend = false,
 }: {
+  /** No Send / Don't send here: the job's form card above owns them, or the job is blocked. */
+  hideSend?: boolean;
   /** The page's Needs-you card already shows this job's FormHandoff: the blocked section keeps its other
    *  controls but shows no second one (owner 2026-10-26, two "The filled form was closed" on one page). */
   handoffShownAbove?: boolean;
@@ -90,7 +93,9 @@ export function ApplicationDecisions({
   }
 
   const cv = controls.cv ?? null;
-  const allowed = allowedActions(status, { hasCv: cv !== null, newFillWaiting });
+  const allowed = allowedActions(status, { hasCv: cv !== null, newFillWaiting }).filter(
+    (a) => !(hideSend && (a === "send_approve" || a === "send_decline")),
+  );
   // The newest of {fill, yes, no} is the current one: after a newer fill an old mark is history.
   const approved = newFillWaiting ? null : (cv?.approved ?? null);
   const declined = newFillWaiting ? null : (controls.declined ?? null);

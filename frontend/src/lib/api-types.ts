@@ -4070,6 +4070,11 @@ export interface components {
             artifacts: components["schemas"]["ApplicationArtifactOut"][];
             /** Asks */
             asks: components["schemas"]["AskOut"][];
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: components["schemas"]["BlockerOut"][];
             /** Contacts */
             contacts: components["schemas"]["ContactOut"][];
             /** Created At */
@@ -4106,6 +4111,12 @@ export interface components {
             known_people?: components["schemas"]["KnownPeopleOut"];
             /** Last Event At */
             last_event_at: string | null;
+            /**
+             * More
+             * @default 0
+             */
+            more: number;
+            next?: components["schemas"]["BlockerOut"] | null;
             next_step: components["schemas"]["NextStepOut"];
             proof: components["schemas"]["ProofOut"];
             /** Receipts */
@@ -4401,6 +4412,11 @@ export interface components {
             artifacts: {
                 [key: string]: number;
             };
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: components["schemas"]["BlockerOut"][];
             browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Country */
             country?: string | null;
@@ -4462,8 +4478,14 @@ export interface components {
              * @enum {string}
              */
             line_side: "above" | "below" | "unknown";
+            /**
+             * More
+             * @default 0
+             */
+            more: number;
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
+            next?: components["schemas"]["BlockerOut"] | null;
             next_step: components["schemas"]["NextStepOut"];
             /**
              * Origin
@@ -4861,6 +4883,28 @@ export interface components {
              * @default
              */
             confirmation: string;
+        };
+        /**
+         * BlockerOut
+         * @description One thing an application waits on: who (`actor`), what (`label`, plain English), since when, and the
+         *     row it is about (`ref`: ask_id / event_id / artifact_id / contact_ids).
+         */
+        BlockerOut: {
+            /**
+             * Actor
+             * @enum {string}
+             */
+            actor: "you" | "your_pc" | "assistant" | "job360" | "employer";
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Ref */
+            ref?: {
+                [key: string]: unknown;
+            } | null;
+            /** Since */
+            since: string;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -5991,6 +6035,7 @@ export interface components {
              * @enum {string}
              */
             recipe: "hunt" | "daily" | "batch" | "reach";
+            search?: components["schemas"]["InboxSearchOut"] | null;
         };
         /** DuplicateOut */
         DuplicateOut: {
@@ -6666,6 +6711,21 @@ export interface components {
             subject: string;
             /** Thread Id */
             thread_id: string | null;
+        };
+        /** InboxSearchOut */
+        InboxSearchOut: {
+            /** After */
+            after: string;
+            /** Application Ids */
+            application_ids: number[];
+            /** Companies */
+            companies: string[];
+            /** Email Senders */
+            email_senders: string[];
+            /** Gmail After */
+            gmail_after: string;
+            /** Skip Message Ids */
+            skip_message_ids: string[];
         };
         /**
          * InterviewAgenda
@@ -10689,7 +10749,7 @@ export interface operations {
             query?: {
                 status?: string | null;
                 updated_since?: string | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
                 due?: boolean;
                 quiet_days?: number | null;

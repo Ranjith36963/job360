@@ -21,7 +21,7 @@ import logging
 import re
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
@@ -492,7 +492,8 @@ def validate_source(raw: Optional[dict[str, Any]], *, allow_quote: bool = True) 
     if kind not in settings.APPLICATION_EVENT_SOURCE_KINDS:
         raise SpineError(
             422,
-            f"kind must be one of APPLICATION_EVENT_SOURCE_KINDS {settings.APPLICATION_EVENT_SOURCE_KINDS}",
+            f"kind must be one of APPLICATION_EVENT_SOURCE_KINDS {settings.APPLICATION_EVENT_SOURCE_KINDS}"
+            " (where the email came from, not what it says: omit it for an email)",
         )
 
     received_at = ""
@@ -2558,14 +2559,30 @@ async def get_application_detail(
     # reaches the web header and every agent calling get_application.
     from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
 
-    detail["next_step"] = next_step_for_detail(detail)
+    detail["next_step"] = next_step_for_detail(
+        detail,
+        approval_holds=await _approval_holds(
+            db, user_id, app_row,
+            [(int(e.get("id") or 0), str(e.get("event_type"))) for e in events if not e.get("superseded")],
+        ),
+    )
     from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
 
     held = (await kit_service.holds_for_apps(db, user_id, [application_id], datetime.now(timezone.utc))).get(
         application_id
     )
     detail["hold"], detail["stage"] = (held[0], held[1]) if held else (None, "")
+    from src.services.applications import blockers as blockers_service  # noqa: PLC0415 - blockers imports this module
+
+    mine = await blockers_service.blockers_for(db, user_id, [application_id])
+    detail.update(blockers_fields(mine.get(application_id, [])))
     return detail
+
+
+def blockers_fields(blockers: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The additive trio every application reader carries: ``blockers`` (ordered), ``next`` (the first or null)
+    and ``more`` (how many follow it). Read-only; ``next_step`` and ``may_submit`` are untouched."""
+    return {"blockers": blockers, "next": blockers[0] if blockers else None, "more": max(0, len(blockers) - 1)}
 
 
 def _pay_advertised_for(app_row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
@@ -2591,6 +2608,29 @@ async def _artifact_counts_by_kind(db: JobDatabase, application_id: int) -> dict
         (application_id,),
     )
     return {r[0]: int(r[1]) for r in await cur.fetchall()}
+
+
+async def _approval_holds(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], events: list[tuple[int, str]]
+) -> bool:
+    """Does the user's yes still hold, as the submit gate reads it (kit ``controls_state``: not
+    expired, CV / letter / form unchanged)? Only asked when the events say the form is filled and
+    approved on a ``considering`` application, so no other row pays for it."""
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+    from src.services.applications.next_step import kit_flags  # noqa: PLC0415
+
+    filled, approved = kit_flags(events)
+    if app_row.get("status") != "considering" or not (filled and approved):
+        return True
+    state = await kit_service.controls_state(db, user_id, app_row, datetime.now(timezone.utc))
+    cv = state["cv"]
+    holds = cv is not None and cv["approved"] is not None and state["approval_stale"] is None
+    if not holds:
+        logging.getLogger("job360.spine").info(
+            "next_step_approval_lapsed",
+            extra={"application_id": app_row["id"], "reason": state["approval_stale"] or "cv_changed"},
+        )
+    return holds
 
 
 async def list_applications(
@@ -2797,6 +2837,9 @@ async def list_applications(
 
     countries = await visa_service.user_work_countries(db, user_id)
     score_line = await user_score_line(user_id)
+    from src.services.applications import blockers as blockers_service  # noqa: PLC0415 - blockers imports this module
+
+    blockers_by_app = await blockers_service.blockers_for(db, user_id, [int(r["id"]) for r in rows])
 
     # 2026-09-24 — the list's "Next:" line needs interview_at and has_lesson,
     # both read off application_events. One query for the whole page (never
@@ -2919,6 +2962,7 @@ async def list_applications(
                 "preflight": preflights.get(app_id),
                 "browser": browsers.get(app_id),
                 "origin": origins.get(app_id, ""),
+                **blockers_fields(blockers_by_app.get(app_id, [])),
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),
@@ -2935,6 +2979,7 @@ async def list_applications(
                     follow_up_due=follow_up_due,
                     form_filled=kit_flags(kit_events_by_app.get(app_id, []))[0],
                     submit_approved=kit_flags(kit_events_by_app.get(app_id, []))[1],
+                    approval_holds=await _approval_holds(db, user_id, r, kit_events_by_app.get(app_id, [])),
                 ),
             }
         )

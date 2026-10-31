@@ -194,6 +194,24 @@ async def _check_after_fill(agent: AsyncClient, app_id: int, *, session: str | N
 
 
 @pytest.mark.asyncio
+async def test_an_assistants_unlabelled_read_holds_nothing(authenticated_async_context, fixture_user_id):
+    """2026-10-31: hourly apply runs read kits with no `session`; the next run (labelled) saw each one as
+    another session's hold, skipped the job and check_submit asked held_by_other_session."""
+    from src.services.applications import kit as kit_service
+
+    async with authenticated_async_context() as client:
+        app_id, token = await _setup(client, fixture_user_id)
+    async with _bearer_client(token) as agent:
+        await _kit(agent, app_id)  # an earlier run, no label
+        assert (await _kit(agent, app_id, "apply-1541"))["hold"] is None
+        assert await _check_after_fill(agent, app_id, session="apply-1541") == ("ask", "submit_mode_confirm")
+    async with _db() as db:
+        held = await kit_service.holds_for_apps(db, fixture_user_id, [app_id], datetime.now(timezone.utc))
+    assert app_id in held, "the labelled read just now is still a hold for the queue"
+    assert held[app_id][0]["session"] == "apply-1541"
+
+
+@pytest.mark.asyncio
 async def test_an_unlabelled_caller_after_a_labelled_read_is_warned_unsure(
     authenticated_async_context, fixture_user_id
 ):

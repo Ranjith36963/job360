@@ -140,6 +140,15 @@ describe("JobCards", () => {
     expect(screen.getByTestId("job-header-1")).not.toHaveTextContent(/things? wait/);
   });
 
+  it("a loaded row says the first blocker and how many more", async () => {
+    getApplication.mockImplementation(async (id: number) => ({
+      ...detail(id, [ask(1, id, { kind: "captcha" } as Partial<Ask>)]),
+      next: { kind: "captcha", actor: "you", label: "solve the CAPTCHA", since: "2026-10-20T10:00:00Z" }, more: 2,
+    }));
+    render(<JobCards open={[ask(1, 1, { kind: "captcha" } as Partial<Ask>)]} onChanged={async () => {}} />);
+    expect(await screen.findByTestId("job-what-1")).toHaveTextContent("You: solve the CAPTCHA +2 more");
+  });
+
   it("a collapsed header title links to the application", () => {
     getApplication.mockImplementation(() => new Promise(() => {}));
     render(<JobCards open={[ask(1, 1, { kind: "captcha" } as Partial<Ask>)]} onChanged={async () => {}} />);

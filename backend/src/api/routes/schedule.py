@@ -34,6 +34,15 @@ RunReason = Literal[
 ]
 
 
+class InboxSearchOut(BaseModel):
+    after: str  # ISO-8601; "" when the user has no open application
+    gmail_after: str  # the same day as Gmail's after: YYYY/MM/DD
+    application_ids: list[int]  # every open application: mark_inbox_checked these after the search
+    companies: list[str]
+    email_senders: list[str]
+    skip_message_ids: list[str]  # open unmatched mail: never read or park it again
+
+
 class DueItemOut(BaseModel):
     duty: Duty
     recipe: Literal["hunt", "daily", "batch", "reach"]
@@ -42,6 +51,8 @@ class DueItemOut(BaseModel):
     application_ids: Optional[list[int]] = None
     # Only on `network`: at most this many new people who fit the user's profile (cold contacts) this run.
     max_people: Optional[int] = None
+    # Only on `inbox`: what one Gmail search needs (2026-10-31), see services/applications/inbox.search_plan.
+    search: Optional[InboxSearchOut] = None
 
 
 class WhatsDueOut(BaseModel):
@@ -160,6 +171,11 @@ async def whats_due(
         answer["nothing_due"] = not answer["due"]
         answer["running"] = {**answer["running"], **{d: now.isoformat(timespec="seconds") for d in lost}}
         answer["held_by_running"] = [*answer["held_by_running"], *lost]
+    for item in answer["due"]:
+        if item["duty"] == "inbox":
+            from src.services.applications.inbox import search_plan  # noqa: PLC0415 - profile <-> spine cycle
+
+            item["search"] = await search_plan(db, user.id)
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 

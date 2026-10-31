@@ -918,6 +918,10 @@ class SubmitFacts:
     # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
     # ``approved`` is then False; the ask the gate would give is answered as ``approval_stale``.
     approval_stale: Optional[str] = None
+    # Owner rule 2026-10-31: the kinds (ASK_KINDS; "" counts as ``question``) of this application's OPEN asks
+    # (not answered, not withdrawn), minus asks that are not about applying (the doctor's lesson ask, the
+    # proof ask). A blocker kind asks ``blocker_open``, ``question`` asks ``question_open``; a yes clears neither.
+    open_asks: tuple[str, ...] = ()
     # Gap roadmap slice 30: the application's id, matched against the grant's scope
     # (``SubmitCounts.grant_scope``). ``None`` is never in a scope.
     application_id: Optional[int] = None
@@ -949,7 +953,7 @@ REASONS: tuple[str, ...] = (
     "type_first_pending", "below_score_line", "answer_guessed", "answer_unapproved", "sensitive_unconfirmed",
     "approval_stale",
     "required_unanswered", "grant_scope", "email_not_drafted", "blank_unasked", "answer_blank",
-    "answer_placeholder",
+    "answer_placeholder", "blocker_open", "question_open",
 )
 
 # Owner 2026-10-24: check_submit tells the assistant plainly what to do next. A stop whose fix is the
@@ -1238,6 +1242,8 @@ def may_submit(
         ``KIT_HOLD_MINUTES`` and has not released it -> ask
         ``held_by_other_session`` (a yes does NOT clear it; after every stop)
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
+    5b1. an open CAPTCHA / sign-in / upload / safety ask -> ask ``blocker_open``; an open question ask ->
+        ``question_open``
     5d. ``form_url`` fails :func:`screen_form_url` (user-info ``@``, ``%`` or a
         backslash in the authority, non-ASCII / IDNA host, not http(s)) -> ask
         ``unknown_site`` (a yes does NOT clear it)
@@ -1271,7 +1277,8 @@ def may_submit(
     page, profile or email draft changed since) clears nothing; the ask it would have cleared answers
     ``approval_stale`` naming the part.
     Rules 1-4c (4a-4a3, 4b-email, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
-    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
+    session's hold (5a), the ``blocked`` ask (5b), ``blocker_open`` / ``question_open`` (5b1),
+    the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
     ``below_score_line`` (4a4), ``answer_guessed``, ``answer_unapproved`` and
     ``sensitive_unconfirmed`` (4e) and ``blank_unasked`` (4e2) are NEVER cleared by a yes.
     """
@@ -1389,6 +1396,9 @@ def may_submit(
             "ask", "blocked",
             "Your assistant got stuck on this application. Do not submit; the user resolves it first.",
         )
+    open_ask = open_ask_decision(application.open_asks)
+    if open_ask is not None:
+        return open_ask
     screened: Optional[str] = None
     if not email:
         screened = screen_form_url(site_host)
@@ -1463,6 +1473,28 @@ def answer_blank_decision(items: tuple[str, ...]) -> SubmitDecision:
         "answer from Needs you (an open ask is not an answer: wait for it), record a new form_filled and call "
         'check_submit again. Only the user\'s own "Leave blank" lets a field stay empty.',
     )
+
+
+BLOCKER_ASK_KINDS = ("captcha", "login", "upload", "safety")
+
+
+def open_ask_decision(kinds: tuple[str, ...]) -> Optional[SubmitDecision]:
+    """Owner rule 2026-10-31: no submit while this job has an open ask. A CAPTCHA / sign-in / upload / safety
+    ask (filed with ask_user, with or without a ``blocked`` event) -> ``blocker_open``; an open question ask ->
+    ``question_open``. Both are ``ask`` (like ``blocked``) and a yes never clears them."""
+    if any(k in BLOCKER_ASK_KINDS for k in kinds):
+        return SubmitDecision(
+            "ask", "blocker_open",
+            "This job is waiting on you for a CAPTCHA, sign-in, upload or code step (Needs you). "
+            "Do not submit; you clear it first.",
+        )
+    if "question" in kinds:
+        return SubmitDecision(
+            "ask", "question_open",
+            "This job still has a question waiting for your answer on Needs you. "
+            "Do not submit until you answer it.",
+        )
+    return None
 
 
 def blank_unasked_decision(blanks: tuple[str, ...]) -> SubmitDecision:

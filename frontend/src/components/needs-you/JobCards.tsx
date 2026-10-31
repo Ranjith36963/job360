@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FOLD_LIST, FoldRow, useFoldSet, type FoldSet } from "@/components/fold/FoldRow";
 import { JobCard } from "./JobCard";
+import { nextLine } from "@/lib/blocker-words";
 import { JobRowAction, JobRowHeader, JobRowSummary } from "./JobRowSummary";
 import { NewConnections, newConnections } from "./NewConnections";
 import { ReadyCard, isMissingAnswer } from "./ReadyCard";
@@ -87,7 +88,7 @@ function makeLimiter(max: number) {
     });
 }
 
-type Slot = { status: "loading" } | { status: "ready"; card: JobCardData; facts: RowFacts } | { status: "failed" };
+type Slot = { status: "loading" } | { status: "ready"; card: JobCardData; facts: RowFacts; line: string } | { status: "failed" };
 type Cvs = Map<number, { artifactId: number; version: number }>;
 
 /** What the page needs to know about the job list (the cards it holds, the asks it could not place). */
@@ -111,8 +112,9 @@ export type JobCardsReport = {
 };
 
 /** The ready-to-send part of a job's card: its label and the ReadyCard (answers, Send, Don't send). */
-function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: {
+export function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts, status, changes }: {
   card: ReadyCardData; asks: Ask[]; paused: boolean; embedded: boolean; onChanged: () => void;
+  status?: string; changes?: number;
   salaryFacts: ReturnType<typeof useSalaryFacts>;
 }) {
   return (
@@ -120,7 +122,7 @@ function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: 
       <h3 className={cn("font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint", paused && "opacity-70")}>
         {paused ? "Ready to send · on hold while paused" : "Ready to send"}
       </h3>
-      <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} onChanged={onChanged} salaryFacts={salaryFacts} />
+      <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} status={status} changes={changes} onChanged={onChanged} salaryFacts={salaryFacts} />
     </section>
   );
 }
@@ -252,7 +254,7 @@ export function JobCards({
       fetched.current.set(id, gen);
       set(id, { status: "loading" }, true);
       void limiter(() => getApplication(id)).then(
-        (d) => mounted.current && fetched.current.get(id) === gen && set(id, { status: "ready", card: buildCard(d, byJob.get(id) ?? [], null), facts: factsFromDetail(d) }),
+        (d) => mounted.current && fetched.current.get(id) === gen && set(id, { status: "ready", card: buildCard(d, byJob.get(id) ?? [], null), facts: factsFromDetail(d), line: nextLine(d.next, d.more) }),
         () => mounted.current && fetched.current.get(id) === gen && set(id, { status: "failed" }),
       );
     }
@@ -321,7 +323,7 @@ export function JobCards({
               label={[card?.company || h.company, card?.role || h.role].filter(Boolean).join(", ") || "this job"}
               open={open} onToggle={() => toggle(h.id)} actionClass="lg:w-40"
               action={<JobRowAction card={card} onOpen={() => !open && toggle(h.id)} />}
-              summary={<JobRowSummary h={h} card={card} facts={facts} linkTestid={header ? `title-link-${h.id}` : `row-title-${h.id}`} />}>
+              summary={<JobRowSummary h={h} card={card} facts={facts} nextText={slot?.status === "ready" ? slot.line : ""} linkTestid={header ? `title-link-${h.id}` : `row-title-${h.id}`} />}>
               {card ? <JobCard card={card} onChanged={onChanged} ready={readyPart(h, true)} showHeader={false} bare />
                 : slot?.status === "failed" ? <div className="p-3">{readyPart(h, false)}</div>
                 : slot?.status === "loading" && <Skeleton data-testid={`job-skeleton-${h.id}`} className="m-4 h-16" />}
