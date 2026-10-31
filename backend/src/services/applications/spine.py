@@ -492,7 +492,8 @@ def validate_source(raw: Optional[dict[str, Any]], *, allow_quote: bool = True) 
     if kind not in settings.APPLICATION_EVENT_SOURCE_KINDS:
         raise SpineError(
             422,
-            f"kind must be one of APPLICATION_EVENT_SOURCE_KINDS {settings.APPLICATION_EVENT_SOURCE_KINDS}",
+            f"kind must be one of APPLICATION_EVENT_SOURCE_KINDS {settings.APPLICATION_EVENT_SOURCE_KINDS}"
+            " (where the email came from, not what it says: omit it for an email)",
         )
 
     received_at = ""
