@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import type { ApplicationControls, ApplicationDetail, ReadyCardData, VisaShape } from "@/lib/api";
-import { ReadyCard, isMissingAnswer } from "@/components/needs-you/ReadyCard";
+import { isMissingAnswer } from "@/components/needs-you/ReadyCard";
 import { useSalaryFacts } from "@/components/needs-you/useSalaryFacts";
 import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
@@ -36,9 +36,9 @@ import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
 import { FollowUpField } from "@/components/applications/FollowUpField";
 import { JobCard } from "@/components/needs-you/JobCard";
-import { loadJobCard } from "@/components/needs-you/JobCards";
+import { ReadySection, loadJobCard } from "@/components/needs-you/JobCards";
 import type { JobCardData } from "@/lib/job-cards";
-import { cardShowsFormHandoff } from "@/lib/job-cards";
+import { cardShowsFormHandoff, waitSummary } from "@/lib/job-cards";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
@@ -235,6 +235,15 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const place = detail.job.job_location;
   const unconfirmed = submitUnconfirmed(detail.events);
   const queued = isQueued(detail.events);
+  // The job's filled form is shown ONCE, inside the top "Needs you" section, with its one Send.
+  const readyShown = ready !== null && actions.includes("ready_card");
+  const readyForm = readyShown ? ready : null;
+  const readyPart = readyForm && (
+    <ReadySection card={readyForm.card} asks={detail.asks} paused={readyForm.paused} embedded={jobCard !== null} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} salaryFacts={salaryFacts} />
+  );
+  // Same words the Needs-you row shows for this job; the stored next step only when nothing waits on the user.
+  const waits = jobCard && jobCard.asks.length > 0 ? waitSummary(jobCard.asks.map((a) => a.ask), jobCard.people.length) : "";
+  const nextLabel = waits || nextStep?.label;
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
@@ -311,14 +320,18 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         </section>
       )}
 
-      {jobCard && (
+      {(jobCard || readyPart) && (
         <section aria-labelledby="app-asks" data-testid="app-asks" className="flex flex-col gap-3">
           <h2 id="app-asks" className={LABEL}>
             Needs you
           </h2>
-          <ul className="flex flex-col gap-3">
-            <JobCard card={jobCard} onChanged={reloadAfterAsk} showHeader={false} />
-          </ul>
+          {jobCard ? (
+            <ul className="flex flex-col gap-3">
+              <JobCard card={jobCard} onChanged={reloadAfterAsk} showHeader={false} ready={readyPart} />
+            </ul>
+          ) : (
+            readyPart
+          )}
         </section>
       )}
 
@@ -396,9 +409,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           className="scroll-quiet contents lg:flex lg:flex-col lg:gap-6 lg:border-l lg:border-border lg:pl-8 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto"
         >
           <div data-testid="app-actions" className="order-1 flex flex-col items-start gap-3 border-t border-border pt-5 lg:order-none lg:border-t-0 lg:pt-0">
-            {nextStep?.label && (
+            {nextLabel && (
               <p data-testid="next-step" className="font-heading text-lg leading-snug text-brand">
-                Next: {nextStep.label}
+                Next: {nextLabel}
               </p>
             )}
             <span
@@ -475,11 +488,6 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 Add to calendar
               </a>
             )}
-            {ready && actions.includes("ready_card") && (
-              <div className="w-full">
-                <ReadyCard card={ready.card} asks={detail.asks} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} salaryFacts={salaryFacts} />
-              </div>
-            )}
             {controls && (
               <ApplicationDecisions
                 applicationId={detail.id}
@@ -487,6 +495,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 status={detail.status}
                 changesSinceApproved={cvChanges}
                 newFillWaiting={ready !== null}
+                hideSend={readyShown || controls.blocked != null}
                 handoffShownAbove={jobCard !== null && cardShowsFormHandoff(jobCard)}
                 handoff={(() => {
                   const a = (detail.asks ?? []).find(
