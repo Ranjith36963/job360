@@ -861,10 +861,30 @@ async def gate_facts(
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),
         blank_unasked=await _blank_unasked(db, user_id, app_row),
+        open_asks=await _open_ask_kinds(db, user_id, application_id),
         **await _blank_or_placeholder(db, user_id, app_row),
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
+
+
+async def _open_ask_kinds(db: JobDatabase, user_id: str, application_id: int) -> tuple[str, ...]:
+    """Kinds of this application's open asks (one query; mirrors ``asks._job_has_open_ask``). Left out: the
+    doctor's "keep this lesson?" ask (a question row keyed ``doctor_repeat_*``) and the proof ask
+    (context ``proof_missing:*``): neither is about the form. Outreach files no ask."""
+    from src.services.applications import asks as asks_service  # noqa: PLC0415 - keep the import graph flat
+
+    cur = await db._db.execute(
+        "SELECT kind, context, questions FROM application_asks WHERE user_id = ? AND application_id = ? "
+        "AND answered_at IS NULL AND withdrawn_at IS NULL",
+        (user_id, application_id),
+    )
+    kinds: list[str] = []
+    for kind, context, questions in await cur.fetchall():
+        if str(context or "").startswith("proof_missing:") or asks_service.is_doctor_only(questions):
+            continue
+        kinds.append(str(kind or "") or "question")
+    return tuple(kinds)
 
 
 async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -2195,9 +2215,9 @@ async def live_hold(
 ) -> Optional[dict[str, Any]]:
     """Another session's live hold: the newest kit read inside ``KIT_HOLD_MINUTES`` whose
     ``(recorded_by, session)`` differs from the caller's ``(actor, session)``, with no later
-    applied / withdrawn / rejected / hold_released by ANY actor. A kit read with no
-    ``session`` key (before 2026-10-15) counts as session ``""``; the same actor with both
-    sessions ``""`` is the same holder. An UNLABELLED caller after a labelled read by its
+    applied / withdrawn / rejected / hold_released by ANY actor. An assistant's read with no
+    ``session`` holds nothing (2026-10-31); the web user's own read (always unlabelled) does.
+    An UNLABELLED caller after a labelled read by its
     own actor gets ``unsure: true`` (it may be another session of the same assistant).
     Warns in the kit; check_submit asks ``held_by_other_session`` on a sure hold."""
     actor = actor_for(user)
@@ -2231,6 +2251,11 @@ def _pick_hold(
         if int(r["id"]) <= cleared_upto:
             break  # this read and every older one were released
         their = str(_json(r.get("payload")).get("session") or "")
+        if not their and r["recorded_by"] != "web":
+            # 2026-10-31: an ASSISTANT's unlabelled read claims nothing. Hourly apply runs read kits with
+            # no session and left 30-minute holds the next runs skipped as another session's work. The
+            # web user's own read (always unlabelled) still holds: the owner is on that job.
+            continue
         if r["recorded_by"] != actor or (session and their != session):
             sure = sure or {**r, "session": their}
         elif not session and their:

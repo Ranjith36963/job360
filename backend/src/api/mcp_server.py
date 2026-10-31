@@ -1322,7 +1322,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def list_applications(
         status: Optional[str] = None,
         updated_since: Optional[str] = None,
-        limit: int = 20,
+        limit: Optional[int] = None,
         offset: int = 0,
         due: bool = False,
         quiet_days: Optional[int] = None,
@@ -1347,7 +1347,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `from:` (mail that never names the company), `inbox_checked_at` = read
         only mail after it (null = since the application was added). `in_flight=true` —
         only applications another session holds now; rows carry `hold` and `stage`.
-        `queued=true` - the batch queue in order (`queue_position`); work it top-down.
+        `queued=true` - the whole batch queue (up to 200; `limit` pages) in work order; work it top-down.
         Rows carry `preflight`; the reply a
         `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
         in places with that level of the user's own job priority; rows carry `priority`.
@@ -1391,6 +1391,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
         names it). `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
         (reach also lists `application_ids`: find people for those only);
+        inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
+        build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
+        those application_ids (at most 200 per call);
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
@@ -1847,7 +1850,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         record_event.
 
         `unmatched`: mail you read but could not tie to ONE application, each {message_id,
-        thread_id?, sender, subject, received_at, kind?, dismissed?}. Stored once per message id as a
+        thread_id?, sender, subject, received_at, dismissed?}; no `kind` (it is the source, email by
+        default, never rejection/interview: that is not known until matched). Stored once per message id as a
         Needs-you item; the user picks its application or dismisses it on Job360. Never ask_user
         about it. `dismissed: true` only when the user told you it is about no job. A message id
         already recorded on an event is not stored (`already_recorded`).
@@ -2503,8 +2507,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     @mcp.tool()
     async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:
         """The APPLICATION KIT - call before you fill ANY application form.
-        Pass `session`: a short label you pick once per conversation (letters, digits,
-        space . _ : -, max 60) and reuse, also in check_submit.
+        Pass `session`: one short label per conversation (letters, digits,
+        space . _ : -, max 60), reused in check_submit; none = no hold.
         It holds, for THIS job: the CV and cover letter (`text` up to 8000
         chars, `text_truncated` + `text_more` fetch the rest; `include_text=false`
         sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link,
