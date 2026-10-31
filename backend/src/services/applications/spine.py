@@ -21,7 +21,7 @@ import logging
 import re
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
@@ -2565,7 +2565,17 @@ async def get_application_detail(
         application_id
     )
     detail["hold"], detail["stage"] = (held[0], held[1]) if held else (None, "")
+    from src.services.applications import blockers as blockers_service  # noqa: PLC0415 - blockers imports this module
+
+    mine = await blockers_service.blockers_for(db, user_id, [application_id])
+    detail.update(blockers_fields(mine.get(application_id, [])))
     return detail
+
+
+def blockers_fields(blockers: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The additive trio every application reader carries: ``blockers`` (ordered), ``next`` (the first or null)
+    and ``more`` (how many follow it). Read-only; ``next_step`` and ``may_submit`` are untouched."""
+    return {"blockers": blockers, "next": blockers[0] if blockers else None, "more": max(0, len(blockers) - 1)}
 
 
 def _pay_advertised_for(app_row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
@@ -2797,6 +2807,9 @@ async def list_applications(
 
     countries = await visa_service.user_work_countries(db, user_id)
     score_line = await user_score_line(user_id)
+    from src.services.applications import blockers as blockers_service  # noqa: PLC0415 - blockers imports this module
+
+    blockers_by_app = await blockers_service.blockers_for(db, user_id, [int(r["id"]) for r in rows])
 
     # 2026-09-24 — the list's "Next:" line needs interview_at and has_lesson,
     # both read off application_events. One query for the whole page (never
@@ -2919,6 +2932,7 @@ async def list_applications(
                 "preflight": preflights.get(app_id),
                 "browser": browsers.get(app_id),
                 "origin": origins.get(app_id, ""),
+                **blockers_fields(blockers_by_app.get(app_id, [])),
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),

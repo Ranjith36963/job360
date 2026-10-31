@@ -870,6 +870,14 @@
             "title": "Asks",
             "type": "array"
           },
+          "blockers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BlockerOut"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "contacts": {
             "items": {
               "$ref": "#/components/schemas/ContactOut"
@@ -997,6 +1005,21 @@
               }
             ],
             "title": "Last Event At"
+          },
+          "more": {
+            "default": 0,
+            "title": "More",
+            "type": "integer"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
@@ -1854,6 +1877,14 @@
             "title": "Artifacts",
             "type": "object"
           },
+          "blockers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BlockerOut"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "browser": {
             "anyOf": [
               {
@@ -2031,6 +2062,11 @@
             "title": "Line Side",
             "type": "string"
           },
+          "more": {
+            "default": 0,
+            "title": "More",
+            "type": "integer"
+          },
           "needs_sponsorship": {
             "anyOf": [
               {
@@ -2041,6 +2077,16 @@
               }
             ],
             "title": "Needs Sponsorship"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
@@ -3046,6 +3092,54 @@
           }
         },
         "title": "BlockedSubmittedRequest",
+        "type": "object"
+      },
+      "BlockerOut": {
+        "description": "One thing an application waits on: who (`actor`), what (`label`, plain English), since when, and the\nrow it is about (`ref`: ask_id / event_id / artifact_id / contact_ids).",
+        "properties": {
+          "actor": {
+            "enum": [
+              "you",
+              "your_pc",
+              "assistant",
+              "job360",
+              "employer"
+            ],
+            "title": "Actor",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "actor",
+          "label",
+          "since"
+        ],
+        "title": "BlockerOut",
         "type": "object"
       },
       "Body_clear_profile_section_api_profile_clear_post": {
