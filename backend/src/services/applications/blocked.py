@@ -471,6 +471,12 @@ async def after_append(
                 )
             except SpineError:  # pragma: no cover - answered or withdrawn in between
                 pass
+        # A later ask_user blocker may have merged into / replaced the stored ask: clear every open one.
+        # Only the USER's own "Mark resolved" (web) may clear a blocker ask; an agent's unblocked never does.
+        if stored["assistant"] == "web":
+            await asks_service.withdraw_open_matching(
+                db, user.id, application_id, "web", "unblocked", blockers=True
+            )
     _log(user, application_id, event_type, stored, "ok")
 
 

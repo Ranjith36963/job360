@@ -3484,6 +3484,10 @@ async def approve_send(
     stamp = await kit_service.approval_fingerprint(db, user.id, application_id)
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
     await _web_decision(db, user, application_id, "submit_approved", payload, fingerprint=stamp)
+    # The agent's own "may I send?" ask (a bare sentence, no form row) is answered by this Send.
+    await asks_service.withdraw_open_matching(
+        db, user.id, application_id, "web", "answered by Send", blockers=False
+    )
     return await _controls(db, user, application_id)
 
 

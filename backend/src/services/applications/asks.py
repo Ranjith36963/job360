@@ -608,6 +608,51 @@ async def count_open_ask_cards(db: JobDatabase, user_id: str) -> int:
     return int(row[0] or 0) if row else 0
 
 
+def row_keys(raw: Any) -> list[str]:
+    """The keys of a stored ``questions`` column ("" / bad JSON = no rows)."""
+    try:
+        rows = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        return []
+    return [str(r.get("key", "")) for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def is_doctor_only(raw: Any) -> bool:
+    """The doctor's "keep this lesson?" ask: it has rows and EVERY key is ``doctor_repeat_*``. A merged ask that
+    also holds a form row is not doctor-only (it still blocks a submit)."""
+    keys = row_keys(raw)
+    return bool(keys) and all(k.startswith("doctor_repeat_") for k in keys)
+
+
+async def withdraw_open_matching(
+    db: JobDatabase, user_id: str, application_id: int, by: str, reason: str, *, blockers: bool
+) -> int:
+    """Withdraw this application's open asks: every blocker-kind ask (``blockers``), or else every question ask
+    that is only sentence rows (``said_*`` / ``earlier_*``, no form row) and not the doctor's. Returns how many."""
+    cur = await db._db.execute(
+        "SELECT id, kind, questions FROM application_asks WHERE user_id = ? AND application_id = ? "
+        "AND answered_at IS NULL AND withdrawn_at IS NULL",
+        (user_id, application_id),
+    )
+    done = 0
+    for ask_id, kind, raw in await cur.fetchall():
+        keys = row_keys(raw)
+        if raw and not keys:  # rows we cannot read are never "sentence-only"
+            keys = ["?"]
+        if blockers:
+            hit = kind in BLOCKER_FAMILY
+        else:
+            hit = kind in QUESTION_FAMILY and all(k.startswith(("said_", "earlier_")) for k in keys)
+        if not hit:
+            continue
+        try:
+            await withdraw_ask(db, user_id, int(ask_id), by, reason)
+            done += 1
+        except SpineError:  # pragma: no cover - answered or withdrawn in between
+            pass
+    return done
+
+
 async def _job_has_open_ask(db: JobDatabase, user_id: str, application_id: int) -> bool:
     cur = await db._db.execute(
         "SELECT 1 FROM application_asks WHERE user_id = ? AND application_id = ? "
