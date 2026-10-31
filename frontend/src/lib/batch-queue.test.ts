@@ -57,3 +57,11 @@ describe("originLabel", () => {
     expect(originLabel(null)).toBe("");
   });
 });
+
+describe("queueSummaryLine - the one count", () => {
+  it("shows the server's jobs waiting on you, not this queue's asked + blocked", () => {
+    expect(queueSummaryLine({ queued: 8, ready_to_send: 5, asked: 0, blocked: 0, daily_left: 3 }, 7)).toBe(
+      "8 queued · 5 ready · 7 need you · 3 left today",
+    );
+  });
+});

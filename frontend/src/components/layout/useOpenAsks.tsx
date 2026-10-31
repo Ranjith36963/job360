@@ -6,9 +6,9 @@ import { onChanges } from "@/lib/live-changes";
 
 /**
  * The Needs-you badge: the same total the Needs-you page shows ("N things need you"), from ONE cheap
- * read, GET /api/needs-you-count (owner 2026-10-27). The server applies the page's own rules (distinct
- * jobs with an open ask, a ready card, a CV to approve or a person to reach, plus the Other items), so
- * the badge is exact on every page, with no full cards read. A light fetch after mount when signed in,
+ * read, GET /api/needs-you-count (owner 2026-10-27). The server counts each job once by its first blocker
+ * (the jobs waiting on the user) plus the Other items, and the page and the dashboard headline read that
+ * same answer, so the badge is exact on every page, with no full cards read. A light fetch after mount when signed in,
  * re-fetched on every navigation and on every live change. It never blocks render, and a failure just
  * means no badge. On Needs you the page announces its own total after every reload (ASKS_CHANGED_EVENT),
  * so the badge clears while the user answers there, with no navigation needed.

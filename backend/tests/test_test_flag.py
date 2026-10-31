@@ -47,7 +47,8 @@ async def _new(client: AsyncClient) -> dict[str, Any]:
 async def _count(client: AsyncClient) -> dict[str, int]:
     resp = await client.get("/api/needs-you-count")
     assert resp.status_code == 200, resp.text
-    return resp.json()
+    body = resp.json()
+    return {k: body[k] for k in ("n", "jobs", "other")}
 
 
 @pytest.mark.asyncio

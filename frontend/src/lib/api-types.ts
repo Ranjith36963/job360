@@ -7558,12 +7558,48 @@ export interface components {
         };
         /** NeedsYouCountOut */
         NeedsYouCountOut: {
+            /**
+             * By Actor
+             * @default {}
+             */
+            by_actor: {
+                [key: string]: number;
+            };
+            /**
+             * By Kind
+             * @default {}
+             */
+            by_kind: {
+                [key: string]: number;
+            };
+            /**
+             * Job Ids
+             * @default []
+             */
+            job_ids: number[];
+            /**
+             * Job Ids By Kind
+             * @default {}
+             */
+            job_ids_by_kind: {
+                [key: string]: number[];
+            };
             /** Jobs */
             jobs: number;
+            /**
+             * Jobs Waiting On You
+             * @default 0
+             */
+            jobs_waiting_on_you: number;
             /** N */
             n: number;
             /** Other */
             other: number;
+            /**
+             * Other Ask Ids
+             * @default []
+             */
+            other_ask_ids: number[];
         };
         /**
          * NextStepOut

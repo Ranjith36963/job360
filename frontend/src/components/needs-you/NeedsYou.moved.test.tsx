@@ -10,8 +10,12 @@ const resolveSubmit = vi.fn();
 const fetchWhatsNewPages = vi.fn();
 const listAsks = vi.fn();
 
+// The one server count (GET /api/needs-you-count) the summary and chips read; tests that check a number set it.
+const getNeedsYouCount = vi.hoisted(() => vi.fn());
+const ZERO_COUNT = { n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {} };
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
+  getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listApplications: (...a: unknown[]) => listApplications(...a),
   recordApplicationEvent: vi.fn().mockResolvedValue({}),
   recordApplicationReceipt: (...a: unknown[]) => recordApplicationReceipt(...a),
@@ -41,6 +45,7 @@ const ev = (id: number, application_id: number, event_type: string) => ({
 const app = { id: 7, job_title: "Engineer", job_company: "Mistral AI", follow_up_due: false };
 
 beforeEach(() => {
+  getNeedsYouCount.mockReset().mockResolvedValue(ZERO_COUNT);
   listApplications.mockReset().mockResolvedValue({ applications: [], total: 0 });
   recordApplicationReceipt.mockReset().mockResolvedValue({});
   resolveSubmit.mockReset().mockResolvedValue({});

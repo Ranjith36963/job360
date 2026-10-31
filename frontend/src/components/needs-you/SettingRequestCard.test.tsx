@@ -9,8 +9,12 @@ const getAssistantSettings = vi.fn();
 const listAsks = vi.fn();
 const toastError = vi.fn();
 
+// The one server count (GET /api/needs-you-count) the summary and chips read; tests that check a number set it.
+const getNeedsYouCount = vi.hoisted(() => vi.fn());
+const ZERO_COUNT = { n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {} };
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
+  getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: vi.fn(),
   withdrawAsk: vi.fn(),
@@ -38,6 +42,7 @@ const request = {
 };
 
 beforeEach(() => {
+  getNeedsYouCount.mockReset().mockResolvedValue(ZERO_COUNT);
   confirmSettingRequest.mockReset().mockResolvedValue({});
   declineSettingRequest.mockReset().mockResolvedValue({});
   getAssistantSettings.mockReset().mockResolvedValue({ waiting: [request] });
@@ -194,6 +199,7 @@ describe("Needs-you page", () => {
     window.addEventListener("job360:asks-changed", on);
     const q = (id: number) => ({ id, application_id: null, question: `Q${id}`, context: "", asked_by: "x", asked_at: "2026-10-20T10:00:00Z", status: "open" });
     listAsks.mockImplementation(async (s: string) => ({ asks: s === "open" ? [q(1), q(2)] : [], open_count: 2 }));
+    getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 0, other: 3, jobs_waiting_on_you: 0, by_actor: { you: 0 }, by_kind: {} });
     render(<NeedsYou />);
     // A request is a permission (owner 2026-10-28): one Review link to Connect > Permissions, no card here.
     const row = await screen.findByTestId("other-row-setting-link");

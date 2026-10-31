@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { toast } from "sonner";
-import { listApplications, recordApplicationEvent } from "@/lib/api";
+import { getNeedsYouCount, listApplications, recordApplicationEvent } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import {
   filterByBrowser,
@@ -72,9 +72,15 @@ export function BatchQueueCard() {
   const [browserFilter, setBrowserFilter] = useState<QueueBrowserFilter>("all");
   // The own-browser queue (null: failed or not loaded): its tasks join the list once each.
   const [own, setOwn] = useState<OwnBrowserQueue | null>(null);
+  const [needYou, setNeedYou] = useState<number | null>(null); // the one server count, not this queue's own
 
   const load = useCallback(async () => {
     void getOwnBrowserQueue().then((q) => q && setOwn(q)); // a failed read keeps the last good tasks
+    try {
+      void getNeedsYouCount().then((c) => setNeedYou(c.jobs_waiting_on_you), () => {});
+    } catch {
+      // no count: the line falls back to the queue's own
+    }
     try {
       const res = await listApplications({ queued: true, limit: 50 });
       setRows(res.applications as QueueRow[]);
@@ -158,9 +164,9 @@ export function BatchQueueCard() {
         </p>
       ) : (
         <>
-          {queueSummaryLine(summary) && (
+          {queueSummaryLine(summary, needYou) && (
             <p className="font-mono text-xs text-muted-foreground" data-testid="batch-queue-summary">
-              {queueSummaryLine(summary)}
+              {queueSummaryLine(summary, needYou)}
             </p>
           )}
           <QueueBrowserFilterRow summary={filterSummary} total={items.length} value={browserFilter} onChange={setBrowserFilter} />
