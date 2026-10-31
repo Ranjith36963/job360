@@ -260,18 +260,19 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     )
     urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    out: dict[int, dict[str, str]] = {}
-    for app_id in ids:
-        p = blocks.get(app_id, {})
-        reason = str(p.get("reason") or "")
-        by_browser = p.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
-        route = routing.browser_for(
-            url=urls.get(app_id, ""), queue_kind="application",
-            job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
-            page_stop="otp_needed" if reason == "otp_needed" else "",
-        )
-        out[app_id] = routing.label(route)
-    return out
+    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {})) for app_id in ids}
+
+
+def route_label(url: str, block: dict[str, Any]) -> dict[str, str]:
+    """The browser (``routing.label``) that runs one queued application: its apply link plus its open block's
+    payload (``{}`` = none). Pure; ``queue_browsers`` and ``blockers`` share it."""
+    reason = str(block.get("reason") or "")
+    by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
+    return routing.label(routing.browser_for(
+        url=url, queue_kind="application",
+        job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
+        page_stop="otp_needed" if reason == "otp_needed" else "",
+    ))
 
 
 async def queue_summary(

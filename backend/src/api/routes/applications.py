@@ -732,6 +732,17 @@ class ContactOut(BaseModel):
     outreach: ContactOutreachOut
 
 
+class BlockerOut(BaseModel):
+    """One thing an application waits on: who (`actor`), what (`label`, plain English), since when, and the
+    row it is about (`ref`: ask_id / event_id / artifact_id / contact_ids)."""
+
+    kind: str
+    actor: Literal["you", "your_pc", "assistant", "job360", "employer"]
+    label: str
+    since: str
+    ref: Optional[dict[str, Any]] = None
+
+
 class NextStepOut(BaseModel):
     """What to do next on this application — a state machine over the stored
     record (status, fit, CV versions, receipt, interview date, lesson), never
@@ -889,6 +900,10 @@ class ApplicationDetailOut(BaseModel):
     # over the record, never a judgement of the job). `code` is the closed
     # vocabulary an agent branches on; `label` is the sentence the web shows.
     next_step: NextStepOut
+    # Blockers slice 3 - everything that waits, ordered; `next` is the first, `more` how many follow it.
+    blockers: list[BlockerOut] = []
+    next: Optional[BlockerOut] = None
+    more: int = 0
     # Owner decision, 2026-09-25 — the follow-up date (in the caller's own
     # timezone), and whether it has arrived. `null`/`false` when unset.
     follow_up_on: Optional[str]
@@ -947,6 +962,9 @@ class ApplicationSummaryOut(BaseModel):
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut
+    blockers: list[BlockerOut] = []
+    next: Optional[BlockerOut] = None
+    more: int = 0
     # Owner decision, 2026-09-25 — same pair as ApplicationDetailOut, so the
     # list's "Due" chip and amber tag need no per-row detail fetch.
     follow_up_on: Optional[str] = None

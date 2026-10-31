@@ -45,12 +45,14 @@ _OPEN_ASKS_SQL = (
 
 # Each contact's newest drafted message, unless it is empty or the newest "sent" mark is at or after it
 # (``personToReach`` in job-cards.ts). Only the newest LIST_PEOPLE_MAX contacts, as GET /api/people lists.
-_UNSENT_SQL = (
-    "SELECT c.id, c.application_id, m.text FROM application_contacts c "
+_UNSENT_HEAD = (
+    "SELECT c.id, c.application_id, m.text, m.occurred_at FROM application_contacts c "
     "JOIN contact_outreach m ON m.id = (SELECT MAX(x.id) FROM contact_outreach x "
     "WHERE x.contact_id = c.id AND x.user_id = c.user_id AND x.entry = 'message') "
     "WHERE c.user_id = ? "
-    "AND c.id IN (SELECT n.id FROM application_contacts n WHERE n.user_id = ? ORDER BY n.id DESC LIMIT ?) "
+)
+_UNSENT_NEWEST = "AND c.id IN (SELECT n.id FROM application_contacts n WHERE n.user_id = ? ORDER BY n.id DESC LIMIT ?) "
+_UNSENT_TAIL = (
     "AND NOT EXISTS (SELECT 1 FROM contact_outreach s WHERE s.user_id = c.user_id "
     "AND s.id = (SELECT MAX(y.id) FROM contact_outreach y WHERE y.contact_id = c.id "
     "AND y.user_id = c.user_id AND y.entry = 'sent') AND s.occurred_at >= m.occurred_at) "
@@ -61,6 +63,20 @@ _UNSENT_SQL = (
     "AND NOT EXISTS (SELECT 1 FROM contact_outreach k WHERE k.contact_id = c.id "
     "AND k.user_id = c.user_id AND k.entry = 'skipped' AND k.id > m.id)"
 )
+_UNSENT_SQL = _UNSENT_HEAD + _UNSENT_NEWEST + _UNSENT_TAIL
+
+
+async def unsent_for_apps(db: JobDatabase, user_id: str, app_ids: list[int]) -> list[dict[str, Any]]:
+    """The same people as ``_unsent_contacts`` (``id, application_id, text, occurred_at``), narrowed to these
+    applications in one query, with the same newest-people cap. Read-only; scoped by ``user_id``."""
+    if not app_ids:
+        return []
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        _UNSENT_HEAD + _UNSENT_NEWEST + f"AND c.application_id IN ({marks}) " + _UNSENT_TAIL,  # noqa: S608
+        (user_id, user_id, settings.LIST_PEOPLE_MAX, *app_ids),
+    )
+    return [dict(r) for r in await cur.fetchall()]
 
 
 async def _open_ask_jobs(db: JobDatabase, user_id: str, tests: set[int]) -> tuple[set[int], int]:
