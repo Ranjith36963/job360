@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   getStats: vi.fn(),
   listApplications: vi.fn(),
   listAsks: vi.fn(),
+  getNeedsYouCount: vi.fn(),
   answerAsk: vi.fn(),
   withdrawAsk: vi.fn(),
   getAssistantSettings: vi.fn(),
@@ -88,11 +89,18 @@ const ask = (id: number) => ({
   job_company: "Mistral AI",
 });
 
+// The one server count (GET /api/needs-you-count) the headline reads.
+const serverCount = (by: { you?: number; your_pc?: number; assistant?: number }) => ({
+  n: by.you ?? 0, jobs: by.you ?? 0, other: 0, jobs_waiting_on_you: by.you ?? 0,
+  by_actor: { you: 0, your_pc: 0, assistant: 0, job360: 0, employer: 0, ...by }, by_kind: {},
+});
+
 function happy({ events = [event(1, "agent:Claude"), event(2, "web")], asks = [] as unknown[] } = {}) {
   api.whatsNew.mockResolvedValue(whatsNewOk(events));
   api.getStats.mockResolvedValue({ overall: { brought: 5, applied: 3, replied: 1, interview: 1 } });
   api.listApplications.mockResolvedValue({ applications: [app], total: 1 });
   api.listAsks.mockResolvedValue({ asks, open_count: asks.length });
+  api.getNeedsYouCount.mockResolvedValue(serverCount({ you: asks.length }));
   api.getProfile.mockResolvedValue({
     preferences: { assistant_notes: ["Never apply to agencies"] },
     agent_edits: [],
@@ -110,12 +118,29 @@ describe("Home", () => {
     happy({ asks: [ask(1), ask(2)] });
     render(<Home />);
     const h1 = await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
-    expect(h1).toHaveTextContent("Your assistant (Claude) wrote 1 record since you were last here. Two things need you.");
+    expect(h1).toHaveTextContent("Your assistant (Claude) wrote 1 record since you were last here. 2 jobs wait on you");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.queryByTestId("home-apps")).toBeNull();
     expect(await screen.findByTestId("home-feed")).toHaveTextContent("Document saved");
     expect(screen.getByRole("heading", { name: "Activity" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Jobs in" })).toHaveAttribute("href", "/bring");
+  });
+
+  it("the headline says who the jobs wait on, from the server's by_actor, leaving zero parts out", async () => {
+    happy();
+    api.getNeedsYouCount.mockResolvedValue(serverCount({ you: 3, your_pc: 2, assistant: 1 }));
+    render(<Home />);
+    const h1 = await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    expect(h1).toHaveTextContent("3 jobs wait on you · 2 on your PC · 1 on your assistant");
+  });
+
+  it("says Nothing waits on you when no job waits on the user", async () => {
+    happy();
+    api.getNeedsYouCount.mockResolvedValue(serverCount({ you: 0, your_pc: 4 }));
+    render(<Home />);
+    const h1 = await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    expect(h1).toHaveTextContent("since you were last here. Nothing waits on you");
+    expect(h1).not.toHaveTextContent("on your PC");
   });
 
   it("stores the new last visit only after rendering", async () => {

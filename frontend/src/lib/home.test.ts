@@ -5,7 +5,7 @@ import {
   dayAt,
   isBrandNew,
   lastApplied,
-  needsYouSentence,
+  waitsSentence,
   readLastVisit,
   selectFeed,
   sentenceText,
@@ -32,72 +32,71 @@ const text = (args: Parameters<typeof buildSentence>[0]) => sentenceText(buildSe
 
 describe("buildSentence", () => {
   it("zero records: the quiet line", () => {
-    expect(text({ events: [], truncated: false, openAsks: 0 })).toBe("Nothing new since you were last here.");
+    expect(text({ events: [], truncated: false, waits: null })).toBe("Nothing new since you were last here.");
   });
 
   it("web events are not counted", () => {
-    expect(text({ events: [ev(1, "web"), ev(2, "web")], truncated: false, openAsks: 0 })).toBe(
+    expect(text({ events: [ev(1, "web"), ev(2, "web")], truncated: false, waits: null })).toBe(
       "Nothing new since you were last here."
     );
   });
 
   it("one assistant, one record (singular) and the name after agent:", () => {
-    expect(text({ events: [ev(1, "agent:Claude")], truncated: false, openAsks: 0 })).toBe(
+    expect(text({ events: [ev(1, "agent:Claude")], truncated: false, waits: null })).toBe(
       "Your assistant (Claude) wrote 1 record since you were last here."
     );
   });
 
   it("one assistant, many records; token: names work too; web ignored", () => {
     const events = [ev(1, "token:Cursor"), ev(2, "token:Cursor"), ev(3, "web")];
-    expect(text({ events, truncated: false, openAsks: 0 })).toBe(
+    expect(text({ events, truncated: false, waits: null })).toBe(
       "Your assistant (Cursor) wrote 2 records since you were last here."
     );
   });
 
   it("several assistants: every one is named exactly as it signed, never a vague plural", () => {
     const events = [ev(1, "agent:Claude"), ev(2, "token:Cursor"), ev(3, "agent:Claude")];
-    expect(text({ events, truncated: false, openAsks: 0 })).toBe(
+    expect(text({ events, truncated: false, waits: null })).toBe(
       "Your assistants (Claude and Cursor) wrote 3 records since you were last here."
     );
   });
 
   it("three or more assistants are listed with commas, in first-seen order", () => {
     const events = [ev(1, "agent:Claude Code (job360)"), ev(2, "agent:Codex"), ev(3, "agent:Grok"), ev(4, "agent:Codex")];
-    expect(text({ events, truncated: false, openAsks: 1 })).toBe(
-      "Your assistants (Claude Code (job360), Codex and Grok) wrote 4 records since you were last here. One thing needs you."
+    expect(text({ events, truncated: false, waits: null })).toBe(
+      "Your assistants (Claude Code (job360), Codex and Grok) wrote 4 records since you were last here."
     );
   });
 
   it("highlights exactly the records phrase", () => {
-    const parts = buildSentence({ events: [ev(1, "agent:Claude")], truncated: false, openAsks: 2 });
+    const parts = buildSentence({ events: [ev(1, "agent:Claude")], truncated: false, waits: null });
     expect(parts.filter((p) => p.em).map((p) => p.text)).toEqual(["1 record"]);
   });
 
   it("truncated shows N+", () => {
-    expect(text({ events: [ev(1, "agent:Claude"), ev(2, "agent:Claude")], truncated: true, openAsks: 0 })).toBe(
+    expect(text({ events: [ev(1, "agent:Claude"), ev(2, "agent:Claude")], truncated: true, waits: null })).toBe(
       "Your assistant (Claude) wrote 2+ records since you were last here."
     );
   });
 
-  it("appends the needs-you sentence: 0, 1, many, and after the quiet line", () => {
+  it("appends who the jobs wait on: you, your PC, your assistant, and after the quiet line", () => {
     const one = [ev(1, "agent:Claude")];
-    expect(text({ events: one, truncated: false, openAsks: 1 })).toBe(
-      "Your assistant (Claude) wrote 1 record since you were last here. One thing needs you."
+    expect(text({ events: one, truncated: false, waits: { you: 1, your_pc: 0, assistant: 0 } })).toBe(
+      "Your assistant (Claude) wrote 1 record since you were last here. 1 job waits on you"
     );
-    expect(text({ events: one, truncated: false, openAsks: 2 })).toBe(
-      "Your assistant (Claude) wrote 1 record since you were last here. Two things need you."
+    expect(text({ events: one, truncated: false, waits: { you: 5, your_pc: 2, assistant: 1 } })).toBe(
+      "Your assistant (Claude) wrote 1 record since you were last here. 5 jobs wait on you · 2 on your PC · 1 on your assistant"
     );
-    expect(text({ events: [], truncated: false, openAsks: 3 })).toBe(
-      "Nothing new since you were last here. Three things need you."
+    expect(text({ events: [], truncated: false, waits: { you: 3, your_pc: 0, assistant: 4 } })).toBe(
+      "Nothing new since you were last here. 3 jobs wait on you · 4 on your assistant"
     );
   });
 });
 
-describe("needsYouSentence", () => {
-  it("words up to ten, digits after, silent at zero", () => {
-    expect(needsYouSentence(0)).toBe("");
-    expect(needsYouSentence(10)).toBe("Ten things need you.");
-    expect(needsYouSentence(11)).toBe("11 things need you.");
+describe("waitsSentence", () => {
+  it("omits zero parts, and says Nothing waits on you when no job waits on the user", () => {
+    expect(waitsSentence({ you: 2, your_pc: 0, assistant: 0 })).toBe("2 jobs wait on you");
+    expect(waitsSentence({ you: 0, your_pc: 3, assistant: 2 })).toBe("Nothing waits on you");
   });
 });
 
@@ -224,7 +223,7 @@ describe("process events stay out of Activity", () => {
     const events = [ev(1, "agent:Claude"), ev(2, "agent:Claude", { event_type: "process_log", process: true })];
     const apps = [{ id: 1, job_company: "Acme", job_title: "Dev" }] as never;
     expect(selectFeed(events, apps)).toHaveLength(1);
-    const text = sentenceText(buildSentence({ events, truncated: false, openAsks: 0 }));
+    const text = sentenceText(buildSentence({ events, truncated: false, waits: null }));
     expect(text).toContain("wrote 1 record ");
   });
 });

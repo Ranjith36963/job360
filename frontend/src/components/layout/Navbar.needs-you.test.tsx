@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Navbar } from "./Navbar";
 import { Sidebar } from "./Sidebar";
-import { countNeedsYou, listAllOpenAsks } from "@/lib/needs-you-items";
+import { listAllOpenAsks } from "@/lib/needs-you-items";
 
 // The badge is the server's exact total (GET /api/needs-you-count, owner 2026-10-27): the hook shows the
 // number as given and reads nothing else, so it can never differ from the Needs-you page's own total.
@@ -93,10 +93,9 @@ describe("Navbar drawer — Needs you badge", () => {
       ask(5, 9, { question: "SIMULATION: do not apply" }), // words never hide a job (the server drops test apps)
       ask(6, null), ask(7, null),
     ] as never[];
-    // The page's rule (what the server mirrors) gives 5, and the badge shows exactly the server's number.
-    const rule = countNeedsYou({ open: asks, ready: [], waiting: 0 });
-    expect(rule).toMatchObject({ n: 5, jobs: 3, other: 2 });
-    getNeedsYouCount.mockResolvedValue({ n: rule.n, jobs: rule.jobs, other: rule.other });
+    // The badge shows exactly the server's number (3 jobs that wait on the user + 2 others); it counts nothing itself.
+    expect(asks).toHaveLength(7);
+    getNeedsYouCount.mockResolvedValue({ n: 5, jobs: 3, other: 2 });
     render(<Navbar />);
     await waitFor(() => expect(getNeedsYouCount).toHaveBeenCalled());
     openDrawer();
@@ -110,7 +109,7 @@ describe("Navbar drawer — Needs you badge", () => {
     const all = await listAllOpenAsks();
     expect(listAsks).toHaveBeenCalledTimes(2);
     expect(listAsks).toHaveBeenNthCalledWith(2, "open", 50);
-    expect(countNeedsYou({ open: all, ready: [], waiting: 0 }).n).toBe(51);
+    expect(all).toHaveLength(51);
   });
 
   it("shows no badge at zero", async () => {

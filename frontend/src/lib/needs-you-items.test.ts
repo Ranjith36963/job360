@@ -6,7 +6,7 @@ const listAsks = vi.fn();
 vi.mock("@/lib/api", () => ({ listAsks: (...a: unknown[]) => listAsks(...a) }));
 
 import {
-  CHIPS, GROUP_NAMES, SORTS, chipOfTier, countNeedsYou, jobChip, jobHeaders, listAllOpenAsks, readSort, saveSort,
+  GROUP_NAMES, SORTS, chipLabel, fromServerCount, jobHeaders, listAllOpenAsks, readSort, saveSort,
   sortJobs, summaryLine,
 } from "./needs-you-items";
 
@@ -60,55 +60,42 @@ describe("sort options", () => {
 
   it("uses the owner's group names and never the old ones", () => {
     expect(GROUP_NAMES).toEqual(["Form open now", "Ready to send", "Waiting on your answer", "Quick checks", "New connections"]);
-    const copy = JSON.stringify([SORTS, CHIPS, GROUP_NAMES]);
+    const copy = JSON.stringify([SORTS, GROUP_NAMES]);
     expect(copy).not.toMatch(/Stuck on you|People only|Claude/i);
   });
 });
 
-describe("filter chips", () => {
-  it("maps the rank tiers: Ready = 2, Waiting on you = 1 and 3, Checks = 4 and person-only (5)", () => {
-    expect([1, 2, 3, 4, 5].map((t) => chipOfTier(t as 1 | 2 | 3 | 4 | 5))).toEqual(["waiting", "ready", "waiting", "checks", "checks"]);
-  });
-
-  it("puts every job in exactly one chip, and the chips add up to All", () => {
-    const open = [
-      ask(1, 10, { kind: "captcha", held_seconds: 60 } as Partial<Ask>), // form open now
-      ask(2, 11), // a free question
-      ask(3, null), // not about a job: Other
-      ask(4, 12, { question: "SIMULATION: practice" }), // counted: the server, not the words, drops test apps
-    ];
-    const cards = [ready(20), ready(11)];
-    const cvRows = [cvRow(30), cvRow(20)];
-    const people = [{ application_id: 40, job_company: "Co40", job_title: "Dev" }];
-    const headers = jobHeaders(open, cards, cvRows, people);
+describe("job headers", () => {
+  it("makes one header per job from asks, ready cards, CVs and people", () => {
+    const open = [ask(1, 10), ask(2, 11), ask(3, null), ask(4, 12)];
+    const headers = jobHeaders(open, [ready(20), ready(11)], [cvRow(30), cvRow(20)], [{ application_id: 40, job_company: "Co40", job_title: "Dev" }]);
     expect(headers.map((h) => h.id).sort()).toEqual([10, 11, 12, 20, 30, 40]);
-    const chips = headers.map((h) => jobChip(h));
-    expect(chips.every((c) => ["ready", "waiting", "checks"].includes(c))).toBe(true);
-    const c = countNeedsYou({ open, ready: cards, cvRows, people, connections: 2, waiting: 1, outcomes: 1, mail: 1 });
-    expect(c.byChip).toEqual({ all: 12, ready: 0, waiting: 3, checks: 3, other: 6 });
-    expect(c.byChip.ready + c.byChip.waiting + c.byChip.checks + c.byChip.other).toBe(c.byChip.all);
-    expect(c.jobs).toBe(headers.length);
   });
 });
 
-describe("countNeedsYou", () => {
-  it("counts one per job (many asks, a ready card and a CV on one job are one)", () => {
-    const c = countNeedsYou({ open: [ask(1, 7), ask(2, 7)], ready: [ready(7)], cvRows: [cvRow(7)], waiting: 0 });
-    expect(c).toMatchObject({ n: 1, jobs: 1, other: 0 });
+describe("fromServerCount", () => {
+  const server = (over: Record<string, unknown> = {}) => ({
+    n: 9, jobs: 7, other: 2, jobs_waiting_on_you: 7,
+    by_actor: { you: 7, your_pc: 1, assistant: 3, job360: 0, employer: 2 },
+    by_kind: { send_yes: 2, approve_cv: 1, outreach_send: 1, answers: 2, site_step: 1, assistant_step: 3 },
+    job_ids: [5, 6, 7, 8, 9, 10, 11],
+    job_ids_by_kind: { site_step: [5], approve_cv: [6], answers: [7, 8], send_yes: [9, 10], outreach_send: [11] },
+    ...over,
   });
 
-  it("leaves out dropped jobs and counts asks of a failed job in Other", () => {
-    const c = countNeedsYou({ open: [ask(1, 7), ask(2, 8)], ready: [], waiting: 0, dropped: [8], failedAsks: 1 });
-    expect(c).toMatchObject({ n: 2, jobs: 1, other: 1 });
+  it("one chip per kind that waits on you, in plan words; the chips add up to the jobs, All is N", () => {
+    const c = fromServerCount(server());
+    expect(c.chips).toEqual(["all", "site_step", "approve_cv", "answers", "send_yes", "outreach_send", "other"]);
+    expect(c.chips.map(chipLabel)).toEqual(["All", "On the site", "Approve CV", "Answers", "Send", "Notes", "Other"]);
+    expect(c.byChip).toEqual({ all: 9, other: 2, site_step: 1, approve_cv: 1, answers: 2, send_yes: 2, outreach_send: 1 });
+    expect(c.chips.filter((k) => k !== "all" && k !== "other").reduce((t, k) => t + c.byChip[k], 0)).toBe(c.jobs);
+    expect(c.jobIds).toHaveLength(c.jobs);
   });
 
-  it("ready cards past the page still count, as Ready", () => {
-    expect(countNeedsYou({ open: [], ready: [ready(1)], readyTotal: 3, waiting: 0 }).byChip.ready).toBe(3);
-  });
-
-  it("the badge's cheap read: a ready TOTAL instead of cards", () => {
-    const c = countNeedsYou({ open: [ask(1, 7), ask(2, null)], ready: 2, waiting: 1 });
-    expect(c).toMatchObject({ n: 5, jobs: 3, other: 2 });
+  it("a server with nothing waiting on the user has only All", () => {
+    const c = fromServerCount(server({ n: 0, jobs: 0, other: 0, job_ids: [], job_ids_by_kind: {} }));
+    expect(c.chips).toEqual(["all"]);
+    expect(c.byChip.all).toBe(0);
   });
 
   it("says the summary line in plain words", () => {

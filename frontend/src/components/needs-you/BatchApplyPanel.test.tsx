@@ -23,6 +23,7 @@ vi.mock("@/lib/api", () => ({
   recordApplicationReceipt: (...a: unknown[]) => recordApplicationReceipt(...a),
   resolveSubmit: (...a: unknown[]) => resolveSubmit(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
+  getNeedsYouCount: async () => ({ n: 4, jobs: 4, other: 0, jobs_waiting_on_you: 4, by_actor: { you: 4 }, by_kind: {} }),
 }));
 vi.mock("@/lib/home-fetch", () => ({ fetchWhatsNewPages: (...a: unknown[]) => fetchWhatsNewPages(...a) }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
@@ -155,7 +156,7 @@ describe("BatchApplyPanel", () => {
   describe("Queue", () => {
     it("shows the summary, each job with its problems in plain words", async () => {
       render(<BatchApplyPanel />);
-      expect(await screen.findByTestId("batch-queue-summary")).toHaveTextContent("2 queued · 1 ready · 1 need you · 3 left today");
+      expect(await screen.findByTestId("batch-queue-summary")).toHaveTextContent("2 queued · 1 ready · 4 need you · 3 left today");
       const row = screen.getByTestId("batch-row-11");
       expect(row).toHaveTextContent("#1");
       expect(row).toHaveTextContent("Data Analyst · Acme");

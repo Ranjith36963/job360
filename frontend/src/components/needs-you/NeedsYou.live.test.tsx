@@ -15,8 +15,12 @@ const getReadyToSend = vi.fn();
 const getCvToApprove = vi.fn();
 const listPeople = vi.fn();
 
+// The one server count (GET /api/needs-you-count) the summary and chips read; tests that check a number set it.
+const getNeedsYouCount = vi.hoisted(() => vi.fn());
+const ZERO_COUNT = { n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {} };
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
+  getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   withdrawAsk: vi.fn(),
@@ -56,6 +60,7 @@ function changed() {
 }
 
 beforeEach(() => {
+  getNeedsYouCount.mockReset().mockResolvedValue(ZERO_COUNT);
   openNow = [];
   listAsks.mockReset().mockImplementation(async (s: string) => (s === "open" ? { asks: openNow.map((x) => ({ ...(x as object) })), open_count: openNow.length } : { asks: [], open_count: 0 }));
   // The real API client notes every save (api.ts request()); this mock does what it does.

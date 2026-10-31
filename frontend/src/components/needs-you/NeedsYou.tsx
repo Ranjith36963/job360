@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, getNeedsYouCount, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -22,8 +22,8 @@ import { useLiveAsks, useLiveRefresh, useLiveRequests } from "./useLiveLists";
 import type { JobCardsReport } from "./JobCards";
 import { groupAsks } from "@/lib/job-cards";
 import { FormHandoff } from "@/components/applications/FormHandoff";
-import { countNeedsYou, listAllOpenAsks, readSort, saveSort } from "@/lib/needs-you-items";
-import type { Chip, SortKey } from "@/lib/needs-you-items";
+import { EMPTY_COUNT, fromServerCount, listAllOpenAsks, readSort, saveSort } from "@/lib/needs-you-items";
+import type { Chip, NeedsYouCount, SortKey } from "@/lib/needs-you-items";
 import { NeedsYouControls, readShow, writeShow } from "./NeedsYouControls";
 import { useFoldSet } from "@/components/fold/FoldRow";
 // Every string on an ask (question, context, answer, job fields) is written by
@@ -329,9 +329,10 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
   // The order and the chip: the order is kept per browser, the chip in the link (?show=).
   const [sort, setSort] = useState<SortKey>(() => (typeof window === "undefined" ? "urgent" : readSort()));
   const [show, setShow] = useState<Chip>(() => (typeof window === "undefined" ? "all" : readShow()));
-  // null until the job list's Ready to send read has answered (0 if it failed): announcing
-  // before then would drop the ready count from the badge for a moment.
-  const readyTotal = jobs.readyTotal;
+  const [count, setCount] = useState<NeedsYouCount | null>(null);
+  // The count never answered (and there is no earlier one): the rows fall back to the page's own reads.
+  const [countFailed, setCountFailed] = useState(false);
+  const [countTick, setCountTick] = useState(0);
   // Which job rows are unfolded: all folded at first, in memory only (owner 2026-10-27).
   const fold = useFoldSet();
 
@@ -351,7 +352,14 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
   // Live (PR 6): the asks and requests as shown; one the user is in survives a refresh.
   const shown = useLiveAsks(open);
   const shownWaiting = useLiveRequests(waiting);
-  const general = useMemo(() => (open ? [...groupAsks(shown).general, ...jobs.failed] : []), [open, shown, jobs.failed]);
+  // Other asks: those tied to no job, plus job-tied ones with no row to answer them in (the server's
+  // `other_ask_ids`). Without the server count a job whose record failed to load shows its asks here instead.
+  const otherAskIds = count?.otherAskIds;
+  const general = useMemo(() => {
+    if (!open) return [];
+    const tiedToOther = otherAskIds ? shown.filter((a) => otherAskIds.includes(a.id)) : jobs.failed;
+    return [...groupAsks(shown).general, ...tiedToOther];
+  }, [open, shown, jobs.failed, otherAskIds]);
 
   const load = useCallback(async () => {
     try {
@@ -387,23 +395,32 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
     return () => window.removeEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
   }, [load]);
 
-  // ONE count (owner plan §2.6): the summary line, the All chip, the chips' sum and the badge.
-  const count = useMemo(
-    () =>
-      countNeedsYou({
-        open: open ?? [], ready: jobs.inputs?.ready ?? [], readyTotal: readyTotal ?? 0,
-        cvRows: jobs.inputs?.cvRows, people: jobs.inputs?.people, dropped: jobs.inputs?.dropped,
-        connections: jobs.connections, failedAsks: jobs.failed.length, waiting: waiting.length, ...otherLoaded,
-      }),
-    [open, jobs, readyTotal, waiting.length, otherLoaded],
-  );
-  // A chip that empties (its last item answered) falls back to All.
-  const active: Chip = show !== "all" && jobs.settled && count.byChip[show] === 0 ? "all" : show;
-
-  const loaded = open !== null && readyTotal !== null;
+  // ONE count (owner plan §2.6): the server's, the same response the badge and the dashboard headline read.
+  // Re-read whenever anything on the page changes (an answer, a send, a live change). A failed read keeps the last.
   useEffect(() => {
-    if (loaded) announce(count.n);
-  }, [loaded, count.n]);
+    let cancelled = false;
+    getNeedsYouCount().then(
+      (c) => {
+        if (cancelled) return;
+        setCount(fromServerCount(c));
+        setCountFailed(false);
+      },
+      () => {
+        if (!cancelled) setCountFailed(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [open, jobs.total, jobs.readyTotal, waiting.length, otherLoaded, countTick]);
+  const shownCount = count ?? EMPTY_COUNT;
+  // A chip that empties (its last item answered) falls back to All.
+  const active: Chip = show !== "all" && jobs.settled && count !== null && !(shownCount.byChip[show] > 0) ? "all" : show;
+
+  const countN = count ? count.n : null;
+  useEffect(() => {
+    if (countN !== null) announce(countN);
+  }, [countN]);
 
   async function loadOlder() {
     setLoadingMore(true);
@@ -435,10 +452,10 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
 
   return (
     <div className="flex min-w-0 flex-col gap-6" data-testid="needs-you-main">
-      {error && (
+      {(error || (countFailed && !count)) && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
-          <span>{error} What you see may be out of date.</span>
-          <button type="button" data-testid="needs-you-retry" onClick={() => void load()} className={linkBtn}>
+          <span>{error ?? "Could not load the Needs-you count."} What you see may be out of date.</span>
+          <button type="button" data-testid="needs-you-retry" onClick={() => { void load(); setCountTick((t) => t + 1); }} className={linkBtn}>
             Try again
           </button>
         </div>
@@ -446,8 +463,8 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <NeedsYouControls
-            count={count}
-            settled={jobs.settled}
+            count={shownCount}
+            settled={jobs.settled && count !== null}
             show={active}
             onShow={(c) => {
               setShow(c);
@@ -470,7 +487,7 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         {active === "all" && jobs.settled && jobs.total === 0 && !jobs.connections && general.length === 0 && waiting.length > 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}
-        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} />
+        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>
       <OtherList

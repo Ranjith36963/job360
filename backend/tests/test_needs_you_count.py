@@ -49,7 +49,9 @@ async def _count(client: AsyncClient) -> dict[str, int]:
     resp = await client.get("/api/needs-you-count")
     assert resp.status_code == 200, resp.text
     assert resp.headers["cache-control"] == "no-store"
-    return resp.json()
+    body = resp.json()
+    assert body["jobs_waiting_on_you"] == body["jobs"] == body["by_actor"]["you"]
+    return {k: body[k] for k in ("n", "jobs", "other")}
 
 
 async def _ask(client: AsyncClient, app_id: int | None, question: str = "Notice period?", **extra: Any) -> int:
@@ -101,6 +103,11 @@ async def _suggest(client: AsyncClient, app_id: int, mid: str = "<s-1@co.example
     assert resp.status_code == 201, resp.text
 
 
+async def _applied(client: AsyncClient, app_id: int) -> None:
+    """A note waits until the application is sent (owner 2026-10-31), so a job with a person must be applied."""
+    assert (await client.post(f"/api/applications/{app_id}/events", json={"event_type": "applied"})).status_code == 201
+
+
 def _waiting_request(user_id: str, path: str = "assistant_settings.daily_cap") -> None:
     _sql(
         "INSERT INTO assistant_setting_requests (user_id, path, value, requested_by, requested_at) "
@@ -135,6 +142,7 @@ async def test_every_kind_counts_once_in_its_bucket(authenticated_async_context)
         assert (await _count(client))["jobs"] == 2
         await _cv(client, job_cv)
         assert (await _count(client))["jobs"] == 3
+        await _applied(client, job_person)
         await _person(client, "Rita", job_person)
         assert (await _count(client))["jobs"] == 4, "a drafted, unsent note to a person on a job"
 
@@ -157,7 +165,6 @@ async def test_one_job_with_an_ask_a_ready_card_and_a_cv_counts_once(authenticat
         await _ask(client, app_id)
         await _cv(client, app_id)
         await _ready(client, app_id)
-        await _person(client, "Rita", app_id)
         assert (await client.get("/api/ready-to-send")).json()["total"] == 1
         assert len((await client.get("/api/cv-to-approve")).json()["items"]) == 1
         assert await _count(client) == {"n": 1, "jobs": 1, "other": 0}
@@ -185,6 +192,7 @@ async def test_withdrawn_answered_and_practice_asks_do_not_count(authenticated_a
 async def test_a_sent_note_does_not_count_but_a_newer_draft_does(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
+        await _applied(client, app_id)
         done_job = await _person(client, "Sent Sam", app_id, sent=True)
         await _person(client, "Sent Cold", None, sent=True)
         await _person(client, "No Draft", None, draft=False)
@@ -203,6 +211,7 @@ async def test_a_skipped_note_does_not_count_until_a_newer_draft(authenticated_a
     """#1342 saves a skip as a `skipped` ledger row; the badge must agree with the page that hides them."""
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
+        await _applied(client, app_id)
         on_job = await _person(client, "Skip Sam", app_id)
         cold = await _person(client, "Skip Cold", None)
         assert await _count(client) == {"n": 2, "jobs": 1, "other": 1}
@@ -258,6 +267,7 @@ async def test_the_total_equals_the_pages_rules_over_the_pages_own_reads(authent
         await _ready(client, jobs[1])
         await _cv(client, jobs[2])
         await _ready(client, jobs[3])
+        await _applied(client, jobs[4])
         await _person(client, "Rita", jobs[4])
         await _person(client, "Sent Sam", jobs[5], sent=True)
         await _ask(client, None, "General")
@@ -309,3 +319,52 @@ async def test_session_only_and_it_writes_no_audit_row(authenticated_async_conte
                            headers={"Authorization": f"Bearer {token}"}) as agent:
         resp = await agent.get("/api/needs-you-count")
         assert resp.status_code == 403 and resp.json()["detail"] == "session_required"
+
+
+@pytest.mark.asyncio
+async def test_by_actor_counts_each_job_once_under_its_first_blocker(authenticated_async_context):
+    """by_actor sums to the open jobs with a blocker, matches blockers_for, and a CAPTCHA job counts under you."""
+    from src.api.dependencies import get_db
+    from src.services.applications import blockers
+
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        captcha, answer, ready, sent, idle = [await _bring(client, n) for n in range(1, 6)]
+        resp = await client.post(
+            f"/api/applications/{captcha}/events",
+            json={"event_type": "blocked", "payload": {"reason": "captcha", "step": "open_form"}},
+        )
+        assert resp.status_code == 201, resp.text
+        await _ask(client, answer)
+        await _ready(client, ready)
+        await _applied(client, sent)  # waits on someone else, not on the user
+        body = (await client.get("/api/needs-you-count")).json()
+
+        db = await get_db()
+        expected = await blockers.blockers_for(db, user_id, [captcha, answer, ready, sent, idle])
+        firsts = [b[0] for b in expected.values() if b]
+        assert expected[captcha][0]["actor"] == "you" and expected[idle][0]["actor"] == "assistant"
+        assert sum(body["by_actor"].values()) == len(firsts) == sum(body["by_kind"].values()) == 5
+        for actor in ("you", "your_pc", "assistant", "job360", "employer"):
+            assert body["by_actor"][actor] == sum(1 for b in firsts if b["actor"] == actor)
+        assert body["by_actor"]["you"] == 3  # CAPTCHA + open ask + Send; the other two wait on others, so not in n
+        assert body["jobs_waiting_on_you"] == body["jobs"] == 3 and body["n"] == 3
+        mine = {i for i in (captcha, answer, ready) if expected[i][0]["actor"] == "you"}
+        assert set(body["job_ids"]) == mine == {captcha, answer, ready} and len(body["job_ids"]) == 3
+        assert body["job_ids_by_kind"][expected[captcha][0]["kind"]] == [captcha]
+        assert sorted(i for v in body["job_ids_by_kind"].values() for i in v) == sorted(body["job_ids"])
+        assert body["job_ids"] == sorted(body["job_ids"], key=lambda i: expected[i][0]["since"])
+        assert body["by_kind"] == {k: sum(1 for b in firsts if b["kind"] == k) for k in {b["kind"] for b in firsts}}
+
+
+@pytest.mark.asyncio
+async def test_an_open_proof_ask_on_a_ghosted_job_counts_in_other_and_is_listed(authenticated_async_context):
+    """A job-tied ask with no row to answer it in (the job is closed) is an Other item, with its id returned."""
+    async with authenticated_async_context() as client:
+        job = await _bring(client, 1)
+        proof = await _ask(client, job, "Proof of your application?", context=f"proof_missing:{job}")
+        _sql("UPDATE applications SET status = 'ghosted' WHERE id = ?", (job,))
+        body = (await client.get("/api/needs-you-count")).json()
+        assert body["job_ids"] == [] and body["jobs"] == 0
+        assert body["other_ask_ids"] == [proof]
+        assert body["other"] == 1 and body["n"] == 1

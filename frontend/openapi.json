@@ -9820,8 +9820,48 @@
       },
       "NeedsYouCountOut": {
         "properties": {
+          "by_actor": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "By Actor",
+            "type": "object"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "By Kind",
+            "type": "object"
+          },
+          "job_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "job_ids_by_kind": {
+            "additionalProperties": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Job Ids By Kind",
+            "type": "object"
+          },
           "jobs": {
             "title": "Jobs",
+            "type": "integer"
+          },
+          "jobs_waiting_on_you": {
+            "default": 0,
+            "title": "Jobs Waiting On You",
             "type": "integer"
           },
           "n": {
@@ -9831,6 +9871,14 @@
           "other": {
             "title": "Other",
             "type": "integer"
+          },
+          "other_ask_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Other Ask Ids",
+            "type": "array"
           }
         },
         "required": [

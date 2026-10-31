@@ -1,6 +1,6 @@
 "use client";
 
-import { CHIPS, GROUP_NAMES, SORTS, summaryLine } from "@/lib/needs-you-items";
+import { GROUP_NAMES, SORTS, chipLabel, summaryLine } from "@/lib/needs-you-items";
 import type { Chip, NeedsYouCount, SortKey } from "@/lib/needs-you-items";
 import { cn, relativeTime } from "@/lib/utils";
 
@@ -8,7 +8,7 @@ import { cn, relativeTime } from "@/lib/utils";
 export function readShow(): Chip {
   try {
     const v = new URLSearchParams(window.location.search).get("show");
-    return CHIPS.find((c) => c.key === v)?.key ?? "all";
+    return v && /^[a-z_]{1,32}$/.test(v) ? v : "all"; // a chip that has no jobs falls back to All on the page
   } catch {
     return "all";
   }
@@ -75,19 +75,19 @@ export function NeedsYouControls({ count, settled, show, onShow, sort, onSort, g
       </div>
       {count.n > 0 && (
         <div role="group" aria-label="Show" className="-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 pb-1" data-testid="needs-you-chips">
-          {CHIPS.filter((c) => c.key === "all" || count.byChip[c.key] > 0).map((c) => (
+          {count.chips.map((c) => (
             <button
-              key={c.key}
+              key={c}
               type="button"
-              aria-pressed={show === c.key}
-              data-testid={`chip-${c.key}`}
-              onClick={() => onShow(c.key)}
+              aria-pressed={show === c}
+              data-testid={`chip-${c}`}
+              onClick={() => onShow(c)}
               className={cn(
                 "shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                show === c.key ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted",
+                show === c ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted",
               )}
             >
-              {c.label} <span className="font-mono">{count.byChip[c.key]}</span>
+              {chipLabel(c)} <span className="font-mono">{count.byChip[c]}</span>
             </button>
           ))}
         </div>
