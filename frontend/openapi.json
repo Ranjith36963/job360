@@ -18551,11 +18551,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 20,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           },
           {

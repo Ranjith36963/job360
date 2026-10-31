@@ -10703,7 +10703,7 @@ export interface operations {
             query?: {
                 status?: string | null;
                 updated_since?: string | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
                 due?: boolean;
                 quiet_days?: number | null;

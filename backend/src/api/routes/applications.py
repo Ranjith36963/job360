@@ -2296,11 +2296,16 @@ async def list_outcome_suggestions(
     return {"suggestions": items, "truncated": truncated}
 
 
+QUEUE_LIST_LIMIT = 200  # the route's own max; a queued list with no limit is the whole queue
+
+
 @router.get("/applications", response_model=ListApplicationsResponse, dependencies=AUTH_FIRST)
 async def list_applications(
     status: Optional[str] = Query(None),
     updated_since: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=200),
+    # 2026-10-31: no `limit` = 20 rows, but the whole queue (up to 200) for `queued=true` - every hourly
+    # apply run read only the first 20 of 39-76 queued rows and never paged.
+    limit: Optional[int] = Query(None, ge=1, le=200),
     offset: int = Query(0, ge=0),
     # Owner decision, 2026-09-25 — "what's due" / "gone quiet", the two doors
     # the daily-check prompt closes its run with.
@@ -2321,6 +2326,8 @@ async def list_applications(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if limit is None:
+            limit = QUEUE_LIST_LIMIT if queued else 20
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,
