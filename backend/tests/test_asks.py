@@ -185,6 +185,8 @@ async def test_open_cap_is_429(authenticated_async_context, monkeypatch):
         assert blocked.status_code == 429 and "ASKS_MAX_OPEN_PER_USER" in blocked.text
         # A full ask list must not end an apply run: the refusal tells the agent to keep filling forms.
         assert "keep working" in blocked.text and "never ends a run" in blocked.text
+        # 2026-10-30 22:41 run: "fill every other queued form" read as "skip this one"; WPP 333 stayed unfilled.
+        assert "fill THIS job's form anyway" in blocked.text
         # answering one frees a slot
         assert (await client.post(f"/api/asks/{first}/answer", json={"answer": "x"})).status_code == 200
         assert (await _ask(client, question="three")).status_code == 201
