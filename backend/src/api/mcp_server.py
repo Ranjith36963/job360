@@ -2503,8 +2503,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     @mcp.tool()
     async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:
         """The APPLICATION KIT - call before you fill ANY application form.
-        Pass `session`: a short label you pick once per conversation (letters, digits,
-        space . _ : -, max 60) and reuse, also in check_submit.
+        Pass `session`: one short label per conversation (letters, digits,
+        space . _ : -, max 60), reused in check_submit; none = no hold.
         It holds, for THIS job: the CV and cover letter (`text` up to 8000
         chars, `text_truncated` + `text_more` fetch the rest; `include_text=false`
         sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link,
