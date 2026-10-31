@@ -487,3 +487,22 @@ def test_comment_stripping_keeps_text_and_unclosed_blocks():
 
     assert _strip_comments("# T\n<!-- a -->\nbody <!-- b --> end\n") == "# T\nbody  end\n"
     assert _strip_comments("x <!-- never closed") == "x <!-- never closed"
+
+
+def test_no_recipe_records_submit_attempted_before_a_job360_browser_click():
+    """2026-10-31: the recipes said "right before the click record submit_attempted". In Job360's browser the
+    click records it itself (mcp_server browser tool), and an attempt recorded first makes check_submit stop
+    (submit_unconfirmed), so the click is refused. Every recipe that names the step says the browser does it."""
+    from src.api.routes.recipes import load_recipe
+
+    said = {
+        "apply": "in job360's browser the click records `submit_attempted` itself",
+        "forms": "in job360's browser the click records `submit_attempted` itself",
+        "batch": "job360's browser records `submit_attempted` on the click",
+        "rules": "job360's browser records it on the final submit click",
+    }
+    for name, phrase in said.items():
+        text = flat(load_recipe(name).text)
+        assert phrase in text, name
+        assert "right before the click `record_event` `submit_attempted`" not in text, name
+        assert "before each click `record_event` `submit_attempted`" not in text, name

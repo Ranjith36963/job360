@@ -5908,6 +5908,16 @@
             ],
             "title": "Recipe",
             "type": "string"
+          },
+          "search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxSearchOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7649,6 +7659,56 @@
           "event_id"
         ],
         "title": "InboxItemOut",
+        "type": "object"
+      },
+      "InboxSearchOut": {
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "companies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "email_senders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
+          "gmail_after": {
+            "title": "Gmail After",
+            "type": "string"
+          },
+          "skip_message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skip Message Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "after",
+          "gmail_after",
+          "application_ids",
+          "companies",
+          "email_senders",
+          "skip_message_ids"
+        ],
+        "title": "InboxSearchOut",
         "type": "object"
       },
       "InterviewAgenda": {
@@ -18585,11 +18645,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 20,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           },
           {

@@ -1190,7 +1190,9 @@ async def test_a_hold_ends_after_applied_and_after_the_window(authenticated_asyn
         await _kit(client, app_id)
         assert (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "company_site"})).status_code == 201
     async with _bearer_client(token) as agent:
-        assert (await _kit(agent, app_id)).json()["hold"] is None, "applied ends the hold"
+        # 2026-10-31: an assistant's read holds only with a `session` label (an unlabelled one claims nothing)
+        labelled = await agent.get(f"/api/applications/{app_id}/kit", params={"session": "apply-run"})
+        assert labelled.json()["hold"] is None, "applied ends the hold"
     async with authenticated_async_context() as client:
         assert (await _kit(client, app_id)).json()["hold"] is not None
         old = (datetime.now(timezone.utc) - timedelta(minutes=settings.KIT_HOLD_MINUTES + 1)).isoformat()

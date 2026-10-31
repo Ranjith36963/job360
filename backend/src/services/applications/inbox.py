@@ -75,3 +75,34 @@ async def mark_checked(
     )
     await db._db.commit()
     return {"application_ids": ids, "inbox_checked_at": when}
+
+
+async def search_plan(db: JobDatabase, user_id: str) -> dict[str, Any]:
+    """Gmail check 2026-10-31: everything ONE inbox search needs, so a scheduled run never reads the whole
+    application list (100 rows passed the tool-result limit every hour and runs searched a guessed window).
+    ``after`` = the oldest open application's ``inbox_checked_at`` (its ``created_at`` when never checked);
+    ``skip_message_ids`` = mail already parked unmatched and still open, so it is not read and parked again."""
+    closed = settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
+    marks = ",".join("?" for _ in closed)
+    cur = await db._db.execute(
+        "SELECT id, job_company, job_url, inbox_checked_at, created_at FROM applications "  # noqa: S608
+        f"WHERE user_id = ? AND status NOT IN ({marks}) ORDER BY id",
+        [user_id, *closed],
+    )
+    rows = await cur.fetchall()
+    starts = [str(r["inbox_checked_at"] or r["created_at"] or "") for r in rows]
+    after = min((s for s in starts if s), default="")
+    companies = sorted({str(r["job_company"] or "").strip() for r in rows} - {""}, key=str.casefold)
+    senders = sorted({s for r in rows for s in email_senders_for(r["job_url"] or "")})
+    cur = await db._db.execute(
+        "SELECT message_id FROM inbox_items WHERE user_id = ? AND resolution = '' ORDER BY id", [user_id],
+    )
+    skip = [str(r["message_id"]) for r in await cur.fetchall()]
+    return {
+        "after": after,
+        "gmail_after": after[:10].replace("-", "/"),
+        "application_ids": [int(r["id"]) for r in rows],
+        "companies": companies,
+        "email_senders": senders,
+        "skip_message_ids": skip,
+    }
