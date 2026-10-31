@@ -5789,10 +5789,22 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
+          },
+          "max_people": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max People"
           },
           "reason": {
             "enum": [
@@ -5887,7 +5899,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -9240,7 +9253,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -9294,7 +9308,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -13510,7 +13525,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -18050,7 +18066,8 @@
                 "hunt",
                 "inbox",
                 "batch",
-                "reach"
+                "reach",
+                "network"
               ],
               "type": "string"
             },
@@ -18118,7 +18135,8 @@
                 "hunt",
                 "inbox",
                 "batch",
-                "reach"
+                "reach",
+                "network"
               ],
               "type": "string"
             },
@@ -30013,7 +30031,8 @@
                       "hunt",
                       "inbox",
                       "batch",
-                      "reach"
+                      "reach",
+                      "network"
                     ],
                     "type": "string"
                   },

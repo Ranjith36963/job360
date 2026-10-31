@@ -1389,8 +1389,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def whats_due(duties: Optional[list[str]] = None) -> dict[str, Any]:
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
-        names it). `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
-        (reach also lists `application_ids`: find people for those only);
+        names it). `due` lists {duty: hunt|inbox|reach|network|batch, recipe, reason} in run order
+        (reach also lists `application_ids`: find people for those only; network lists `max_people`);
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
@@ -1413,7 +1413,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def mark_done(
         duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done", reason: str = "",
     ) -> dict[str, Any]:
-        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach (reach also
+        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
         takes `application_ids`, the ones you worked). `outcome` = done | partial | failed; `reason`
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
         network_blocked | rate_limited | needs_user | error. A failed duty waits 2h, 4h, 8h... (at most

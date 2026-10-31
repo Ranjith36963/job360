@@ -26,7 +26,7 @@ from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["schedule"])
 
-Duty = Literal["hunt", "inbox", "batch", "reach"]
+Duty = Literal["hunt", "inbox", "batch", "reach", "network"]
 Outcome = Literal["done", "partial", "failed"]
 RunReason = Literal[
     "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
@@ -40,6 +40,8 @@ class DueItemOut(BaseModel):
     reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications", "run_now"]
     # Only on `reach`: the applications to find people for this run (newest first).
     application_ids: Optional[list[int]] = None
+    # Only on `network`: at most this many new people who fit the user's profile (cold contacts) this run.
+    max_people: Optional[int] = None
 
 
 class WhatsDueOut(BaseModel):

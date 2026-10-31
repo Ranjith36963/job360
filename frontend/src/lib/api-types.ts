@@ -5978,7 +5978,9 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
+            /** Max People */
+            max_people?: number | null;
             /**
              * Reason
              * @enum {string}
@@ -6020,7 +6022,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
              * Failures In Row
              * @default 0
@@ -7329,7 +7331,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
              * Outcome
              * @default done
@@ -7347,7 +7349,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
              * Failures In Row
              * @default 0
@@ -9035,7 +9037,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /** Failures In Row */
             failures_in_row: number;
             /** Label */
@@ -10500,7 +10502,7 @@ export interface components {
                 [key: string]: number;
             };
             /** Held By Running */
-            held_by_running?: ("hunt" | "inbox" | "batch" | "reach")[];
+            held_by_running?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Hunt Hold */
             hunt_hold?: "queue_full" | null;
             /** Last Done At */
@@ -10516,7 +10518,7 @@ export interface components {
             /** Nothing Due */
             nothing_due: boolean;
             /** Run Now */
-            run_now?: ("hunt" | "inbox" | "batch" | "reach")[];
+            run_now?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Running */
             running?: {
                 [key: string]: string | null;
@@ -16229,7 +16231,7 @@ export interface operations {
     whats_due_api_schedule_due_get: {
         parameters: {
             query?: {
-                duties?: ("hunt" | "inbox" | "batch" | "reach")[] | null;
+                duties?: ("hunt" | "inbox" | "batch" | "reach" | "network")[] | null;
             };
             header?: {
                 authorization?: string | null;
