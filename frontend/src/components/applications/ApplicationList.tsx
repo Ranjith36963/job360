@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { listApplications } from "@/lib/api";
 import type { ApplicationSummary } from "@/lib/api";
+import { nextLine } from "@/lib/blocker-words";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
@@ -64,6 +65,11 @@ const LIVE_STATUSES = new Set([
  * fit, documents/sent, location/visa, last update) fill the right on wide
  * screens; everything stacks on phones.
  */
+/** The row's first blocker + how many more; the stored next step when nothing blocks. */
+function nextText(app: ApplicationSummary): string {
+  return nextLine(app.next, app.more) || app.next_step?.label || "";
+}
+
 export function ApplicationRows({ applications }: { applications: ApplicationSummary[] }) {
   return (
     <ul className="flex flex-col">
@@ -146,11 +152,11 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
               {/* 2-6. Everything else — fills the right on wide screens. */}
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 {/* 2. Next line, with the interview date/time when there is one. */}
-                {(app.next_step?.label || app.interview_at || (app.follow_up_due && app.follow_up_on)) && (
+                {(nextText(app) || app.interview_at || (app.follow_up_due && app.follow_up_on)) && (
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                    {app.next_step?.label && (
-                      <span data-testid="row-next-step" className="truncate text-brand">
-                        Next: {app.next_step.label}
+                    {nextText(app) && (
+                      <span data-testid="row-next-step" className="break-words text-brand">
+                        Next: {nextText(app)}
                       </span>
                     )}
                     {app.interview_at && (
