@@ -861,10 +861,30 @@ async def gate_facts(
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),
         blank_unasked=await _blank_unasked(db, user_id, app_row),
+        open_asks=await _open_ask_kinds(db, user_id, application_id),
         **await _blank_or_placeholder(db, user_id, app_row),
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
+
+
+async def _open_ask_kinds(db: JobDatabase, user_id: str, application_id: int) -> tuple[str, ...]:
+    """Kinds of this application's open asks (one query; mirrors ``asks._job_has_open_ask``). Left out: the
+    doctor's "keep this lesson?" ask (a question row keyed ``doctor_repeat_*``) and the proof ask
+    (context ``proof_missing:*``): neither is about the form. Outreach files no ask."""
+    from src.services.applications import asks as asks_service  # noqa: PLC0415 - keep the import graph flat
+
+    cur = await db._db.execute(
+        "SELECT kind, context, questions FROM application_asks WHERE user_id = ? AND application_id = ? "
+        "AND answered_at IS NULL AND withdrawn_at IS NULL",
+        (user_id, application_id),
+    )
+    kinds: list[str] = []
+    for kind, context, questions in await cur.fetchall():
+        if str(context or "").startswith("proof_missing:") or asks_service.is_doctor_only(questions):
+            continue
+        kinds.append(str(kind or "") or "question")
+    return tuple(kinds)
 
 
 async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
