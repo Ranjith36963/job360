@@ -1850,7 +1850,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         record_event.
 
         `unmatched`: mail you read but could not tie to ONE application, each {message_id,
-        thread_id?, sender, subject, received_at, kind?, dismissed?}. Stored once per message id as a
+        thread_id?, sender, subject, received_at, dismissed?}; no `kind` (it is the source, email by
+        default, never rejection/interview: that is not known until matched). Stored once per message id as a
         Needs-you item; the user picks its application or dismisses it on Job360. Never ask_user
         about it. `dismissed: true` only when the user told you it is about no job. A message id
         already recorded on an event is not stored (`already_recorded`).
