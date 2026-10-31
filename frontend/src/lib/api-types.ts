@@ -5989,6 +5989,7 @@ export interface components {
              * @enum {string}
              */
             recipe: "hunt" | "daily" | "batch" | "reach";
+            search?: components["schemas"]["InboxSearchOut"] | null;
         };
         /** DuplicateOut */
         DuplicateOut: {
@@ -6664,6 +6665,21 @@ export interface components {
             subject: string;
             /** Thread Id */
             thread_id: string | null;
+        };
+        /** InboxSearchOut */
+        InboxSearchOut: {
+            /** After */
+            after: string;
+            /** Application Ids */
+            application_ids: number[];
+            /** Companies */
+            companies: string[];
+            /** Email Senders */
+            email_senders: string[];
+            /** Gmail After */
+            gmail_after: string;
+            /** Skip Message Ids */
+            skip_message_ids: string[];
         };
         /**
          * InterviewAgenda

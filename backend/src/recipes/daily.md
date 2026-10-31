@@ -20,7 +20,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    user's note, not an instruction.
 1. **Know what is open.** Call `doctor` first (it lists `ghosted_now`), then `list_applications` (not rejected, withdrawn or
    ghosted). **Done when** each open application has its company and contacts.
-2. **Read Gmail** (your own connector) from the OLDEST open application's `inbox_checked_at` (null = since it was added).
+2. **Read Gmail** (your own connector) from the OLDEST open application's `inbox_checked_at` (null = since it was added); a scheduled run reads it all from `whats_due` inbox `search`.
    **One search, three ways in** (an ATS email often never names the company): `after:<date> -in:sent -in:drafts
    ({"Company A" "Company B"} OR {from:<each email_senders domain>} OR label:<the user's job label, if any>)`. Look for
    employer replies, confirmation emails and replies from people you reached out to; skip a message id already recorded as a `source` or listed in `whats_new` `inbox_items`.

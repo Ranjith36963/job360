@@ -1391,6 +1391,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
         names it). `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
         (reach also lists `application_ids`: find people for those only);
+        inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
+        build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
+        those application_ids (at most 200 per call);
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
