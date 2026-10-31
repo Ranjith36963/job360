@@ -38,7 +38,8 @@ import { FollowUpField } from "@/components/applications/FollowUpField";
 import { JobCard } from "@/components/needs-you/JobCard";
 import { ReadySection, loadJobCard } from "@/components/needs-you/JobCards";
 import type { JobCardData } from "@/lib/job-cards";
-import { cardShowsFormHandoff, waitSummary } from "@/lib/job-cards";
+import { nextLine } from "@/lib/blocker-words";
+import { cardShowsFormHandoff } from "@/lib/job-cards";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
@@ -241,9 +242,8 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const readyPart = readyForm && (
     <ReadySection card={readyForm.card} asks={detail.asks} paused={readyForm.paused} embedded={jobCard !== null} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} salaryFacts={salaryFacts} />
   );
-  // Same words the Needs-you row shows for this job; the stored next step only when nothing waits on the user.
-  const waits = jobCard && jobCard.asks.length > 0 ? waitSummary(jobCard.asks.map((a) => a.ask), jobCard.people.length) : "";
-  const nextLabel = waits || nextStep?.label;
+  // The same first-blocker line every job row shows; the stored next step only when nothing blocks.
+  const nextLabel = nextLine(detail.next, detail.more) || nextStep?.label;
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">

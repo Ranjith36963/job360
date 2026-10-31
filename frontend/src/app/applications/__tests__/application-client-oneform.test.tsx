@@ -97,11 +97,11 @@ describe("application page: the form once", () => {
     expect(await screen.findByTestId("send-approve-button")).toBeInTheDocument();
   });
 
-  it("Next line shows what waits on the user, else the stored next step", async () => {
-    getApplication.mockResolvedValue(detail({ asks: [OPEN_ASK] }));
+  it("Next line shows the first blocker and how many more, else the stored next step", async () => {
+    getApplication.mockResolvedValue(detail({ asks: [OPEN_ASK], next: { kind: "captcha", actor: "you", label: "solve the CAPTCHA", since: "2026-10-20T10:00:00Z" }, more: 2 }));
     const { unmount } = render(<ApplicationClient applicationId={42} />);
     await screen.findByTestId("app-asks");
-    expect(screen.getByTestId("next-step")).toHaveTextContent("Next: Check 1 answer");
+    expect(screen.getByTestId("next-step")).toHaveTextContent("Next: You: solve the CAPTCHA +2 more");
     unmount();
     getApplication.mockResolvedValue(detail());
     render(<ApplicationClient applicationId={42} />);

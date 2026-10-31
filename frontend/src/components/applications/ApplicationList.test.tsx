@@ -278,6 +278,16 @@ describe("ApplicationList — fit display (redesign slice 2)", () => {
     expect(fit.querySelector(".bg-primary")).toBeNull();
   });
 
+  it("shows the first blocker and how many more when the row has one", async () => {
+    listApplications.mockResolvedValue({
+      applications: [summary({ next: { kind: "captcha", actor: "you", label: "solve the CAPTCHA", since: "2026-10-20T10:00:00Z" }, more: 2, next_step: { code: "apply", label: "old text" } })],
+      total: 1,
+    });
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    expect(screen.getByTestId("row-next-step")).toHaveTextContent("Next: You: solve the CAPTCHA +2 more");
+  });
+
   it("with no fit judged, row-fit is absent and the next-step line stays", async () => {
     listApplications.mockResolvedValue({ applications: [summary()], total: 1 });
     render(<ApplicationList />);
