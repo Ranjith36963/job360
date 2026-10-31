@@ -820,7 +820,8 @@ def _grows_linearly(fn, make, n=6000):
     assert t4 < 8 * t1 + 0.05, (t1, t4)
 
 
-def test_html_to_text_and_pipe_spacing_are_linear():
+def test_html_to_text_and_pipe_spacing_are_linear(monkeypatch):
+    monkeypatch.setattr(hk, "_KIT_GUARD", None)  # the plain path; the guard's own scans: test_ad_guard_html.py
     assert hk.html_to_text("<p>A &amp; B</p><br/>C<ul><li>x</li></ul>") == "A & B\nC x"
     for evil in ("<a ", "<li", "<"):
         _grows_linearly(hk.html_to_text, lambda k, e=evil: e * k)
