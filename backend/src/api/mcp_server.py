@@ -1322,7 +1322,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def list_applications(
         status: Optional[str] = None,
         updated_since: Optional[str] = None,
-        limit: int = 20,
+        limit: Optional[int] = None,
         offset: int = 0,
         due: bool = False,
         quiet_days: Optional[int] = None,
@@ -1347,7 +1347,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `from:` (mail that never names the company), `inbox_checked_at` = read
         only mail after it (null = since the application was added). `in_flight=true` —
         only applications another session holds now; rows carry `hold` and `stage`.
-        `queued=true` - the batch queue in order (`queue_position`); work it top-down.
+        `queued=true` - the whole batch queue (up to 200; `limit` pages) in work order; work it top-down.
         Rows carry `preflight`; the reply a
         `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
         in places with that level of the user's own job priority; rows carry `priority`.
