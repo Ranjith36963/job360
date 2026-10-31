@@ -98,6 +98,31 @@ describe("fromServerCount", () => {
     expect(c.byChip.all).toBe(0);
   });
 
+  it("leaves out dropped jobs and counts asks of a failed job in Other", () => {
+    // Job 8 is not a row (its ask is in other_ask_ids, so it counts in Other); job 7 is a row and counts once in All.
+    const c = fromServerCount(server({
+      n: 2, jobs: 1, other: 1, job_ids: [7], job_ids_by_kind: { answers: [7] }, other_ask_ids: [31],
+    }));
+    expect(c.otherAskIds).toEqual([31]);
+    expect(c.byChip).toMatchObject({ all: 2, other: 1, answers: 1 });
+    expect(c.jobIds).toEqual([7]);
+  });
+
+  it("ready cards past the page still count, as Ready", () => {
+    // 30 Send jobs: the page loads only a few cards, but the chip is the server's count of ids.
+    const ids = Array.from({ length: 30 }, (_, i) => 100 + i);
+    const c = fromServerCount(server({ n: 30, jobs: 30, other: 0, job_ids: ids, job_ids_by_kind: { send_yes: ids } }));
+    expect(c.byChip.send_yes).toBe(30);
+    expect(chipLabel("send_yes")).toBe("Send");
+  });
+
+  it("the badge's cheap read: the number is the server's n, not a count of loaded cards", () => {
+    const c = fromServerCount(server({ n: 12, jobs: 7, other: 5, job_ids: [1, 2, 3, 4, 5, 6, 7], job_ids_by_kind: { answers: [1, 2, 3, 4, 5, 6, 7] } }));
+    expect(c.n).toBe(12);
+    expect(c.byChip.all).toBe(12);
+    expect(c.jobs + c.other).toBe(c.n);
+  });
+
   it("says the summary line in plain words", () => {
     expect(summaryLine(0)).toBe("Nothing needs you right now.");
     expect(summaryLine(1)).toBe("1 thing needs you");
