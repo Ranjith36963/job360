@@ -347,8 +347,10 @@ def test_run_now_batch_over_waiting_and_hours_but_not_paused():
 
 
 def test_run_now_reach_needs_ids_and_inbox_needs_auto_mode():
-    assert schedule.due_now(_pressed(1, duty="reach", people_hunt=True), NOW)["due"] == []
-    reach = schedule.due_now(_pressed(1, duty="reach", people_hunt=True, reach_ids=[4, 5]), NOW)
+    # reach with no applications is not due (the network hunt, on the same switch, is: never done)
+    assert _duties(schedule.due_now(_pressed(1, duty="reach", people_hunt=True), NOW)) == ["network"]
+    done = {"network": NOW}  # the network hunt ran just now, so only reach is due
+    reach = schedule.due_now(_pressed(1, duty="reach", people_hunt=True, reach_ids=[4, 5], stamps=done), NOW)
     assert reach["due"] == [{"duty": "reach", "recipe": "reach", "reason": "run_now", "application_ids": [4, 5]}]
     stamps = {"inbox": NOW - timedelta(hours=1)}
     inbox = schedule.due_now(_pressed(1, duty="inbox", inbox_mode="auto", stamps=stamps), NOW)
