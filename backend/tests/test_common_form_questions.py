@@ -177,7 +177,7 @@ async def test_b1_get_profile_common_questions_open_lists_no_per_job_id(authenti
         get_profile = mcp_server.build_server()._tool_manager.get_tool("get_profile").fn
         mcp_server._current_user.set(mcp_server.CurrentUser(id=fixture_user_id, email="e2e@example.com"))
         try:
-            opened = (await get_profile()).get("common_questions_open") or []
+            opened = (await get_profile(view="full")).get("common_questions_open") or []
         finally:
             mcp_server._current_user.set(None)
     per_job = {q["id"] for q in common_questions.catalog() if q.get("per_job")}

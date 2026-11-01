@@ -219,7 +219,7 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
             assert body["not_saved"] == []
             assert "profile" not in body and "raw_text" not in res.content[0].text
             assert body["applied"][0]["path"] == "user_info.logistics"
-            got = json.loads((await session.call_tool("get_profile", {})).content[0].text)
+            got = json.loads((await session.call_tool("get_profile", {"view": "full"})).content[0].text)
             assert got["fields"]["user_info.logistics"]["current_salary"] == {
                 "amount": 45000, "currency": "GBP", "period": "year"}
             bad = await session.call_tool(

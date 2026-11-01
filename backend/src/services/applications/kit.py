@@ -2526,7 +2526,7 @@ async def build_kit(
     if answers_omitted:
         out["answers_omitted"] = answers_omitted
         out["instructions"].append(
-            "More approved answers: get_profile fields['user_info.answers']"
+            "More approved answers: get_profile(view=\"full\") fields['user_info.answers']"
         )
     if people_here["count"]:
         out["instructions"].append(

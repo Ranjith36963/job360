@@ -9,7 +9,7 @@ This is an INTERVIEW: you ask, the user answers, you save their words. Never ans
 Job360 is the record. Every edit holding the user's own answer: `"source": "user_said"` (`agent_inferred` only
 for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360.
 
-0. **Resume.** `get_profile`: read `assistant_notes`, `fields`, `settings.setup_progress`.
+0. **Resume.** `get_profile(view="full")`: read `instructions`, `fields`, `settings.setup_progress`.
    Say "N of 6 done", **resume** at `setup_progress.next`; a field already set:
    show it, ask "still right?". All six done: jump to step 3.
 1. **Six rounds, in this order.** 3-5 questions a round; visa, salary and equality
@@ -53,7 +53,7 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
    Needs you, and click Confirm once. I cannot confirm it for you; until then the safe setting
    stands." Safer choices apply at once. A round needing the user's OK can't be marked done in
    the same call: resend WITHOUT setup_progress (parked for Confirm), mark it done after.
-2. **Fix the profile from `raw`** (`get_profile(include_raw=true)`: CV, LinkedIn,
+2. **Fix the profile from `raw`** (`get_profile(view="full", include_raw=true)`: CV, LinkedIn,
    GitHub). Write `cv_data.cv_positions`, `cv_data.cv_projects` (one per real
    GitHub project), links, summary when missing or wrong (`"source": "agent_inferred"`: you
    read these). Never invent a fact; never overwrite a target the user gave. The Doctor checks the values before you write them (`get_recipe("doctor")`, row Profile writes).

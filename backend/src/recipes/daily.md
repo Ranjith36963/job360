@@ -9,7 +9,7 @@ Print this checklist and tick each step:
 Report first: your message starts "Did / Skipped / Needs you" with counts and links, then details. Blocked or a tool is
 missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, outreach, events): `get_recipe("rules")`.
 
-0. **Check the mode.** `get_profile`, read `preferences.daily_check`. `paused`,
+0. **Check the mode.** `get_profile`, read `basics["preferences.daily_check"]` (absent = empty). `paused`,
    `declined` or empty: STOP, read no email, record nothing, do not ask. `ask`:
    ask in chat "Can I check your Gmail now?" and STOP unless they say yes.
    `auto` (or `scheduled`): go on. **A scheduled run** (the user's task woke you): call `whats_due` first and run only what

@@ -542,7 +542,7 @@ async def test_mcp_update_profile_and_get_profile(authenticated_async_context, f
     )
     async with mcp_runtime():
         async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
-            before = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
+            before = json.loads((await mcp.call_tool("get_profile", {"view": "full"})).content[0].text)
             assert set(before["editable_paths"]) == set(settings.PROFILE_EDITABLE_PATHS)
             assert before["fields"]["cv_data.location"] == "London"
             assert before["agent_edits"] == []
@@ -554,7 +554,7 @@ async def test_mcp_update_profile_and_get_profile(authenticated_async_context, f
             body = json.loads(result.content[0].text)
             assert body["applied"][0]["set_by"] == "token:agent"
 
-            after = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
+            after = json.loads((await mcp.call_tool("get_profile", {"view": "full"})).content[0].text)
             assert after["fields"]["cv_data.location"] == "Manchester"
             assert after["agent_edits"][0]["path"] == "cv_data.location"
 

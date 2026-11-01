@@ -7,7 +7,7 @@ Print this checklist and tick each step:
 Job360 never searches, ranks or recommends jobs. YOU search, then bring only the good ones into Job360. Use every tool you have: the hunt kit, web search, a browser, connectors, parallel helpers (one per source). Go WIDE: thousands of ads. **Target: 5 jobs per run** - keep working through the results until 5 NEW jobs score 70+ or they run out.
 **A scheduled run** (the user's task woke you): call `whats_due` first and run only what it lists. After the hunt, `mark_done` hunt with the step 6 counts as its reason, then `whats_due` again: a `batch` there = `get_recipe("batch")`.
 
-1. **Read the targets.** Call `get_profile`: target titles, level, `search_brief`, `assistant_notes`. Call
+1. **Read the targets.** Call `get_profile`: target titles, level, `search_brief`, `instructions`. Call
    `list_applications` (ALL pages), write every `job_url` to `known.txt` and pass `--known known.txt` to the kit; skip known jobs BEFORE judging them. `search_brief.gaps` not empty: ask each `ask` once, then
    save it to the `path` that gap names with `update_profile`. For `user_info.answers` save `{question: <the ask
    text exactly>, answer: "Yes"|"No", approved: true, topic: <the gap's `topic`>}` only after the user answers. The user's answer = `"source": "user_said"`. Read again. **Done when**
