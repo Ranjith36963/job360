@@ -142,6 +142,11 @@ async def _queued_job(client: AsyncClient, n: int) -> int:
     return int(resp.json()["application_id"])
 
 
+async def _save_cv(client: AsyncClient, app_id: int) -> None:
+    saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, engineer."})
+    assert saved.status_code in (200, 201), saved.text
+
+
 async def _stop_batch(client: AsyncClient, **body: Any):
     return await client.post("/api/schedule/done", json={
         "duty": "batch", "outcome": "partial", "reason": "needs_user", **body})
@@ -170,6 +175,8 @@ async def test_needs_user_is_refused_while_a_queued_job_needs_no_owner_input(
         # an open ask on the second row: now every queued job waits on the owner or is filled
         ask = await client.post("/api/asks", json={"question": "Notice period?", "application_id": second})
         assert ask.status_code in (200, 201), ask.text
+        await _save_cv(client, first)
+        await _save_cv(client, second)
         ok = await _stop_batch(client)
         assert ok.status_code == 200, ok.text
         assert ok.json()["outcome"] == "partial"
@@ -180,6 +187,7 @@ async def test_a_blocked_job_no_longer_blocks_the_needs_user_stop(authenticated_
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id = await _queued_job(client, 3)
+        await _save_cv(client, app_id)
         assert (await _stop_batch(client)).status_code == 409
         stuck = await client.post(f"/api/applications/{app_id}/events", json={
             "event_type": "blocked", "payload": {"reason": "captcha", "page_host": "jobs.northwind.example"}})
@@ -218,3 +226,46 @@ async def test_only_batch_partial_without_a_blocker_is_ever_refused(authenticate
             resp = await client.post("/api/schedule/done", json=body)
             assert resp.status_code == 200, (body, resp.text)
             assert resp.json()["duty"] == body["duty"] and resp.json()["outcome"] == body["outcome"]
+
+
+# ── Owner 2026-11-01: a queued job with no CV keeps the batch run going, whatever else it waits on ─────────
+
+
+@pytest.mark.asyncio
+async def test_a_job_without_a_cv_refuses_the_stop_even_with_an_open_ask(authenticated_async_context, fixture_user_id):
+    # 31 Oct runs: each asked one question, then stopped with 22 queued jobs still missing their CV.
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id = await _queued_job(client, 6)
+        ask = await client.post("/api/asks", json={"question": "Notice period?", "application_id": app_id})
+        assert ask.status_code in (200, 201), ask.text
+        refused = await _stop_batch(client)
+        assert refused.status_code == 409, refused.text
+        detail = refused.json()["detail"]
+        assert "1 queued jobs still have no CV" in detail
+        assert f"next: application {app_id} (Northwind 6)" in detail and "save_artifact kind cv" in detail
+        await _save_cv(client, app_id)
+        assert (await _stop_batch(client)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_job_without_a_cv_still_needs_its_cv(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id = await _queued_job(client, 7)
+        stuck = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "blocked", "payload": {"reason": "captcha", "page_host": "jobs.northwind.example"}})
+        assert stuck.status_code == 201, stuck.text
+        refused = await _stop_batch(client)
+        assert refused.status_code == 409 and "still have no CV" in refused.json()["detail"], refused.text
+
+
+@pytest.mark.asyncio
+async def test_a_closed_posting_never_asks_for_a_cv(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id = await _queued_job(client, 8)
+        closed = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "blocked", "payload": {"reason": "posting_closed", "page_host": "jobs.northwind.example"}})
+        assert closed.status_code == 201, closed.text
+        assert (await _stop_batch(client)).status_code == 200
