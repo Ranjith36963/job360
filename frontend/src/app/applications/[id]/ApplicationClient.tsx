@@ -18,6 +18,7 @@ import { useSalaryFacts } from "@/components/needs-you/useSalaryFacts";
 import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { BatchButton } from "@/components/applications/BatchButton";import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
+import { openItemsText, openYouItems } from "@/lib/open-items";
 import { TestApplicationBanner } from "@/components/applications/TestApplicationBanner";
 import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
@@ -235,6 +236,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const actions = allowedActions(detail.status, { hasReceipt: detail.receipts.length > 0 });
   const place = detail.job.job_location;
   const unconfirmed = submitUnconfirmed(detail.events);
+  const openItems = openYouItems(detail.blockers);
   const queued = isQueued(detail.events);
   // The job's filled form is shown ONCE, inside the top "Needs you" section, with its one Send.
   const readyShown = ready !== null && actions.includes("ready_card");
@@ -284,7 +286,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         <PayAdvertised pay={detail.job.pay_advertised} />
       </header>
 
-      {unconfirmed && <SubmitUnconfirmedBanner applicationId={detail.id} onChanged={reloadAfterAsk} />}
+      {unconfirmed && <SubmitUnconfirmedBanner applicationId={detail.id} blockers={detail.blockers} onChanged={reloadAfterAsk} />}
 
       {detail.is_test && (
         <TestApplicationBanner
@@ -439,6 +441,11 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 </button>
               ) : (
                 <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+                  {openItems.length > 0 && (
+                    <p className="basis-full text-warning" data-testid="mark-applied-open-items">
+                      {openItemsText(openItems)}
+                    </p>
+                  )}
                   <span>
                     Record that you applied? This creates a receipt that can&apos;t be deleted.
                   </span>
