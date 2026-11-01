@@ -92,7 +92,7 @@ def test_reach_runs_after_hunt_and_before_batch():
         _facts(hunt_every_hours=1, inbox_mode="auto", check_every="1h", apply_on_own=True, queued=1,
                people_hunt=True, reach_ids=[7, 3]), NOW
     )
-    assert [d["duty"] for d in answer["due"]] == ["inbox", "hunt", "reach", "batch"]
+    assert [d["duty"] for d in answer["due"]] == ["inbox", "hunt", "reach", "network", "batch"]
     assert answer["due"][2] == {"duty": "reach", "recipe": "reach", "reason": "new_applications",
                                 "application_ids": [7, 3]}
 
@@ -100,7 +100,7 @@ def test_reach_runs_after_hunt_and_before_batch():
 def test_reach_needs_its_own_switch_not_the_job_hunt():
     """Rule #29: a user who never turned the people hunt on is never woken to find people."""
     assert [d["duty"] for d in schedule.due_now(_facts(hunt_every_hours=6, reach_ids=[7]), NOW)["due"]] == ["hunt"]
-    assert [d["duty"] for d in schedule.due_now(_facts(people_hunt=True, reach_ids=[7]), NOW)["due"]] == ["reach"]
+    assert [d["duty"] for d in schedule.due_now(_facts(people_hunt=True, reach_ids=[7]), NOW)["due"]] == ["reach", "network"]
 
 
 # ── Through the real doors ───────────────────────────────────────────────────

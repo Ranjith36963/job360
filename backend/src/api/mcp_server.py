@@ -160,6 +160,36 @@ def _request_db() -> AbstractAsyncContextManager[JobDatabase]:
     return contextlib.asynccontextmanager(get_request_db)()
 
 
+# 2026-11-01: a full queued list was 215,129 characters for 91 rows (blockers alone 46,783); the apply runs
+# named the size as a reason to stop. `compact=true` keeps what a run branches on, about 400 characters a row.
+_COMPACT_KEYS = ("id", "job_title", "job_company", "job_url", "country", "status", "fit_score", "line_side",
+                 "queue_position")
+_COMPACT_PREFLIGHT = ("has_cv", "blocked_count", "waiting_on_owner", "duplicate_flag", "avoided", "kit_missing")
+
+
+def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
+    """One list row cut to what a run branches on. Read-only projection of the route's row."""
+    out: dict[str, Any] = {k: row[k] for k in _COMPACT_KEYS if k in row}
+    step = row.get("next_step") or {}
+    out["next_step"] = step.get("code") if isinstance(step, dict) else step
+    nxt = row.get("next")
+    if isinstance(nxt, dict):
+        out["next"] = {k: nxt.get(k) for k in ("kind", "actor", "label")}
+    blockers = row.get("blockers")
+    if isinstance(blockers, list):
+        out["waiting_on"] = [f"{b.get('kind')}:{b.get('actor')}" for b in blockers if isinstance(b, dict)]
+    browser = row.get("browser")
+    if isinstance(browser, dict):
+        out["browser"] = browser.get("kind")
+    pre = row.get("preflight")
+    if isinstance(pre, dict):
+        out["preflight"] = {k: pre[k] for k in _COMPACT_PREFLIGHT if k in pre}
+        out["preflight"]["hold"] = bool(pre.get("hold"))
+    if row.get("hold"):
+        out["hold"] = True
+    return out
+
+
 def _tool_error(exc: HTTPException) -> Exception:
     """Route HTTPException → tool error the agent can read: ``"404: Job not found"``."""
     from mcp.server.mcpserver.exceptions import ToolError
@@ -1330,6 +1360,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         queued: bool = False,
         priority: Optional[str] = None,
         agenda: Optional[str] = None,
+        compact: bool = False,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1351,7 +1382,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Rows carry `preflight`; the reply a
         `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
         in places with that level of the user's own job priority; rows carry `priority`.
-        `agenda` (today|tomorrow|week, in the user's timezone) - only applications with an interview or follow-up."""
+        `agenda` (today|tomorrow|week, in the user's timezone) - only applications with an interview or follow-up.
+        `compact=true` - short rows (id, title, company, url, next_step, next, waiting_on, browser, preflight);
+        use it to walk the queue, then get_application_kit for one job."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
@@ -1363,6 +1396,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             _audit("list_applications", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit("list_applications", "ok", count=len(resp.get("applications", [])))
+        if compact:
+            resp = {**resp, "applications": [_compact_row(r) for r in resp.get("applications", [])]}
         return {**resp, "assistant_hint": ASSISTANT_HINT}
 
     @mcp.tool()
@@ -1389,8 +1424,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def whats_due(duties: Optional[list[str]] = None) -> dict[str, Any]:
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
-        names it). `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
-        (reach also lists `application_ids`: find people for those only);
+        names it). `due` lists {duty: hunt|inbox|reach|network|batch, recipe, reason} in run order
+        (reach also lists `application_ids`: find people for those only; network lists `max_people`);
         inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
         build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
         those application_ids (at most 200 per call);
@@ -1416,7 +1451,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def mark_done(
         duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done", reason: str = "",
     ) -> dict[str, Any]:
-        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach (reach also
+        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
         takes `application_ids`, the ones you worked). `outcome` = done | partial | failed; `reason`
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
         network_blocked | rate_limited | needs_user | error. A failed duty waits 2h, 4h, 8h... (at most

@@ -26,7 +26,7 @@ from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["schedule"])
 
-Duty = Literal["hunt", "inbox", "batch", "reach"]
+Duty = Literal["hunt", "inbox", "batch", "reach", "network"]
 Outcome = Literal["done", "partial", "failed"]
 RunReason = Literal[
     "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
@@ -49,6 +49,8 @@ class DueItemOut(BaseModel):
     reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications", "run_now"]
     # Only on `reach`: the applications to find people for this run (newest first).
     application_ids: Optional[list[int]] = None
+    # Only on `network`: at most this many new people who fit the user's profile (cold contacts) this run.
+    max_people: Optional[int] = None
     # Only on `inbox`: what one Gmail search needs (2026-10-31), see services/applications/inbox.search_plan.
     search: Optional[InboxSearchOut] = None
 
@@ -192,7 +194,22 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
 
     rows = await queue_preflight.fillable_rows(db, user.id)
     if not rows:
-        return
+        # 2026-11-01 (31 Oct runs): every run asked one question, then stopped while 22 queued jobs had no
+        # CV. A missing CV needs no owner input, whatever else the row waits on.
+        cvs = await queue_preflight.cv_rows(db, user.id)
+        if not cvs:
+            return
+        first = cvs[0]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(cvs)} queued jobs still have no CV; next: application {first['id']} "
+                f"({first['company'] or 'unknown company'}). Keep working: write its tailored CV and save it "
+                "with save_artifact kind cv. An open question, a site block or the user's own browser does not "
+                "stop CV writing; questions to the user are not a reason to stop. "
+                f"Ids: {', '.join(str(r['id']) for r in cvs[:5])}."
+            ),
+        )
     first = rows[0]
     raise HTTPException(
         status_code=409,
