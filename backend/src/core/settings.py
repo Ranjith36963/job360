@@ -1022,8 +1022,9 @@ REACH_WINDOW_DAYS = 14
 # Only a read that names its `duties` takes them (2026-10-25): a read without them only looks.
 DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "30"))
 # Owner 2026-10-25 - back-pressure: the hunt is not due while the batch queue already holds this many
-# open jobs (whats_due `hunt_hold: queue_full`); it is due again as the queue drains.
-HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "25"))
+# open jobs (whats_due `hunt_hold: queue_full`); it is due again as the queue drains. Owner 2026-11-01: 1000
+# (was 25), so the hourly hunt keeps filling the queue from every board instead of stopping at 25.
+HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "1000"))
 REACH_MAX_PER_RUN = 5
 # Owner 2026-10-31 - the NETWORK hunt (duty `network`): while `people_hunt` is on, once every
 # NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
