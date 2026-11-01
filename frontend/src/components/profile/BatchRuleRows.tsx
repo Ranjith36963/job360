@@ -536,7 +536,7 @@ export function BatchRuleRows({
                   }}
                   className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                 >
-                  Confirm
+                  Yes, apply this change
                 </button>
                 <button
                   type="button"
@@ -615,7 +615,7 @@ export function BatchRuleRows({
                       onClick={saveGrant}
                       className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                     >
-                      Confirm
+                      Yes, apply this change
                     </button>
                     <button
                       type="button"

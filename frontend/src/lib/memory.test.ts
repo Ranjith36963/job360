@@ -55,14 +55,14 @@ describe("who approved a saved answer", () => {
   const item = (approved: boolean) => ({ question: "Notice?", answer: "1 month", approved });
   const hist = (by: string, approved: boolean, at = "2026-10-01T00:00:00Z") => ({ set_by: by, set_at: at, value: [item(approved)] });
 
-  it("web approval reads 'Approved by you'", () => {
+  it("web approval reads 'OK by you'", () => {
     const by = answerApprover([hist("web", true)], "Notice?", "1 month");
-    expect(approvalText(by, "2026-10-03T10:00:00Z")).toBe("Approved by you, 3 Oct");
+    expect(approvalText(by, "2026-10-03T10:00:00Z")).toBe("OK by you, 3 Oct");
   });
 
   it("an agent/token approval never says 'by you'", () => {
     const by = answerApprover([hist("token:lc", true)], "Notice?", "1 month");
-    expect(approvalText(by, "2026-10-03T10:00:00Z")).toBe("Marked approved by lc, 3 Oct");
+    expect(approvalText(by, "2026-10-03T10:00:00Z")).toBe("Marked OK by lc, 3 Oct");
   });
 
   it("uses the oldest row in which it is approved (history is newest first)", () => {
@@ -71,7 +71,7 @@ describe("who approved a saved answer", () => {
   });
 
   it("unknown history makes no claim", () => {
-    expect(approvalText(answerApprover([], "Notice?", "1 month"))).toBe("Approved");
+    expect(approvalText(answerApprover([], "Notice?", "1 month"))).toBe("OK");
   });
 });
 

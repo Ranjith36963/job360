@@ -112,7 +112,7 @@ describe("OwnBrowserQueueCard", () => {
     getOwnBrowserQueue.mockResolvedValue(queue());
     render(<RunNowPanel />);
     expect(await screen.findByTestId("own-browser-window")).toHaveTextContent("Any time your PC is on");
-    expect(screen.getByTestId("own-browser-queue")).toHaveTextContent("Waiting for your own browser");
+    expect(screen.getByTestId("own-browser-queue")).toHaveTextContent("waiting for your own browser");
     expect(screen.getByTestId("own-browser-count")).toHaveTextContent("2 waiting for your own browser");
     expect(screen.queryByTestId("own-browser-run-now-done")).toBeNull();
     fireEvent.click(screen.getByTestId("own-browser-run-now"));

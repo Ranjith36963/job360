@@ -386,7 +386,7 @@ export function Contacts({
       const updated = await confirmContact(id);
       setList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
     } catch (err) {
-      toast.error(apiErrorMessage(err, "Could not confirm this person."));
+      toast.error(apiErrorMessage(err, "Could not save your OK."));
     } finally {
       setConfirming(null);
     }
@@ -565,7 +565,7 @@ export function Contacts({
                     onClick={() => void confirm(contact.id)}
                     className="font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
                   >
-                    Confirm
+                    OK
                   </button>
                 </div>
               )}

@@ -296,7 +296,7 @@ describe("folded rows (owner 2026-10-27: + unfolds the card)", () => {
     const row = await screen.findByTestId("job-summary-3");
     expect(screen.getByTestId("job-row-3-toggle")).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByTestId("card-3").parentElement).not.toBeVisible();
-    for (const text of ["Emplay", "Associate AI Engineer", "Bengaluru", "since 1 d ago", "by Helper · 25 Oct · LinkedIn", "Fit 74", "Waiting on your answer", "Check 1 answer"])
+    for (const text of ["Emplay", "Associate AI Engineer", "Bengaluru", "since 1 d ago", "by Helper · 25 Oct · LinkedIn", "Fit 74", "On you", "Check 1 answer"])
       expect(row).toHaveTextContent(text);
     expect(row.textContent).not.toMatch(/APP-/);
   });
