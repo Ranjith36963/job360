@@ -393,7 +393,7 @@ async def test_mcp_writes_positions_and_projects(authenticated_async_context, fi
     )
     async with mcp_runtime():
         async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
-            before = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
+            before = json.loads((await mcp.call_tool("get_profile", {"view": "full"})).content[0].text)
             assert "cv_data.cv_positions" in before["editable_paths"]
             assert "cv_data.cv_projects" in before["editable_paths"]
 
@@ -408,7 +408,7 @@ async def test_mcp_writes_positions_and_projects(authenticated_async_context, fi
             body = json.loads(result.content[0].text)
             assert [a["set_by"] for a in body["applied"]] == ["token:agent", "token:agent"]
 
-            after = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
+            after = json.loads((await mcp.call_tool("get_profile", {"view": "full"})).content[0].text)
             assert after["fields"]["cv_data.cv_positions"] == POSITIONS
             assert after["fields"]["cv_data.cv_projects"] == PROJECTS
 

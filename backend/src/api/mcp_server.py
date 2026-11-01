@@ -795,6 +795,22 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         lines.append(f"Fix it and resend ALL {len(edits)} edits in one call: {', '.join(paths)}")
         return "\n".join(lines)
 
+    def _with_shapes(message: str, refused: list[str]) -> str:
+        """S4: a refusal ends with the expected shape of each refused path, so the writer needs no
+        get_profile(view="full") to fix it. Shapes come from `shapes.SHAPES`, never the caller's value."""
+        compact = profile_shapes.compact_shapes()
+        lines = [message]
+        for path in dict.fromkeys(refused):
+            if path in compact:
+                shape = json.dumps(compact[path], ensure_ascii=False, separators=(",", ":"))
+                lines.append(f"Shape for {path}: {shape}")
+        return "\n".join(lines)
+
+    def _refused_paths(detail: Any, paths: list[Any]) -> list[str]:
+        """The call's paths a route refusal names as bad (one `<path>: rule` line each)."""
+        lines = detail.splitlines() if isinstance(detail, str) else []
+        return [p for p in paths if isinstance(p, str) and any(line.startswith(f"{p}: ") for line in lines)]
+
     def _save_fit_limits() -> str:
         """The save_fit limits, read off the live settings (they are env-tunable), with an example."""
         from src.core import settings as _s  # noqa: PLC0415
@@ -895,26 +911,92 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             resp = await templates_route.list_templates(kind="outreach_template", label=None, db=db, user=_user())
         return list(resp["templates"])
 
+    # S4 (2026-11-01) - get_profile is BRIEF by default: measured live, every call in every duty
+    # returned 55-61k chars and the client saved each to a file. A run reads the brief; setup and
+    # profile writers pass view="full" for `fields`, `shapes`, `editable_paths` and `agent_edits`.
+    # The paths a run reads, picked out of `fields` into the brief's `basics` (unset = absent, rule #29).
+    _BRIEF_PATHS = (
+        "cv_data.name", "cv_data.headline", "cv_data.location", "user_info.contact",
+        "preferences.target_job_titles", "preferences.experience_levels", "preferences.preferred_locations",
+        "preferences.work_arrangement", "preferences.looking_for", "preferences.dealbreakers",
+        "preferences.avoid_companies", "preferences.target_companies", "preferences.daily_check",
+        "preferences.check_every", "user_info.right_to_work", "preferences.salary_by_country",
+        "user_info.languages",
+    )
+    _BRIEF_LESSONS = 5
+    _BRIEF_TOPICS = 80
+    _FULL_VIEW_POINTER = (
+        'view="full" adds fields (every editable path\'s value), shapes (a valid example per path), '
+        "editable_paths, agent_edits, skills, common_questions_open, all lessons and all saved answers."
+    )
+
+    def _settings_once(settings_view: Any) -> Any:
+        """The settings without `notes`: a copy of the assistant notes, already sent as `instructions`."""
+        if isinstance(settings_view, dict):
+            return {k: v for k, v in settings_view.items() if k != "notes"}
+        return settings_view
+
+    def _answers_summary(answers: Any) -> dict[str, Any]:
+        rows = [a for a in (answers or []) if isinstance(a, dict)]
+        topics = sorted({str(a["topic"]) for a in rows if a.get("topic")})
+        out: dict[str, Any] = {
+            "saved": len(rows), "approved": sum(1 for a in rows if a.get("approved") is True),
+            "topics": topics[:_BRIEF_TOPICS],
+        }
+        if len(topics) > _BRIEF_TOPICS:
+            out["topics_more"] = len(topics) - _BRIEF_TOPICS
+        return out
+
+    def _brief(full: dict[str, Any]) -> dict[str, Any]:
+        """The run view of a full get_profile payload: same values, minus the bulk."""
+        fields = full.get("fields") or {}
+        keep = (
+            "instructions", "memory_notes", "memory_check", "assistant_hint", "is_complete", "job_titles",
+            "skills_count", "experience_level", "experience_level_inferred", "education", "has_cv",
+            "cv_file_warning", "has_linkedin", "has_github", "top_skills", "search_brief", "settings",
+            "profile_edit_id", "unconfirmed", "raw_available", "outreach_templates", "raw",
+        )
+        out = {k: full[k] for k in keep if k in full}
+        out["basics"] = {p: fields[p] for p in _BRIEF_PATHS if fields.get(p) not in (None, "", [], {})}
+        out["answers"] = _answers_summary(fields.get("user_info.answers"))
+        if full.get("common_questions_open"):  # the list itself (question + save_to each) is in full
+            out["answers"]["open_common_questions"] = len(full["common_questions_open"])
+        lessons = full.get("lessons") or []
+        out["lessons"] = lessons[:_BRIEF_LESSONS]
+        if len(lessons) > _BRIEF_LESSONS:
+            out["lessons_more"] = len(lessons) - _BRIEF_LESSONS
+        out["full_view"] = _FULL_VIEW_POINTER
+        return out
+
     @mcp.tool()
     async def get_profile(
-        include_raw: bool = False, raw_section: str = "", raw_offset: int = 0
+        include_raw: bool = False,
+        raw_section: str = "",
+        raw_offset: int = 0,
+        view: Annotated[
+            Literal["brief", "full"],
+            Field(description='"brief" (default): what a run reads. "full": adds fields, shapes, editable_paths, '
+                              "agent_edits - for setup and for writes that need a current value."),
+        ] = "brief",
     ) -> dict[str, Any]:
         """READ `instructions` FIRST: the user's own rules; they override your defaults, never a HARD LINE.
 
+        view="brief" (default): instructions, memory_notes, memory_check, settings, job_titles, top_skills,
+        search_brief, lessons (newest 5), `basics` (contact, targets, right_to_work and salary per country,
+        daily_check; unset = absent) and `answers` (saved/approved counts + topics). view="full" adds `fields`
+        (every editable path's value), `shapes` (a valid example per path), `editable_paths`, `agent_edits`:
+        use it in setup and before a write that must send a current value.
+
         Read `settings` before any apply step: obey each `effective`; `paused: true` = stop all apply work;
         `waiting` = changes the user has not yet confirmed — do not ask again or act as if applied.
-        `settings.setup_progress` = which of the six setup rounds (targets first) are done.
 
-        The CV/LinkedIn/GitHub text is sent only with get_profile(include_raw=true) as `raw` (+`raw.truncated`);
-        `raw_available` says whether any exists. Each section is cut at 15000 chars; `raw.more` gives the `next`
-        call (`raw_section` + `raw_offset`). `editable_paths` = what you may write, `fields` = current values,
-        `shapes` = a valid example for each structured path. `skills` = THE skill list; remove a wrong one via
-        `preferences.excluded_skills`.
+        include_raw=true (either view) adds `raw`: the CV/LinkedIn/GitHub text, each section cut at 15000
+        chars; `raw.more` gives the `next` call (`raw_section` + `raw_offset`). `raw_available` says any exists.
+        `skills` (full) = THE skill list; remove a wrong one via `preferences.excluded_skills`.
 
-        MEMORY: the facts job forms ask are in `fields["user_info.contact"]`, `fields["user_info.right_to_work"]`,
-        `fields["user_info.logistics"]`, `fields["user_info.languages"]`, `fields["user_info.equality"]` and
-        `fields["user_info.answers"]`; the salary is `fields["preferences.salary_by_country"]`. Read them before any
-        form. A missing key means "not answered": ask only that, once, then save it; never guess. Use the
+        MEMORY: form facts are user_info.contact, user_info.right_to_work, user_info.logistics,
+        user_info.languages, user_info.equality, user_info.answers and preferences.salary_by_country.
+        A missing key means "not answered": ask only that, once, then save it; never guess. Use the
         HIRING country's record (also for a remote job). Never convert currency. A salary floor is never stored or
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
@@ -923,10 +1005,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
-        No profile yet: `profile_exists` false + `next` (ask for the CV, or update_profile).
-        Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint,
-        outreach_templates.
-        Full rules and shapes: get_recipe("rules")."""
+        No profile yet: `profile_exists` false + `next`. Full rules: get_recipe("rules")."""
         # ONE profile read for the whole tool call. `load_profile_response` is
         # the same function `GET /profile` itself is (same 404, same rendering),
         # and it hands back BOTH the UserProfile object and the rendered
@@ -954,21 +1033,25 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 from src.api.models import AssistantSettingsView  # noqa: PLC0415
 
                 editable = list(profile_edits.editable_paths())
-                view = profile_route.settings_view(UserProfile(), user_id)
+                settings_view = profile_route.settings_view(UserProfile(), user_id)
                 tpl = await _outreach_templates()
-                return {
+                empty = {
                     "profile_exists": False,
                     "next": (
                         f"No profile yet. Ask the user to upload their CV at {settings.SITE_BASE_URL}/profile, "
                         "or save fields with update_profile."
                     ),
-                    "settings": AssistantSettingsView(**view).model_dump(),
-                    "editable_paths": editable,
+                    "settings": _settings_once(AssistantSettingsView(**settings_view).model_dump()),
                     "profile_edit_id": profile_edits.current_edit_id(user_id),
-                    "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
                     "assistant_hint": ASSISTANT_HINT,
                     # Pack #13 - newest version per label; absent when none (rule #29). Job360 never fills one.
                     **({"outreach_templates": tpl} if tpl else {}),
+                }
+                if view == "brief":
+                    return {**empty, "full_view": _FULL_VIEW_POINTER}
+                return {
+                    **empty, "editable_paths": editable,
+                    "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
                 }
             _audit("get_profile", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -998,7 +1081,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         open_qs = common_questions.open_questions(profile, cq_rows)
         cq = common_questions.summary(cq_rows)
         notes = [n for n in (profile.preferences.assistant_notes or []) if isinstance(n, str)]
-        return {
+        full = {
             # The user's own rules (notes with no Memory step prefix), then the step facts, then the check.
             "instructions": [n for n in notes if not n.startswith(profile_edits.STEP_FACT_PREFIXES)],
             "memory_notes": [
@@ -1033,9 +1116,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             "has_linkedin": s.has_linkedin,
             "has_github": s.has_github,
             "top_skills": resp.skill_tiers.get("primary", [])[:15],
-            # The user's standing instructions to the agent — read first (the
-            # docstring says so). [] when there are none (rule #29). DEPRECATED: use `instructions`.
-            "assistant_notes": list(profile.preferences.assistant_notes or []),
+            # S4: the deprecated `assistant_notes` copy is gone - the notes are `instructions` +
+            # `memory_notes` above (and `fields["preferences.assistant_notes"]` in the full view).
             # Owner decision 2026-10-12 - WHERE this user's hunt searches: one row
             # per place from their own right_to_work answers, each with a plain
             # "counts if" line, plus the gaps to ask once. Never our own list.
@@ -1050,7 +1132,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             # Owner decision 2026-10-08 (S2) - the assistant settings with the
             # safe defaults filled in, the practice-run state and the riskier
             # changes still waiting for the user's click. Read before ANY apply.
-            "settings": resp.assistant_settings.model_dump() if resp.assistant_settings else None,
+            "settings": _settings_once(resp.assistant_settings.model_dump()) if resp.assistant_settings else None,
             "editable_paths": editable_paths,
             # Gap 4 - send back as update_profile's expected_profile_version (moves on every edit).
             "profile_edit_id": resp.profile_edit_id,
@@ -1090,6 +1172,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable_paths},
             **({"raw": _raw_block(profile.cv_data, raw_section, raw_offset)} if include_raw else {}),
         }
+        return full if view == "full" else _brief(full)
 
     @mcp.tool()
     async def bring_job(
@@ -2330,8 +2413,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Each edit = {"path": an editable_paths entry, "value": value, or null to clear}; several per call.
         ALL OR NOTHING: one refused edit = NOTHING saved; fix it, resend ALL paths in one call (a path left
-        out is lost). get_profile `shapes` = an example per path.
-        A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` + your change.
+        out is lost). A refusal gives each refused path's shape.
+        A write REPLACES THE WHOLE VALUE of its path: send the whole current value + your change.
         List paths (e.g. preferences.excluded_skills) take "op": append (value = 1 item), remove_at (+"index"),
         upsert (1 user_info.answers record; replaces same topic/question+company).
         Optional expected_profile_version = the `profile_edit_id` you last read (get_profile, this reply):
@@ -2365,14 +2448,20 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 {"edits": edits, "expected_profile_version": expected_profile_version}
             )
         except ValidationError as exc:
+            bad_rows = {e["loc"][1] for e in exc.errors() if len(e.get("loc", ())) > 1 and e["loc"][0] == "edits"}
+            bad = [str(paths[i]) for i in bad_rows if isinstance(i, int) and i < len(paths)]
             raise _validation_error(
-                exc, tool="update_profile", message=_update_profile_shape_error(exc, edits), paths=paths
+                exc, tool="update_profile", message=_with_shapes(_update_profile_shape_error(exc, edits), bad),
+                paths=paths,
             ) from None
         try:
             resp = await profile_route.update_profile(body, _user())
         except HTTPException as exc:
             # S3 — paths and a closed reason code only, never values, in the audit trail.
             _audit_refused("update_profile", exc, paths=paths)
+            refused = _refused_paths(exc.detail, paths)
+            if refused:
+                exc = HTTPException(status_code=exc.status_code, detail=_with_shapes(str(exc.detail), refused))
             raise _tool_error(exc) from None
         _audit("update_profile", "ok", paths=paths)
         # The REST route returns the whole rendered profile; an MCP reply must stay small

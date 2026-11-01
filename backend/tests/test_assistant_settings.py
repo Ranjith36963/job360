@@ -1307,7 +1307,7 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
             result = _payload(await mcp.call_tool("update_profile", {"edits": [_e(APPLY, "auto")]}))
             assert [w["path"] for w in result["waiting"]] == [APPLY] and result["waiting"][0]["value"] == "auto"
             assert result["applied"] == []
-            prof = _payload(await mcp.call_tool("get_profile", {}))
+            prof = _payload(await mcp.call_tool("get_profile", {"view": "full"}))
             s = prof["settings"]
             assert s["above_line"] == {"value": "", "effective": "ask"}
             assert s["paused"] is False and s["practice_run"] == {"needed": False, "auto_on_since": None}
@@ -1524,7 +1524,7 @@ async def test_setup_progress_applies_at_once_from_a_token_and_is_in_settings_an
             result = _payload(await mcp.call_tool("update_profile", {"edits": [_e(PROGRESS, done)]}))
             assert result["waiting"] == [], "progress is not a setting: nothing waits"
             assert [a["path"] for a in result["applied"]] == [PROGRESS]
-            prof = _payload(await mcp.call_tool("get_profile", {}))
+            prof = _payload(await mcp.call_tool("get_profile", {"view": "full"}))
             progress = prof["settings"]["setup_progress"]
             assert (progress["done"], progress["total"], progress["next"]) == (2, 6, "targets")
             assert set(progress["rounds"]) == {"you", "visa"}
@@ -1535,7 +1535,7 @@ async def test_setup_progress_applies_at_once_from_a_token_and_is_in_settings_an
                         _done("you", at=(now + timedelta(hours=1)).isoformat())):
                 refused = await mcp.call_tool("update_profile", {"edits": [_e(PROGRESS, bad)]})
                 assert refused.is_error and PROGRESS in refused.content[0].text
-            again = _payload(await mcp.call_tool("get_profile", {}))
+            again = _payload(await mcp.call_tool("get_profile", {"view": "full"}))
             assert again["settings"]["setup_progress"]["done"] == 2
     async with authenticated_async_context() as client:
         view = await _view(client)

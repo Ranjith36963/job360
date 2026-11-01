@@ -1,4 +1,4 @@
-"""Slice B3: get_profile puts `instructions`, `memory_notes`, `memory_check` first; `assistant_notes` stays.
+"""Slice B3: get_profile puts `instructions`, `memory_notes`, `memory_check` first; S4 dropped the `assistant_notes` copy.
 
 Helpers are copied from test_instructions_cap.py, never imported (per-test schema isolation).
 """
@@ -53,5 +53,5 @@ async def test_get_profile_leads_with_instructions(authenticated_async_context, 
     check = got["memory_check"]
     assert set(check) == {"verified", "to_verify", "missing"}
     assert all(isinstance(v, int) for v in check.values())
-    assert got["assistant_notes"] == NOTES
+    assert "assistant_notes" not in got  # S4: the deprecated copy is gone; `instructions` + `memory_notes` hold it
     assert after["verified"] == check["verified"] and after["to_verify"] == check["to_verify"] + 1

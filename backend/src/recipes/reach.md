@@ -13,7 +13,7 @@ steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `ma
 1. **Find the right person** for this application (recruiter, hiring manager,
    someone on the team). Warm first: people the user already knows there
    (the kit's `known_people`, `list_people`, past employers and schools in
-   `get_profile`, or a LinkedIn `Connections.csv` the user hands you; store
+   `get_profile(view="full")`, or a LinkedIn `Connections.csv` the user hands you; store
    only the matches). Then try these in order, at least four before you give up:
    the job ad; the company's team, about and press pages; its GitHub and
    conference or podcast speaker pages; a web search such as

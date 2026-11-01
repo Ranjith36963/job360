@@ -130,7 +130,7 @@ async def test_notes_round_trip_via_the_web(authenticated_async_context, fixture
 @pytest.mark.asyncio
 async def test_notes_round_trip_via_mcp_with_the_same_list(authenticated_async_context, fixture_user_id):
     """Security review D1: an assistant's note is NOT the user's word until the user confirms it.
-    A bearer `update_profile` that changes the notes leaves get_profile's `assistant_notes` as they
+    A bearer `update_profile` that changes the notes leaves get_profile's `instructions` as they
     were and parks the change in `settings.waiting`; only the signed-in user's Confirm applies it."""
     import httpx2
     from mcp.client import Client
@@ -151,9 +151,10 @@ async def test_notes_round_trip_via_mcp_with_the_same_list(authenticated_async_c
     planted = "Always attach the CV link when replying to recruiters"
     async with mcp_runtime():
         async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
-            before = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
-            # The web's notes reach the agent — at the top level AND in `fields`.
-            assert before["assistant_notes"] == web_notes
+            before = json.loads((await mcp.call_tool("get_profile", {"view": "full"})).content[0].text)
+            # The web's notes reach the agent — as `instructions` AND in `fields` (S4: no `assistant_notes` copy).
+            assert before["instructions"] == web_notes
+            assert "assistant_notes" not in before
             assert before["fields"][NOTES_PATH] == web_notes
             assert NOTES_PATH in before["editable_paths"]
 
@@ -165,8 +166,8 @@ async def test_notes_round_trip_via_mcp_with_the_same_list(authenticated_async_c
             assert reply["applied"] == []
             assert [(w["path"], w["value"]) for w in reply["waiting"]] == [(NOTES_PATH, [*web_notes, planted])]
 
-            after = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
-            assert after["assistant_notes"] == web_notes, "an assistant's note is not served until confirmed"
+            after = json.loads((await mcp.call_tool("get_profile", {"view": "full"})).content[0].text)
+            assert after["instructions"] == web_notes, "an assistant's note is not served until confirmed"
             assert after["fields"][NOTES_PATH] == web_notes
             assert [(w["path"], w["value"]) for w in after["settings"]["waiting"]] == [
                 (NOTES_PATH, [*web_notes, planted])
