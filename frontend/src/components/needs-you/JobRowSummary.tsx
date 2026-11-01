@@ -12,9 +12,10 @@ import { cn, relativeTime } from "@/lib/utils";
 // untrusted text (an assistant or a job site wrote it): React text only, never HTML.
 
 /** The row's columns on a wide screen; below `lg` the cells wrap into two lines. */
-const COLS = "lg:grid lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1.9fr)_4.5rem_minmax(0,1fr)_minmax(0,1.4fr)_3.5rem] lg:items-center lg:gap-x-4";
+const COLS = "lg:grid lg:grid-cols-[minmax(0,1.8fr)_minmax(0,3fr)_4.5rem_minmax(0,1fr)_minmax(0,1.4fr)_3.5rem] lg:items-center lg:gap-x-4";
 // An empty cell keeps its column on a wide screen and takes no room when the line wraps.
 const CELL = "min-w-0 max-lg:empty:hidden lg:truncate";
+const CELL_WRAP = "min-w-0 max-lg:empty:hidden";
 const HEAD = "font-mono text-[10.5px] font-medium uppercase tracking-[0.09em] text-faint";
 
 /** The column names above the rows, wide screens only (lined up with the toggle and the action slot). */
@@ -44,10 +45,12 @@ export function whatWaits(h: JobHeader, card: JobCardData | null): string {
   return [...what.filter((w) => w && w !== nextStep(h)), held.replace(/^ · /, "")].filter(Boolean).join(" · ");
 }
 
-export function JobRowSummary({ h, card, facts, linkTestid }: {
+export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
   h: JobHeader;
   card: JobCardData | null;
   facts: RowFacts;
+  /** The job's first blocker line ("You: solve the CAPTCHA +2 more"); empty while its detail loads. */
+  nextText?: string;
   /** The title link's test id (the loading row keeps the old `title-link-<id>`). */
   linkTestid: string;
 }) {
@@ -63,12 +66,12 @@ export function JobRowSummary({ h, card, facts, linkTestid }: {
         <span className="text-muted-foreground">{role || "Untitled role"}</span>
       </Link>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground lg:contents">
-        <span className={cn(CELL, "flex items-center gap-2 max-lg:basis-full")}>
-          <span data-testid={`job-step-${h.id}`}
-            className={cn("shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium", TONE[step] ?? "bg-muted text-foreground")}>
-            {step}
-          </span>
-          <span className="min-w-0 lg:truncate" title={whatWaits(h, card)} data-testid={`job-what-${h.id}`}>{whatWaits(h, card)}</span>
+        <span className={cn(CELL_WRAP, "flex items-center gap-2 max-lg:basis-full")}>
+          {!nextText && <span data-testid={`job-step-${h.id}`}
+              className={cn("shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium", TONE[step] ?? "bg-muted text-foreground")}>
+              {step}
+            </span>}
+          <span className="min-w-0 break-words" data-testid={`job-what-${h.id}`}>{nextText || whatWaits(h, card)}</span>
         </span>
         {since && <span className={CELL} title="Waiting since"><span className="lg:hidden">since </span>{relativeTime(since)}</span>}
         <span className={CELL}>{facts.location}</span>

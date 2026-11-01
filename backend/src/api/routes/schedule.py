@@ -26,12 +26,21 @@ from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["schedule"])
 
-Duty = Literal["hunt", "inbox", "batch", "reach"]
+Duty = Literal["hunt", "inbox", "batch", "reach", "network"]
 Outcome = Literal["done", "partial", "failed"]
 RunReason = Literal[
     "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
     "needs_user", "error",
 ]
+
+
+class InboxSearchOut(BaseModel):
+    after: str  # ISO-8601; "" when the user has no open application
+    gmail_after: str  # the same day as Gmail's after: YYYY/MM/DD
+    application_ids: list[int]  # every open application: mark_inbox_checked these after the search
+    companies: list[str]
+    email_senders: list[str]
+    skip_message_ids: list[str]  # open unmatched mail: never read or park it again
 
 
 class DueItemOut(BaseModel):
@@ -40,6 +49,10 @@ class DueItemOut(BaseModel):
     reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications", "run_now"]
     # Only on `reach`: the applications to find people for this run (newest first).
     application_ids: Optional[list[int]] = None
+    # Only on `network`: at most this many new people who fit the user's profile (cold contacts) this run.
+    max_people: Optional[int] = None
+    # Only on `inbox`: what one Gmail search needs (2026-10-31), see services/applications/inbox.search_plan.
+    search: Optional[InboxSearchOut] = None
 
 
 class WhatsDueOut(BaseModel):
@@ -158,6 +171,11 @@ async def whats_due(
         answer["nothing_due"] = not answer["due"]
         answer["running"] = {**answer["running"], **{d: now.isoformat(timespec="seconds") for d in lost}}
         answer["held_by_running"] = [*answer["held_by_running"], *lost]
+    for item in answer["due"]:
+        if item["duty"] == "inbox":
+            from src.services.applications.inbox import search_plan  # noqa: PLC0415 - profile <-> spine cycle
+
+            item["search"] = await search_plan(db, user.id)
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 
@@ -176,7 +194,22 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
 
     rows = await queue_preflight.fillable_rows(db, user.id)
     if not rows:
-        return
+        # 2026-11-01 (31 Oct runs): every run asked one question, then stopped while 22 queued jobs had no
+        # CV. A missing CV needs no owner input, whatever else the row waits on.
+        cvs = await queue_preflight.cv_rows(db, user.id)
+        if not cvs:
+            return
+        first = cvs[0]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(cvs)} queued jobs still have no CV; next: application {first['id']} "
+                f"({first['company'] or 'unknown company'}). Keep working: write its tailored CV and save it "
+                "with save_artifact kind cv. An open question, a site block or the user's own browser does not "
+                "stop CV writing; questions to the user are not a reason to stop. "
+                f"Ids: {', '.join(str(r['id']) for r in cvs[:5])}."
+            ),
+        )
     first = rows[0]
     raise HTTPException(
         status_code=409,

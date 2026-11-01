@@ -96,18 +96,19 @@ export function assistantNames(events: readonly { recorded_by: string; process?:
 /** One run of the sentence. `em` marks the single highlighted phrase. */
 export type SentencePart = { text: string; em?: boolean };
 
-const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+/** The jobs waiting on each actor, from the one server count (GET /api/needs-you-count `by_actor`). */
+export type Waits = { you: number; your_pc: number; assistant: number };
 
-function capitalise(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** "One thing needs you." / "Two things need you." — up to ten in words, then digits. */
-export function needsYouSentence(k: number): string {
-  if (k <= 0) return "";
-  if (k === 1) return "One thing needs you.";
-  const word = k <= 10 ? WORDS[k] : String(k);
-  return `${capitalise(word)} things need you.`;
+/**
+ * "3 jobs wait on you · 2 on your PC · 1 on your assistant" (zero parts left out), or "Nothing waits on
+ * you" when no job waits on the user. The same server count the nav badge and the Needs-you chips read.
+ */
+export function waitsSentence(w: Waits): string {
+  if (w.you <= 0) return "Nothing waits on you";
+  const parts = [`${w.you} ${w.you === 1 ? "job waits" : "jobs wait"} on you`];
+  if (w.your_pc > 0) parts.push(`${w.your_pc} on your PC`);
+  if (w.assistant > 0) parts.push(`${w.assistant} on your assistant`);
+  return parts.join(" · ");
 }
 
 /** "Claude" / "Claude and Codex" / "Claude, Codex and Grok" — every name, as recorded. */
@@ -121,12 +122,12 @@ export function joinNames(names: readonly string[]): string {
  *
  * `events` are the events since the last visit; only those NOT written by the
  * user in the browser count. `truncated` means there were more than we paged
- * through, so the count shows as "N+". `openAsks` is how many questions wait.
+ * through, so the count shows as "N+". `waits` is the server's jobs-by-actor count (null = unknown).
  */
 export function buildSentence(args: {
   events: readonly { recorded_by: string; process?: boolean }[];
   truncated: boolean;
-  openAsks: number;
+  waits: Waits | null;
 }): SentencePart[] {
   const mine = assistantEvents(args.events);
   const n = mine.length;
@@ -147,8 +148,7 @@ export function buildSentence(args: {
     parts.push({ text: " since you were last here." });
   }
 
-  const asks = needsYouSentence(args.openAsks);
-  if (asks) parts.push({ text: ` ${asks}` });
+  if (args.waits) parts.push({ text: ` ${waitsSentence(args.waits)}` });
   return parts;
 }
 

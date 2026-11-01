@@ -160,6 +160,36 @@ def _request_db() -> AbstractAsyncContextManager[JobDatabase]:
     return contextlib.asynccontextmanager(get_request_db)()
 
 
+# 2026-11-01: a full queued list was 215,129 characters for 91 rows (blockers alone 46,783); the apply runs
+# named the size as a reason to stop. `compact=true` keeps what a run branches on, about 400 characters a row.
+_COMPACT_KEYS = ("id", "job_title", "job_company", "job_url", "country", "status", "fit_score", "line_side",
+                 "queue_position")
+_COMPACT_PREFLIGHT = ("has_cv", "blocked_count", "waiting_on_owner", "duplicate_flag", "avoided", "kit_missing")
+
+
+def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
+    """One list row cut to what a run branches on. Read-only projection of the route's row."""
+    out: dict[str, Any] = {k: row[k] for k in _COMPACT_KEYS if k in row}
+    step = row.get("next_step") or {}
+    out["next_step"] = step.get("code") if isinstance(step, dict) else step
+    nxt = row.get("next")
+    if isinstance(nxt, dict):
+        out["next"] = {k: nxt.get(k) for k in ("kind", "actor", "label")}
+    blockers = row.get("blockers")
+    if isinstance(blockers, list):
+        out["waiting_on"] = [f"{b.get('kind')}:{b.get('actor')}" for b in blockers if isinstance(b, dict)]
+    browser = row.get("browser")
+    if isinstance(browser, dict):
+        out["browser"] = browser.get("kind")
+    pre = row.get("preflight")
+    if isinstance(pre, dict):
+        out["preflight"] = {k: pre[k] for k in _COMPACT_PREFLIGHT if k in pre}
+        out["preflight"]["hold"] = bool(pre.get("hold"))
+    if row.get("hold"):
+        out["hold"] = True
+    return out
+
+
 def _tool_error(exc: HTTPException) -> Exception:
     """Route HTTPException → tool error the agent can read: ``"404: Job not found"``."""
     from mcp.server.mcpserver.exceptions import ToolError
@@ -1323,7 +1353,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def list_applications(
         status: Optional[str] = None,
         updated_since: Optional[str] = None,
-        limit: int = 20,
+        limit: Optional[int] = None,
         offset: int = 0,
         due: bool = False,
         quiet_days: Optional[int] = None,
@@ -1331,6 +1361,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         queued: bool = False,
         priority: Optional[str] = None,
         agenda: Optional[str] = None,
+        compact: bool = False,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1348,11 +1379,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `from:` (mail that never names the company), `inbox_checked_at` = read
         only mail after it (null = since the application was added). `in_flight=true` —
         only applications another session holds now; rows carry `hold` and `stage`.
-        `queued=true` - the batch queue in order (`queue_position`); work it top-down.
+        `queued=true` - the whole batch queue (up to 200; `limit` pages) in work order; work it top-down.
         Rows carry `preflight`; the reply a
         `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
         in places with that level of the user's own job priority; rows carry `priority`.
-        `agenda` (today|tomorrow|week, in the user's timezone) - only applications with an interview or follow-up."""
+        `agenda` (today|tomorrow|week, in the user's timezone) - only applications with an interview or follow-up.
+        `compact=true` - short rows (id, title, company, url, next_step, next, waiting_on, browser, preflight);
+        use it to walk the queue, then get_application_kit for one job."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
@@ -1364,6 +1397,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             _audit("list_applications", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit("list_applications", "ok", count=len(resp.get("applications", [])))
+        if compact:
+            resp = {**resp, "applications": [_compact_row(r) for r in resp.get("applications", [])]}
         return {**resp, "assistant_hint": ASSISTANT_HINT}
 
     @mcp.tool()
@@ -1390,8 +1425,11 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def whats_due(duties: Optional[list[str]] = None) -> dict[str, Any]:
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
-        names it). `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
-        (reach also lists `application_ids`: find people for those only);
+        names it). `due` lists {duty: hunt|inbox|reach|network|batch, recipe, reason} in run order
+        (reach also lists `application_ids`: find people for those only; network lists `max_people`);
+        inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
+        build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
+        those application_ids (at most 200 per call);
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
@@ -1414,7 +1452,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def mark_done(
         duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done", reason: str = "",
     ) -> dict[str, Any]:
-        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach (reach also
+        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
         takes `application_ids`, the ones you worked). `outcome` = done | partial | failed; `reason`
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
         network_blocked | rate_limited | needs_user | error. A failed duty waits 2h, 4h, 8h... (at most
@@ -1848,7 +1886,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         record_event.
 
         `unmatched`: mail you read but could not tie to ONE application, each {message_id,
-        thread_id?, sender, subject, received_at, kind?, dismissed?}. Stored once per message id as a
+        thread_id?, sender, subject, received_at, dismissed?}; no `kind` (it is the source, email by
+        default, never rejection/interview: that is not known until matched). Stored once per message id as a
         Needs-you item; the user picks its application or dismisses it on Job360. Never ask_user
         about it. `dismissed: true` only when the user told you it is about no job. A message id
         already recorded on an event is not stored (`already_recorded`).
@@ -2504,8 +2543,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     @mcp.tool()
     async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:
         """The APPLICATION KIT - call before you fill ANY application form.
-        Pass `session`: a short label you pick once per conversation (letters, digits,
-        space . _ : -, max 60) and reuse, also in check_submit.
+        Pass `session`: one short label per conversation (letters, digits,
+        space . _ : -, max 60), reused in check_submit; none = no hold.
         It holds, for THIS job: the CV and cover letter (`text` up to 8000
         chars, `text_truncated` + `text_more` fetch the rest; `include_text=false`
         sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link,

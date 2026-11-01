@@ -333,3 +333,23 @@ def test_recipes_teach_unmatched_mail():
     assert len(daily.splitlines()) == 69  # 70 file lines less the unserved doc comment
     rules = load_recipe("rules").text
     assert "UNMATCHED MAIL" in rules and "dismissed" in rules
+
+
+@pytest.mark.asyncio
+async def test_unmatched_with_an_event_type_as_kind_says_how_to_fix_it(authenticated_async_context):
+    """2026-10-30/31: every scheduled Gmail check sent unmatched items with kind "rejection" and got a bare
+    422, then guessed "email". The refusal names the fix, and the tool and recipe say to omit `kind`."""
+    async with authenticated_async_context() as client:
+        r = (await _ok(client, unmatched=[_mail("u-k", kind="rejection")]))["unmatched"][0]
+        assert r["ok"] is False and "kind must be one of" in r["error"]
+        assert "omit it for an email" in r["error"]
+        ok = (await _ok(client, unmatched=[_mail("u-k")]))["unmatched"][0]
+        assert ok["ok"] is True and isinstance(ok["inbox_item_id"], int)
+    from src.api.routes.recipes import load_recipe
+
+    assert "no `kind`" in load_recipe("daily").text
+    import inspect
+
+    from src.api import mcp_server
+
+    assert "no `kind`" in inspect.getsource(mcp_server)

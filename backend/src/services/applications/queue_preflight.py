@@ -144,6 +144,33 @@ async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     return [{"id": i, "company": names.get(i, "")} for i in todo]
 
 
+async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+    """Queued rows still missing their tailored CV (owner 2026-11-01), oldest queued first. Writing a CV needs
+    neither the owner nor a browser, so an open ask, a site block or the owner's own browser does not excuse
+    it; only another session's live hold and a closed posting do. Scoped by ``user_id``; read-only.
+    ``[{"id", "company"}]``."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    open_ids = await schedule._open_queue_ids(db, user_id)
+    if not open_ids:
+        return []
+    queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
+    ids = sorted(open_ids, key=lambda i: (str(queued_at.get(i) or ""), i))
+    skip = await _with_kind(db, user_id, ids, "cv")
+    skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
+    blocks = await blocked_service.open_blocks(db, user_id, ids)
+    skip |= {i for i, p in blocks.items() if p.get("reason") == "posting_closed"}
+    todo = [i for i in ids if i not in skip]
+    if not todo:
+        return []
+    cur = await db._db.execute(
+        f"SELECT id, job_company FROM applications WHERE user_id = ? AND id IN ({_marks(todo)})",  # noqa: S608
+        [user_id, *todo],
+    )
+    names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
+    return [{"id": i, "company": names.get(i, "")} for i in todo]
+
+
 def _days_since(iso: Optional[str], now: datetime) -> Optional[int]:
     if not iso:
         return None
@@ -260,18 +287,19 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     )
     urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    out: dict[int, dict[str, str]] = {}
-    for app_id in ids:
-        p = blocks.get(app_id, {})
-        reason = str(p.get("reason") or "")
-        by_browser = p.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
-        route = routing.browser_for(
-            url=urls.get(app_id, ""), queue_kind="application",
-            job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
-            page_stop="otp_needed" if reason == "otp_needed" else "",
-        )
-        out[app_id] = routing.label(route)
-    return out
+    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {})) for app_id in ids}
+
+
+def route_label(url: str, block: dict[str, Any]) -> dict[str, str]:
+    """The browser (``routing.label``) that runs one queued application: its apply link plus its open block's
+    payload (``{}`` = none). Pure; ``queue_browsers`` and ``blockers`` share it."""
+    reason = str(block.get("reason") or "")
+    by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
+    return routing.label(routing.browser_for(
+        url=url, queue_kind="application",
+        job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
+        page_stop="otp_needed" if reason == "otp_needed" else "",
+    ))
 
 
 async def queue_summary(

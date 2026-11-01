@@ -168,8 +168,14 @@ async def changes(
 
 class NeedsYouCountOut(BaseModel):
     n: int  # the Needs-you page's total: jobs + other
-    jobs: int  # distinct jobs with anything open (an ask, a ready card, a CV to approve, a person to reach)
+    jobs: int  # jobs whose first blocker is the user (= jobs_waiting_on_you)
     other: int  # asks with no job, waiting setting requests, outcome suggestions, unmatched mail, new connections
+    jobs_waiting_on_you: int = 0  # = by_actor["you"]
+    by_actor: dict[str, int] = {}  # open jobs once each, by first blocker's actor
+    by_kind: dict[str, int] = {}  # the same jobs, by the kind of that first blocker
+    other_ask_ids: list[int] = []  # open asks tied to a job that is not a row (e.g. proof missing): shown in Other
+    job_ids: list[int] = []  # the jobs waiting on the user, oldest first blocker first (the page's rows)
+    job_ids_by_kind: dict[str, list[int]] = {}  # the same ids grouped by their first blocker's kind
 
 
 @router.get("/needs-you-count", response_model=NeedsYouCountOut, dependencies=AUTH_FIRST)

@@ -20,6 +20,9 @@ Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
   An application whose only people are still an invite pending on LinkedIn is not listed. One whose
   fit score is BELOW the user's own line (``assistant_settings.apply_min_score``, ``line_side``) is not
   listed either; no score or no line stays in (rule 29: an empty shelf is silent).
+* ``network`` (recipe ``reach``, owner 2026-10-31: build the user's network) - also only while
+  ``people_hunt`` is on, once every ``NETWORK_EVERY_HOURS`` (never done = due); lists ``max_people``
+  (``NETWORK_MAX_PER_RUN``): new people who fit the user's profile, stored as cold contacts.
 * ``batch`` (recipe ``batch``) - the queue holds open applications AND the assistant may apply
   on its own (``submit_mode`` ``auto_when_sure`` or a live auto grant) AND not paused AND the
   daily and weekly limits have room AND now is inside ``apply_hours``. No interval: it is due
@@ -83,7 +86,9 @@ REASON_WORDS: dict[str, tuple[str, str]] = {
               "Open your assistant's last run to see what happened, then press Run now."),
     "no_work": ("it had nothing to do", "Nothing to do."),
 }
-DUTY_WORDS: dict[str, str] = {"hunt": "Hunt", "inbox": "Gmail check", "reach": "People hunt", "batch": "Apply"}
+DUTY_WORDS: dict[str, str] = {
+    "hunt": "Hunt", "inbox": "Gmail check", "reach": "People hunt", "batch": "Apply", "network": "Network",
+}
 
 
 def backoff_hours(failures: int) -> int:
@@ -117,6 +122,9 @@ class DueFacts:
     reach_ids: list[int] = field(default_factory=list)
     # Queued jobs that wait on the user (an open ask, an open block, a CV not seen yet; owner 2026-10-25).
     waiting_on_you: int = 0
+    # Queued jobs still missing their tailored CV (owner 2026-11-01): writing one needs nobody, so they keep
+    # the batch due even when every queued job also waits on the user.
+    cv_missing: int = 0
     # Failed runs in a row per duty (0 or missing = the last run was done or partial).
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
@@ -141,7 +149,9 @@ def batch_hold(f: DueFacts) -> Optional[str]:
         return "not_allowed"
     if f.queued <= 0:
         return "queue_empty"
-    if f.waiting_on_you >= f.queued:  # every queued job waits on the user: a run could do nothing
+    # Every queued job waits on the user and every one has its CV: a run could do nothing (2026-11-01: a
+    # missing CV is work a run can do, so a row without one keeps the batch due).
+    if f.waiting_on_you >= f.queued and f.cv_missing <= 0:
         return "waiting_on_you"
     if f.daily_left is not None and f.daily_left <= 0:
         return "daily_cap_reached"
@@ -209,6 +219,19 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     elif f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
+    if f.people_hunt:  # the network hunt: once a day while the people hunt is on
+        last = f.stamps.get("network")
+        failed = f.failures.get("network", 0)
+        every = backoff_hours(failed) if failed > 0 else settings.NETWORK_EVERY_HOURS
+        nxt = now if last is None else last + timedelta(hours=every)
+        next_due["network"] = _iso(nxt)
+        item = {"duty": "network", "recipe": settings.SCHEDULE_DUTY_RECIPES["network"],
+                "max_people": settings.NETWORK_MAX_PER_RUN}
+        if is_forced("network"):
+            forced_due.add("network")
+            due.append({**item, "reason": "run_now"})
+        elif nxt - DUE_GRACE <= now:
+            due.append({**item, "reason": "never_done" if last is None else "interval_elapsed"})
     hold = batch_hold(f)
     if is_forced("batch") and hold in (None, "waiting_on_you", "outside_hours"):
         forced_due.add("batch")
@@ -339,7 +362,7 @@ async def mark(
 
 
 async def load_runs(db: JobDatabase, user_id: str) -> dict[str, dict[str, Any]]:
-    """``{duty: {outcome, reason, failures, done_at}}`` for the user's four duties (rule #12)."""
+    """``{duty: {outcome, reason, failures, done_at}}`` for the user's duties (rule #12)."""
     marks = ",".join("?" for _ in settings.SCHEDULE_DUTIES)
     cur = await db._db.execute(
         "SELECT duty, done_at, outcome, reason, failures FROM assistant_duty_runs "  # noqa: S608 - placeholders only
@@ -374,11 +397,11 @@ def status(f: DueFacts, answer: dict[str, Any], runs: dict[str, dict[str, Any]])
     """One row per duty for the Home status card (owner 2026-10-25), from the same facts and answer
     ``whats_due`` uses. ``state`` is the first that applies: off, running, due, failing, held, waiting."""
     on = {"hunt": f.hunt_every_hours is not None, "inbox": inbox_every_hours(f.inbox_mode, f.check_every) is not None,
-          "reach": f.people_hunt, "batch": f.apply_on_own}
+          "reach": f.people_hunt, "batch": f.apply_on_own, "network": f.people_hunt}
     holds = {"hunt": answer.get("hunt_hold"), "batch": answer.get("batch_hold")}
     due = {d["duty"] for d in answer["due"]}
     out: list[dict[str, Any]] = []
-    for duty in ("hunt", "inbox", "reach", "batch"):
+    for duty in ("hunt", "inbox", "reach", "network", "batch"):
         row = runs.get(duty) or {}
         failures = int(row.get("failures") or 0)
         hold = holds.get(duty) if on[duty] else None
@@ -436,6 +459,13 @@ async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
         if await blocked.open_block(db, user_id, app_id) is not None:
             waiting.add(app_id)
     return len(waiting)
+
+
+async def _cv_missing(db: JobDatabase, user_id: str) -> int:
+    """How many queued jobs still have no tailored CV: the same rows mark_done's 409 names (owner 2026-11-01)."""
+    from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
+
+    return len(await queue_preflight.cv_rows(db, user_id))
 
 
 async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
@@ -521,6 +551,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         apply_on_own=apply_on_own,
         queued=len(queue_ids),
         waiting_on_you=await _waiting_on_you(db, user_id, queue_ids) if apply_on_own else 0,
+        cv_missing=await _cv_missing(db, user_id) if apply_on_own and queue_ids else 0,
         daily_left=rules.daily_left(cfg, counts),
         weekly_left=weekly_left,
         inside_hours=inside,

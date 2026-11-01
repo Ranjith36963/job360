@@ -140,6 +140,15 @@ describe("JobCards", () => {
     expect(screen.getByTestId("job-header-1")).not.toHaveTextContent(/things? wait/);
   });
 
+  it("a loaded row says the first blocker and how many more", async () => {
+    getApplication.mockImplementation(async (id: number) => ({
+      ...detail(id, [ask(1, id, { kind: "captcha" } as Partial<Ask>)]),
+      next: { kind: "captcha", actor: "you", label: "solve the CAPTCHA", since: "2026-10-20T10:00:00Z" }, more: 2,
+    }));
+    render(<JobCards open={[ask(1, 1, { kind: "captcha" } as Partial<Ask>)]} onChanged={async () => {}} />);
+    expect(await screen.findByTestId("job-what-1")).toHaveTextContent("You: solve the CAPTCHA +2 more");
+  });
+
   it("a collapsed header title links to the application", () => {
     getApplication.mockImplementation(() => new Promise(() => {}));
     render(<JobCards open={[ask(1, 1, { kind: "captcha" } as Partial<Ask>)]} onChanged={async () => {}} />);
@@ -245,12 +254,31 @@ describe("one card per job (owner 2026-10-26)", () => {
     getReadyToSend.mockResolvedValue(readyList([readyCard(20, { answers: [readyAnswer()] })]));
     getCvToApprove.mockResolvedValue({ items: [cvRow(40, "2026-10-21T09:00:00+00:00")] });
     const asks = [ask(1, 10), ask(2, 30)];
-    const { rerender } = render(<JobCards open={asks} onChanged={async () => {}} show="checks" />);
+    const { rerender } = render(<JobCards open={asks} onChanged={async () => {}} show="approve_cv" jobIds={[10, 30, 20, 40]} idsByKind={{ approve_cv: [40], answers: [10, 30], send_yes: [20] }} />);
     await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-40"]));
-    rerender(<JobCards open={asks} onChanged={async () => {}} sort="oldest" />);
+    rerender(<JobCards open={asks} onChanged={async () => {}} sort="oldest" jobIds={[10, 30, 20, 40]} idsByKind={{ approve_cv: [40], answers: [10, 30], send_yes: [20] }} />);
     await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(4));
     // Asks at 10:01 and 10:02, the fill on 10-08, the CV on 10-21.
     expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual(["card-20", "card-10", "card-30", "card-40"]);
+  });
+});
+
+describe("rows are the server's job ids", () => {
+  it("shows exactly the counted jobs: no row for an ask the server did not count, a bare row for a job with no ask", async () => {
+    // Server counted 1, 2 and 9 (a site step: no ask); the ask on job 3 is not a counted job.
+    render(<JobCards open={[ask(1, 1), ask(2, 2), ask(3, 3)]} onChanged={async () => {}} jobIds={[1, 2, 9]} idsByKind={{ answers: [1, 2], site_step: [9] }} />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid).sort()).toEqual(["card-1", "card-2", "card-9"]));
+    expect(screen.getAllByTestId(/^job-row-\d+$/)).toHaveLength(3);
+  });
+});
+
+describe("a counted job whose record fails to load", () => {
+  it("keeps its row with a link, so the count and the rows still agree", async () => {
+    getApplication.mockReset().mockRejectedValue(new Error("down"));
+    render(<JobCards open={[]} onChanged={async () => {}} jobIds={[7]} idsByKind={{ site_step: [7] }} />);
+    expect(await screen.findByTestId("job-row-7")).toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId("job-row-7-toggle"));
+    expect(await screen.findByTestId("job-failed-7")).toHaveTextContent("Could not load this job");
   });
 });
 

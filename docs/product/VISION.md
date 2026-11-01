@@ -54,7 +54,7 @@ full job-seeking help, because every part that matters lives in Job360:
 | Memory | Profile, answers, every document version, events, receipts |
 | Duty board | `whats_due` / `mark_done`: what is due now, what is done |
 | Ignition | Job360 starts the assistant the moment the seeker acts or a step finishes (a vendor start link where one exists; the vendor's own timer everywhere) |
-| Engines on a clock | Hunt, people hunt, apply, Gmail check: scheduled runs with the seeker's computer off |
+| Engines on a clock | Scheduled runs with the seeker's computer off; the duties are `core/settings.SCHEDULE_DUTIES` |
 | Dashboards | **Needs you** for attention and Run now triggers, the **Progress dashboard** for now and recent, **Statistics** for results over time, **Connect your assistant** for every permission and setting. See "Every page has one purpose". |
 
 The harness never becomes the brain: no LLM of its own (decision 28), never

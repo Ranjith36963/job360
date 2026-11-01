@@ -18,7 +18,7 @@ async def _status(client: AsyncClient) -> dict[str, dict[str, Any]]:
     resp = await client.get("/api/schedule/status")
     assert resp.status_code == 200, resp.text
     rows = resp.json()["duties"]
-    assert [r["duty"] for r in rows] == ["hunt", "inbox", "reach", "batch"]
+    assert [r["duty"] for r in rows] == ["hunt", "inbox", "reach", "network", "batch"]
     return {r["duty"]: r for r in rows}
 
 

@@ -127,6 +127,59 @@ async def cv_to_approve(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     return out
 
 
+async def newest_cv_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """``{application_id: {artifact_id, created_at, sha}}`` of each application's newest CV (a hidden one never
+    counts, as in ``cv_to_approve``), in one query for all of ``app_ids``. Scoped by ``user_id``."""
+    if not app_ids:
+        return {}
+    hidden = sorted(await hiding.hidden_artifact_ids(db, user_id))
+    skip = f"AND v.id NOT IN ({','.join('?' for _ in hidden)})" if hidden else ""
+    ids = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT c.application_id, c.id AS artifact_id, c.text, c.created_at FROM application_artifacts c "  # noqa: S608
+        "WHERE c.user_id = ? AND c.kind = 'cv' "
+        f"AND c.application_id IN ({ids}) "
+        "AND c.version_no = (SELECT MAX(v.version_no) FROM application_artifacts v WHERE v.application_id = "
+        f"c.application_id AND v.user_id = c.user_id AND v.kind = 'cv' {skip})",
+        (user_id, *app_ids, *hidden),
+    )
+    return {
+        int(r["application_id"]): {
+            "artifact_id": r["artifact_id"], "created_at": r["created_at"], "sha": kit.sha256_text(r["text"]),
+        }
+        for r in await cur.fetchall()
+    }
+
+
+async def answer_flags_for(
+    user_id: str, fills: dict[int, dict[str, Any]]
+) -> dict[int, list[dict[str, Any]]]:
+    """The card's flags (:func:`_answer_rows`, the SAME reading as the card) for many fills at once, one profile
+    load for all. ``fills``: ``{application_id: {job_country, job_company, filled_at, answers}}``."""
+    import asyncio  # noqa: PLC0415
+
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    if not fills:
+        return {}
+    loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    out: dict[int, list[dict[str, Any]]] = {}
+    for app_id, f in fills.items():
+        country = (str(f.get("job_country") or "").strip().upper()) or None
+        blocks, _missing = kit.compute_answers(profile, overlay, country)
+        have = {i["key"]: i for block in blocks.values() for i in block}
+        typed = [
+            a for a in f["answers"]
+            if isinstance(a, dict) and "question" in a and ("answer" in a or a.get("redacted"))
+        ]
+        company = _company_key(str(f.get("job_company") or ""))
+        out[app_id] = _answer_rows(typed, have, saved, profile, company, f["filled_at"])[1]
+    return out
+
+
 async def newest_fill_id(db: JobDatabase, user_id: str, application_id: int) -> Optional[int]:
     """The id of the caller's newest ``form_filled`` event on one application
     (None when there is none). "Send" checks it so a yes names the fill the user saw."""

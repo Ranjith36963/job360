@@ -1,14 +1,14 @@
 // The Needs-you page's items, in one place (owner plan §2.4-§2.6): the jobs it lists (one per
-// application), the sort, the filter chips and ONE count. The page and the chips count through
-// `countNeedsYou`, so "N things need you", the All chip and the chips' sum agree; the nav badge reads the
-// server's count of the same rules (GET /api/needs-you-count, backend services/applications/needs_you_count.py).
+// application), the sort, the filter chips and ONE count: the server's (GET /api/needs-you-count, backend
+// services/applications/needs_you_count.py), read by the page, the chips, the nav badge and the dashboard.
 // Pure except `listAllOpenAsks`. Every string here was written by an assistant: never rendered here.
 
 import { listAsks } from "@/lib/api";
+import type { NeedsYouCount as NeedsYouCountOut } from "@/lib/api";
 import type { Ask, CvToApproveRow, ReadyCardData } from "@/lib/api";
 import { groupAsks } from "@/lib/job-cards";
-import { jobTier, newestAt, sortByUrgency } from "@/lib/needs-you-rank";
-import type { JobRankInput, JobTier } from "@/lib/needs-you-rank";
+import { newestAt, sortByUrgency } from "@/lib/needs-you-rank";
+import type { JobRankInput } from "@/lib/needs-you-rank";
 
 const ASKS_PAGE = 50; // the server's page size for GET /api/asks
 const MAX_ASK_PAGES = 10;
@@ -96,65 +96,50 @@ export function sortJobs<T extends JobRankInput>(jobs: T[], key: SortKey): T[] {
 
 // ---- Filter chips ----
 
-export type Chip = "all" | "ready" | "waiting" | "checks" | "other";
-export const CHIPS: { key: Chip; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "ready", label: "Ready" },
-  { key: "waiting", label: "Waiting on you" },
-  { key: "checks", label: "Checks" },
-  { key: "other", label: "Other" },
+/** "all", "other", or the kind of a job's first blocker (the server's `job_ids_by_kind`). */
+export type Chip = string;
+/** The chip for each kind of blocker that waits on the user, in the order they show. */
+export const KIND_CHIPS: { key: string; label: string }[] = [
+  { key: "posting_closed", label: "Posting closed" },
+  { key: "site_step", label: "On the site" },
+  { key: "approve_cv", label: "Approve CV" },
+  { key: "answers", label: "Answers" },
+  { key: "send_yes", label: "Send" },
+  { key: "apply_by_hand", label: "Apply" },
+  { key: "outreach_send", label: "Notes" },
 ];
-export const isChip = (v: unknown): v is Chip => CHIPS.some((c) => c.key === v);
-
-/** The one chip a job sits in: Ready = tier 2; Waiting on you = tiers 1 and 3 (a form open now needs
- *  you too); Checks = tier 4 and a job whose only item left is a person (tier 5). */
-export function chipOfTier(tier: JobTier): "ready" | "waiting" | "checks" {
-  if (tier === 2) return "ready";
-  return tier === 1 || tier === 3 ? "waiting" : "checks";
-}
-export const jobChip = (j: JobRankInput) => chipOfTier(jobTier(j));
+export const chipLabel = (key: Chip): string =>
+  key === "all" ? "All" : key === "other" ? "Other" : (KIND_CHIPS.find((c) => c.key === key)?.label ?? key);
 
 // ---- One count ----
 
-export type NeedsYouInputs = {
-  /** Every open ask (all pages). The server already left a test job's asks out. */
-  open: Ask[];
-  /** The ready cards, or only their total when the cards were not read. The badge no longer counts here
-   *  (it reads GET /api/needs-you-count, which applies these same rules on the server). */
-  ready: ReadyCardData[] | number;
-  /** The ready total when `ready` holds the cards: cards past the page still count, as Ready. */
-  readyTotal?: number;
-  cvRows?: CvToApproveRow[];
-  people?: PersonJob[];
-  /** People with no job and an unsent note (New connections). */
-  connections?: number;
-  /** Setting changes waiting for an OK, outcome suggestions, unmatched mail. */
-  waiting: number;
-  outcomes?: number;
-  mail?: number;
-  /** Jobs the list dropped (their card loaded with nothing open, or failed with nothing ready). */
-  dropped?: number[];
-  /** Asks of jobs whose record failed to load: the page shows them in Other. */
-  failedAsks?: number;
+export type NeedsYouCount = {
+  n: number;
+  jobs: number;
+  other: number;
+  byChip: Record<Chip, number>;
+  /** The chips to show, in order: All, then each kind that waits on the user, then Other. */
+  chips: Chip[];
+  /** The jobs that wait on the user (the page's rows), and the same ids by first-blocker kind. */
+  jobIds: number[];
+  idsByKind: Record<string, number[]>;
+  /** Open asks tied to a job that is not a row (e.g. proof missing on a closed job): listed in Other. */
+  otherAskIds: number[];
 };
 
-export type NeedsYouCount = { n: number; jobs: number; other: number; byChip: Record<Chip, number> };
-
-/** N = jobs (one per application, each in exactly one chip) + Other items. All = N = the chips' sum. */
-export function countNeedsYou(i: NeedsYouInputs): NeedsYouCount {
-  const cards = typeof i.ready === "number" ? [] : i.ready;
-  const dropped = new Set(i.dropped ?? []);
-  const byChip: Record<Chip, number> = { all: 0, ready: 0, waiting: 0, checks: 0, other: 0 };
-  for (const h of jobHeaders(i.open, cards, i.cvRows ?? [], i.people ?? []))
-    if (!dropped.has(h.id)) byChip[jobChip(h)]++;
-  // Ready jobs the cards did not carry (a counts-only read, or past the page); a counts-only read cannot
-  // see which of them also have an open ask, so only a caller that holds the cards counts exactly.
-  byChip.ready += typeof i.ready === "number" ? i.ready : Math.max(0, (i.readyTotal ?? cards.length) - cards.length);
-  const jobs = byChip.ready + byChip.waiting + byChip.checks;
-  byChip.other = groupAsks(i.open).general.length + (i.failedAsks ?? 0) + i.waiting + (i.outcomes ?? 0) + (i.mail ?? 0) + (i.connections ?? 0);
-  byChip.all = jobs + byChip.other;
-  return { n: byChip.all, jobs, other: byChip.other, byChip };
+/** The page's count IS the server's (GET /api/needs-you-count): N = jobs waiting on you + Other, All = N = the
+ *  chips' sum, and the rows are exactly `job_ids`. The nav badge and the dashboard headline read the same
+ *  response; nothing is counted or derived here. */
+export function fromServerCount(c: NeedsYouCountOut): NeedsYouCount {
+  const idsByKind = c.job_ids_by_kind ?? {};
+  const kinds = KIND_CHIPS.map((k) => k.key).filter((k) => (idsByKind[k]?.length ?? 0) > 0);
+  const byChip: Record<Chip, number> = { all: c.n, other: c.other };
+  for (const k of kinds) byChip[k] = idsByKind[k].length;
+  return { n: c.n, jobs: c.jobs, other: c.other, byChip, chips: ["all", ...kinds, ...(c.other > 0 ? ["other"] : [])], jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [] };
 }
+export const EMPTY_COUNT: NeedsYouCount = fromServerCount({
+  n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, other_ask_ids: [],
+});
 
 /** "57 things need you" (owner plan §2.6). */
 export function summaryLine(n: number): string {

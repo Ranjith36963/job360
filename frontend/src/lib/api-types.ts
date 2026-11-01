@@ -4070,6 +4070,11 @@ export interface components {
             artifacts: components["schemas"]["ApplicationArtifactOut"][];
             /** Asks */
             asks: components["schemas"]["AskOut"][];
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: components["schemas"]["BlockerOut"][];
             /** Contacts */
             contacts: components["schemas"]["ContactOut"][];
             /** Created At */
@@ -4106,6 +4111,12 @@ export interface components {
             known_people?: components["schemas"]["KnownPeopleOut"];
             /** Last Event At */
             last_event_at: string | null;
+            /**
+             * More
+             * @default 0
+             */
+            more: number;
+            next?: components["schemas"]["BlockerOut"] | null;
             next_step: components["schemas"]["NextStepOut"];
             proof: components["schemas"]["ProofOut"];
             /** Receipts */
@@ -4401,6 +4412,11 @@ export interface components {
             artifacts: {
                 [key: string]: number;
             };
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: components["schemas"]["BlockerOut"][];
             browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Country */
             country?: string | null;
@@ -4462,8 +4478,14 @@ export interface components {
              * @enum {string}
              */
             line_side: "above" | "below" | "unknown";
+            /**
+             * More
+             * @default 0
+             */
+            more: number;
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
+            next?: components["schemas"]["BlockerOut"] | null;
             next_step: components["schemas"]["NextStepOut"];
             /**
              * Origin
@@ -4861,6 +4883,28 @@ export interface components {
              * @default
              */
             confirmation: string;
+        };
+        /**
+         * BlockerOut
+         * @description One thing an application waits on: who (`actor`), what (`label`, plain English), since when, and the
+         *     row it is about (`ref`: ask_id / event_id / artifact_id / contact_ids).
+         */
+        BlockerOut: {
+            /**
+             * Actor
+             * @enum {string}
+             */
+            actor: "you" | "your_pc" | "assistant" | "job360" | "employer";
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Ref */
+            ref?: {
+                [key: string]: unknown;
+            } | null;
+            /** Since */
+            since: string;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -5978,7 +6022,9 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
+            /** Max People */
+            max_people?: number | null;
             /**
              * Reason
              * @enum {string}
@@ -5989,6 +6035,7 @@ export interface components {
              * @enum {string}
              */
             recipe: "hunt" | "daily" | "batch" | "reach";
+            search?: components["schemas"]["InboxSearchOut"] | null;
         };
         /** DuplicateOut */
         DuplicateOut: {
@@ -6020,7 +6067,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
              * Failures In Row
              * @default 0
@@ -6664,6 +6711,21 @@ export interface components {
             subject: string;
             /** Thread Id */
             thread_id: string | null;
+        };
+        /** InboxSearchOut */
+        InboxSearchOut: {
+            /** After */
+            after: string;
+            /** Application Ids */
+            application_ids: number[];
+            /** Companies */
+            companies: string[];
+            /** Email Senders */
+            email_senders: string[];
+            /** Gmail After */
+            gmail_after: string;
+            /** Skip Message Ids */
+            skip_message_ids: string[];
         };
         /**
          * InterviewAgenda
@@ -7329,7 +7391,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
              * Outcome
              * @default done
@@ -7347,7 +7409,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
              * Failures In Row
              * @default 0
@@ -7498,12 +7560,48 @@ export interface components {
         };
         /** NeedsYouCountOut */
         NeedsYouCountOut: {
+            /**
+             * By Actor
+             * @default {}
+             */
+            by_actor: {
+                [key: string]: number;
+            };
+            /**
+             * By Kind
+             * @default {}
+             */
+            by_kind: {
+                [key: string]: number;
+            };
+            /**
+             * Job Ids
+             * @default []
+             */
+            job_ids: number[];
+            /**
+             * Job Ids By Kind
+             * @default {}
+             */
+            job_ids_by_kind: {
+                [key: string]: number[];
+            };
             /** Jobs */
             jobs: number;
+            /**
+             * Jobs Waiting On You
+             * @default 0
+             */
+            jobs_waiting_on_you: number;
             /** N */
             n: number;
             /** Other */
             other: number;
+            /**
+             * Other Ask Ids
+             * @default []
+             */
+            other_ask_ids: number[];
         };
         /**
          * NextStepOut
@@ -9035,7 +9133,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch" | "reach";
+            duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /** Failures In Row */
             failures_in_row: number;
             /** Label */
@@ -10500,7 +10598,7 @@ export interface components {
                 [key: string]: number;
             };
             /** Held By Running */
-            held_by_running?: ("hunt" | "inbox" | "batch" | "reach")[];
+            held_by_running?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Hunt Hold */
             hunt_hold?: "queue_full" | null;
             /** Last Done At */
@@ -10516,7 +10614,7 @@ export interface components {
             /** Nothing Due */
             nothing_due: boolean;
             /** Run Now */
-            run_now?: ("hunt" | "inbox" | "batch" | "reach")[];
+            run_now?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Running */
             running?: {
                 [key: string]: string | null;
@@ -10687,7 +10785,7 @@ export interface operations {
             query?: {
                 status?: string | null;
                 updated_since?: string | null;
-                limit?: number;
+                limit?: number | null;
                 offset?: number;
                 due?: boolean;
                 quiet_days?: number | null;
@@ -16229,7 +16327,7 @@ export interface operations {
     whats_due_api_schedule_due_get: {
         parameters: {
             query?: {
-                duties?: ("hunt" | "inbox" | "batch" | "reach")[] | null;
+                duties?: ("hunt" | "inbox" | "batch" | "reach" | "network")[] | null;
             };
             header?: {
                 authorization?: string | null;

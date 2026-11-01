@@ -13,14 +13,15 @@ export type QueueSummary = {
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-/** "8 queued · 5 ready · 2 need you · 3 left today". "Need you" = questions open plus blocked.
- *  "Left today" is left out when there is no daily limit. */
-export function queueSummaryLine(s: QueueSummary | null | undefined): string {
+/** "8 queued · 5 ready · 2 need you · 3 left today". "Need you" is the ONE server count of jobs waiting on the
+ *  user (`needYou`, GET /api/needs-you-count); until it has answered it falls back to this queue's own
+ *  questions open plus blocked. "Left today" is left out when there is no daily limit. */
+export function queueSummaryLine(s: QueueSummary | null | undefined, needYou?: number | null): string {
   if (!s) return "";
   const parts = [
     `${num(s.queued)} queued`,
     `${num(s.ready_to_send)} ready`,
-    `${num(s.asked) + num(s.blocked)} need you`,
+    `${typeof needYou === "number" ? needYou : num(s.asked) + num(s.blocked)} need you`,
   ];
   if (num(s.outreach) > 0) parts.push(`${num(s.outreach)} outreach`);
   if (typeof s.daily_left === "number") parts.push(`${s.daily_left} left today`);

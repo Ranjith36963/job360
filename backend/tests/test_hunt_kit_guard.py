@@ -122,8 +122,11 @@ def test_guard_field_is_capped() -> None:
     assert all(len(x) <= 200 for x in g["instruction_like"])
 
 
-def test_kit_runs_without_kit_guard(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_kit_runs_without_kit_guard(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     monkeypatch.setitem(sys.modules, "kit_guard", None)  # import raises ImportError
+    monkeypatch.setattr(hk, "_REPO_GUARD", tmp_path / "no_such_ad_guard.py")  # a downloaded kit: no checkout
     text = hk.html_to_text("<p>Build agents.</p><p>Remote.</p>")
     assert text == "Build agents.\nRemote."
     col = _collector()
@@ -131,6 +134,18 @@ def test_kit_runs_without_kit_guard(monkeypatch: pytest.MonkeyPatch, capsys: pyt
     assert len(col.results) == 1
     assert col.results[0]["guard"] == "unavailable"
     assert capsys.readouterr().err.count("kit_guard unavailable") == 1  # one note, not one per ad
+
+
+def test_kit_run_from_the_repo_uses_the_checkouts_ad_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-31 scheduled hunt: run from a job360 checkout with no kit_guard.py next to the kit, it printed
+    "kit_guard unavailable" and checked no ad. The checkout's services/ad_guard.py is the same file."""
+    monkeypatch.setitem(sys.modules, "kit_guard", None)  # no kit_guard.py next to the kit
+    assert hk._REPO_GUARD.is_file()
+    col = _collector()
+    _offer(col, "Build agents.\n" + TAG_SPELLED + "\nRemote.")
+    rec = col.results[0]
+    assert TAG_SPELLED not in rec["description"]
+    assert any("ignore previous instructions" in x for x in rec["guard"]["invisible_text"])
 
 
 def test_a_crashing_guard_never_stops_the_hunt(monkeypatch: pytest.MonkeyPatch) -> None:

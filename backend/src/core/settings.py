@@ -1009,8 +1009,10 @@ ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUE
 # is expected to wake (returned as `expected_every_hours`). Duties are a closed set; `tick` is the
 # stamp of the last scheduled run. Reads and marks are per-user rate limited (a loop cannot hammer).
 SCHEDULE_TICK_HOURS = int(os.getenv("SCHEDULE_TICK_HOURS", "1"))
-SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch", "reach")
-SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch", "reach": "reach"}
+SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch", "reach", "network")
+SCHEDULE_DUTY_RECIPES: dict[str, str] = {
+    "hunt": "hunt", "inbox": "daily", "batch": "batch", "reach": "reach", "network": "reach",
+}
 # Owner 2026-10-24 - the PEOPLE hunt (duty `reach`): open applications (considering/applied) brought or
 # applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
 # first, at most REACH_MAX_PER_RUN per run. Sends stay capped by check_outreach (OUTREACH_COMPANY_MAX).
@@ -1020,9 +1022,16 @@ REACH_WINDOW_DAYS = 14
 # Only a read that names its `duties` takes them (2026-10-25): a read without them only looks.
 DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "30"))
 # Owner 2026-10-25 - back-pressure: the hunt is not due while the batch queue already holds this many
-# open jobs (whats_due `hunt_hold: queue_full`); it is due again as the queue drains.
-HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "25"))
+# open jobs (whats_due `hunt_hold: queue_full`); it is due again as the queue drains. Owner 2026-11-01: 1000
+# (was 25), so the hourly hunt keeps filling the queue from every board instead of stopping at 25.
+HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "1000"))
 REACH_MAX_PER_RUN = 5
+# Owner 2026-10-31 - the NETWORK hunt (duty `network`): while `people_hunt` is on, once every
+# NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
+# (not one job) and stores them as cold contacts. Job360 only says it is due and how many; the assistant
+# finds and judges them (VISION rule 4: Job360 never sources or ranks).
+NETWORK_EVERY_HOURS = 24
+NETWORK_MAX_PER_RUN = 10
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and

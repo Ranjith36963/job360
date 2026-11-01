@@ -42,6 +42,7 @@ def next_step(
     follow_up_due: bool = False,
     form_filled: bool = False,
     submit_approved: bool = False,
+    approval_holds: bool = True,
     now: datetime | None = None,
 ) -> dict[str, str]:
     """``{"code": …, "label": …}`` — ``code`` is a closed vocabulary an agent
@@ -60,7 +61,11 @@ def next_step(
     ``form_filled`` / ``submit_approved`` (owner ask 2026-10-13, "waiting for your yes"): on a
     not-yet-applied application, a recorded form fill that the user has not yet approved reads
     ``confirm_submit``; once approved (and still not applied) it reads ``submit_now``. The caller
-    passes ``False`` when the user declined after the fill (see :func:`kit_flags`)."""
+    passes ``False`` when the user declined after the fill (see :func:`kit_flags`).
+
+    ``approval_holds`` (default True): the yes is still good (not expired, CV/letter/form unchanged,
+    as the submit gate reads it). When ``submit_approved`` but not ``approval_holds``, the step is
+    ``confirm_submit`` again, so the page never says "you said yes" for a yes the gate refuses."""
     if now is None:
         now = datetime.now(timezone.utc)
     if follow_up_due and status not in _CLOSED:
@@ -70,6 +75,8 @@ def next_step(
             return {"code": "judge_fit", "label": "No fit judged yet — ask your assistant to judge it"}
         if cv_versions == 0:
             return {"code": "write_cv", "label": "Fit judged — no CV for this job yet"}
+        if form_filled and submit_approved and not approval_holds:
+            return {"code": "confirm_submit", "label": "Your yes ran out — say yes again"}
         if form_filled and submit_approved:
             return {"code": "submit_now", "label": "You said yes — submit, then it is recorded"}
         if form_filled:
@@ -114,7 +121,7 @@ def kit_flags(events: Iterable[tuple[int, str]]) -> tuple[bool, bool]:
     return True, approved > fill
 
 
-def next_step_for_detail(detail: Mapping[str, Any]) -> dict[str, str]:
+def next_step_for_detail(detail: Mapping[str, Any], *, approval_holds: bool = True) -> dict[str, str]:
     """Derive the inputs from the ``get_application`` shape."""
     events = detail.get("events") or []
     artifacts = detail.get("artifacts") or []
@@ -131,4 +138,5 @@ def next_step_for_detail(detail: Mapping[str, Any]) -> dict[str, str]:
         follow_up_due=bool(detail.get("follow_up_due")),
         form_filled=filled,
         submit_approved=approved,
+        approval_holds=approval_holds,
     )

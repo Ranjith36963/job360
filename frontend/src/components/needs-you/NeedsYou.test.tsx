@@ -10,8 +10,12 @@ const confirmAsk = vi.fn();
 const getAssistantSettings = vi.fn();
 const requestJson = vi.fn();
 
+// The one server count (GET /api/needs-you-count) the summary and chips read; tests that check a number set it.
+const getNeedsYouCount = vi.hoisted(() => vi.fn());
+const ZERO_COUNT = { n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {} };
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
+  getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   withdrawAsk: (...a: unknown[]) => withdrawAsk(...a),
@@ -70,7 +74,15 @@ const base = {
 const evil = "<img src=x onerror=alert(1)>";
 const openAsk = { ...base, id: 1, question: evil, status: "open" };
 
+// What the server would count for these open asks when no job record loads: every ask is an Other item
+// (job-tied ones have no row, so they are listed by `other_ask_ids`).
+function serverFor(open: unknown[]) {
+  const tied = (open as { id: number; application_id: number | null }[]).filter((a) => a.application_id !== null).map((a) => a.id);
+  return { n: open.length, jobs: 0, other: open.length, jobs_waiting_on_you: 0, by_actor: { you: 0 }, by_kind: {}, job_ids: [], job_ids_by_kind: {}, other_ask_ids: tied };
+}
+
 function setup(open: unknown[], answered: unknown[] = []) {
+  getNeedsYouCount.mockResolvedValue(serverFor(open));
   listAsks.mockImplementation(async (s: string) =>
     s === "open"
       ? { asks: open, open_count: open.length }
@@ -90,6 +102,7 @@ async function openOther() {
 }
 
 beforeEach(() => {
+  getNeedsYouCount.mockReset().mockResolvedValue(ZERO_COUNT);
   listAsks.mockReset();
   answerAsk.mockReset().mockResolvedValue({});
   withdrawAsk.mockReset().mockResolvedValue({});
@@ -305,10 +318,11 @@ describe("NeedsYou", () => {
     const on = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("job360:asks-changed", on);
     setup([openAsk]);
-    render(<NeedsYou />);
+        render(<NeedsYou />);
     await openOther();
     await waitFor(() => expect(seen).toEqual([1]));
     setup([]); // the user answered it
+    getNeedsYouCount.mockResolvedValue(ZERO_COUNT);
     fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
     fireEvent.click(screen.getByTestId("ask-save"));
     fireEvent.click(screen.getByTestId("ask-answer-confirm"));
@@ -316,13 +330,14 @@ describe("NeedsYou", () => {
     window.removeEventListener("job360:asks-changed", on);
   });
 
-  it("the badge count includes Ready to send, and never announces without it first", async () => {
+  it("the badge count is the server's, Ready to send included, and nothing is announced before it answers", async () => {
     readyMock.total = 2;
     const seen: number[] = [];
     const on = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("job360:asks-changed", on);
     try {
       setup([openAsk]);
+      getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] } });
       render(<NeedsYou />);
       await waitFor(() => expect(seen).toEqual([3]));
     } finally {
@@ -367,6 +382,7 @@ describe("NeedsYou", () => {
       Array.from({ length: n }, (_, i) => ({ ...openAsk, id: from + i, application_id: null, question: `Q${from + i}` }));
     listAsks.mockImplementation(async (s: string, offset = 0) =>
       s === "open" ? { asks: offset === 0 ? page(0, 50) : page(50, 10), open_count: 60 } : { asks: [], open_count: 60 });
+    getNeedsYouCount.mockResolvedValue({ n: 60, jobs: 0, other: 60, jobs_waiting_on_you: 0, by_actor: { you: 0 }, by_kind: {} });
     render(<NeedsYou />);
     expect(await screen.findByTestId("needs-you-summary")).toHaveTextContent("60 things need you");
     expect(listAsks).toHaveBeenCalledWith("open", 50);
@@ -376,16 +392,18 @@ describe("NeedsYou", () => {
 
   it("a chip shows only its part of the page and lives in the link; chips at 0 are hidden", async () => {
     readyMock.total = 2;
+    getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] } });
     try {
       setup([{ ...openAsk, application_id: null }], [{ ...base, id: 2, question: "Q2", status: "answered", answer: "A2" }]);
+      getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] } });
       render(<NeedsYou />);
       await waitFor(() => expect(screen.getByTestId("needs-you-summary")).toHaveTextContent("3 things need you"));
-      expect(screen.getByTestId("chip-ready")).toHaveTextContent("Ready 2");
-      expect(screen.queryByTestId("chip-waiting")).toBeNull();
-      expect(screen.queryByTestId("chip-checks")).toBeNull();
-      fireEvent.click(screen.getByTestId("chip-ready"));
-      expect(window.location.search).toBe("?show=ready");
-      expect(screen.getByTestId("chip-ready")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("chip-send_yes")).toHaveTextContent("Send 2");
+      expect(screen.queryByTestId("chip-answers")).toBeNull();
+      expect(screen.queryByTestId("chip-approve_cv")).toBeNull();
+      fireEvent.click(screen.getByTestId("chip-send_yes"));
+      expect(window.location.search).toBe("?show=send_yes");
+      expect(screen.getByTestId("chip-send_yes")).toHaveAttribute("aria-pressed", "true");
       expect(screen.queryByTestId("other-list")).toBeNull();
       expect(screen.queryByTestId("answered-toggle")).toBeNull();
       fireEvent.click(screen.getByTestId("chip-other"));
@@ -440,6 +458,7 @@ describe("NeedsYou", () => {
       readyMock.items = [readyCard(5)];
       requestJson.mockResolvedValue(queue);
       setup([]);
+      getNeedsYouCount.mockResolvedValue({ n: 1, jobs: 1, other: 0, jobs_waiting_on_you: 1, by_actor: { you: 1 }, by_kind: { send_yes: 1 }, job_ids: [5], job_ids_by_kind: { send_yes: [5] } });
     }
 
     it("shows no own-browser strip in the list (its Run now sits beside the summary), with no Waiting for you label on screen", async () => {
@@ -471,5 +490,28 @@ describe("NeedsYou", () => {
       expect(gauges).toHaveTextContent(/Oldest waiting \d+ (d|mo)/);
       expect(gauges.textContent).not.toMatch(/APP-/);
     });
+  });
+
+  it("a failed count read shows the error with Try again and falls back to the page's own reads", async () => {
+    setup([{ ...openAsk, application_id: 8 }]);
+    getNeedsYouCount.mockRejectedValue(new Error("down"));
+    render(<NeedsYou />);
+    expect(await screen.findByTestId("needs-you-retry")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load the Needs-you count");
+    // Fallback: the page lists what it read (the job record fails here, so the ask shows in Other).
+    expect((await screen.findAllByTestId(/^other-open-/)).length).toBe(1);
+    getNeedsYouCount.mockResolvedValue(serverFor([{ ...openAsk, application_id: 8 }]));
+    fireEvent.click(screen.getByTestId("needs-you-retry"));
+    await waitFor(() => expect(screen.queryByTestId("needs-you-retry")).toBeNull());
+  });
+
+  it("an open ask on a job with no row (proof missing on a closed job) is an Other item the user can answer", async () => {
+    const proof = { ...openAsk, id: 21, application_id: 9, question: "Proof of your application?", context: "proof_missing:9" };
+    setup([proof]);
+    getNeedsYouCount.mockResolvedValue({ ...serverFor([proof]), job_ids: [], other_ask_ids: [21] });
+    render(<NeedsYou />);
+    expect(await screen.findByTestId("needs-you-summary")).toHaveTextContent("1 thing needs you");
+    expect(screen.getByTestId("chip-other")).toHaveTextContent("Other 1");
+    expect((await screen.findAllByTestId(/^other-open-/)).length).toBe(1);
   });
 });

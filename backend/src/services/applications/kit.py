@@ -2325,9 +2325,9 @@ async def live_hold(
 ) -> Optional[dict[str, Any]]:
     """Another session's live hold: the newest kit read inside ``KIT_HOLD_MINUTES`` whose
     ``(recorded_by, session)`` differs from the caller's ``(actor, session)``, with no later
-    applied / withdrawn / rejected / hold_released by ANY actor. A kit read with no
-    ``session`` key (before 2026-10-15) counts as session ``""``; the same actor with both
-    sessions ``""`` is the same holder. An UNLABELLED caller after a labelled read by its
+    applied / withdrawn / rejected / hold_released by ANY actor. An assistant's read with no
+    ``session`` holds nothing (2026-10-31); the web user's own read (always unlabelled) does.
+    An UNLABELLED caller after a labelled read by its
     own actor gets ``unsure: true`` (it may be another session of the same assistant).
     Warns in the kit; check_submit asks ``held_by_other_session`` on a sure hold."""
     actor = actor_for(user)
@@ -2361,6 +2361,11 @@ def _pick_hold(
         if int(r["id"]) <= cleared_upto:
             break  # this read and every older one were released
         their = str(_json(r.get("payload")).get("session") or "")
+        if not their and r["recorded_by"] != "web":
+            # 2026-10-31: an ASSISTANT's unlabelled read claims nothing. Hourly apply runs read kits with
+            # no session and left 30-minute holds the next runs skipped as another session's work. The
+            # web user's own read (always unlabelled) still holds: the owner is on that job.
+            continue
         if r["recorded_by"] != actor or (session and their != session):
             sure = sure or {**r, "session": their}
         elif not session and their:

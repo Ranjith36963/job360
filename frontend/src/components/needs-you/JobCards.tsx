@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApplication, getCvToApprove, getReadyToSend, listPeople } from "@/lib/api";
 import type { ApplicationDetail, Ask, CvToApproveRow, ReadyCardData, ReadyToSend as ReadyData } from "@/lib/api";
@@ -7,7 +8,7 @@ import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state"
 import { buildCard, groupAsks } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach } from "@/lib/job-cards";
 import { factsFromDetail, factsFromReady, mergeFacts, oldestAt, type RowFacts } from "@/lib/job-row";
-import { jobChip, jobHeaders, sortJobs } from "@/lib/needs-you-items";
+import { jobHeaders, sortJobs } from "@/lib/needs-you-items";
 import { jobTier } from "@/lib/needs-you-rank";
 import type { Chip, JobHeader as Header, PersonJob, SortKey } from "@/lib/needs-you-items";
 import { splitReady } from "@/lib/ready-to-send";
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FOLD_LIST, FoldRow, useFoldSet, type FoldSet } from "@/components/fold/FoldRow";
 import { JobCard } from "./JobCard";
+import { nextLine } from "@/lib/blocker-words";
 import { JobRowAction, JobRowHeader, JobRowSummary } from "./JobRowSummary";
 import { NewConnections, newConnections } from "./NewConnections";
 import { ReadyCard, isMissingAnswer } from "./ReadyCard";
@@ -87,7 +89,7 @@ function makeLimiter(max: number) {
     });
 }
 
-type Slot = { status: "loading" } | { status: "ready"; card: JobCardData; facts: RowFacts } | { status: "failed" };
+type Slot = { status: "loading" } | { status: "ready"; card: JobCardData; facts: RowFacts; line: string } | { status: "failed" };
 type Cvs = Map<number, { artifactId: number; version: number }>;
 
 /** What the page needs to know about the job list (the cards it holds, the asks it could not place). */
@@ -104,15 +106,16 @@ export type JobCardsReport = {
   settled: boolean;
   /** Ready-to-send cards for the badge: null until that read answers, 0 when it failed. */
   readyTotal: number | null;
-  /** What the page counts (countNeedsYou): the ready cards, CVs, people's jobs and the jobs dropped. */
+  /** What the list was built from: the ready cards, CVs, people's jobs and the jobs dropped. */
   inputs?: { ready: ReadyCardData[]; cvRows: CvToApproveRow[]; people: PersonJob[]; dropped: number[] };
   /** The jobs listed per group (index 0 = Form open now ... 4 = New connections) and the oldest open item. */
   gauges?: { tiers: number[]; oldest: string };
 };
 
 /** The ready-to-send part of a job's card: its label and the ReadyCard (answers, Send, Don't send). */
-function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: {
+export function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts, status, changes }: {
   card: ReadyCardData; asks: Ask[]; paused: boolean; embedded: boolean; onChanged: () => void;
+  status?: string; changes?: number;
   salaryFacts: ReturnType<typeof useSalaryFacts>;
 }) {
   return (
@@ -120,7 +123,7 @@ function ReadySection({ card, asks, paused, embedded, onChanged, salaryFacts }: 
       <h3 className={cn("font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint", paused && "opacity-70")}>
         {paused ? "Ready to send · on hold while paused" : "Ready to send"}
       </h3>
-      <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} onChanged={onChanged} salaryFacts={salaryFacts} />
+      <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} status={status} changes={changes} onChanged={onChanged} salaryFacts={salaryFacts} />
     </section>
   );
 }
@@ -135,7 +138,14 @@ export function JobCards({
   sort = "urgent",
   show = "all",
   fold,
+  jobIds,
+  idsByKind,
 }: {
+  /** The rows: exactly the jobs the server counted as waiting on the user. The page always passes it (an empty
+   *  list until the count answers); only a bare list of cards in a test leaves it out and lists what it reads. */
+  jobIds?: number[];
+  /** The same ids by first-blocker kind: a chip shows only its kind's jobs. */
+  idsByKind?: Record<string, number[]>;
   /** The open asks; the job-tied ones are grouped here, one card per job. */
   open: Ask[];
   /** The order (Most urgent, Newest first, Oldest first). */
@@ -216,30 +226,41 @@ export function JobCards({
 
   const salaryFacts = useSalaryFacts(!!ready?.items.some((c) => c.answers.some(isMissingAnswer)));
 
-  const headers: Header[] = useMemo(
-    () => sortJobs(jobHeaders(open, ready?.items ?? [], cvRows ?? [], people ?? []), sort),
-    [open, people, ready, cvRows, sort],
-  );
+  // The rows ARE the server's job ids (one row each, so rows == the summary); the asks, ready cards, CVs and
+  // people already read only decorate a row. An id with none of them is a bare header whose card loads below.
+  const headers: Header[] = useMemo(() => {
+    const all = jobHeaders(open, ready?.items ?? [], cvRows ?? [], people ?? []);
+    if (!jobIds) return sortJobs(all, sort);
+    const ids = new Set(jobIds);
+    const withData = all.filter((h) => ids.has(h.id));
+    const have = new Set(withData.map((h) => h.id));
+    const bare: Header[] = [...ids].filter((id) => !have.has(id)).map((id) => ({
+      id, company: "", role: "", asks: [], ready: null, cv: null, cvSavedAt: null, people: false,
+    }));
+    return sortJobs([...withData, ...bare], sort);
+  }, [jobIds, open, people, ready, cvRows, sort]);
 
   // A loaded card takes this header's current CV; it stays while anything on it is open.
   const cardOf = useCallback((h: Header): JobCardData | null => {
     const s = slots.get(h.id);
     return s?.status === "ready" ? { ...s.card, cv: h.cv } : null;
   }, [slots]);
+
+  // With the server's ids every row stays while the server counts it; a bare list drops a card that loads empty.
   const live = useCallback((h: Header) => {
+    if (jobIds) return true;
     const s = slots.get(h.id);
     if (s?.status === "failed") return h.ready !== null;
     const c = cardOf(h);
     return !c || c.asks.length > 0 || c.people.length > 0 || h.ready !== null || h.cv !== null;
-  }, [slots, cardOf]);
-
+  }, [jobIds, slots, cardOf]);
   const current = useMemo(() => headers.filter(live), [headers, live]);
   // Live (PR 6): the card the user is in never moves or closes on a refresh (counts use `current`).
   const alive = useLiveJobs(current);
   // The chosen chip's jobs; "Other" holds no job (only New connections show from here).
   const shown = useMemo(
-    () => (show === "all" ? alive : show === "other" ? [] : alive.filter((h) => jobChip(h) === show)),
-    [alive, show],
+    () => (show === "all" ? alive : show === "other" ? [] : alive.filter((h) => (idsByKind ? idsByKind[show]?.includes(h.id) : false))),
+    [alive, show, idsByKind],
   );
   // The shown jobs: a card that loads with nothing open drops out and the next job takes its place.
   const page = useMemo(() => shown.slice(0, limit), [shown, limit]);
@@ -252,7 +273,7 @@ export function JobCards({
       fetched.current.set(id, gen);
       set(id, { status: "loading" }, true);
       void limiter(() => getApplication(id)).then(
-        (d) => mounted.current && fetched.current.get(id) === gen && set(id, { status: "ready", card: buildCard(d, byJob.get(id) ?? [], null), facts: factsFromDetail(d) }),
+        (d) => mounted.current && fetched.current.get(id) === gen && set(id, { status: "ready", card: buildCard(d, byJob.get(id) ?? [], null), facts: factsFromDetail(d), line: nextLine(d.next, d.more) }),
         () => mounted.current && fetched.current.get(id) === gen && set(id, { status: "failed" }),
       );
     }
@@ -305,7 +326,7 @@ export function JobCards({
   return (
     <div className="flex flex-col gap-3">
       {readyError}
-      {clean.length >= 2 && (show === "all" || show === "ready") && <SendAllCard clean={clean} held={held} paused={paused} onChanged={readyChanged} />}
+      {clean.length >= 2 && (show === "all" || show === "send_yes") && <SendAllCard clean={clean} held={held} paused={paused} onChanged={readyChanged} />}
       {page.length > 0 && <JobRowHeader />}
       {page.length > 0 && <ul className={FOLD_LIST} data-testid="job-cards">
         {/* Every job is ONE folded row (owner 2026-10-27); + unfolds today's full card, kept mounted. */}
@@ -321,9 +342,17 @@ export function JobCards({
               label={[card?.company || h.company, card?.role || h.role].filter(Boolean).join(", ") || "this job"}
               open={open} onToggle={() => toggle(h.id)} actionClass="lg:w-40"
               action={<JobRowAction card={card} onOpen={() => !open && toggle(h.id)} />}
-              summary={<JobRowSummary h={h} card={card} facts={facts} linkTestid={header ? `title-link-${h.id}` : `row-title-${h.id}`} />}>
+              summary={<JobRowSummary h={h} card={card} facts={facts} nextText={slot?.status === "ready" ? slot.line : ""} linkTestid={header ? `title-link-${h.id}` : `row-title-${h.id}`} />}>
               {card ? <JobCard card={card} onChanged={onChanged} ready={readyPart(h, true)} showHeader={false} bare />
-                : slot?.status === "failed" ? <div className="p-3">{readyPart(h, false)}</div>
+                : slot?.status === "failed" ? (
+                  <div className="p-3">
+                    {readyPart(h, false) ?? (
+                      <p className="text-sm text-muted-foreground" data-testid={`job-failed-${h.id}`}>
+                        Could not load this job. <Link href={`/applications/${h.id}`} className="underline underline-offset-2">Open it</Link> to see what waits.
+                      </p>
+                    )}
+                  </div>
+                )
                 : slot?.status === "loading" && <Skeleton data-testid={`job-skeleton-${h.id}`} className="m-4 h-16" />}
             </FoldRow>
           );

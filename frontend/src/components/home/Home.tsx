@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { listAsks } from "@/lib/api";
+import { getNeedsYouCount, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { MorningCheck } from "@/components/needs-you/MorningCheck";
@@ -24,7 +24,7 @@ import {
   selectFeed,
   writeLastVisit,
 } from "@/lib/home";
-import type { FeedItem } from "@/lib/home";
+import type { FeedItem, Waits } from "@/lib/home";
 import type { WhatsNewPages } from "@/lib/home-fetch";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +60,7 @@ export function Home() {
 
   const [since, setSince] = useState<Load<SinceVisit>>(LOADING);
   const [asks, setAsks] = useState<Load<Asks>>(LOADING);
+  const [waits, setWaits] = useState<Load<Waits>>(LOADING);
   const [apps, setApps] = useState<Load<{ list: ApplicationSummary[]; total: number }>>(LOADING);
   const [feed, setFeed] = useState<Load<Feed>>(LOADING);
 
@@ -77,6 +78,10 @@ export function Home() {
     listAsks("open")
       .then((r) => live() && setAsks({ status: "ok", value: { asks: r.asks, openCount: r.open_count } }))
       .catch(() => live() && setAsks({ status: "error" }));
+
+    getNeedsYouCount()
+      .then((c) => live() && setWaits({ status: "ok", value: { you: c.by_actor.you ?? 0, your_pc: c.by_actor.your_pc ?? 0, assistant: c.by_actor.assistant ?? 0 } }))
+      .catch(() => live() && setWaits({ status: "error" }));
 
     fetchAllApplications()
       .then((r) => live() && setApps({ status: "ok", value: { list: r.applications, total: r.total } }))
@@ -134,6 +139,7 @@ export function Home() {
   function retry() {
     setSince(LOADING);
     setAsks(LOADING);
+    setWaits(LOADING);
     setApps(LOADING);
     setFeed(LOADING);
     run();
@@ -155,11 +161,10 @@ export function Home() {
     );
   }
 
-  const openCount = asks.status === "ok" ? asks.value.openCount : 0;
-  const sentenceReady = since.status !== "loading" && asks.status !== "loading";
+  const sentenceReady = since.status !== "loading" && waits.status !== "loading";
   const parts =
     since.status === "ok"
-      ? buildSentence({ events: since.value.events, truncated: since.value.truncated, openAsks: openCount })
+      ? buildSentence({ events: since.value.events, truncated: since.value.truncated, waits: waits.status === "ok" ? waits.value : null })
       : null;
 
   const feedItems = feed.status === "ok" ? feed.value.items : [];

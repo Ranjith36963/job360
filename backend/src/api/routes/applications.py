@@ -732,6 +732,17 @@ class ContactOut(BaseModel):
     outreach: ContactOutreachOut
 
 
+class BlockerOut(BaseModel):
+    """One thing an application waits on: who (`actor`), what (`label`, plain English), since when, and the
+    row it is about (`ref`: ask_id / event_id / artifact_id / contact_ids)."""
+
+    kind: str
+    actor: Literal["you", "your_pc", "assistant", "job360", "employer"]
+    label: str
+    since: str
+    ref: Optional[dict[str, Any]] = None
+
+
 class NextStepOut(BaseModel):
     """What to do next on this application — a state machine over the stored
     record (status, fit, CV versions, receipt, interview date, lesson), never
@@ -889,6 +900,10 @@ class ApplicationDetailOut(BaseModel):
     # over the record, never a judgement of the job). `code` is the closed
     # vocabulary an agent branches on; `label` is the sentence the web shows.
     next_step: NextStepOut
+    # Blockers slice 3 - everything that waits, ordered; `next` is the first, `more` how many follow it.
+    blockers: list[BlockerOut] = []
+    next: Optional[BlockerOut] = None
+    more: int = 0
     # Owner decision, 2026-09-25 — the follow-up date (in the caller's own
     # timezone), and whether it has arrived. `null`/`false` when unset.
     follow_up_on: Optional[str]
@@ -947,6 +962,9 @@ class ApplicationSummaryOut(BaseModel):
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut
+    blockers: list[BlockerOut] = []
+    next: Optional[BlockerOut] = None
+    more: int = 0
     # Owner decision, 2026-09-25 — same pair as ApplicationDetailOut, so the
     # list's "Due" chip and amber tag need no per-row detail fetch.
     follow_up_on: Optional[str] = None
@@ -2296,11 +2314,16 @@ async def list_outcome_suggestions(
     return {"suggestions": items, "truncated": truncated}
 
 
+QUEUE_LIST_LIMIT = 200  # the route's own max; a queued list with no limit is the whole queue
+
+
 @router.get("/applications", response_model=ListApplicationsResponse, dependencies=AUTH_FIRST)
 async def list_applications(
     status: Optional[str] = Query(None),
     updated_since: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=200),
+    # 2026-10-31: no `limit` = 20 rows, but the whole queue (up to 200) for `queued=true` - every hourly
+    # apply run read only the first 20 of 39-76 queued rows and never paged.
+    limit: Optional[int] = Query(None, ge=1, le=200),
     offset: int = Query(0, ge=0),
     # Owner decision, 2026-09-25 — "what's due" / "gone quiet", the two doors
     # the daily-check prompt closes its run with.
@@ -2321,6 +2344,8 @@ async def list_applications(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if limit is None:
+            limit = QUEUE_LIST_LIMIT if queued else 20
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,

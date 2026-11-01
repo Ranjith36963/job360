@@ -6,6 +6,9 @@ Print this checklist and tick each step:
 
 **A scheduled run** (`whats_due` lists `reach`): steps 1-4 for its `application_ids` ONLY (at most 2 people per company
 and role a week), then `mark_done("reach", application_ids)`. It never sends: the user sends from Needs you.
+**A network run** (`whats_due` lists `network`): no job. Find up to `max_people` NEW people who fit the user's
+`get_profile` (people in their target roles, recruiters for them, alumni, ex-colleagues, founders and leads),
+steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `mark_done("network")`.
 
 1. **Find the right person** for this application (recruiter, hiring manager,
    someone on the team). Warm first: people the user already knows there

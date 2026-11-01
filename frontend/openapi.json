@@ -870,6 +870,14 @@
             "title": "Asks",
             "type": "array"
           },
+          "blockers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BlockerOut"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "contacts": {
             "items": {
               "$ref": "#/components/schemas/ContactOut"
@@ -997,6 +1005,21 @@
               }
             ],
             "title": "Last Event At"
+          },
+          "more": {
+            "default": 0,
+            "title": "More",
+            "type": "integer"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
@@ -1854,6 +1877,14 @@
             "title": "Artifacts",
             "type": "object"
           },
+          "blockers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BlockerOut"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "browser": {
             "anyOf": [
               {
@@ -2031,6 +2062,11 @@
             "title": "Line Side",
             "type": "string"
           },
+          "more": {
+            "default": 0,
+            "title": "More",
+            "type": "integer"
+          },
           "needs_sponsorship": {
             "anyOf": [
               {
@@ -2041,6 +2077,16 @@
               }
             ],
             "title": "Needs Sponsorship"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
@@ -3046,6 +3092,54 @@
           }
         },
         "title": "BlockedSubmittedRequest",
+        "type": "object"
+      },
+      "BlockerOut": {
+        "description": "One thing an application waits on: who (`actor`), what (`label`, plain English), since when, and the\nrow it is about (`ref`: ask_id / event_id / artifact_id / contact_ids).",
+        "properties": {
+          "actor": {
+            "enum": [
+              "you",
+              "your_pc",
+              "assistant",
+              "job360",
+              "employer"
+            ],
+            "title": "Actor",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "actor",
+          "label",
+          "since"
+        ],
+        "title": "BlockerOut",
         "type": "object"
       },
       "Body_clear_profile_section_api_profile_clear_post": {
@@ -5789,10 +5883,22 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
+          },
+          "max_people": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max People"
           },
           "reason": {
             "enum": [
@@ -5814,6 +5920,16 @@
             ],
             "title": "Recipe",
             "type": "string"
+          },
+          "search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxSearchOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5887,7 +6003,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -7555,6 +7672,56 @@
           "event_id"
         ],
         "title": "InboxItemOut",
+        "type": "object"
+      },
+      "InboxSearchOut": {
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "companies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "email_senders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
+          "gmail_after": {
+            "title": "Gmail After",
+            "type": "string"
+          },
+          "skip_message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skip Message Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "after",
+          "gmail_after",
+          "application_ids",
+          "companies",
+          "email_senders",
+          "skip_message_ids"
+        ],
+        "title": "InboxSearchOut",
         "type": "object"
       },
       "InterviewAgenda": {
@@ -9240,7 +9407,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -9294,7 +9462,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -9666,8 +9835,48 @@
       },
       "NeedsYouCountOut": {
         "properties": {
+          "by_actor": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "By Actor",
+            "type": "object"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "By Kind",
+            "type": "object"
+          },
+          "job_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "job_ids_by_kind": {
+            "additionalProperties": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Job Ids By Kind",
+            "type": "object"
+          },
           "jobs": {
             "title": "Jobs",
+            "type": "integer"
+          },
+          "jobs_waiting_on_you": {
+            "default": 0,
+            "title": "Jobs Waiting On You",
             "type": "integer"
           },
           "n": {
@@ -9677,6 +9886,14 @@
           "other": {
             "title": "Other",
             "type": "integer"
+          },
+          "other_ask_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Other Ask Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -13510,7 +13727,8 @@
               "hunt",
               "inbox",
               "batch",
-              "reach"
+              "reach",
+              "network"
             ],
             "title": "Duty",
             "type": "string"
@@ -18050,7 +18268,8 @@
                 "hunt",
                 "inbox",
                 "batch",
-                "reach"
+                "reach",
+                "network"
               ],
               "type": "string"
             },
@@ -18118,7 +18337,8 @@
                 "hunt",
                 "inbox",
                 "batch",
-                "reach"
+                "reach",
+                "network"
               ],
               "type": "string"
             },
@@ -18491,11 +18711,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 20,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           },
           {
@@ -30013,7 +30239,8 @@
                       "hunt",
                       "inbox",
                       "batch",
-                      "reach"
+                      "reach",
+                      "network"
                     ],
                     "type": "string"
                   },

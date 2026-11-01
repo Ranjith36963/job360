@@ -295,7 +295,7 @@ async def test_run_now_is_not_a_scheduled_duty(authenticated_async_context):
         assert all("own_browser" not in d["duty"] for d in answer["due"])
         assert "own_browser" not in str(answer["next_due_at"]) + str(answer["last_done_at"]) + str(answer["running"])
         status = (await client.get("/api/schedule/status")).json()
-        assert [d["duty"] for d in status["duties"]] == ["hunt", "inbox", "reach", "batch"]
+        assert [d["duty"] for d in status["duties"]] == ["hunt", "inbox", "reach", "network", "batch"]
     assert "own_browser" not in settings.SCHEDULE_DUTIES and "own_browser" not in duty_trigger.DUTIES
 
 

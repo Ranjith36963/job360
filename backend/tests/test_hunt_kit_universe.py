@@ -361,4 +361,6 @@ def test_history_none_rotates_by_the_calendar_not_slice_zero(monkeypatch: pytest
     monkeypatch.setattr(hk, "rotate_open", spy)
     _cursor_run(monkeypatch, tmp_path, [], hist="none")
     _cursor_run(monkeypatch, tmp_path, [])
-    assert got == [None, {}]  # no history: calendar slice; a history file: the stored cursor
+    # no history: calendar slice; a history file with no cursor file yet: seeded from the calendar (not row 0)
+    assert got[0] is None and got[1] == {"icims": hk.calendar_offsets(
+        [{"ats": "icims", "source": "universe"}] * 14, {}, None)["icims"]}
