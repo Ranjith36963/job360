@@ -36,9 +36,21 @@ import inspect
 import json
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, cast
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Literal,
+    Mapping,
+    Optional,
+    cast,
+)
 
 from fastapi import HTTPException
+from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -597,7 +609,52 @@ UNKNOWN_ARGS_HINT = (
 )
 
 
-def unknown_arguments_message(input_schema: Mapping[str, Any], arguments: Mapping[str, Any]) -> str:
+# mark_done's closed reason set and free-text note, in the advertised input schema (2026-11-01: 15 first calls
+# in the 10-31 runs sent free text as `reason`). pydantic is already loaded by fastapi, so no lazy import.
+MarkDoneReason = Annotated[
+    Optional[Literal[
+        "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
+        "needs_user", "error",
+    ]],
+    Field(description="Why the run ended (needed when outcome=failed). Closed set; free text is refused."),
+]
+MarkDoneNote = Annotated[
+    str, Field(max_length=300, description="Optional free text, at most 300 characters. Not stored yet."),
+]
+
+# The corrected call, one line, for the tools whose first calls went wrong most in prod (2026-10-31
+# transcripts). A refusal that shows the shape lets the assistant fix the call in one try.
+CALL_SHAPES: dict[str, str] = {
+    "mark_done": 'mark_done(duty="hunt", outcome="failed", reason="needs_user", note="short text")',
+    "ask_user": 'ask_user(question="what you need from the user", application_id=12)',
+    "check_form": ('check_form(application_id=12, form_url="https://...", questions=[{"question": "Notice period?", '
+                   '"required": true, "key": "logistics.notice_period", "field_type": "text"}])'),
+    "record_event": 'record_event(event_type="note", application_id=12, detail="what happened")',
+    "browser": 'browser(action="open", url="https://...", application_id=12)',
+}
+# Words an assistant reaches for that a tool names differently: (tool, wrong) -> right.
+ARG_ALIASES: dict[tuple[str, str], str] = {
+    ("ask_user", "message"): "question", ("ask_user", "prompt"): "question", ("ask_user", "text"): "question",
+    ("record_event", "type"): "event_type", ("record_event", "event"): "event_type",
+    ("record_event", "note"): "detail", ("check_form", "fields"): "questions",
+    ("mark_done", "status"): "outcome", ("mark_done", "message"): "note",
+}
+
+
+def closest_argument(tool: str, wrong: str, allowed: list[str]) -> str:
+    """The valid argument ``wrong`` most likely meant, or "". Suggest only: the call is still refused."""
+    alias = ARG_ALIASES.get((tool, wrong[:60]))
+    if alias in allowed:
+        return alias or ""
+    import difflib
+
+    close = difflib.get_close_matches(wrong[:60], allowed, n=1, cutoff=0.6)
+    return close[0] if close else ""
+
+
+def unknown_arguments_message(
+    input_schema: Mapping[str, Any], arguments: Mapping[str, Any], tool: str = ""
+) -> str:
     """The refusal text for ``arguments`` keys the tool's advertised schema lacks, or "" when none.
 
     The accepted keys are exactly the advertised ``inputSchema.properties`` (the
@@ -611,7 +668,10 @@ def unknown_arguments_message(input_schema: Mapping[str, Any], arguments: Mappin
         return ""
     shown = ", ".join(k[:60] for k in unknown[:10]) + (f" (+{len(unknown) - 10} more)" if len(unknown) > 10 else "")
     takes = ", ".join(allowed) if allowed else "no arguments"
-    return f"Nothing was done: unknown argument(s): {shown}. This tool takes: {takes}. {UNKNOWN_ARGS_HINT}"
+    fixes = [f"`{k[:60]}` -> `{c}`" for k in unknown[:3] if (c := closest_argument(tool, k, allowed))]
+    did = f" Did you mean {', '.join(fixes)}?" if fixes else ""
+    shape = f" Call shape: {CALL_SHAPES[tool]}." if tool in CALL_SHAPES else ""
+    return f"Nothing was done: unknown argument(s): {shown}. This tool takes: {takes}.{did}{shape} {UNKNOWN_ARGS_HINT}"
 
 
 def forbid_unknown_arguments(server: MCPServer) -> None:
@@ -646,7 +706,7 @@ def _strict_server_class() -> type[MCPServer]:
             async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
                 tool = self._tool_manager.get_tool(name)
                 if tool is not None:
-                    refusal = unknown_arguments_message(tool.parameters, arguments or {})
+                    refusal = unknown_arguments_message(tool.parameters, arguments or {}, name)
                     if refusal:
                         if _current_user.get() is not None:
                             _audit(name, "error", http_status=422, reason="unknown_key")
@@ -1429,8 +1489,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
         build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
         those application_ids (at most 200 per call);
-        run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
-        change a setting, and never an approval to submit (check_submit stays the gate)."""
+        run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop.
+        With `duties` it CLAIMS each due duty for 30 minutes (without `duties` it only reads).
+        Never a reason to change a setting, and never an approval to submit (check_submit stays the gate)."""
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
         if bad:
             raise _tool_error(HTTPException(422, f"duties must be from: {', '.join(settings.SCHEDULE_DUTIES)}"))
@@ -1449,13 +1510,17 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
 
     @mcp.tool()
     async def mark_done(
-        duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done", reason: str = "",
+        duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done",
+        reason: MarkDoneReason = None, note: MarkDoneNote = "",
     ) -> dict[str, Any]:
         """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
         takes `application_ids`, the ones you worked). `outcome` = done | partial | failed; `reason`
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
-        network_blocked | rate_limited | needs_user | error. A failed duty waits 2h, 4h, 8h... (at most
-        24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox."""
+        network_blocked | rate_limited | needs_user | error (a closed set: free text is refused; put prose in
+        `note`, at most 300 characters, accepted but not stored yet). A failed duty waits 2h, 4h, 8h... (at
+        most 24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox."""
+        if len(note) > 300:
+            raise _tool_error(HTTPException(422, "note: at most 300 characters"))
         try:
             body = schedule_route.MarkDoneIn.model_validate({
                 "duty": duty, "application_ids": application_ids, "outcome": outcome, "reason": reason or None,
@@ -1468,7 +1533,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         except HTTPException as exc:
             _audit("mark_done", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
-        _audit("mark_done", "ok", duty=body.duty)
+        _audit("mark_done", "ok", duty=body.duty, note_len=len(note))
         return resp.model_dump()
 
     @mcp.tool()
