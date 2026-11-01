@@ -80,10 +80,9 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 - `src/middleware.ts` — session-cookie auth guard; `PROTECTED_PATHS` there is the
   gated list, and an unauthed hit bounces to `/login?next=…`.
 
-## Verify, don't assume (root rule + verify-job360 skill)
+## Verify, don't assume
 
-A clean `npm run build` does NOT prove the UI works. After touching pages, API calls,
-or auth, run the **`/verify-job360`** skill (browser flavor) — it drives a real browser
-with Playwright, checks the console for errors, and walks the journey. "Compiles" ≠ "works".
+A clean `npm run build` does NOT prove the UI works. After touching pages, API calls or
+auth, drive the real app: launch facts are the `run-job360` skill, checkpoints its `CHECKLIST.md`.
 
 See root [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the deep technical reference.
