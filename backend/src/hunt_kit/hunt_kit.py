@@ -2177,6 +2177,30 @@ def _board_key(b: dict[str, Any]) -> str:
     return "%s:%s" % (b["ats"], b["token"].lower())
 
 
+def calendar_offsets(
+    boards: list[dict[str, Any]],
+    limits: dict[str, int] | None = None,
+    today: _dt.date | None = None,
+    open_days: int = OPEN_CYCLE_DAYS,
+) -> dict[str, int]:
+    """{ats: start row} of the calendar-day slice of every slow ATS that rotates (pure; same math as rotate_open)."""
+    limits = limits or {}
+    day = (today or _dt.date.today()).toordinal()
+    out: dict[str, int] = {}
+    for ats in SLOW_ATS:
+        pool = [b for b in boards if b["ats"] == ats and b.get("source") in _OPEN_LISTS]
+        if ats in limits:
+            n = limits[ats] or 0
+        elif open_days and open_days > 0:
+            n = -(-len(pool) // open_days)
+        else:
+            n = 0
+        if n <= 0 or len(pool) <= n:
+            continue
+        out[ats] = (day * n) % len(pool)
+    return out
+
+
 def rotate_open(
     boards: list[dict[str, Any]],
     limits: dict[str, int] | None = None,
@@ -2190,11 +2214,11 @@ def rotate_open(
     ``ceil(pool / open_days)`` rows, so ``open_days`` runs cover the whole pool; ``open_days`` of 0 turns
     rotation off. With ``offsets`` ({ats: next row}) a slice starts at the stored offset (modulo the pool
     size) and wraps round the pool; the caller moves the offset on by the boards that really finished.
-    Without ``offsets`` the start comes from the calendar day. Pure: no file is read or written.
-    Vetted rows (``companies.json``, ``--companies-extra``) and every other ATS are always kept.
+    Without ``offsets`` the start comes from the calendar day (``calendar_offsets``). Pure: no file is read
+    or written. Vetted rows (``companies.json``, ``--companies-extra``) and every other ATS are always kept.
     """
     limits = limits or {}
-    day = (today or _dt.date.today()).toordinal()
+    start_at = calendar_offsets(boards, limits, today, open_days) if offsets is None else offsets
     drop: set[int] = set()
     for ats in SLOW_ATS:
         pool = [b for b in boards if b["ats"] == ats and b.get("source") in _OPEN_LISTS]
@@ -2206,7 +2230,7 @@ def rotate_open(
             n = 0
         if n <= 0 or len(pool) <= n:
             continue
-        start = (day * n) % len(pool) if offsets is None else max(0, int(offsets.get(ats, 0))) % len(pool)
+        start = max(0, int(start_at.get(ats, 0))) % len(pool)
         keep = {id(b) for b in (pool + pool)[start:start + n]}
         drop |= {id(b) for b in pool} - keep
     return [b for b in boards if id(b) not in drop]
@@ -2410,10 +2434,15 @@ def run(args: argparse.Namespace) -> Collector:
     wd_max = getattr(args, "workday_max", WORKDAY_MAX)
     col.cursor = load_rotation_cursor(getattr(args, "history", None))
     listed = boards
-    # No cursor file (--history none): fall back to the calendar slice, else every run would rescan slice 0.
+    limits = {"workday": wd_max} if wd_max is not None else {}
+    open_days = getattr(args, "open_days", OPEN_CYCLE_DAYS)
+    # --history none: no cursor file, so the slice comes from the calendar day (offsets None).
     offsets = col.cursor if _cursor_path(getattr(args, "history", None)) else None
-    boards = rotate_open(listed, {"workday": wd_max} if wd_max is not None else {},
-                         open_days=getattr(args, "open_days", OPEN_CYCLE_DAYS), offsets=offsets)
+    if offsets is not None and not offsets:
+        # A fresh container has a history path but no cursor file yet: start from the calendar day, not row 0,
+        # and keep that start as the cursor so the saved next position is right.
+        offsets = col.cursor = calendar_offsets(listed, limits, None, open_days)
+    boards = rotate_open(listed, limits, open_days=open_days, offsets=offsets)
     col.rotation = plan_rotation(listed, boards, col.cursor)
     wd_titles = "\n".join(queries[:WORKDAY_SEARCH_TITLES])  # board rows hold strings; kit_ats splits it
     # title_ok is the Collector's own title test (--titles and --exclude-title-words): readers that fetch a
