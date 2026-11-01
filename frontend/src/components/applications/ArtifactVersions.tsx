@@ -18,17 +18,17 @@ import type { ApplicationControls } from "@/lib/api";
  * name. */
 function describeMadeBy(madeBy: string): string {
   if (madeBy === "web:tailor") return "Made on the website";
-  if (madeBy.startsWith("agent:")) return `Written by ${madeBy.slice("agent:".length)}`;
+  const m = /^(?:agent|token):(.+)$/.exec(madeBy);
+  if (m) return `Written by ${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}`;
   return madeBy;
 }
 
 /** Whose opinion the ATS score is: the assistant that saved the version —
  * never Job360's (it has no LLM and scores nothing). */
 function opinionOwner(madeBy: string): string {
-  if (madeBy.startsWith("agent:")) {
-    const name = madeBy.slice("agent:".length).trim();
-    if (name) return `${name}'s opinion`;
-  }
+  const m = /^(?:agent|token):(.+)$/.exec(madeBy);
+  const name = m ? m[1].trim() : "";
+  if (name) return `${name.charAt(0).toUpperCase()}${name.slice(1)}'s opinion`;
   return "your assistant's opinion";
 }
 
@@ -88,7 +88,7 @@ export function ArtifactVersions({
   applicationId: number;
   artifacts: ApplicationArtifact[];
   receipts?: ApplicationReceiptEntry[];
-  /** S3: the decision state. When given, the LATEST CV shows "I've checked this CV". */
+  /** S3: the decision state. When given, the LATEST CV shows "Approve CV". */
   controls?: ApplicationControls | null;
   onControls?: (next: ApplicationControls) => void;
   /** S11a: re-read the application after a Hide / Show again. */

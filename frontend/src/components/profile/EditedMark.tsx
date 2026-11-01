@@ -75,12 +75,12 @@ export function EditedMark({
         <button
           type="button"
           data-testid="keep"
-          aria-label={unconfirmed ? `Confirm ${who}'s change` : `Keep ${who}'s change`}
+          aria-label={unconfirmed ? `OK ${who}'s change` : `Keep ${who}'s change`}
           disabled={pending !== null}
           onClick={run("keep", onKeep)}
           className={buttonClass}
         >
-          {pending === "keep" ? (unconfirmed ? "Confirming…" : "Keeping…") : unconfirmed ? "Confirm" : "Keep"}
+          {pending === "keep" ? (unconfirmed ? "Saving…" : "Keeping…") : unconfirmed ? "OK" : "Keep"}
         </button>
       )}
       {onTakeBack && (

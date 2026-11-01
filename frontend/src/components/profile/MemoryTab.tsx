@@ -66,7 +66,7 @@ function Step({ id, title, doneAt, waiting, defaultOpen, pinned = false, confirm
             <span className="text-[15px] font-medium">{title}</span>
             {waiting > 0 && (
               <span data-testid={`memory-step-waiting-${id}`} className="rounded-full bg-muted px-2 py-0.5 text-xs text-warning">
-                {waiting} to confirm
+                {waiting} need OK
               </span>
             )}
             <span className="ml-auto font-mono text-xs text-faint">{when || (done ? "" : "not done")}</span>
@@ -87,10 +87,10 @@ function Step({ id, title, doneAt, waiting, defaultOpen, pinned = false, confirm
         <div id={`memory-step-body-${id}`} className="flex flex-col pb-4">
           {waiting > 0 && (
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-muted px-3.5 py-2.5">
-              <span className="text-[13px] text-muted-foreground">Your assistant saved these. Confirm them as yours, or change any first.</span>
+              <span className="text-[13px] text-muted-foreground">Your assistant saved these. OK them, or change any first.</span>
               <Button type="button" size="sm" className="min-h-11 md:min-h-8" data-testid={`memory-confirm-step-${id}`}
                 disabled={confirming} aria-busy={confirming} onClick={onConfirmAll}>
-                {confirming ? "Confirming…" : `Confirm all ${waiting}`}
+                {confirming ? "Saving…" : `OK all ${waiting}`}
               </Button>
             </div>
           )}
@@ -320,7 +320,7 @@ export function MemoryTab() {
         await confirm(spec);
       }
     } catch (err: unknown) {
-      setKeepAllError(apiErrorMessage(err, "Could not confirm everything. Try again."));
+      setKeepAllError(apiErrorMessage(err, "Could not save every OK. Try again."));
     } finally {
       await load();
       setKeepingAll(null);
@@ -423,7 +423,7 @@ export function MemoryTab() {
           })}
         </div>
 
-        <Section title="Approved answers" hint="Answers you approved once. Reused word for word.">
+        <Section title="OK'd answers" hint="Answers you said OK to once. Reused word for word.">
           {approved.length === 0 ? (
             <p className="border-t border-border py-3 text-sm text-faint">Not saved yet</p>
           ) : approved.map((a, i) => (
