@@ -83,7 +83,7 @@ describe("describeSettingRequest", () => {
   it("outreach send: auto says it sends in your name; draft_only says you send; the Gmail mode never mentions outreach", () => {
     const on = describeSettingRequest("assistant_settings.outreach_send", "auto");
     expect(on.title).toBe("Automatic outreach emails");
-    expect(on.change).toContain("in your name");
+    expect(on.change).toContain("from your Gmail");
     expect(describeSettingRequest("assistant_settings.outreach_send", "draft_only").change).toBe(
       "Only draft outreach emails; I send them myself",
     );
@@ -137,7 +137,7 @@ describe("SettingRequestCard", () => {
     expect(screen.getByTestId("setting-request-change")).toHaveTextContent(
       "Apply on its own for jobs at or above your score line (80)",
     );
-    expect(screen.getByText(/Nothing changes until you confirm/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing changes until you apply it here/)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull(); // the actor name is text, never HTML
     expect(confirmSettingRequest).not.toHaveBeenCalled();
   });

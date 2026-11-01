@@ -46,7 +46,7 @@ describe("CvToApprove", () => {
     const first = await screen.findByTestId("job-card-1");
     // The folded row names the job; the card inside it holds the CV.
     expect(screen.getByTestId("job-row-1")).toHaveTextContent("ElevenLabs");
-    expect(first).toHaveTextContent("CV version 2, not checked yet");
+    expect(first).toHaveTextContent("CV version 2, not approved yet");
     await screen.findByTestId("job-card-2");
     expect(screen.getByTestId("job-row-2")).toHaveTextContent("Beta");
     fireEvent.click(screen.getByTestId("job-row-1-toggle")); // every job row starts folded

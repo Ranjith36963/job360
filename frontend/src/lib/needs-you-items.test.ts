@@ -31,7 +31,7 @@ describe("sort options", () => {
 
   it("offers exactly Most urgent (default), Newest first and Oldest first", () => {
     expect(SORTS.map((s) => s.label)).toEqual(["Most urgent", "Newest first", "Oldest first"]);
-    expect(SORTS[0].line).toBe("Forms open now, then ready to send, then waiting on your answer, then quick checks.");
+    expect(SORTS[0].line).toBe("");
   });
 
   it("Most urgent is today's rank", () => {
@@ -59,7 +59,7 @@ describe("sort options", () => {
   });
 
   it("uses the owner's group names and never the old ones", () => {
-    expect(GROUP_NAMES).toEqual(["Form open now", "Ready to send", "Waiting on your answer", "Quick checks", "New connections"]);
+    expect(GROUP_NAMES).toEqual(["Form open now", "Send", "On you", "Quick checks", "New connections"]);
     const copy = JSON.stringify([SORTS, GROUP_NAMES]);
     expect(copy).not.toMatch(/Stuck on you|People only|Claude/i);
   });

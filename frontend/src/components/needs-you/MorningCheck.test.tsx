@@ -56,7 +56,7 @@ describe("MorningCheck", () => {
     for (const t of ["On", "Score line 75", "How it applies: Ask me each time", "Below the line: dropped", "4 of 10 today"]) {
       expect(strip).toHaveTextContent(t);
     }
-    expect(strip).not.toHaveTextContent("Confirm before sending");
+    expect(strip).not.toHaveTextContent("Ask before sending");
     expect(screen.getByText("Morning check (run by your assistant)")).toBeInTheDocument();
     expect(screen.getByTestId("mc-always-asks")).toHaveTextContent(
       "Your assistant always stops and asks you when it is not sure: a CAPTCHA, a login page, a guessed answer, or anything not verified.",

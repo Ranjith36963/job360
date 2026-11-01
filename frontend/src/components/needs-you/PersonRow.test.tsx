@@ -98,7 +98,7 @@ describe("PersonRow", () => {
     const at = new Date(approved).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     show(person({ linkedin_state: "connected", own_browser_task: { ...task("queued", 77), approved_at: approved } }));
     const el = screen.getByTestId("send-status-4");
-    expect(el).toHaveTextContent(`Waiting to send. You said yes at ${at}. Your assistant sends it the next time it runs.`);
+    expect(el).toHaveTextContent(`You said Send at ${at}. Goes out next time your assistant runs.`);
     expect(el).toHaveAttribute("data-state", "waiting");
     expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
     fireEvent.click(screen.getByText("Don't send"));
@@ -109,7 +109,7 @@ describe("PersonRow", () => {
   it("queued with no approved_at drops the time", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("queued") }));
     expect(screen.getByTestId("send-status-4").textContent).toBe(
-      "Waiting to send. You said yes. Your assistant sends it the next time it runs.");
+      "You said Send. Goes out next time your assistant runs.");
   });
 
   it("queued and Job360's browser gave up: needs your own browser", () => {
@@ -117,7 +117,7 @@ describe("PersonRow", () => {
       send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Sign-in wall" } }));
     const el = screen.getByTestId("send-status-4");
     expect(el.textContent).toBe(
-      "Needs your own browser. Job360's browser couldn't send this one (see why below). Ask your assistant to send it from your own browser \u2014 you stay signed in to LinkedIn there.");
+      "Your PC: needs your own browser.");
     expect(el).toHaveAttribute("data-state", "needs-own-browser");
     expect(screen.getByText("Don't send")).toBeInTheDocument();
   });
@@ -127,7 +127,7 @@ describe("PersonRow", () => {
       send_browser: { kind: "own_browser", label: "Your own browser: runs when your PC is on", reason: "linkedin_own_browser" } }));
     const el = screen.getByTestId("send-status-4");
     expect(el.textContent).toBe(
-      "Waiting for your own browser. It goes out the next time your assistant runs on your PC.");
+      "Goes out next time your assistant runs on your PC.");
     expect(el).toHaveAttribute("data-state", "waiting-own-browser");
     expect(el).not.toHaveClass("text-warning");
     expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your own browser: runs when your PC is on");
@@ -140,7 +140,7 @@ describe("PersonRow", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
       send_browser: { kind: "human", label: "Only you can do this", reason: "CAPTCHA" } }));
     const el = screen.getByTestId("send-status-4");
-    expect(el.textContent).toBe("Needs you. Open the profile and send it yourself, then press I sent it.");
+    expect(el.textContent).toBe("You: send it from the profile, then press I sent it.");
     expect(el).toHaveAttribute("data-state", "needs-you");
     expect(screen.getByText("Don't send")).toBeInTheDocument();
   });
