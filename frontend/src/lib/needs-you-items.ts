@@ -100,6 +100,7 @@ export function sortJobs<T extends JobRankInput>(jobs: T[], key: SortKey): T[] {
 export type Chip = string;
 /** The chip for each kind of blocker that waits on the user, in the order they show. */
 export const KIND_CHIPS: { key: string; label: string }[] = [
+  { key: "confirm_sent", label: "Confirm sent" },
   { key: "posting_closed", label: "Posting closed" },
   { key: "site_step", label: "On the site" },
   { key: "approve_cv", label: "Approve CV" },

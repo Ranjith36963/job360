@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Ask } from "@/lib/api";
-import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, rememberAnswers, saveAskRowAnswers } from "@/lib/api";
+import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, recordApplicationReceipt, rememberAnswers, resolveSubmit, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
 import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
@@ -114,6 +114,17 @@ export function JobCard({
     const done = new Set([...hidden, contactId]);
     for (const [askId, ids] of covered) {
       if (ids.includes(contactId) && ids.every((id) => done.has(id))) await answerAsk(askId, answer);
+    }
+  }
+  async function confirmRun(fn: () => Promise<unknown>, failMsg: string) {
+    setBusy(true);
+    try {
+      await fn();
+      await onChanged();
+    } catch (err) {
+      toast.apiError(err, failMsg);
+    } finally {
+      setBusy(false);
     }
   }
   const rowCount = merged.rows.length;
@@ -287,6 +298,27 @@ export function JobCard({
           )}
         </div>
       </div>
+
+      {card.confirmSent && (
+        <section className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid={`confirm-sent-${card.applicationId}`}>
+          <h3 className={label}>Employer confirmed — did it go out?</h3>
+          {(card.confirmSent.subject || card.confirmSent.receivedAt) && (
+            <p className="text-xs text-muted-foreground" data-testid={`confirm-sent-email-${card.applicationId}`}>
+              {[card.confirmSent.receivedAt ? relativeTime(card.confirmSent.receivedAt) : "", card.confirmSent.subject].filter(Boolean).join(" · ")}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} className={mainBtn} data-testid={`confirm-sent-applied-${card.applicationId}`}
+              onClick={() => void confirmRun(() => recordApplicationReceipt(card.applicationId, {}), "Could not record this application.")}>
+              Mark Applied
+            </button>
+            <button type="button" disabled={busy} className={btn} data-testid={`confirm-sent-not-sent-${card.applicationId}`}
+              onClick={() => void confirmRun(() => resolveSubmit(card.applicationId), "Could not save that. Try again.")}>
+              It was not sent
+            </button>
+          </div>
+        </section>
+      )}
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
