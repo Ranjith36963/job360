@@ -971,6 +971,24 @@ def clean_withdraw_reason(raw: Any) -> str:
     return text
 
 
+USER_ONLY_WITHDRAW_MSG = (
+    "Only the user can clear a CAPTCHA, sign-in, upload or form question. Ask them on Needs you."
+)
+
+
+def _user_only_to_clear(ask: dict[str, Any]) -> bool:
+    """Owner 2026-11-01: an assistant may not withdraw an open captcha/login/upload/safety ask or a form
+    question about an application (an assistant withdrew both 11 s before recording the job applied). Free for
+    it: asks with no application, sentence-only asks (``said_*`` / ``earlier_*``), ``doctor_repeat_*`` lesson
+    asks and proof asks."""
+    if ask.get("application_id") is None or str(ask.get("context") or "").startswith("proof_missing:"):
+        return False
+    if ask.get("kind") in BLOCKER_FAMILY:
+        return True
+    keys = [str(q.get("key", "")) for q in ask.get("questions") or [] if isinstance(q, dict)]
+    return any(not k.startswith(("said_", "earlier_", "doctor_repeat_")) for k in keys)
+
+
 async def withdraw_ask(
     db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False
 ) -> dict[str, Any]:
@@ -985,6 +1003,8 @@ async def withdraw_ask(
         raise SpineError(404, "ask not found")
     if own_only and existing["asked_by"] != withdrawn_by:
         raise SpineError(403, "only the user can withdraw an ask you did not ask; ask them to, on Needs you")
+    if own_only and _user_only_to_clear(existing):
+        raise SpineError(409, USER_ONLY_WITHDRAW_MSG)
     if own_only and not clean_reason:
         raise SpineError(
             422, f"say why the ask is out of date (withdraw reason, at most {ASKS_WITHDRAW_REASON_MAX_CHARS} chars)"
