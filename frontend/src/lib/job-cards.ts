@@ -104,6 +104,8 @@ export type JobCardData = {
   ownBrowserCount: number;
   /** True when any of them does. */
   ownBrowser: boolean;
+  /** The employer's "we received your application" email while the job is not applied: the user says whether it went. */
+  confirmSent?: { subject: string; receivedAt: string } | null;
 };
 
 /** Open asks grouped by job (one card each), the rest (no job) left over. A test job's asks never
@@ -116,6 +118,17 @@ export function groupAsks(open: Ask[]): { byJob: Map<number, Ask[]>; general: As
     else byJob.set(ask.application_id, [...(byJob.get(ask.application_id) ?? []), ask]);
   }
   return { byJob, general };
+}
+
+/** The `confirm_sent` blocker of a job (its ref holds the email's subject and received time), else null. */
+function confirmSentOf(detail: ApplicationDetail): { subject: string; receivedAt: string } | null {
+  const b = (detail.blockers ?? []).find((x) => x.kind === "confirm_sent");
+  if (!b) return null;
+  const ref = (b.ref ?? {}) as { subject?: unknown; received_at?: unknown };
+  return {
+    subject: typeof ref.subject === "string" ? ref.subject : "",
+    receivedAt: typeof ref.received_at === "string" ? ref.received_at : b.since,
+  };
 }
 
 export function buildCard(
@@ -138,6 +151,7 @@ export function buildCard(
     oldestAskAt: sorted[0]?.asked_at ?? detail.updated_at,
     ownBrowserCount: sorted.filter(needsOwnBrowser).length,
     ownBrowser: sorted.some(needsOwnBrowser),
+    confirmSent: confirmSentOf(detail),
   };
 }
 

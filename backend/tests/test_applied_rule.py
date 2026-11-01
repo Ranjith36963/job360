@@ -316,3 +316,56 @@ async def test_no_cv_at_all_assistant_refused_but_the_web_users_mark_applied_sav
         r = await _record(web, app_id)
         assert r.status_code == 201, r.text
         assert "cv_not_approved" in (await _applied_payload(web, app_id))["open_at_submit"]
+
+
+_EMAIL = {"kind": "email", "message_id": "<c-1@hire.example>", "sender": "no-reply@hire.example",
+          "subject": "We received your application", "received_at": "2026-11-01T09:30:00+00:00"}
+
+
+@pytest.mark.asyncio
+async def test_refused_applied_still_stores_the_confirmation_email_as_proof_and_user_confirms(
+    authenticated_async_context, fixture_user_id,
+):
+    from src.services.applications import blockers
+    from src.services.applications import proof as proof_service
+
+    async with authenticated_async_context() as web:
+        _seed(fixture_user_id)
+        app_id = await _app(web, 20)
+        await asks.create_ask(await _db(), fixture_user_id, app_id, "Needs you", "", "claude-code", kind="captcha")
+        async with await _agent(web) as agent:
+            r = await _event(agent, app_id, "applied", {})
+            assert r.status_code == 409 and "record it as proof" in r.text, r.text
+            note = await agent.post(f"/api/applications/{app_id}/events", json={
+                "event_type": "note", "detail": "Submission confirmed: We received your application",
+                "source": _EMAIL})
+            assert note.status_code == 201, note.text
+        db = await _db()
+        assert (await proof_service.proof_for(db, fixture_user_id, [app_id]))[app_id]["has_email"] is True
+        rows = (await blockers.blockers_for(db, fixture_user_id, [app_id]))[app_id]
+        assert rows[0]["kind"] == "confirm_sent" and rows[0]["actor"] == "you", rows
+        assert rows[0]["ref"]["subject"] == "We received your application"
+        assert [b["kind"] for b in rows].count("site_step") == 1  # confirm_sent came first, site_step stays
+        assert (await web.get(f"/api/applications/{app_id}")).json()["status"] == "considering"
+        mark = await _event(web, app_id, "applied", {})  # the web Mark Applied
+        assert mark.status_code == 201, mark.text
+        assert "open_at_submit" in await _applied_payload(web, app_id)
+        after = (await blockers.blockers_for(db, fixture_user_id, [app_id]))[app_id]
+        assert "confirm_sent" not in [b["kind"] for b in after]
+
+
+@pytest.mark.asyncio
+async def test_it_was_not_sent_dismisses_the_confirmation_blocker(authenticated_async_context, fixture_user_id):
+    from src.services.applications import blockers
+
+    async with authenticated_async_context() as web:
+        _seed(fixture_user_id)
+        app_id = await _app(web, 21)
+        n = await web.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "note", "detail": "Submission confirmed: Thanks", "source": _EMAIL})
+        assert n.status_code == 201, n.text
+        db = await _db()
+        assert (await blockers.blockers_for(db, fixture_user_id, [app_id]))[app_id][0]["kind"] == "confirm_sent"
+        res = await web.post(f"/api/applications/{app_id}/submit/resolve")
+        assert res.status_code == 201, res.text
+        assert "confirm_sent" not in [b["kind"] for b in (await blockers.blockers_for(db, fixture_user_id, [app_id]))[app_id]]
