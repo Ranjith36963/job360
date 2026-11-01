@@ -28,6 +28,9 @@ import type { SalaryFacts } from "@/lib/salary-suggest";
 // the user's assistants - untrusted. Only ever rendered as React text nodes.
 
 const label = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
+/** Flag codes the backend writes per answer row (ready.py `_answer_rows`). */
+const ROW_FLAG_CODES: readonly string[] = ["changed", "guessed", "unapproved", "sensitive", "blank", "not_in_memory"];
+const STATUS_ORDER = { needs_you: 0, check: 1, ok: 2 } as const;
 const tap = "min-h-11 md:min-h-0";
 
 /** The approval card: the job, the CV and letter, EVERY answer that will go out
@@ -70,6 +73,13 @@ export function ReadyCard({
   // Send waits until every answer reads OK: a guess or a draft needs the user's OK, a blank or
   // sensitive row needs their answer (owner, 2026-10-26). Answers the user edited read OK.
   const unchecked = card.answers.filter((a) => readyRowLabel(a, card).status !== "ok").length;
+
+  // Only flags that are not about one answer row: each row already shows its own status and source.
+  const cardFlags = card.flags.filter((f) => !ROW_FLAG_CODES.includes(f.code));
+  // Rows that need the user's answer first, then rows to OK, then OK rows; stable inside each group.
+  const orderedAnswers = card.answers
+    .map((a, i) => ({ a, i, rank: STATUS_ORDER[readyRowLabel(a, card).status] }))
+    .sort((x, y) => x.rank - y.rank || x.i - y.i);
 
   async function decide(send: boolean) {
     setBusy(true);
@@ -199,24 +209,23 @@ export function ReadyCard({
         </section>
       )}
 
-      {(card.flags.length > 0 || missing > 0) && (
-        <ul data-testid={`ready-flags-${card.application_id}`} className="flex flex-col gap-1 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
-          {card.flags.map((f, i) => (
-            <li key={`${f.code}-${i}`}>{flagText(f)}</li>
-          ))}
+      {(cardFlags.length > 0 || missing > 0) && (
+        <p data-testid={`ready-flags-${card.application_id}`} className="text-xs text-muted-foreground">
+          {cardFlags.map((f) => flagText(f)).join(" · ")}
+          {cardFlags.length > 0 && missing > 0 && " · "}
           {missing > 0 && (
-            <li data-testid={`ready-draft-missing-${card.application_id}`}>
+            <span data-testid={`ready-draft-missing-${card.application_id}`}>
               {`${missing} answer${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} text.`}
-            </li>
+            </span>
           )}
-        </ul>
+        </p>
       )}
 
       {card.answers.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <h4 className={label}>Every answer that will go out</h4>
           <ul className="flex flex-col divide-y divide-border">
-            {card.answers.map((a, i) => (
+            {orderedAnswers.map(({ a, i }) => (
               <AnswerRow
                 key={`${a.question}-${i}`}
                 answer={a}
@@ -254,28 +263,32 @@ export function ReadyCard({
             {`OK ${unchecked} more to send`}
           </span>
         )}
-        {card.held_seconds != null && card.held_seconds > 0 && !finishing && (
-          <button
-            type="button"
-            data-testid={`ready-finish-${card.application_id}`}
-            onClick={() => setFinishing(true)}
-            className={cn(tap, "rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-muted")}
-          >
-            {`Finish it here${heldText(card.held_seconds)}`}
-          </button>
-        )}
-        {nothingSent(status) && (
-          <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
-            {changes === undefined ? (
-              "Nothing sent yet"
-            ) : (
-              <>
-                <span data-testid="changes-since-approved">{`${changes} change${changes === 1 ? "" : "s"}`}</span> · nothing sent yet
-              </>
-            )}
-          </p>
-        )}
       </div>
+      {((card.held_seconds != null && card.held_seconds > 0 && !finishing) || nothingSent(status)) && (
+        <div className="flex flex-wrap items-center gap-3">
+          {card.held_seconds != null && card.held_seconds > 0 && !finishing && (
+            <button
+              type="button"
+              data-testid={`ready-finish-${card.application_id}`}
+              onClick={() => setFinishing(true)}
+              className={cn(tap, "rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-muted")}
+            >
+              {`Finish it here${heldText(card.held_seconds)}`}
+            </button>
+          )}
+          {nothingSent(status) && (
+            <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
+              {changes === undefined ? (
+                "Nothing sent yet"
+              ) : (
+                <>
+                  <span data-testid="changes-since-approved">{`${changes} change${changes === 1 ? "" : "s"}`}</span> · nothing sent yet
+                </>
+              )}
+            </p>
+          )}
+        </div>
+      )}
       {/* The filled form, kept open in Job360's browser: the user can look at it and press Submit themselves. */}
       {finishing && (
         <FinishInBrowser
