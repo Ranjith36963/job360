@@ -36,6 +36,15 @@ def test_all_queued_jobs_waiting_means_no_run_and_one_ready_means_a_run():
     assert [d["duty"] for d in one["due"]] == ["batch"] and one["batch_hold"] is None
 
 
+def test_a_queued_job_without_a_cv_keeps_the_batch_due_when_every_job_waits():
+    """2026-11-01: 94 queued jobs waited on the owner, many without a CV, and every hourly run stopped at
+    whats_due. Writing a CV needs nobody, so a job without one keeps the batch due."""
+    no_cv = schedule.due_now(_facts(waiting_on_you=2, cv_missing=1), NOW)
+    assert [d["duty"] for d in no_cv["due"]] == ["batch"] and no_cv["batch_hold"] is None
+    every_cv = schedule.due_now(_facts(waiting_on_you=2, cv_missing=0), NOW)
+    assert (every_cv["batch_hold"], every_cv["nothing_due"]) == ("waiting_on_you", True)
+
+
 async def _queued(client: AsyncClient, n: int) -> int:
     resp = await client.post("/api/jobs/bring", json={
         "title": f"Data Engineer {n}", "company": f"Northwind {n}", "location": "Remote", "queue": True,
@@ -72,9 +81,19 @@ async def test_asks_blocks_and_unseen_cvs_hold_the_batch_until_the_user_answers(
         assert stuck.status_code == 201, stuck.text
         saved = await client.post(f"/api/applications/{cv}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
         assert saved.status_code in (200, 201), saved.text
+        # 2026-11-01: the asked and the blocked job have no CV yet, so a run still has work: write them.
+        no_cv = await _due(client)
+        assert [d["duty"] for d in no_cv["due"]] == ["batch"] and no_cv["batch_hold"] is None
+        assert no_cv["waiting_on_you"] == 3
+        for app_id in (asked, blocked):
+            done = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
+            assert done.status_code in (200, 201), done.text
         held = await _due(client)
         assert (held["batch_hold"], held["waiting_on_you"], held["nothing_due"]) == ("waiting_on_you", 3, True)
+        stuck_free = await client.post(f"/api/applications/{blocked}/events", json={
+            "event_type": "unblocked", "payload": {"resolution": "user_did_it"}})
+        assert stuck_free.status_code == 201, stuck_free.text
         answered = await client.post(f"/api/asks/{ask.json()['id']}/answer", json={"answer": "One month"})
         assert answered.status_code == 200, answered.text
-        freed = await _due(client)
-        assert [d["duty"] for d in freed["due"]] == ["batch"] and freed["waiting_on_you"] == 2
+        still = await _due(client)
+        assert still["batch_hold"] == "waiting_on_you", "every job now has a CV the user has not seen"
