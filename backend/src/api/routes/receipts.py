@@ -21,6 +21,9 @@ from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.routes.applications import ProofOut, ReceiptAnswerOut, ReceiptFileOut
 from src.repositories.database import JobDatabase
+from src.services.applications import kit as kit_service
+from src.services.applications.authorship import actor_for
+from src.services.applications.spine import SpineError
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["receipts"])
@@ -205,6 +208,11 @@ async def create_receipt(
     )
     if application is None or app_row is None or await db.get_job_by_id(job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    # Owner rule 2026-10-31: an assistant is refused (409) while an item is open; the user's click is stamped.
+    try:
+        open_at_submit = await kit_service.enforce_applied_rule(db, user.id, int(application["id"]), actor_for(user))
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     # The ad "as it read" is the caller's own snapshot, never the catalog row.
     job = {
         "id": job_id, "title": app_row.get("job_title") or "", "company": app_row.get("job_company") or "",
@@ -239,6 +247,7 @@ async def create_receipt(
         await applications_spine.write_through_legacy_receipt(
             db, user_id=user.id, application_id=application["id"],
             receipt_id=receipt["id"], sent_at=receipt["sent_at"], note=body.note.strip(),
+            recorded_by=actor_for(user), open_at_submit=open_at_submit,
         )
 
     get_audit_logger().info(

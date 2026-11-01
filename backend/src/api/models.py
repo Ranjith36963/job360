@@ -563,6 +563,20 @@ class DoctorSilentBlock(BaseModel):
     truncated: bool = False
 
 
+class DoctorOpenItem(BaseModel):
+    application_id: int
+    codes: list[str]
+
+
+class DoctorSubmitRule(BaseModel):
+    """Owner rule 2026-10-31: no `applied` with an open item. What got past it (the user's own click) or
+    could (a held yes with an item open)."""
+
+    applied_with_open: list[DoctorOpenItem] = []
+    yes_with_open: list[DoctorOpenItem] = []
+    next_step: str = ""
+
+
 class DoctorResponse(BaseModel):
     """``GET /api/doctor`` - one read of "what state is this account in, and
     what should the assistant do next?". Every field is built defensively: a
@@ -589,6 +603,7 @@ class DoctorResponse(BaseModel):
     interviews: InterviewAgenda = InterviewAgenda()
     # The connector check (owner 2026-10-25): {reported, missing_essential, missing_recommended, failing}.
     connectors: dict[str, Any] = {}
+    submit_rule: DoctorSubmitRule = DoctorSubmitRule()
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

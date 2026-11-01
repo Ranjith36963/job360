@@ -868,6 +868,116 @@ async def gate_facts(
     )
 
 
+# ── The applied rule (owner, 2026-10-31) ─────────────────────────────────────
+
+# Plain-English words for each open item an `applied` is recorded against.
+OPEN_RULE_WORDS: dict[str, str] = {
+    "blocked": "a CAPTCHA, sign-in or other step is blocked",
+    "blocker_open": "a CAPTCHA, sign-in, upload or code ask is waiting on the user",
+    "question_open": "a question is waiting for the user's answer",
+    "answer_guessed": "an answer was guessed and the user has not verified it",
+    "answer_unapproved": "a written answer is not approved by the user",
+    "sensitive_unconfirmed": "a private or legal answer is not confirmed by the user",
+    "required_unanswered": "a required form question is unanswered",
+    "answer_blank": "a form field is still blank",
+    "answer_placeholder": "an answer is placeholder text",
+    "cv_not_approved": "the CV being sent is not approved by the user",
+}
+
+
+async def _cv_not_approved(
+    db: JobDatabase, user_id: str, application_id: int, cv_artifact_id: Optional[int], channel: str = "",
+) -> bool:
+    """The CV the receipt would freeze has neither a ``cv_seen`` nor a ``submit_approved`` matching its id and
+    text. Staleness and the approval TTL never count here (auto mode asks ``cv_not_seen`` first, so a seen
+    CV is the user's yes). No CV at all counts as not approved (owner 2026-11-01): an assistant may not record
+    it; the user marks it applied themselves."""
+    frozen = await spine.frozen_cv_id(db, user_id, application_id, cv_artifact_id, channel)
+    if frozen is None:
+        return True
+    art = await spine.get_artifact(db, user_id, application_id, frozen)
+    if art is None or art["kind"] != "cv":
+        return False  # the receipt route reports a bad id itself
+    sha = sha256_text(art["text"])
+    return not any(
+        cv_mark_matches(ev, frozen, sha)
+        for ev in await _events(db, user_id, application_id, ("cv_seen", "submit_approved"))
+    )
+
+
+async def open_rule_items(
+    db: JobDatabase, user_id: str, application_id: int, *, cv_artifact_id: Optional[int] = None,
+    app_row: Optional[dict[str, Any]] = None, channel: str = "",
+) -> list[str]:
+    """Codes of everything still open on this application that bars recording it ``applied`` (owner rule
+    2026-10-31). Reads the SAME facts ``check_submit`` reads (:func:`gate_facts`), so the two never drift.
+    Outreach is not here. ``[]`` = nothing open."""
+    row = app_row or await spine.get_owned_application(db, user_id, application_id)
+    if row is None:
+        return []
+    f = await gate_facts(db, user_id, row, email_verified=True)
+    codes = [
+        code for code, hit in (
+            ("blocked", f.blocked), ("blocker_open", any(k in settings_rules.BLOCKER_ASK_KINDS for k in f.open_asks)),
+            ("question_open", "question" in f.open_asks), ("answer_guessed", f.guessed_unverified),
+            ("answer_unapproved", f.written_unapproved), ("sensitive_unconfirmed", f.sensitive_unconfirmed),
+            ("required_unanswered", f.required_unanswered), ("answer_blank", bool(f.answer_blank)),
+            ("answer_placeholder", bool(f.answer_placeholder)),
+        ) if hit
+    ]
+    if await _cv_not_approved(db, user_id, application_id, cv_artifact_id, channel):
+        codes.append("cv_not_approved")
+    return codes
+
+
+async def _already_applied(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """A receipt exists, or an ``applied`` event that no later event corrects: the application is already
+    applied, so there is nothing left to gate (a replay, a confirmation). Status is never the test: an
+    assistant could first record ``replied`` to move it out of ``considering``."""
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
+        (application_id, user_id),
+    )
+    if await cur.fetchone() is not None:
+        return True
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.user_id = ? "
+        "AND e.event_type = 'applied' AND NOT EXISTS (SELECT 1 FROM application_events c "
+        "WHERE c.corrects_event_id = e.id AND c.user_id = e.user_id) LIMIT 1",
+        (application_id, user_id),
+    )
+    return await cur.fetchone() is not None
+
+
+async def enforce_applied_rule(
+    db: JobDatabase, user_id: str, application_id: int, actor: str, *, cv_artifact_id: Optional[int] = None,
+    channel: str = "",
+) -> list[str]:
+    """Run the applied rule for a receipt / `applied` event about to be written. An assistant (any non-web
+    actor) is REFUSED with 409 ``submit_rule_open`` naming what is open; the user's own web click is not:
+    the open codes come back to be stamped on the `applied` event (``open_at_submit``). ``[]`` when nothing
+    is open or the application already has a receipt / surviving ``applied`` event (a replay)."""
+    row = await spine.get_owned_application(db, user_id, application_id)
+    if row is None or await _already_applied(db, user_id, application_id):
+        return []
+    codes = await open_rule_items(
+        db, user_id, application_id, cv_artifact_id=cv_artifact_id, app_row=row, channel=channel
+    )
+    if not codes:
+        return []
+    base = {"user_id": safe_log_value(user_id), "application_id": application_id, "actor": safe_log_value(actor),
+            "codes": ",".join(codes)}
+    if actor == "web":
+        get_audit_logger().info("applied_with_open", extra={"event": "applied_with_open", **base})
+        return codes
+    get_audit_logger().warning("submit_rule_refused", extra={"event": "submit_rule_refused", **base, "status": 409})
+    words = "; ".join(f"{c} ({OPEN_RULE_WORDS[c]})" for c in codes)
+    msg = f"submit_rule_open: do not record this as applied while it is open: {words}. Clear them first."
+    if await submit_unconfirmed(db, user_id, application_id):
+        msg += " If the user already pressed Submit in the browser, ask them to press Mark Applied on Job360."
+    raise spine.SpineError(409, msg)
+
+
 async def _open_ask_kinds(db: JobDatabase, user_id: str, application_id: int) -> tuple[str, ...]:
     """Kinds of this application's open asks (one query; mirrors ``asks._job_has_open_ask``). Left out: the
     doctor's "keep this lesson?" ask (a question row keyed ``doctor_repeat_*``) and the proof ask
