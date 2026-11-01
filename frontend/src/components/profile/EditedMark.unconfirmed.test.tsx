@@ -21,7 +21,7 @@ describe("EditedMark unconfirmed", () => {
     const onKeep = vi.fn().mockResolvedValue(undefined);
     render(<EditedMark edit={edit()} onKeep={onKeep} />);
     expect(screen.getByTestId("unconfirmed-badge")).toBeInTheDocument();
-    expect(screen.getByTestId("keep").textContent).toBe("Confirm");
+    expect(screen.getByTestId("keep").textContent).toBe("OK");
     fireEvent.click(screen.getByTestId("keep"));
     await waitFor(() => expect(onKeep).toHaveBeenCalledWith("preferences.salary_min"));
   });
