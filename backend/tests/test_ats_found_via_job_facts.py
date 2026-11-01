@@ -553,6 +553,17 @@ async def test_mcp_tools_carry_the_new_params(authenticated_async_context):
             )
             assert edited["found_via"] == "email"
 
+            # Owner rule 2026-10-31: an assistant records applied only after the user approved the CV.
+            import hashlib
+
+            async with authenticated_async_context() as web:
+                approved = await web.post(
+                    f"/api/applications/{app_id}/events",
+                    json={"event_type": "submit_approved", "payload": {
+                        "artifact_id": saved["artifact_id"], "sha256": hashlib.sha256(b"cv").hexdigest(),
+                        "where": "web"}},
+                )
+                assert approved.status_code == 201, approved.text
             receipt = await mcp.call_tool("record_application", {"job_id": brought["job_id"], "channel": "pigeon"})
             assert not receipt.is_error, "an odd channel never costs the user their receipt"
 

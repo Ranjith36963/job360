@@ -1202,7 +1202,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         the named CV version (none named: the one Job360 uploaded or served, listed in `files`;
         else the newest, with a warning), the
         named cover letter and any answers/fields into an immutable receipt, and appends an `applied` event to
-        the application's history. Sends nothing anywhere. `channel` is where they
+        the application's history. Sends nothing anywhere.
+        Refused (409) while a CAPTCHA, question, unapproved CV or answer is open. `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
         "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
