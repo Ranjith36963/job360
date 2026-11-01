@@ -657,7 +657,7 @@ async def test_mcp_get_profile_lists_the_seven_paths_and_values(authenticated_as
         assert tool is not None
         mcp_server._current_user.set(mcp_server.CurrentUser(id=fixture_user_id, email="e2e@example.com"))
         try:
-            result = await tool.fn()
+            result = await tool.fn(view="full")
         finally:
             mcp_server._current_user.set(None)
     for path in SEVEN:
@@ -1312,13 +1312,13 @@ async def test_mcp_update_profile_agrees_with_the_route(authenticated_async_cont
             id=fixture_user_id, email="e2e@example.com", auth_via="token", actor_name="claude-code"
         ))
         try:
-            got = await tools.get_tool("get_profile").fn()
+            got = await tools.get_tool("get_profile").fn(view="full")
             assert got["profile_edit_id"] == (await _get(client))["profile_edit_id"] == 0
             reply = await tools.get_tool("update_profile").fn(
                 [{"path": DEALBREAKERS, "op": "append", "value": "be brief"}], expected_profile_version=0
             )
             assert reply["profile_edit_id"] == edits.current_edit_id(fixture_user_id) > 0
-            assert (await tools.get_tool("get_profile").fn())["fields"][DEALBREAKERS] == ["be brief"]
+            assert (await tools.get_tool("get_profile").fn(view="full"))["fields"][DEALBREAKERS] == ["be brief"]
             with pytest.raises(Exception) as info:
                 await tools.get_tool("update_profile").fn(
                     [{"path": DEALBREAKERS, "op": "append", "value": "lost"}], expected_profile_version=0

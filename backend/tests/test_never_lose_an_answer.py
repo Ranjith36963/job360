@@ -91,7 +91,7 @@ def _assert_self_correcting(text: str, bad_path: str, all_paths: list[str]) -> N
 
 
 async def _fields(get_profile) -> dict[str, Any]:
-    return (await get_profile())["fields"]
+    return (await get_profile(view="full"))["fields"]
 
 
 # ── (a) accepted, the fact is kept ───────────────────────────────────────────
@@ -203,7 +203,7 @@ async def test_unknown_contact_key_is_refused_never_dropped(tools):
     text = await _refused(update_profile, _e("user_info.contact", {"fax": "123"}))
     _assert_self_correcting(text, "user_info.contact", ["user_info.contact"])
     assert "fax" in text and "123" not in text.split("Example:")[0].replace("fax", "")
-    assert "user_info.contact" not in (await get_profile())["agent_edits"].__repr__()
+    assert "user_info.contact" not in (await get_profile(view="full"))["agent_edits"].__repr__()
 
 
 @pytest.mark.asyncio
@@ -369,7 +369,7 @@ async def test_save_fit_pydantic_failure_is_audited(tools, audit_capture):
 @pytest.mark.asyncio
 async def test_get_profile_has_shapes_and_raw_only_when_asked(tools):
     _, get_profile, _ = tools
-    default = await get_profile()
+    default = await get_profile(view="full")
     assert default["raw_available"] is True and "raw" not in default
     assert "user_info.right_to_work" in default["shapes"]
     assert default["shapes"]["user_info.right_to_work"]["example"]["countries"]

@@ -156,7 +156,7 @@ async def _four_surfaces(authenticated_async_context, user_id: str, profile: Any
     token = await _mint_token(authenticated_async_context)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
-            agent = _payload(await mcp.call_tool("get_profile", {}))
+            agent = _payload(await mcp.call_tool("get_profile", {"view": "full"}))
     return {"profile": prof.json(), "alignment": align.json(), "agent": agent}
 
 

@@ -567,7 +567,7 @@ async def test_mcp_get_profile_no_profile_returns_next_step(authenticated_async_
         tool = mcp_server.build_server()._tool_manager.get_tool("get_profile")
         mcp_server._current_user.set(mcp_server.CurrentUser(id=fixture_user_id, email="e2e@example.com"))
         try:
-            result = await tool.fn()
+            result = await tool.fn(view="full")  # setup reads the full view (S4)
         finally:
             mcp_server._current_user.set(None)
     assert result["profile_exists"] is False

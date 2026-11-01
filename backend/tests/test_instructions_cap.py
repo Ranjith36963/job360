@@ -111,7 +111,7 @@ async def test_mcp_update_profile_gets_the_same_refusal(authenticated_async_cont
                 assert "at most 20 instructions" in result.content[0].text
             after = json.loads((await mcp.call_tool("get_profile", {})).content[0].text)
             assert after["settings"]["waiting"] == []
-            assert after["assistant_notes"] == _lines(20)
+            assert after["instructions"] == _lines(20) and "assistant_notes" not in after
 
 
 def test_validate_edit_counts_only_unprefixed_lines():

@@ -1909,7 +1909,7 @@ async def test_approved_text_keeps_the_newest_25_and_counts_the_rest(authenticat
         keys = [i["key"] for i in kit["answers"]["approved_text"]]
         assert len(keys) == 25 and kit["answers_omitted"] == 5
         assert set(keys) == {f"Question {i:02d}?" for i in range(5, 30)}, "the newest 25 whole items"
-        assert any("get_profile fields['user_info.answers']" in line for line in kit["instructions"])
+        assert any("get_profile(view=\"full\") fields['user_info.answers']" in line for line in kit["instructions"])
         # absent when nothing was dropped
         await _patch(client, _e("user_info.answers", records[:3]))
         small = (await _kit(client, app_id)).json()
