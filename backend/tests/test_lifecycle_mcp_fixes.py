@@ -63,6 +63,22 @@ async def _setup(client: AsyncClient):
     return a, b, await _mint_token(client)
 
 
+
+async def _user_approves_cv(client, app_id: int, text: str = "Ada Lovelace. Python engineer.") -> dict:
+    """Owner rule 2026-10-31: an assistant records applied only after the USER approved the CV (web)."""
+    import hashlib
+
+    saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": text})
+    assert saved.status_code == 201, saved.text
+    cv = saved.json()
+    approved = await client.post(
+        f"/api/applications/{app_id}/events",
+        json={"event_type": "submit_approved", "payload": {
+            "artifact_id": cv["artifact_id"], "sha256": hashlib.sha256(text.encode()).hexdigest(), "where": "web"}},
+    )
+    assert approved.status_code == 201, approved.text
+    return cv
+
 # ── 1. record_application takes application_id ──────────────────────────────
 
 
@@ -74,6 +90,7 @@ async def test_record_application_by_application_id_and_absolute_url(authenticat
 
     async with authenticated_async_context() as client:
         a, _b, token = await _setup(client)
+        await _user_approves_cv(client, a["application_id"])
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             body = _ok(await mcp.call_tool("record_application", {"application_id": a["application_id"]}))
@@ -88,6 +105,7 @@ async def test_record_application_job_id_back_compat(authenticated_async_context
 
     async with authenticated_async_context() as client:
         a, _b, token = await _setup(client)
+        await _user_approves_cv(client, a["application_id"])
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             body = _ok(await mcp.call_tool("record_application", {"job_id": a["job_id"]}))

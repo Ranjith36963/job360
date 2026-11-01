@@ -198,6 +198,22 @@ async def _mcp(authenticated_async_context, fixture_user_id):
     return Client(streamable_http_client("http://test/api/mcp", http_client=http))
 
 
+
+async def _user_approves_cv(client, app_id: int, text: str = "Ada Lovelace. Python engineer.") -> dict:
+    """Owner rule 2026-10-31: an assistant records applied only after the USER approved the CV (web)."""
+    import hashlib
+
+    saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": text})
+    assert saved.status_code == 201, saved.text
+    cv = saved.json()
+    approved = await client.post(
+        f"/api/applications/{app_id}/events",
+        json={"event_type": "submit_approved", "payload": {
+            "artifact_id": cv["artifact_id"], "sha256": hashlib.sha256(text.encode()).hexdigest(), "where": "web"}},
+    )
+    assert approved.status_code == 201, approved.text
+    return cv
+
 @pytest.mark.asyncio
 async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
     authenticated_async_context, fixture_user_id
@@ -233,6 +249,8 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
                 "apply_url": "https://jobs.lever.co/quantco-/9", "description": "RAG", "country": "GB",
                 "remote": False})).content[0].text)
             job_id = job.get("job_id")
+            async with authenticated_async_context() as web:
+                await _user_approves_cv(web, job["application_id"])
             rec = json.loads((await session.call_tool(
                 "record_application", {"job_id": job_id, "channel": "company_site"})).content[0].text)
             assert rec["hint"] == DAILY_CHECK_HINT
@@ -241,6 +259,8 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
                 "title": "ML Eng", "company": "Other", "location": "London",
                 "apply_url": "https://jobs.lever.co/other/2", "description": "RAG", "country": "GB",
                 "remote": False})).content[0].text)
+            async with authenticated_async_context() as web:
+                await _user_approves_cv(web, job2["application_id"])
             rec2 = json.loads((await session.call_tool(
                 "record_application", {"job_id": job2["job_id"], "channel": "company_site"})).content[0].text)
             assert "hint" not in rec2
