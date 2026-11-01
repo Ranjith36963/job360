@@ -268,3 +268,34 @@ describe("Suggested salary from Memory", () => {
     expect(screen.getByTestId("ready-answer-input-130-0")).toHaveValue("");
   });
 });
+
+describe("answer order and flags (owner, less verbose)", () => {
+  it("rows that need the user's answer come first, then Check rows, then OK rows, stable inside each", () => {
+    // card(80): 0 memory by assistant (OK), 1 profile (OK), 2 written (Check), 3 guessed (Check); add a blank (Needs you).
+    const c = card(80);
+    c.answers.push(answer({ question: "Notice period", answer: "", source: "none", key: null, saved_by: null, saved_at: null }));
+    render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
+    const ids = screen.getAllByTestId(/^ready-answer-\d+-\d+$/).map((el) => el.getAttribute("data-testid"));
+    const status = screen.getAllByTestId(/^ready-answer-status-/).map((el) => el.textContent);
+    expect(ids).toEqual(["ready-answer-80-4", "ready-answer-80-2", "ready-answer-80-3", "ready-answer-80-0", "ready-answer-80-1"]);
+    expect(status[0]).toContain("Needs you");
+    expect(status[1]).toContain("Check");
+    expect(status[2]).toContain("Check");
+    expect(status[3]).toContain("OK");
+  });
+
+  it("flags about a single answer row make no ready-flags box; a card-level flag shows as one muted line", () => {
+    const rowFlags = [
+      { code: "guessed", text: "An answer was guessed: Visa?", key: null },
+      { code: "sensitive", text: "A private question needs your OK: Salary", key: "salary.expected" },
+    ];
+    const { rerender } = render(<ReadyCard card={card(81, { flags: rowFlags })} paused={false} onChanged={() => {}} />);
+    expect(screen.queryByTestId("ready-flags-81")).toBeNull();
+    const missing = { code: "missing", text: "The job's country is not set \u2014 answer it first", key: "job_country" };
+    rerender(<ReadyCard card={card(81, { flags: [...rowFlags, missing] })} paused={false} onChanged={() => {}} />);
+    const line = screen.getByTestId("ready-flags-81");
+    expect(line).toHaveTextContent("The job's country is not set");
+    expect(line).not.toHaveTextContent("An answer was guessed");
+    expect(line.className).not.toContain("warning");
+  });
+});
