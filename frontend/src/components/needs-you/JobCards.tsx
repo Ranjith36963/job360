@@ -62,7 +62,7 @@ export async function loadJobCard(detail: ApplicationDetail): Promise<JobCardDat
   const asks = groupAsks(open).byJob.get(detail.id) ?? [];
   const cvs = cvMap(await cvRowsToCheck());
   const card = buildCard(detail, asks, cvs.get(detail.id) ?? null);
-  return card.asks.length > 0 || card.people.length > 0 ? card : null;
+  return card.asks.length > 0 || card.people.length > 0 || card.confirmSent ? card : null;
 }
 
 /** At most `max` thunks run at once; the rest wait their turn. */

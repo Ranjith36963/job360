@@ -12,6 +12,8 @@ const markOutreachSkipped = vi.fn();
 const answerAskQuestions = vi.fn();
 const rememberAnswers = vi.fn();
 const saveAskRowAnswers = vi.fn();
+const recordApplicationReceipt = vi.fn();
+const resolveSubmit = vi.fn();
 vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
@@ -20,6 +22,8 @@ vi.mock("@/lib/api", () => ({
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
   rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
   saveAskRowAnswers: (...a: unknown[]) => saveAskRowAnswers(...a),
+  recordApplicationReceipt: (...a: unknown[]) => recordApplicationReceipt(...a),
+  resolveSubmit: (...a: unknown[]) => resolveSubmit(...a),
   downloadApplicationArtifact: vi.fn(),
   updateContact: vi.fn(),
 }));
@@ -46,6 +50,8 @@ function card(asks: Ask[], over: Partial<JobCardData> = {}): JobCardData {
 
 const onChanged = vi.fn(async () => {});
 beforeEach(() => {
+  recordApplicationReceipt.mockReset().mockResolvedValue({});
+  resolveSubmit.mockReset().mockResolvedValue({});
   answerAsk.mockReset().mockResolvedValue({});
   markCvSeen.mockReset().mockResolvedValue({});
   markOutreachSent.mockReset().mockResolvedValue({});
@@ -552,5 +558,25 @@ describe("JobCard saves each answer row on its own", () => {
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`));
     await waitFor(() => expect(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`)).toHaveTextContent("OK"));
     expect(screen.getByTestId(`q-state-${a.id}-equality.ethnicity`)).toHaveTextContent("Needs you");
+  });
+});
+
+describe("employer confirmed — did it go out?", () => {
+  it("shows the email and Mark Applied records the receipt; It was not sent resolves", async () => {
+    const withConfirm = card([], { confirmSent: { subject: "We received your application", receivedAt: "2026-11-01T09:30:00+00:00" } });
+    render(<JobCard card={withConfirm} onChanged={onChanged} showHeader={false} />);
+    const block = screen.getByTestId("confirm-sent-7");
+    expect(within(block).getByText("Employer confirmed — did it go out?")).toBeTruthy();
+    expect(screen.getByTestId("confirm-sent-email-7").textContent).toContain("We received your application");
+    fireEvent.click(screen.getByTestId("confirm-sent-applied-7"));
+    await waitFor(() => expect(recordApplicationReceipt).toHaveBeenCalledWith(7, {}));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("confirm-sent-not-sent-7"));
+    await waitFor(() => expect(resolveSubmit).toHaveBeenCalledWith(7));
+  });
+
+  it("is absent without a confirmation", () => {
+    render(<JobCard card={card([])} onChanged={onChanged} showHeader={false} />);
+    expect(screen.queryByTestId("confirm-sent-7")).toBeNull();
   });
 });

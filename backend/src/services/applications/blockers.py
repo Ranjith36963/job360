@@ -8,6 +8,8 @@ gate. Always scoped by ``user_id``: an id that is not the caller's is ignored (r
 Owner answers 2026-10-31 applied here:
 * a note for a job below the user's score line, or for a dead job (rejected / withdrawn / posting closed), is
   never a blocker; a note waits until the application is sent (status past ``considering``);
+* ``confirm_sent`` (the employer's "we received it" email is stored as proof while the job is not applied; the
+  user clicks Mark Applied or It was not sent) comes first of all;
 * order: posting_closed, site_step, approve_cv, answers, send_yes, apply_by_hand, notes on you, notes on your PC,
   then assistant, then employer; ties oldest first;
 * a CAPTCHA / sign-in / code / account / upload / safety stop is ALWAYS the user's (actor ``you``), whichever
@@ -53,8 +55,8 @@ class Blocker(TypedDict):
 _DEAD = ("rejected", "withdrawn")
 # kind order (lower = sooner); notes on the user's PC come after the ones on the user, then the others.
 _RANK = {
-    "posting_closed": 0, "site_step": 1, "approve_cv": 2, "answers": 3, "send_yes": 4, "apply_by_hand": 5,
-    "outreach_send": 6, "assistant_step": 8, "queued": 9, "follow_up": 10, "waiting_employer": 11,
+    "confirm_sent": -1, "posting_closed": 0, "site_step": 1, "approve_cv": 2, "answers": 3, "send_yes": 4,
+    "apply_by_hand": 5, "outreach_send": 6, "assistant_step": 8, "queued": 9, "follow_up": 10, "waiting_employer": 11,
 }
 _SITE_WORDS = {
     "captcha": "solve the CAPTCHA", "bot_check": "solve the CAPTCHA", "login_needed": "sign in",
@@ -254,8 +256,13 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
     notes = await _outreach(db, user_id, sent_ids, now)
 
+    confirmed = await kit.pending_confirmations(db, user_id, ids)
     for app_id in ids:
         a, s, out = apps[app_id], state[app_id], result[app_id]
+        if (conf := confirmed.get(app_id)) is not None and a["status"] not in _DEAD:
+            conf_ref = {"event_id": conf["id"], "subject": conf["source_subject"] or None,
+                   "received_at": conf["source_received_at"] or conf["recorded_at"]}
+            out.append(_b("confirm_sent", "you", "employer confirmed — did it go out?", conf["recorded_at"], conf_ref))
         considering = a["status"] == "considering"
         reason, block_ev = s["reason"], s["block_ev"]
         block_since = block_ev["recorded_at"] if block_ev else a["updated_at"]

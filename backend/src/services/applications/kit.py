@@ -949,6 +949,54 @@ async def _already_applied(db: JobDatabase, user_id: str, application_id: int) -
     return await cur.fetchone() is not None
 
 
+CONFIRMATION_NOTE_PREFIX = "submission confirmed"
+
+
+async def pending_confirmations(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """``{application_id: newest employer-confirmation proof note}`` for applications NOT yet applied: a ``note``
+    whose detail starts "Submission confirmed" with an email source, that no correction supersedes, with no
+    receipt / surviving ``applied`` and no later web ``submit_resolved`` (the user's "It was not sent").
+    The assistant stores it as proof only; the user's click turns it into ``applied`` or dismisses it.
+    Three queries whatever the number of ids."""
+    ids = sorted({int(i) for i in application_ids})
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        "SELECT e.id, e.application_id, e.recorded_at, e.source_subject, e.source_sender, e.source_received_at "  # noqa: S608
+        f"FROM application_events e WHERE e.user_id = ? AND e.application_id IN ({marks}) AND e.event_type = 'note' "
+        "AND e.source_kind = 'email' AND LOWER(TRIM(e.detail)) LIKE ? "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id "
+        "AND c.user_id = e.user_id) ORDER BY e.id ASC",
+        (user_id, *ids, CONFIRMATION_NOTE_PREFIX + "%"),
+    )
+    notes: dict[int, dict[str, Any]] = {}
+    for r in await cur.fetchall():
+        notes[int(r["application_id"])] = dict(r)  # ascending id: the newest wins
+    if not notes:
+        return {}
+    held = sorted(notes)
+    marks = ",".join("?" for _ in held)
+    cur = await db._db.execute(
+        "SELECT DISTINCT application_id FROM application_receipts "  # noqa: S608
+        f"WHERE user_id = ? AND application_id IN ({marks})",
+        (user_id, *held),
+    )
+    done = {int(r[0]) for r in await cur.fetchall()}
+    cur = await db._db.execute(
+        "SELECT e.application_id, e.event_type, e.id FROM application_events e "  # noqa: S608
+        f"WHERE e.user_id = ? AND e.application_id IN ({marks}) AND ("
+        "(e.event_type = 'applied' AND NOT EXISTS (SELECT 1 FROM application_events c "
+        "WHERE c.corrects_event_id = e.id AND c.user_id = e.user_id)) OR e.event_type = 'submit_resolved')",
+        (user_id, *held),
+    )
+    for r in await cur.fetchall():
+        app_id = int(r["application_id"])
+        if r["event_type"] == "applied" or int(r["id"]) > int(notes[app_id]["id"]):
+            done.add(app_id)
+    return {i: n for i, n in notes.items() if i not in done}
+
+
 async def enforce_applied_rule(
     db: JobDatabase, user_id: str, application_id: int, actor: str, *, cv_artifact_id: Optional[int] = None,
     channel: str = "",
@@ -973,6 +1021,8 @@ async def enforce_applied_rule(
     get_audit_logger().warning("submit_rule_refused", extra={"event": "submit_rule_refused", **base, "status": 409})
     words = "; ".join(f"{c} ({OPEN_RULE_WORDS[c]})" for c in codes)
     msg = f"submit_rule_open: do not record this as applied while it is open: {words}. Clear them first."
+    msg += (" If the employer emailed a confirmation, record it as proof (note with the email source) and the "
+            "user confirms on Needs you.")
     if await submit_unconfirmed(db, user_id, application_id):
         msg += " If the user already pressed Submit in the browser, ask them to press Mark Applied on Job360."
     raise spine.SpineError(409, msg)
@@ -1694,7 +1744,9 @@ async def _check_kit_event(
         if actor != "web" or payload.get("outcome") != "not_sent":
             _refuse(user, event_type, 403)
             raise SpineError(403, "this needs your click on the Job360 website")
-        if not await submit_unconfirmed(db, user.id, application_id):
+        if not await submit_unconfirmed(db, user.id, application_id) and application_id not in (
+            await pending_confirmations(db, user.id, [application_id])
+        ):
             raise SpineError(409, "no unconfirmed submit to resolve")
         return {"outcome": "not_sent", "where": "web", "by": actor}
     if event_type == "form_filled":

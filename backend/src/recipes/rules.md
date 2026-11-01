@@ -721,6 +721,7 @@ application); never paste it anywhere else. Never invent proof: no page text
 and no email means "claimed, unverified". Only the user deletes a screenshot,
 on the website.
 A confirmation email for an application already applied: record_event `applied` with the email `source`; Job360 stores it as the submission confirmation (proof), never a second applied.
+A confirmation email while `record_application` is refused (`submit_rule_open`): record_event `note`, detail "Submission confirmed: <subject>", with the email `source`. It is proof only; Needs you asks the user "Employer confirmed - did it go out?". Never write `applied` yourself, never withdraw asks to get round the rule.
 
 ## Profile
 
