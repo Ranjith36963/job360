@@ -122,6 +122,9 @@ class DueFacts:
     reach_ids: list[int] = field(default_factory=list)
     # Queued jobs that wait on the user (an open ask, an open block, a CV not seen yet; owner 2026-10-25).
     waiting_on_you: int = 0
+    # Queued jobs still missing their tailored CV (owner 2026-11-01): writing one needs nobody, so they keep
+    # the batch due even when every queued job also waits on the user.
+    cv_missing: int = 0
     # Failed runs in a row per duty (0 or missing = the last run was done or partial).
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
@@ -146,7 +149,9 @@ def batch_hold(f: DueFacts) -> Optional[str]:
         return "not_allowed"
     if f.queued <= 0:
         return "queue_empty"
-    if f.waiting_on_you >= f.queued:  # every queued job waits on the user: a run could do nothing
+    # Every queued job waits on the user and every one has its CV: a run could do nothing (2026-11-01: a
+    # missing CV is work a run can do, so a row without one keeps the batch due).
+    if f.waiting_on_you >= f.queued and f.cv_missing <= 0:
         return "waiting_on_you"
     if f.daily_left is not None and f.daily_left <= 0:
         return "daily_cap_reached"
@@ -456,6 +461,13 @@ async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
     return len(waiting)
 
 
+async def _cv_missing(db: JobDatabase, user_id: str) -> int:
+    """How many queued jobs still have no tailored CV: the same rows mark_done's 409 names (owner 2026-11-01)."""
+    from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
+
+    return len(await queue_preflight.cv_rows(db, user_id))
+
+
 async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
     """Which of ``ids`` are this user's applications (rule #12)."""
     if not ids:
@@ -539,6 +551,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         apply_on_own=apply_on_own,
         queued=len(queue_ids),
         waiting_on_you=await _waiting_on_you(db, user_id, queue_ids) if apply_on_own else 0,
+        cv_missing=await _cv_missing(db, user_id) if apply_on_own and queue_ids else 0,
         daily_left=rules.daily_left(cfg, counts),
         weekly_left=weekly_left,
         inside_hours=inside,
