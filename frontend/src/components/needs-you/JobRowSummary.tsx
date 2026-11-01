@@ -33,12 +33,12 @@ export function JobRowHeader() {
 
 const TONE: Record<string, string> = {
   "Form open now": "bg-warning-soft text-warning",
-  "Ready to send": "bg-brand-soft text-brand",
+  "Send": "bg-brand-soft text-brand",
 };
 
-/** What is inside the card, in plain words: "Ready to send · Approve CV · Sign in · Check 2 answers". */
+/** What is inside the card, in plain words: "Send · Approve CV · Sign in · Check 2 answers". */
 export function whatWaits(h: JobHeader, card: JobCardData | null): string {
-  const what = [h.ready && "Ready to send", h.cv && "Approve CV",
+  const what = [h.ready && "Send", h.cv && "Approve CV",
     (h.asks.length > 0 || (!h.ready && !h.cv)) && waitSummary(h.asks, card ? card.people.length : undefined)];
   const held = heldText(h.ready?.held_seconds ?? Math.max(0, ...h.asks.map((a) => a.held_seconds ?? 0)));
   // The chip already names the group: "Ready to send" is not said twice.

@@ -127,7 +127,7 @@ describe("whoLabel", () => {
 describe("askerName", () => {
   it("never shows the raw author id on 'asked by'", () => {
     expect(askerName("agent:Claude")).toBe("Claude");
-    expect(askerName("token:claude-code")).toBe("claude-code");
+    expect(askerName("token:claude-code")).toBe("Claude-code");
     expect(askerName("web")).toBe("you");
     expect(askerName(null)).toBe("your assistant");
   });

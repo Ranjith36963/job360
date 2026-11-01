@@ -10,7 +10,7 @@ describe("morning-check words", () => {
     expect(scoreLineText(null)).toBe("Score line not set");
     expect(scoreLineText(80)).toBe("Score line 80");
     expect(lineSwitchText("auto", "ask")).toBe("Above: apply on its own · Below: ask me");
-    expect(SUBMIT_MODE_LABEL).toEqual({ confirm: "Confirm before sending", auto_when_sure: "Send on its own when sure" });
+    expect(SUBMIT_MODE_LABEL).toEqual({ confirm: "Ask before sending", auto_when_sure: "Send on its own when sure" });
   });
 
   it("quota, since and paused-by", () => {

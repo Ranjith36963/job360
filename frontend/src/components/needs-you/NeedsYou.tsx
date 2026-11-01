@@ -110,7 +110,7 @@ export function AskCard({
         <p data-testid="ask-finish-done" className="text-xs text-muted-foreground">
           Did it go through?{" "}
           <Link href={`/applications/${ask.application_id}`} className="underline underline-offset-2">
-            Press I submitted it on the application
+            Press I sent it on the application
           </Link>
           , or tell your assistant.
         </p>
@@ -132,7 +132,7 @@ export function AskCard({
           {ask.relayed_from_chat &&
             (ask.confirmed_at ? (
               <p className="text-xs font-medium" data-testid="ask-confirmed">
-                You confirmed
+                You said OK
               </p>
             ) : (
               <div>
@@ -140,10 +140,10 @@ export function AskCard({
                   type="button"
                   data-testid="confirm-relayed"
                   disabled={busy}
-                  onClick={() => void run(() => confirmAsk(ask.id), "Could not confirm this answer.")}
+                  onClick={() => void run(() => confirmAsk(ask.id), "Could not save your OK.")}
                   className={confirmBtn}
                 >
-                  {busy ? "Confirming…" : "Confirm"}
+                  {busy ? "Saving…" : "OK"}
                 </button>
               </div>
             ))}
@@ -189,7 +189,7 @@ export function AskCard({
                 }
                 className={confirmBtn}
               >
-                {busy ? "Saving…" : "Confirm"}
+                {busy ? "Saving…" : "Yes, save answer"}
               </button>
               <button
                 type="button"
@@ -232,7 +232,7 @@ export function AskCard({
       {mode === "open" &&
         (pending === "withdraw" ? (
           <div className={confirmBox}>
-            <span>Withdraw this question? Your assistant will stop waiting on it.</span>
+            <span>Withdraw this question? Your assistant stops waiting.</span>
             <button
               type="button"
               data-testid="ask-withdraw-confirm"
@@ -242,7 +242,7 @@ export function AskCard({
               }
               className={confirmBtn}
             >
-              {busy ? "Withdrawing…" : "Confirm"}
+              {busy ? "Withdrawing…" : "Yes, withdraw it"}
             </button>
             <button
               type="button"
@@ -483,7 +483,7 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
       </div>
       {/* One card per job (owner 2026-10-26): its ready form, CV, questions and people, most urgent first. */}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
-        <h2 id="open-asks" className="sr-only">Waiting for you</h2>
+        <h2 id="open-asks" className="sr-only">For you</h2>
         {active === "all" && jobs.settled && jobs.total === 0 && !jobs.connections && general.length === 0 && waiting.length > 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}

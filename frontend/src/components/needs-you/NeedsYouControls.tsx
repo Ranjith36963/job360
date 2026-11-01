@@ -43,7 +43,7 @@ function Gauges({ tiers, oldest }: { tiers: number[]; oldest: string }) {
           {g.name} <span className="font-mono font-medium text-foreground">{g.n}</span>
         </span>
       ))}
-      {age && <span>Oldest waiting <span className="font-mono font-medium text-foreground">{age}</span></span>}
+      {age && <span>Oldest <span className="font-mono font-medium text-foreground">{age}</span></span>}
     </p>
   );
 }
@@ -113,7 +113,7 @@ export function NeedsYouControls({ count, settled, show, onShow, sort, onSort, g
             <button type="button" className={linkBtn} data-testid="fold-all" onClick={() => onFoldAll(false)}>Fold all</button>
           </span>
         )}
-        <p className="text-xs text-muted-foreground" data-testid="needs-you-sort-line">{line}</p>
+        {line && <p className="text-xs text-muted-foreground" data-testid="needs-you-sort-line">{line}</p>}
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ export const LINE_SWITCHES: { value: "ask" | "auto"; label: string }[] = [
   { value: "auto", label: "Apply on its own" },
 ];
 export const SUBMIT_MODES: { value: string; sub: string }[] = [
-  { value: "confirm", sub: "It stops at Submit and shows you Ready to send." },
+  { value: "confirm", sub: "It stops before Submit. You press Send." },
   {
     value: "auto_when_sure",
     sub: "It clicks Submit only for a CV you have seen, after one practice run. Indeed and LinkedIn still ask.",

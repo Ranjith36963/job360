@@ -14,7 +14,7 @@ export const LINE_SWITCH_LABEL: Record<string, string> = {
   skip: "Drop it",
 };
 export const SUBMIT_MODE_LABEL: Record<string, string> = {
-  confirm: "Confirm before sending",
+  confirm: "Ask before sending",
   auto_when_sure: "Send on its own when sure",
 };
 
