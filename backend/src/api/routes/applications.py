@@ -3677,6 +3677,9 @@ async def record_user_submit(
             if block is None and not seen_on:
                 raise _submitted_refused(user, application_id, 409, "not_blocked")
             now = datetime.now(timezone.utc).isoformat()
+            # Owner rule 2026-10-31: the user's own click is never refused, but what was open is stamped
+            # (read before the block is cleared: the block is one of the items).
+            open_at_submit = await kit_service.enforce_applied_rule(db, user.id, application_id, "web")
             if block is not None:
                 stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
                 await blocked_service.record(db, user, application_id, "unblocked", stored, occurred_at=now)
@@ -3692,7 +3695,7 @@ async def record_user_submit(
             )
             receipt = await spine.record_receipt(
                 db, user_id=user.id, application_id=application_id, recorded_by="web", channel=channel,
-                note=note, confirmation=confirmation, applied_at=now,
+                note=note, confirmation=confirmation, applied_at=now, open_at_submit=open_at_submit,
             )
             # A CAPTCHA ask that superseded the block's own (ask_user, 2026-10-26 app 138) stood for this submit too.
             cur = await db._db.execute(
@@ -3975,6 +3978,12 @@ async def _record_event(
         # patch here (coordinator review, 2026-09-25).
         # G338: `submit_attempted` is a claim - the row lock, the 409 checks and the append are
         # one transaction, so of two sessions that both passed check_submit only one may click.
+        if body.event_type == "applied":
+            # Owner rule 2026-10-31: an assistant cannot record applied with items open (409); the user's
+            # own click is stamped with what was open.
+            open_at_submit = await kit_service.enforce_applied_rule(db, user.id, application_id, actor_for(user))
+            if open_at_submit:
+                payload = {**(payload or {}), "open_at_submit": open_at_submit}
         claim: contextlib.AbstractAsyncContextManager[Any] = (
             kit_service.submit_claim(db, user, application_id)
             if body.event_type == "submit_attempted" else contextlib.nullcontext()
@@ -4197,8 +4206,13 @@ async def record_application_receipt(
         applied_at = spine.parse_occurred_at(body.applied_at, field="applied_at") if body.applied_at else None
         if body.request_id is not None:
             idempotency.check_key(body.request_id)
+        open_at_submit = await kit_service.enforce_applied_rule(
+            db, user.id, application_id, actor_for(user), cv_artifact_id=body.cv_artifact_id,
+            channel=body.channel,
+        )
         return await spine.record_receipt(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
+            open_at_submit=open_at_submit,
             channel=body.channel, note=body.note, confirmation=body.confirmation,
             answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,

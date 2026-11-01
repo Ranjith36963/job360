@@ -134,7 +134,7 @@ describe("NeedsYou", () => {
     fireEvent.click(button);
     fireEvent.click(await screen.findByTestId("finish-view"));
     expect(await screen.findByTestId("ask-finish-done")).toHaveTextContent("Did it go through?");
-    expect(screen.getByRole("link", { name: /I submitted it/ })).toHaveAttribute("href", "/applications/7");
+    expect(screen.getByRole("link", { name: /I sent it/ })).toHaveAttribute("href", "/applications/7");
   });
 
   it("renders the question as literal text, never HTML", async () => {
@@ -210,7 +210,7 @@ describe("NeedsYou", () => {
     expect(screen.getAllByTestId("confirm-relayed")).toHaveLength(1); // not on the assistant-only answer
     fireEvent.click(btn);
     await waitFor(() => expect(confirmAsk).toHaveBeenCalledWith(4));
-    expect(await screen.findByTestId("ask-confirmed")).toHaveTextContent("You confirmed");
+    expect(await screen.findByTestId("ask-confirmed")).toHaveTextContent("You said OK");
     expect(screen.queryByTestId("confirm-relayed")).toBeNull();
   });
 
@@ -259,7 +259,7 @@ describe("NeedsYou", () => {
     // Both sit in the ONE Other list (the request as a link to Permissions) first, after the job list.
     const ok = await screen.findByTestId("other-row-setting-link");
     const other = await screen.findByTestId("other-row-question-1");
-    const jobs = screen.getByText("Waiting for you");
+    const jobs = screen.getByText("For you");
     expect(screen.getByTestId("other-count")).toHaveTextContent("Other · 2");
     expect(jobs.compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(ok.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -423,8 +423,7 @@ describe("NeedsYou", () => {
     const { unmount } = render(<NeedsYou />);
     const menu = await screen.findByTestId("needs-you-sort");
     expect([...(menu as HTMLSelectElement).options].map((o) => o.text)).toEqual(["Most urgent", "Newest first", "Oldest first"]);
-    expect(screen.getByTestId("needs-you-sort-line")).toHaveTextContent(
-      "Forms open now, then ready to send, then waiting on your answer, then quick checks.");
+    expect(screen.queryByTestId("needs-you-sort-line")).toBeNull();
     fireEvent.change(menu, { target: { value: "oldest" } });
     expect(window.localStorage.getItem("needs-you-sort")).toBe("oldest");
     unmount();
@@ -468,7 +467,7 @@ describe("NeedsYou", () => {
       expect(screen.queryByTestId("own-browser-queue")).toBeNull();
       expect(screen.queryByText("Run my own-browser tasks now")).toBeNull();
       expect(requestJson).not.toHaveBeenCalledWith("/api/own-browser/queue", "GET");
-      expect(screen.getByText("Waiting for you")).toHaveClass("sr-only");
+      expect(screen.getByText("For you")).toHaveClass("sr-only");
     });
 
     it("Expand all unfolds every job row and Fold all folds them again", async () => {
@@ -487,7 +486,7 @@ describe("NeedsYou", () => {
       withJob();
       render(<NeedsYou />);
       const gauges = await screen.findByTestId("needs-you-gauges");
-      expect(gauges).toHaveTextContent(/Oldest waiting \d+ (d|mo)/);
+      expect(gauges).toHaveTextContent(/Oldest \d+ (d|mo)/);
       expect(gauges.textContent).not.toMatch(/APP-/);
     });
   });

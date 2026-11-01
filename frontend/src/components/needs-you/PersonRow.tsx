@@ -41,22 +41,22 @@ function sendStatus(
   if (kind === "own_browser" && reason === LINKEDIN_OWN_BROWSER_REASON) {
     return {
       state: "waiting-own-browser",
-      text: "Waiting for your own browser. It goes out the next time your assistant runs on your PC.",
+      text: "Goes out next time your assistant runs on your PC.",
     };
   }
   if (kind === "own_browser") {
     return {
       state: "needs-own-browser",
-      text: "Needs your own browser. Job360's browser couldn't send this one (see why below). Ask your assistant to send it from your own browser \u2014 you stay signed in to LinkedIn there.",
+      text: "Your PC: needs your own browser.",
     };
   }
   if (kind === "human") {
-    return { state: "needs-you", text: "Needs you. Open the profile and send it yourself, then press I sent it." };
+    return { state: "needs-you", text: "You: send it from the profile, then press I sent it." };
   }
   const t = clock(task.approved_at);
   return {
     state: "waiting",
-    text: `Waiting to send. You said yes${t ? ` at ${t}` : ""}. Your assistant sends it the next time it runs.`,
+    text: `You said Send${t ? ` at ${t}` : ""}. Goes out next time your assistant runs.`,
   };
 }
 

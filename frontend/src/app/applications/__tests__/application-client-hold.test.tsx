@@ -52,7 +52,7 @@ describe("application page: held by another session", () => {
       .mockResolvedValue(detail());
     render(<ApplicationClient applicationId={42} />);
     const banner = await screen.findByTestId("app-hold");
-    expect(banner).toHaveTextContent("agent:Claude / desktop-apply");
+    expect(banner).toHaveTextContent("Claude is working on this");
     expect(banner).toHaveTextContent("Form filled");
     fireEvent.click(screen.getByRole("button", { name: "Release" }));
     await waitFor(() => expect(screen.queryByTestId("app-hold")).toBeNull());

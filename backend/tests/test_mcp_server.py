@@ -298,6 +298,24 @@ def test_profile_tool_docstrings_teach_the_user_info_memory():
     assert "salary floor" in read
 
 
+async def _user_approves_cv(authenticated_async_context) -> None:
+    """Owner rule 2026-11-01: an assistant records applied only with a CV the USER approved on the web."""
+    import hashlib
+
+    async with authenticated_async_context() as client:
+        application_id = (await client.get("/api/applications")).json()["applications"][0]["id"]
+        text = "my tailored cv"
+        saved = await client.post(f"/api/applications/{application_id}/artifacts", json={"kind": "cv", "text": text})
+        assert saved.status_code == 201, saved.text
+        ok = await client.post(
+            f"/api/applications/{application_id}/events",
+            json={"event_type": "submit_approved", "payload": {
+                "artifact_id": saved.json()["artifact_id"], "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                "where": "web"}},
+        )
+        assert ok.status_code == 201, ok.text
+
+
 @pytest.mark.asyncio
 async def test_bring_then_read_then_record_then_list_round_trip(authenticated_async_context, fixture_user_id):
     from src.api.mcp_server import mcp_runtime
@@ -322,6 +340,8 @@ async def test_bring_then_read_then_record_then_list_round_trip(authenticated_as
             assert job["job_id"] == job_id and "description" in job
             assert job["application_id"] == application_id
             assert job["url"].endswith(f"/applications/{application_id}")
+
+            await _user_approves_cv(authenticated_async_context)
 
             # C1 (application-spine review) — record_application is rewired onto
             # the rich `POST /applications/{id}/receipt` route; its response is
@@ -375,6 +395,7 @@ async def test_another_users_receipt_is_unreachable(authenticated_async_context)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             job_id = _payload(await mcp.call_tool("bring_job", JOB))["job_id"]
+            await _user_approves_cv(authenticated_async_context)
             receipt_id = _payload(await mcp.call_tool("record_application", {"job_id": job_id}))["receipt_id"]
 
     # A second account, with its own token.
@@ -437,6 +458,16 @@ async def test_record_application_writes_a_rich_receipt_through_the_new_route(au
         )
         assert saved.status_code == 201, saved.text
         cv_artifact_id = saved.json()["artifact_id"]
+        # Owner rule 2026-10-31: an assistant records applied only with the CV approved.
+        import hashlib
+
+        approved = await client.post(
+            f"/api/applications/{application_id}/events",
+            json={"event_type": "submit_approved", "payload": {
+                "artifact_id": cv_artifact_id, "sha256": hashlib.sha256(b"my tailored cv").hexdigest(),
+                "where": "web"}},
+        )
+        assert approved.status_code == 201, approved.text
 
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:

@@ -121,7 +121,7 @@ export function JobCard({
   const allAnswered = allChecked && questions.every((q) => (answers[q.ask.id] ?? "").trim().length > 0);
   const hasAnswers = questions.length > 0 || rowCount > 0;
   const canApprove = !busy && allAnswered && (hasAnswers || card.cv !== null);
-  // Rows "Approve all pre-filled" can check: an answer is there, and it is not a consent or personal one.
+  // Rows "OK all and remember" can check: an answer is there, and it is not a consent or personal one.
   const prefillable = merged.rows.filter((m) => {
     const r = rowOf(m.id, m.q);
     return !r.ok && r.value.trim() && !isSensitiveQuestion(m.q);
@@ -278,7 +278,7 @@ export function JobCard({
         <h2 className="font-heading text-base">Job</h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid={`apply-status-${card.applicationId}`}>
-            {card.formFilled ? "Form filled, waiting for you" : "Waiting for you"}
+            {card.formFilled ? "Form filled. Next: you" : "You: finish this"}
           </span>
           {card.formUrl && (
             <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn} data-testid={`section-form-link-${card.applicationId}`}>
@@ -290,7 +290,7 @@ export function JobCard({
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
-          <h3 className={label}>Only you can do this</h3>
+          <h3 className={label}>For you</h3>
           {blockers.filter((b) => !needsOwnBrowser(b.ask)).map(blockerRow)}
           {blockers.some((b) => needsOwnBrowser(b.ask)) && (
             <div className="flex flex-col gap-2" data-testid={`own-chrome-${card.applicationId}`}>
@@ -335,8 +335,8 @@ export function JobCard({
       {card.cv && (
         <section className="flex flex-wrap items-center justify-between gap-2" data-testid="cv-to-check">
           <div className="flex flex-col gap-0.5">
-            <h3 className={label}>CV to check</h3>
-            <p className="text-sm">CV version {card.cv.version}, not checked yet</p>
+            <h3 className={label}>CV</h3>
+            <p className="text-sm">CV version {card.cv.version}, not approved yet</p>
           </div>
           <div className="flex gap-2">
             <Link href={`/applications/${card.applicationId}`} className={btn}>
@@ -346,8 +346,8 @@ export function JobCard({
               PDF
             </button>
             <button type="button" className={btn} disabled={busy} data-testid={`cv-ok-${card.applicationId}`}
-              onClick={() => void run(() => markCvSeen(card.applicationId, card.cv!.artifactId), "Couldn't save that you checked this CV")}>
-              Approve
+              onClick={() => void run(() => markCvSeen(card.applicationId, card.cv!.artifactId), "Couldn't approve this CV")}>
+              Approve CV
             </button>
           </div>
         </section>
@@ -412,14 +412,17 @@ export function JobCard({
         {prefillMode ? (
           <button type="button" className={mainBtn} disabled={busy || prefillable.length === 0}
             data-testid={`approve-prefilled-${card.applicationId}`} onClick={approvePrefilled}>
-            Approve all pre-filled
+            OK all and remember
           </button>
         ) : (
           (hasAnswers || card.cv) && (
-            <button type="button" className={mainBtn} disabled={!canApprove} data-testid={`approve-all-${card.applicationId}`}
-              onClick={() => void approveAll()}>
-              {busy ? "Saving…" : "Approve everything and continue"}
-            </button>
+            <span className="flex flex-col gap-0.5">
+              <button type="button" className={mainBtn} disabled={!canApprove} data-testid={`approve-all-${card.applicationId}`}
+                onClick={() => void approveAll()}>
+                {busy ? "Saving…" : "OK all and remember"}
+              </button>
+              <span className="text-xs text-muted-foreground">Approves the CV and saves these answers to your memory.</span>
+            </span>
           )
         )}
         {card.asks.length > 0 &&

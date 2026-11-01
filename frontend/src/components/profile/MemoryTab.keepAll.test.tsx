@@ -39,8 +39,8 @@ describe("MemoryTab confirm all, per step", () => {
   it("shows the count on the step that holds the two unconfirmed rows, and only there", async () => {
     useHistory(agentHistory);
     render(<MemoryTab />);
-    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("Confirm all 2");
-    expect(screen.getByTestId("memory-step-waiting-you")).toHaveTextContent("2 to confirm");
+    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("OK all 2");
+    expect(screen.getByTestId("memory-step-waiting-you")).toHaveTextContent("2 need OK");
     expect(screen.queryByTestId("memory-confirm-step-visa")).toBeNull();
   });
 
@@ -105,9 +105,9 @@ describe("MemoryTab confirm all, per step", () => {
         : p === "user_info.right_to_work" ? [{ set_by: "agent:Claude", set_at: "2026-10-03T12:00:00Z", value: rtw }]
         : []);
     render(<MemoryTab />);
-    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("Confirm all 2");
+    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("OK all 2");
     // citizenship + the GB work authorisation wait in Right to work
-    expect(screen.getByTestId("memory-confirm-step-visa")).toHaveTextContent("Confirm all 2");
+    expect(screen.getByTestId("memory-confirm-step-visa")).toHaveTextContent("OK all 2");
     fireEvent.click(screen.getByTestId("memory-confirm-step-you"));
     await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledTimes(1));
     expect(keepProfileEdit.mock.calls.map((c) => c[0])).toEqual(["user_info.contact"]);
@@ -129,7 +129,7 @@ describe("MemoryTab confirm all, per step", () => {
     updateProfileFields.mockResolvedValue({ user_info: { contact, equality: userBlock }, preferences: {} });
     render(<MemoryTab />);
     const row = await screen.findByTestId("memory-row-user_info.equality.ethnicity");
-    fireEvent.click(within(row).getByRole("button", { name: /Confirm/ }));
+    fireEvent.click(within(row).getByRole("button", { name: /OK/ }));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "user_info.equality", value: userBlock }]));
     expect(keepProfileEdit).not.toHaveBeenCalled();
   });

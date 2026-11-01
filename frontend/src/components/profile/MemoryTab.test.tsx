@@ -167,7 +167,7 @@ describe("MemoryTab", () => {
     ]);
     expect(screen.queryByText("Assistant settings")).toBeNull();
     const titles = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(titles).toEqual([expect.stringContaining("Your details for forms"), "Approved answers", "How memory works"]);
+    expect(titles).toEqual([expect.stringContaining("Your details for forms"), "OK'd answers", "How memory works"]);
     expect(screen.getByTestId("memory-row-user_info.contact.phone")).toHaveTextContent("You changed this");
     expect(screen.getByTestId("memory-row-user_info.contact.phone")).toHaveTextContent("was: +44 1");
     expect(screen.getByTestId("memory-row-user_info.contact.email")).toHaveTextContent("alex@example.com");

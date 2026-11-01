@@ -238,7 +238,7 @@ export function SettingRequestCard({
           <span className="font-mono">{relativeTime(request.requested_at)}</span>
         </p>
         <p className="text-sm text-muted-foreground">
-          Nothing changes until you confirm. Your assistant cannot confirm this for you.
+          Nothing changes until you apply it here. Your assistant cannot.
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -255,12 +255,12 @@ export function SettingRequestCard({
                     window.dispatchEvent(new CustomEvent(PAUSE_CHANGED_EVENT, { detail: view.paused }));
                   }
                 }),
-              "Could not confirm. It may have expired — ask your assistant to send it again.",
+              "Could not apply. It may have expired — ask your assistant again.",
             )
           }
           className={confirmBtn}
         >
-          {busy ? "Working…" : "Confirm"}
+          {busy ? "Working…" : "Yes, apply this change"}
         </button>
         <button
           type="button"

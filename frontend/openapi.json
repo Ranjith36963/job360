@@ -5581,6 +5581,27 @@
         "title": "DoctorMissingItem",
         "type": "object"
       },
+      "DoctorOpenItem": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "application_id",
+          "codes"
+        ],
+        "title": "DoctorOpenItem",
+        "type": "object"
+      },
       "DoctorOutreach": {
         "description": "Today's outreach (the user's own day): ``sent_today`` recorded sends,\n``daily_max`` the cap check_outreach applies, ``blocked_today`` how many\ncheck_outreach answers today were ``stop``.",
         "properties": {
@@ -5705,6 +5726,14 @@
             "default": "",
             "title": "Stale Hint",
             "type": "string"
+          },
+          "submit_rule": {
+            "$ref": "#/components/schemas/DoctorSubmitRule",
+            "default": {
+              "applied_with_open": [],
+              "next_step": "",
+              "yes_with_open": []
+            }
           },
           "tools": {
             "additionalProperties": {
@@ -5860,6 +5889,34 @@
           "confirmed"
         ],
         "title": "DoctorSilentItem",
+        "type": "object"
+      },
+      "DoctorSubmitRule": {
+        "description": "Owner rule 2026-10-31: no `applied` with an open item. What got past it (the user's own click) or\ncould (a held yes with an item open).",
+        "properties": {
+          "applied_with_open": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DoctorOpenItem"
+            },
+            "title": "Applied With Open",
+            "type": "array"
+          },
+          "next_step": {
+            "default": "",
+            "title": "Next Step",
+            "type": "string"
+          },
+          "yes_with_open": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DoctorOpenItem"
+            },
+            "title": "Yes With Open",
+            "type": "array"
+          }
+        },
+        "title": "DoctorSubmitRule",
         "type": "object"
       },
       "DueItemOut": {

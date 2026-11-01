@@ -178,7 +178,7 @@ export function ReadyCard({
 
       {openAsks.length > 0 && (
         <section data-testid="ready-ask-questions" className="flex flex-col gap-2">
-          <h4 className={label}>Your assistant also needs these answered before you send</h4>
+          <h4 className={label}>Answer these before you send</h4>
           <AskQuestions
             items={ra.merged.rows}
             rows={ra.rows}
@@ -206,7 +206,7 @@ export function ReadyCard({
           ))}
           {missing > 0 && (
             <li data-testid={`ready-draft-missing-${card.application_id}`}>
-              {`${missing} answer${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} the draft text written.`}
+              {`${missing} answer${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} text.`}
             </li>
           )}
         </ul>
@@ -251,7 +251,7 @@ export function ReadyCard({
         </button>
         {unchecked > 0 && (
           <span data-testid={`ready-send-blocked-${card.application_id}`} className="text-xs text-muted-foreground">
-            {`OK or edit ${unchecked} answer${unchecked === 1 ? "" : "s"} above to turn on Send.`}
+            {`OK ${unchecked} more to send`}
           </span>
         )}
         {card.held_seconds != null && card.held_seconds > 0 && !finishing && (

@@ -393,6 +393,15 @@ async def test_a_given_recipient_that_differs_warns_and_mcp_takes_the_new_params
         cv = await _save(client, app_id, "cv", CV)
         draft_id = await _drafted(client, app_id, _draft(attachments=[_att(cv, CV)]))
         token = await _mint_token(client)
+        # Owner rule 2026-10-31: an assistant records applied only after the user approved the CV.
+        import hashlib
+
+        approved = await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "submit_approved", "payload": {
+                "artifact_id": cv["artifact_id"], "sha256": hashlib.sha256(CV.encode()).hexdigest(), "where": "web"}},
+        )
+        assert approved.status_code == 201, approved.text
         bad = await client.post(f"/api/applications/{app_id}/receipt",
                                 json={"channel": "email", "recipient": "two@a.example, three@b.example"})
         assert bad.status_code == 422 and "ONE email address" in bad.text
