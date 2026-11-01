@@ -27,7 +27,7 @@ describe("askRowLabel: the job card's rows", () => {
   it("a guess or a draft reads Check until the owner's OK", () => {
     expect(ask({ source: "guess" })).toEqual({ status: "check", source: "Your assistant's guess" });
     expect(ask({ source: "draft" })).toEqual({ status: "check", source: "Written by your assistant" });
-    expect(ask({ source: "guess" }, { value: "Berlin", ok: true })).toEqual({ status: "ok", source: "You confirmed this" });
+    expect(ask({ source: "guess" }, { value: "Berlin", ok: true })).toEqual({ status: "ok", source: "You said OK" });
   });
 
   it("an empty row reads Needs you, split by why", () => {
@@ -80,13 +80,13 @@ describe("readyRowLabel: the ready card's rows read the backend flags", () => {
     expect(ready(a, [flag("unapproved", "Visa?", "why_us")])).toEqual({ status: "check", source: "Written by your assistant" });
   });
 
-  it("an approved answer without that flag reads OK, You approved this · date", () => {
+  it("an approved answer without that flag reads OK, You said OK · date", () => {
     const a = ra({ source: "approved", key: "why_us", answer: "I build agents.", verified: true, saved_at: "2026-10-01T09:00:00Z" });
-    expect(ready(a)).toEqual({ status: "ok", source: `You approved this · ${dayMonth("2026-10-01T09:00:00Z")}` });
+    expect(ready(a)).toEqual({ status: "ok", source: `You said OK · ${dayMonth("2026-10-01T09:00:00Z")}` });
   });
 
-  it("a verified guess with no flag reads OK, You confirmed this", () => {
-    expect(ready(ra({ verified: true }))).toEqual({ status: "ok", source: "You confirmed this" });
+  it("a verified guess with no flag reads OK, You said OK", () => {
+    expect(ready(ra({ verified: true }))).toEqual({ status: "ok", source: "You said OK" });
   });
 
   it("a sensitive flag reads Needs you, only you can choose", () => {

@@ -137,7 +137,7 @@ export function ApplicationDecisions({
             />
           )}
           <label className={`${NOTE} flex flex-col gap-1`}>
-            Pressed Submit yourself? Paste the confirmation text (optional).
+            Sent it yourself? Paste the confirmation text (optional).
             <textarea
               data-testid="blocked-confirmation-text"
               value={confirmation}
@@ -156,7 +156,7 @@ export function ApplicationDecisions({
               onClick={() => void submittedByHand()}
               className={BTN}
             >
-              I submitted it
+              I sent it
             </button>
             <button
               type="button"
@@ -183,7 +183,7 @@ export function ApplicationDecisions({
           <p className="text-xs text-warning">
             {dup.flag === "same_job"
               ? `You already applied to this job${dup.same_job ? ` on ${formatDate(dup.same_job.applied_at)} (${dup.same_job.status})` : ""}.`
-              : `${dup.same_company_30d} other application${dup.same_company_30d === 1 ? "" : "s"} at this company in the last 30 days.`}
+              : `${dup.same_company_30d} other application${dup.same_company_30d === 1 ? "" : "s"} here in 30 days.`}
           </p>
           <button
             type="button"
@@ -215,7 +215,7 @@ export function ApplicationDecisions({
                 onClick={() => void run(() => approveSend(applicationId), "Couldn't save your yes")}
                 className={approved && !declined ? BTN_ON : BTN}
               >
-                Send this one
+                Send
               </button>
               <button
                 type="button"

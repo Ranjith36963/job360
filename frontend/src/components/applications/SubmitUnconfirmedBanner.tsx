@@ -70,7 +70,7 @@ export function SubmitUnconfirmedBanner({
             onClick={() => void run(() => recordApplicationReceipt(applicationId, {}), "Could not record this application.")}
             className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-50"
           >
-            {busy ? "Recording…" : "Confirm"}
+            {busy ? "Recording…" : "Yes, record it"}
           </button>
           <button
             type="button"

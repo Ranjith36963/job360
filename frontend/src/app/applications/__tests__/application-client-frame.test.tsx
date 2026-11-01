@@ -184,7 +184,7 @@ describe("ApplicationClient frame", () => {
     getApplication.mockResolvedValue(detail({ asks: [captcha] }));
     render(<ApplicationClient applicationId={42} />);
     expect(await screen.findByTestId("job-card-42")).toBeInTheDocument();
-    expect(screen.getByText("You: on the site")).toBeInTheDocument();
+    expect(screen.getByText("For you")).toBeInTheDocument();
     expect(screen.getByTestId("did-it-11")).toHaveTextContent("I did it");
     expect(screen.getByTestId("skip-job-42")).toBeInTheDocument();
     expect(screen.queryByText("Save answer")).toBeNull();

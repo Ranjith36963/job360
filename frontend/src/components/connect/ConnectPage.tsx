@@ -396,7 +396,7 @@ function GrantRow({
             onClick={() => onRevoke(grant)}
             data-testid={`grant-revoke-confirm-${grant.id}`}
           >
-            Confirm revoke
+            Yes, revoke it
           </Button>
           <Button
             type="button"

@@ -42,7 +42,7 @@ import type { JobCardData } from "@/lib/job-cards";
 import { nextLine } from "@/lib/blocker-words";
 import { cardShowsFormHandoff } from "@/lib/job-cards";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
-import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
+import { STATUS_LABEL, askerName, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PageContainer } from "@/components/layout/PageContainer";
 
@@ -303,10 +303,8 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         >
           <p>
             {detail.hold.unsure
-              ? "Another session of your assistant may be working on this application."
-              : `Another assistant session (${detail.hold.held_by}${
-                  detail.hold.session ? ` / ${detail.hold.session}` : ""
-                }) is working this application until ${formatDateTime(detail.hold.until)}.`}
+              ? "Your assistant may be working on this."
+              : `${askerName(detail.hold.held_by)} is working on this until ${formatDateTime(detail.hold.until)}.`}
             {detail.stage ? ` ${detail.stage}` : ""}
           </p>
           {!detail.hold.unsure && (
@@ -458,7 +456,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                     disabled={marking}
                     className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
-                    {marking ? "Recording…" : "Confirm"}
+                    {marking ? "Recording…" : "Yes, record it"}
                   </button>
                   <button
                     type="button"

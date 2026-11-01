@@ -629,9 +629,9 @@ export function answerApprover(
 export function approvalText(recordedBy: string | null, recordedAt?: unknown): string {
   const when = typeof recordedAt === "string" ? shortDate(recordedAt) : "";
   const tail = when ? `, ${when}` : "";
-  if (recordedBy === "web") return `Approved by you${tail}`;
-  if (recordedBy) return `Marked approved by ${whoLabel(recordedBy).name}${tail}`;
-  return `Approved${tail}`;
+  if (recordedBy === "web") return `OK by you${tail}`;
+  if (recordedBy) return `Marked OK by ${whoLabel(recordedBy).name}${tail}`;
+  return `OK${tail}`;
 }
 
 /** Saved facts for one country card. A fact counts as saved when it holds a

@@ -50,7 +50,7 @@ describe("Ready to send", () => {
     render(<ReadyToSend />);
     const el = await screen.findByTestId("ready-card-64");
     fireEvent.click(screen.getByTestId("job-row-64-toggle")); // every job row starts folded
-    expect(within(screen.getByTestId("ready-section-64")).getByText("Ready to send")).toBeInTheDocument();
+    expect(within(screen.getByTestId("ready-section-64")).getByRole("heading", { name: "Form to send" })).toBeInTheDocument();
     expect(el.textContent).toContain(`APP-064 · brought by Claude · ${dayMonth("2026-10-08T07:00:00+00:00", true)}`);
     expect(el).toHaveTextContent("AI Engineer, Agents");
     expect(el).toHaveTextContent("Poolside · Paris · score 82, set by Claude");
@@ -105,7 +105,7 @@ describe("Ready to send", () => {
   it("paused: the label says on hold and Send is disabled", async () => {
     getReadyToSend.mockResolvedValue(payload([card(64)], true));
     render(<ReadyToSend />);
-    expect(await screen.findByText("Ready to send · on hold while paused")).toBeInTheDocument();
+    expect(await screen.findByText("Form to send · on hold while paused")).toBeInTheDocument();
     expect(screen.getByTestId("ready-send-64")).toBeDisabled();
     expect(screen.getByTestId("ready-decline-64")).not.toBeDisabled();
   });
@@ -120,7 +120,7 @@ describe("Ready to send", () => {
   it("a failed read says so and retries", async () => {
     getReadyToSend.mockRejectedValueOnce(new Error("down")).mockResolvedValue(payload([card(1)]));
     render(<ReadyToSend />);
-    expect(await screen.findByText("Could not load Ready to send.")).toBeInTheDocument();
+    expect(await screen.findByText("Could not load jobs to send.")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("ready-retry"));
     expect(await screen.findByTestId("ready-card-1")).toBeInTheDocument();
   });
@@ -204,7 +204,7 @@ describe("Send waits for every answer to read OK (owner, 2026-10-26)", () => {
     render(<ReadyCard card={card(64)} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-send-64")).toBeDisabled();
     // The fixture holds a written answer and a guessed one, plus assistant-saved Memory (OK).
-    expect(screen.getByTestId("ready-send-blocked-64")).toHaveTextContent("OK or edit 2 answers above to turn on Send.");
+    expect(screen.getByTestId("ready-send-blocked-64")).toHaveTextContent("OK 2 more to send");
     fireEvent.click(screen.getByTestId("ready-send-64"));
     expect(approveSend).not.toHaveBeenCalled();
   });
@@ -214,7 +214,7 @@ describe("Send waits for every answer to read OK (owner, 2026-10-26)", () => {
     c.answers.push({ ...answer({ question: "Notice period", answer: "", source: "none", key: null }), verified: false });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-send-65")).toBeDisabled();
-    expect(screen.getByTestId("ready-send-blocked-65")).toHaveTextContent("OK or edit 1 answer above");
+    expect(screen.getByTestId("ready-send-blocked-65")).toHaveTextContent("OK 1 more to send");
   });
 
   it("an answer the user edited never blocks Send", () => {

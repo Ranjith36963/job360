@@ -53,12 +53,12 @@ export function jobHeaders(open: Ask[], ready: ReadyCardData[], cvRows: CvToAppr
 
 export type SortKey = "urgent" | "newest" | "oldest";
 export const SORTS: { key: SortKey; label: string; line: string }[] = [
-  { key: "urgent", label: "Most urgent", line: "Forms open now, then ready to send, then waiting on your answer, then quick checks." },
+  { key: "urgent", label: "Most urgent", line: "" },
   { key: "newest", label: "Newest first", line: "The job with the newest question, filled form or CV first." },
   { key: "oldest", label: "Oldest first", line: "The job that has waited longest first." },
 ];
 /** The group names shown to the user, by tier (owner 2026-10-26); New connections sit below the jobs. */
-export const GROUP_NAMES = ["Form open now", "Ready to send", "Waiting on your answer", "Quick checks", "New connections"] as const;
+export const GROUP_NAMES = ["Form open now", "Send", "On you", "Quick checks", "New connections"] as const;
 
 const SORT_STORE = "needs-you-sort";
 const isSort = (v: unknown): v is SortKey => SORTS.some((s) => s.key === v);

@@ -486,7 +486,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       ) : visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {queuedOnly
-            ? "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt."
+            ? "Your batch is empty. Bring a job with Add to batch ticked."
             : inFlight
               ? "Nothing is in flight right now."
               : narrowed
