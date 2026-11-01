@@ -23,7 +23,7 @@ const BUTTON: Record<Duty, string> = { inbox: "Check Gmail now", hunt: "Hunt now
 export const NOT_STARTED: Record<string, string> = {
   not_set: "Save a start link first.",
   cooldown: "Started a moment ago. Try again in a minute.",
-  hourly_cap: "Started many times this hour already. The hourly run will catch up.",
+  hourly_cap: "Started often this hour. The hourly run will catch up.",
   rate_limited: "Your assistant asked Job360 to wait. Try later.",
 };
 
@@ -106,7 +106,7 @@ export function RunNowPanel() {
       <p className="text-xs text-muted-foreground">These run on your schedule anyway. Press one to start it early.</p>
       {(waitN > 0 || ran) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2" data-testid="own-browser-queue">
-          <h3 className="sr-only">Waiting for your own browser</h3>
+          <h3 className="sr-only">Your own browser</h3>
           <p className="text-sm font-medium" data-testid="own-browser-count">
             {waitN} waiting for your own browser
           </p>

@@ -121,7 +121,7 @@ export function ReadySection({ card, asks, paused, embedded, onChanged, salaryFa
   return (
     <section data-testid={`ready-section-${card.application_id}`} className="flex flex-col gap-2">
       <h3 className={cn("font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint", paused && "opacity-70")}>
-        {paused ? "Ready to send · on hold while paused" : "Ready to send"}
+        {paused ? "Form to send · on hold while paused" : "Form to send"}
       </h3>
       <ReadyCard card={card} asks={asks} paused={paused} embedded={embedded} status={status} changes={changes} onChanged={onChanged} salaryFacts={salaryFacts} />
     </section>
@@ -310,7 +310,7 @@ export function JobCards({
 
   const readyError = readyFailed && !ready && (
     <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
-      <span>Could not load Ready to send.</span>
+      <span>Could not load jobs to send.</span>
       <button type="button" data-testid="ready-retry" onClick={() => setReadyTick((t) => t + 1)} className="text-xs font-medium underline-offset-2 hover:underline">
         Try again
       </button>

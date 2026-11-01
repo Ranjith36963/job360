@@ -83,7 +83,7 @@ const BROWSER_REASON_WORDS: Record<string, string> = {
   job360_safety_stop: "Job360's browser stopped to be safe",
   mfa: "This site wants a code only you have",
   password: "This site wants your password",
-  only_you: "Only you can do this step",
+  only_you: "You: do this step",
   link_unclear: "The apply link has no clear web address",
 };
 

@@ -276,15 +276,15 @@ export function MemoryRow({ spec, value, provenance, emptyNote, compact, amberEm
                   setBusy(true);
                   try {
                     await onConfirm();
-                    toast.success("Confirmed.");
+                    toast.success("OK.");
                   } catch (err: unknown) {
-                    toast.error(apiErrorMessage(err, "Could not confirm that."));
+                    toast.error(apiErrorMessage(err, "Could not save your OK."));
                   } finally {
                     setBusy(false);
                   }
                 }}
               >
-                Confirm
+                OK
               </button>
             )}
           </>

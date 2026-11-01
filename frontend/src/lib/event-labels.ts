@@ -184,5 +184,6 @@ export function whoLabel(recordedBy: string): { who: "you" | "agent"; name: stri
  *  never the raw author id. */
 export function askerName(recordedBy: string | null | undefined): string {
   const who = whoLabel(recordedBy ?? "");
-  return who.who === "you" ? "you" : who.name || "your assistant";
+  if (who.who === "you") return "you";
+  return who.name ? who.name.charAt(0).toUpperCase() + who.name.slice(1) : "your assistant";
 }

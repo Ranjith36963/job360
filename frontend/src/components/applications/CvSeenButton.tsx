@@ -46,7 +46,7 @@ export function CvSeenButton({
     try {
       onChanged?.(await markCvSeen(applicationId, artifactId));
     } catch (err) {
-      toast.apiError(err, "Couldn't save that you checked this CV");
+      toast.apiError(err, "Couldn't approve this CV");
     } finally {
       setBusy(false);
     }
@@ -60,7 +60,7 @@ export function CvSeenButton({
       onClick={() => void click()}
       className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
     >
-      I&apos;ve checked this CV
+      Approve CV
     </button>
   );
 }

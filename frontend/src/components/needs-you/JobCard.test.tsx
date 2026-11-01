@@ -66,7 +66,7 @@ describe("JobCard", () => {
   it("gives a blocker buttons, never a text box, and links the form", async () => {
     const captcha = ask("Solve the CAPTCHA and press Submit");
     render(<JobCard card={card([captcha])} onChanged={onChanged} />);
-    expect(screen.getByText("Only you can do this")).toBeInTheDocument();
+    expect(screen.getByText("For you")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
     for (const l of screen.getAllByRole("link", { name: "Open the form ↗" })) expect(l).toHaveAttribute("href", "https://jobs.example.com/7");
     expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByTestId("ask-open-empty-form")).toHaveAttribute("href", "https://jobs.example.com/7");
@@ -169,7 +169,7 @@ describe("JobCard", () => {
     fireEvent.change(screen.getByTestId(`q-input-${listed.id}-salary`), { target: { value: "€55,000" } });
     expect(screen.queryByTestId("remember-7")).toBeNull(); // no checkbox any more
     const approve = screen.getByTestId("approve-all-7");
-    expect(approve).toHaveTextContent("Approve everything and continue");
+    expect(approve).toHaveTextContent("OK all and remember");
     fireEvent.click(approve);
     const answers = { country: "Germany", visa: "No", salary: "€55,000" };
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(listed.id, answers));
@@ -224,7 +224,7 @@ describe("JobCard", () => {
     expect(screen.getByTestId(`q-ok-${a.id}-gender`)).toHaveTextContent("OK");
   });
 
-  it("Approve all pre-filled leaves consent and personal rows for the owner's own click", async () => {
+  it("OK all and remember leaves consent and personal rows for the owner's own click", async () => {
     const a = listing({}, [
       Q("city", "City?", "Berlin", "guess"),
       Q("gdpr", "Do you consent to data processing?", "Yes", "guess"),
@@ -238,7 +238,7 @@ describe("JobCard", () => {
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { city: "Berlin" })); // persisted, not only shown
     await waitFor(() => expect(screen.getByTestId(`q-edit-${a.id}-empty`)).toBeEnabled());
     expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("OK");
-    expect(screen.getByTestId(`q-source-${a.id}-city`)).toHaveTextContent("You confirmed this");
+    expect(screen.getByTestId(`q-source-${a.id}-city`)).toHaveTextContent("You said OK");
     expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Needs you");
     expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("OK");
     expect(screen.getAllByText(/only you can choose/)).toHaveLength(2);
@@ -389,7 +389,7 @@ describe("JobCard", () => {
     expect(within(job).getByTestId(`blocker-${blocker.id}`)).toBeInTheDocument();
     expect(within(job).getByTestId(`question-${q.id}`)).toBeInTheDocument();
     expect(within(job).getByTestId("cv-to-check")).toBeInTheDocument();
-    expect(within(job).getByText("Form filled, waiting for you")).toBeInTheDocument();
+    expect(within(job).getByText("Form filled. Next: you")).toBeInTheDocument();
     expect(within(job).getByTestId("section-form-link-7")).toHaveAttribute("href", "https://jobs.example.com/7");
     expect(within(job).queryByTestId(`reminder-${rem.id}`)).toBeNull();
     expect(within(out).getByTestId(`reminder-${rem.id}`)).toBeInTheDocument();
