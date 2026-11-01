@@ -285,6 +285,30 @@ describe("ApplicationClient — Mark Applied asks first (decision 2)", () => {
     await waitFor(() => expect(recordApplicationReceipt).toHaveBeenCalledWith(42, {}));
   });
 
+  it("lists the user's open items above the confirm buttons, but not send steps", async () => {
+    const b = (kind: string, label: string, actor = "you") => ({ actor, kind, label, since: "2026-09-01T00:00:00Z" });
+    getApplication.mockResolvedValue({
+      ...detail(), status: "considering", receipts: [],
+      blockers: [b("captcha", "Solve the CAPTCHA"), b("login", "Sign in"), b("confirm_sent", "Confirm it was sent"),
+        b("outreach_send", "Send the note"), b("x", "Assistant thing", "assistant")],
+    });
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("mark-applied"));
+    expect(screen.getByTestId("mark-applied-open-items")).toHaveTextContent(
+      "Still open: Solve the CAPTCHA · Sign in. Saving marks this applied with these open.");
+    fireEvent.click(screen.getByTestId("mark-applied-confirm"));
+    await waitFor(() => expect(recordApplicationReceipt).toHaveBeenCalledWith(42, {}));
+  });
+
+  it("shows no open-items line when nothing is open", async () => {
+    getApplication.mockResolvedValue({ ...detail(), status: "considering", receipts: [], blockers: [] });
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("mark-applied"));
+    expect(screen.queryByTestId("mark-applied-open-items")).toBeNull();
+  });
+
   it("Cancel closes the confirm without posting", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");

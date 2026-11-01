@@ -80,7 +80,7 @@ HUMAN_STOPS: dict[str, str] = {"password": "password", "mfa": "mfa", "otp": "mfa
 LABELS: dict[str, str] = {
     "job360": "I'll use Job360's browser",
     "own_browser": "Needs your own browser: turn your PC on",
-    "human": "Only you can do this",
+    "human": "You: on the site",
 }
 # The chip for linkedin.com: the user's own browser by their choice, not because anything failed.
 LINKEDIN_LABEL = "Your own browser: runs when your PC is on"

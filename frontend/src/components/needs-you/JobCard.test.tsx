@@ -66,7 +66,7 @@ describe("JobCard", () => {
   it("gives a blocker buttons, never a text box, and links the form", async () => {
     const captcha = ask("Solve the CAPTCHA and press Submit");
     render(<JobCard card={card([captcha])} onChanged={onChanged} />);
-    expect(screen.getByText("Only you can do this")).toBeInTheDocument();
+    expect(screen.getByText("You: on the site")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
     for (const l of screen.getAllByRole("link", { name: "Open the form ↗" })) expect(l).toHaveAttribute("href", "https://jobs.example.com/7");
     expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByTestId("ask-open-empty-form")).toHaveAttribute("href", "https://jobs.example.com/7");

@@ -322,7 +322,7 @@ export function JobCard({
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
-          <h3 className={label}>Only you can do this</h3>
+          <h3 className={label}>You: on the site</h3>
           {blockers.filter((b) => !needsOwnBrowser(b.ask)).map(blockerRow)}
           {blockers.some((b) => needsOwnBrowser(b.ask)) && (
             <div className="flex flex-col gap-2" data-testid={`own-chrome-${card.applicationId}`}>

@@ -7,7 +7,7 @@
 export const BROWSER_LABELS = {
   job360: "I'll use Job360's browser",
   own_browser: "Needs your own browser: turn your PC on",
-  human: "Only you can do this",
+  human: "You: on the site",
 } as const;
 
 /** The chip for linkedin.com (owner, 2026-10-26): the user's own browser by their choice, nothing failed.

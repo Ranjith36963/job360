@@ -45,7 +45,7 @@ def test_human_stops_win(stop):
         assert routing.browser_for(page_stop=stop, job360_failed=failed) == routing.Route(
             "human", routing.HUMAN_STOPS[stop]
         )
-    assert routing.label(routing.browser_for(page_stop=stop))["label"] == "Only you can do this"
+    assert routing.label(routing.browser_for(page_stop=stop))["label"] == "You: on the site"
 
 
 @pytest.mark.parametrize(
@@ -149,13 +149,13 @@ async def test_asks_carry_browser(authenticated_async_context, monkeypatch):
 
         cap_ask = await _ask_browser(client, cap_id)
         assert cap_ask["finish_here"] is True  # Job360's browser holds the page: the user solves it right here
-        assert cap_ask["browser"] == {"kind": "human", "label": "Only you can do this", "reason": "only_you"}
+        assert cap_ask["browser"] == {"kind": "human", "label": "You: on the site", "reason": "only_you"}
         assert (await _ask_browser(client, login_id))["browser"] == {
             "kind": "own_browser", "label": "Needs your own browser: turn your PC on",
             "reason": "job360_login_required",
         }
         assert (await _ask_browser(client, otp_id))["browser"] == {
-            "kind": "human", "label": "Only you can do this", "reason": "mfa",
+            "kind": "human", "label": "You: on the site", "reason": "mfa",
         }
         assert (await _ask_browser(client, plain_id))["browser"] == JOB360
         # The application detail carries the same label on its ask.
@@ -173,7 +173,7 @@ async def test_a_caller_captcha_is_the_users_alone(authenticated_async_context):
         )
         assert resp.status_code == 201, resp.text
         assert (await _ask_browser(client, app_id))["browser"] == {
-            "kind": "human", "label": "Only you can do this", "reason": "only_you",
+            "kind": "human", "label": "You: on the site", "reason": "only_you",
         }
 
 
