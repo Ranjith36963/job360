@@ -69,6 +69,31 @@ def test_order_tasks_user_boards_then_feeds_then_round_robin() -> None:
                    "greenhouse:g0", "ashby:a0", "lever:l0", "greenhouse:g1", "ashby:a1", "greenhouse:g2"]
 
 
+def test_order_tasks_sweep_start_begins_each_ats_further_in() -> None:
+    """2026-11-01: every hourly cloud run began the sweep at board 0 and stopped at its time budget, so the
+    boards late in each list were never read. A start point moves each ATS's list round; feeds stay first."""
+
+    def w() -> None:
+        return None
+
+    feeds = [("freehire", "freehire", w)]
+    sweep = [("greenhouse", f"greenhouse:g{i}", w, False) for i in range(4)]
+    sweep += [("ashby", f"ashby:a{i}", w, False) for i in range(2)]
+    ids = [t[1] for t in hk.order_tasks([], feeds, sweep, start=0.5)]
+    assert ids == ["freehire", "greenhouse:g2", "ashby:a1", "greenhouse:g3", "ashby:a0", "greenhouse:g0",
+                   "greenhouse:g1"]
+    assert sorted(ids) == sorted(t[1] for t in hk.order_tasks([], feeds, sweep))  # same tasks, new order
+
+
+def test_sweep_start_hour_gives_24_start_points() -> None:
+    import datetime as dt
+
+    at = [hk.sweep_start("hour", dt.datetime(2026, 11, 1, h, 11, tzinfo=dt.timezone.utc)) for h in range(24)]
+    assert at == [h / 24 for h in range(24)]
+    assert hk.sweep_start("0.25") == 0.25 and hk.sweep_start(None) == 0.0 and hk.sweep_start("nan") == 0.0
+    assert hk.sweep_start("junk") == 0.0 and hk.build_parser().parse_args(["--titles", "x"]).sweep_start == "0"
+
+
 def test_run_starts_feeds_before_the_board_sweep_and_interleaves_types(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -2333,20 +2333,40 @@ def _feed_call(fetch: Callable[..., list[dict[str, Any]]], queries: list[str], d
     return fetch(queries, http, st, days=days, countries=countries)
 
 
+def sweep_start(value: str | None, now: _dt.datetime | None = None) -> float:
+    """Where the board sweep begins, 0 to 1: ``hour`` = the UTC hour / 24 (24 hourly runs, 24 start points),
+    a number = that fraction, anything else = 0 (the list's own order)."""
+    v = (value or "0").strip().lower()
+    if v == "hour":
+        return (now or _dt.datetime.now(_dt.timezone.utc)).hour / 24
+    try:
+        f = float(v)
+    except ValueError:
+        return 0.0
+    return f % 1.0 if f == f and abs(f) != float("inf") else 0.0
+
+
 def order_tasks(
     own: list[tuple[str, str, Callable[[], None], bool]],
     feeds: list[tuple[str, str, Callable[[], None]]],
     sweep: list[tuple[str, str, Callable[[], None], bool]],
+    start: float = 0.0,
 ) -> list[tuple[str, str, Callable[[], None]]]:
     """Run order, so a time budget never starves the cheap sources.
 
     The user's own boards first, then freehire and every feed (a few requests each), then the board
     sweep round-robin across ATS types (one greenhouse, one ashby, one lever, ... rather than all of
     greenhouse's 4,000 boards first). Task ids are untouched, so --resume still matches.
+    ``start`` (0 to 1) begins each ATS's boards that far into its list and wraps round, so runs that each
+    stop at a time budget cover different boards (2026-11-01: every hourly cloud run began at board 0).
     """
     by_ats: dict[str, list[tuple[str, str, Callable[[], None]]]] = {}
     for ats, tid, work, _ in sweep:
         by_ats.setdefault(ats, []).append((ats, tid, work))
+    if start:
+        for ats, row in by_ats.items():
+            k = int(len(row) * (start % 1.0))
+            by_ats[ats] = row[k:] + row[:k]
     mixed = [t for row in itertools.zip_longest(*by_ats.values()) for t in row if t is not None]
     return [(a, t, w) for a, t, w, _ in own] + list(feeds) + mixed
 
@@ -2439,7 +2459,8 @@ def run(args: argparse.Namespace) -> Collector:
             else:
                 print("note: feed %s not provided by %s; skipped" % (name, ", ".join(FEED_MODULES)), file=sys.stderr)
 
-    tasks = order_tasks([t for t in board_tasks if t[3]], feed_tasks, [t for t in board_tasks if not t[3]])
+    tasks = order_tasks([t for t in board_tasks if t[3]], feed_tasks, [t for t in board_tasks if not t[3]],
+                        start=sweep_start(getattr(args, "sweep_start", "0")))
 
     if sink is not None and sink.done:
         before = len(tasks)
@@ -3506,6 +3527,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=WORKDAY_MAX,
         help="open-list Workday boards per run, overriding the --open-days slice (default: pool / open-days; 0 = all)",
+    )
+    p.add_argument(
+        "--sweep-start",
+        default="0",
+        help="where each ATS's board sweep begins: 0 to 1 (a fraction of its list), or 'hour' = the UTC hour / 24 "
+             "so hourly runs stopped by --max-minutes cover different boards (default 0 = the list order)",
     )
     p.add_argument(
         "--open-days",
