@@ -101,7 +101,7 @@ export function StatusMenu({
             disabled={saving}
             onClick={() => void confirm()}
           >
-            {saving ? "Recording…" : "Confirm"}
+            {saving ? "Recording…" : "Yes, record it"}
           </Button>
           <Button
             type="button"

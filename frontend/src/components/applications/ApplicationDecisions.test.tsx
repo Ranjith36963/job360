@@ -100,7 +100,7 @@ describe("cv-seen-button", () => {
 describe("Send / Don't send by status", () => {
   it("considering: both buttons are there", () => {
     render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={vi.fn()} status="considering" />);
-    expect(screen.getByTestId("send-approve-button").textContent).toBe("Send this one");
+    expect(screen.getByTestId("send-approve-button").textContent).toBe("Send");
     expect(screen.getByTestId("send-decline-button").textContent).toBe("Don't send");
   });
 
@@ -231,7 +231,7 @@ describe("Not a duplicate, go ahead", () => {
         onChanged={() => undefined}
       />
     );
-    expect(screen.getByTestId("duplicate-warning").textContent).toMatch(/2 other applications at this company in the last 30 days/);
+    expect(screen.getByTestId("duplicate-warning").textContent).toMatch(/2 other applications here in 30 days/);
   });
 });
 

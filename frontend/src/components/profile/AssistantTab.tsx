@@ -274,7 +274,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
     <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="flex min-w-0 flex-col gap-8" data-testid="assistant-tab">
         {perms && view.waiting.length > 0 && (
-          <Section title="Your assistant asks to change" hint="Nothing changes until you confirm.">
+          <Section title="Your assistant asks to change" hint="Nothing changes until you apply it.">
             <ul className="flex flex-col gap-3" data-testid="permission-requests">
               {view.waiting.map((r) => (
                 <SettingRequestCard
@@ -362,7 +362,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   }}
                   className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                 >
-                  Confirm
+                  Yes, apply this change
                 </button>
                 <button
                   type="button"
@@ -553,7 +553,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   }}
                   className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                 >
-                  Confirm
+                  Yes, apply this change
                 </button>
                 <button
                   type="button"
@@ -602,7 +602,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   }}
                   className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                 >
-                  Confirm
+                  Yes, apply this change
                 </button>
                 <button
                   type="button"
