@@ -142,7 +142,7 @@ app drives on the user's PC, there only while the PC is on and the user agrees. 
 one: leave the task on Needs you and go on. Passwords, one-time codes and MFA are the user's alone; no browser
 solves a CAPTCHA: it is always solved by the user, on Needs you while Job360's browser holds the page
 (Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your own
-browser: turn your PC on", "Your own browser: runs when your PC is on" (LinkedIn) or "Only you can do this".
+browser: turn your PC on", "Your own browser: runs when your PC is on" (LinkedIn) or "You: on the site".
 
 ## Writing the CV
 

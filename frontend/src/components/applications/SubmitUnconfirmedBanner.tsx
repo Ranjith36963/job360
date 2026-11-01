@@ -4,6 +4,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { recordApplicationReceipt, resolveSubmit } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
+import type { components } from "@/lib/api-types";
+import { openItemsText, openYouItems } from "@/lib/open-items";
 
 /** "Started, never confirmed": the assistant began a submit and nothing confirmed it.
  *  Two honest answers: it was sent (record the application, same as Mark Applied) or it
@@ -13,6 +15,7 @@ export function SubmitUnconfirmedBanner({
   onChanged,
   compact = false,
   idSuffix = "",
+  blockers,
 }: {
   applicationId: number;
   onChanged: () => Promise<void> | void;
@@ -20,7 +23,10 @@ export function SubmitUnconfirmedBanner({
   compact?: boolean;
   /** Added to every data-testid so several can sit on one page. */
   idSuffix?: string;
+  /** The application's blockers: open "you" items are listed above the confirm buttons. */
+  blockers?: components["schemas"]["BlockerOut"][];
 }) {
+  const openItems = openYouItems(blockers);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -51,6 +57,11 @@ export function SubmitUnconfirmedBanner({
       )}
       {confirming ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {openItems.length > 0 && (
+            <p className="basis-full text-warning" data-testid={`mark-applied-open-items${idSuffix}`}>
+              {openItemsText(openItems)}
+            </p>
+          )}
           <span>Record that you applied? This creates a receipt that can&apos;t be deleted.</span>
           <button
             type="button"

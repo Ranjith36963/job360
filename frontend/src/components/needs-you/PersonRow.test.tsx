@@ -138,7 +138,7 @@ describe("PersonRow", () => {
 
   it("queued and only you can do it: needs you", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
-      send_browser: { kind: "human", label: "Only you can do this", reason: "CAPTCHA" } }));
+      send_browser: { kind: "human", label: "You: on the site", reason: "CAPTCHA" } }));
     const el = screen.getByTestId("send-status-4");
     expect(el.textContent).toBe("You: send it from the profile, then press I sent it.");
     expect(el).toHaveAttribute("data-state", "needs-you");
