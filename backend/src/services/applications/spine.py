@@ -1717,6 +1717,45 @@ async def _receipt_replay(
     return {**stored, "already_existed": True}
 
 
+async def receipt_uploads_for(
+    db: JobDatabase, user_id: str, application_id: int, channel: str, draft: Optional[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The files a receipt freezes from: Job360's own uploads since the last receipt, then (email channel)
+    the draft's attachments. Shared by :func:`record_receipt` and the applied rule's :func:`frozen_cv_id`."""
+    from src.services.applications import email_channel  # noqa: PLC0415 - email_channel imports spine
+    from src.services.applications import uploads as uploads_service  # noqa: PLC0415 - uploads imports spine
+
+    uploads = await uploads_service.uploads_since_last_receipt(db, user_id, application_id)
+    if channel == "email" and draft is not None:
+        # Slice 31 - attaching a file to the email IS sending it. The draft's attachments come AFTER
+        # Job360's own uploads (server-written evidence wins), so they name what no upload covers: all
+        # files when nothing was served, else e.g. the letter when only a kit link download (no host) was.
+        uploads = [*uploads, *email_channel.receipt_uploads(draft)]
+    return uploads
+
+
+async def frozen_cv_id(
+    db: JobDatabase, user_id: str, application_id: int, cv_artifact_id: Optional[int] = None, channel: str = "",
+) -> Optional[int]:
+    """The id of the CV ``record_receipt`` would freeze with these arguments (None = no CV): the one named,
+    else the CV Job360 uploaded or the draft attached, else the newest. Same channel reading as the receipt."""
+    from src.services.applications import email_channel  # noqa: PLC0415 - email_channel imports spine
+
+    if cv_artifact_id is not None:
+        return int(cv_artifact_id)
+    draft = await email_channel.newest_draft(db, user_id, application_id, since_applied=True)
+    chan = normalize_receipt_channel(channel) if (channel or "").strip() else ""
+    if not chan:
+        _src, host = await _form_answers_source(db, user_id, application_id)
+        chan = _channel_for_host(host) if host else ("email" if draft is not None else "")
+    uploaded = next((u for u in await receipt_uploads_for(db, user_id, application_id, chan, draft)
+                     if u["kind"] == "cv"), None)
+    if uploaded is not None:
+        return int(uploaded["artifact_id"])
+    latest = await latest_artifact(db, user_id, application_id, "cv")
+    return int(latest["id"]) if latest else None
+
+
 async def record_receipt(
     db: JobDatabase,
     *,
@@ -1735,6 +1774,7 @@ async def record_receipt(
     referred_by_contact_id: Optional[int] = None,
     recipient: str = "",
     gmail_message_id: str = "",
+    open_at_submit: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1878,12 +1918,7 @@ async def record_receipt(
     # caller names none. No upload at all = the older flow, unchanged.
     from src.services.applications import uploads as uploads_service  # noqa: PLC0415 - uploads imports spine
 
-    uploads = await uploads_service.uploads_since_last_receipt(db, user_id, application_id)
-    if channel == "email" and draft is not None:
-        # Slice 31 - attaching a file to the email IS sending it. The draft's attachments come AFTER
-        # Job360's own uploads (server-written evidence wins), so they name what no upload covers: all
-        # files when nothing was served, else e.g. the letter when only a kit link download (no host) was.
-        uploads = [*uploads, *email_channel.receipt_uploads(draft)]
+    uploads = await receipt_uploads_for(db, user_id, application_id, channel, draft)
     up_cv = next((u for u in uploads if u["kind"] == "cv"), None)
     up_cl = next((u for u in uploads if u["kind"] == "cover_letter"), None)
     # Only an upload INTO a form (the browser's, host set) proves a letter was attached; a kit link
@@ -2002,7 +2037,11 @@ async def record_receipt(
             receipt_id = int(cur.lastrowid or 0)
             event = await append_event(
                 db, user_id=user_id, application_id=application_id, event_type="applied",
-                payload={"receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate},
+                payload={
+                    "receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate,
+                    # Owner rule 2026-10-31: the user's own Mark Applied with items open stamps them.
+                    **({"open_at_submit": list(open_at_submit)} if open_at_submit else {}),
+                },
                 occurred_at=sent_at, recorded_by=recorded_by,
             )
             result: dict[str, Any] = {
@@ -2079,7 +2118,8 @@ async def record_receipt(
 
 
 async def write_through_legacy_receipt(
-    db: JobDatabase, *, user_id: str, application_id: int, receipt_id: int, sent_at: str, note: str = ""
+    db: JobDatabase, *, user_id: str, application_id: int, receipt_id: int, sent_at: str, note: str = "",
+    recorded_by: str = "web", open_at_submit: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """The legacy `POST /receipts/{job_id}` write-through (spec R8): appends
     the `applied` event for a receipt whose `application_id` the caller
@@ -2090,7 +2130,9 @@ async def write_through_legacy_receipt(
     """
     return await append_event(
         db, user_id=user_id, application_id=application_id, event_type="applied",
-        detail=note or "", payload={"receipt_id": receipt_id}, occurred_at=sent_at, recorded_by="web",
+        detail=note or "",
+        payload={"receipt_id": receipt_id, **({"open_at_submit": list(open_at_submit)} if open_at_submit else {})},
+        occurred_at=sent_at, recorded_by=recorded_by,
     )
 
 

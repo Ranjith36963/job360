@@ -17,6 +17,7 @@ typed), never an email address.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -170,8 +171,60 @@ async def doctor(
         "silent_after_interview": await _silent_after_interview(db, user.id, now),
         "interviews": await _interviews_block(db, user.id, now),
         "connectors": await _connectors_block(db, user.id),
+        "submit_rule": await _submit_rule_block(db, user.id),
         **_tools_block(client_tools_version, client_tools_rev),
     }
+
+
+SUBMIT_RULE_MAX = 50
+SUBMIT_RULE_NEXT = "Review applications sent with open items"
+
+
+async def _submit_rule_block(db: JobDatabase, user_id: str) -> dict[str, Any]:
+    """Owner rule 2026-10-31: applications recorded ``applied`` while an item was open (the web stamps
+    ``open_at_submit`` on the event), and ``considering`` ones whose yes holds while an item is open.
+    Defensive like every doctor field: a failure logs and reads as empty."""
+    out: dict[str, Any] = {"applied_with_open": [], "yes_with_open": [], "next_step": ""}
+    try:
+        cur = await db._db.execute(
+            "SELECT application_id, payload FROM application_events WHERE user_id = ? AND event_type = 'applied' "
+            "AND payload LIKE ? AND id NOT IN (SELECT corrects_event_id FROM application_events "
+            "WHERE user_id = ? AND corrects_event_id IS NOT NULL) ORDER BY id DESC LIMIT ?",
+            (user_id, '%"open_at_submit"%', user_id, SUBMIT_RULE_MAX),
+        )
+        for row in await cur.fetchall():
+            try:
+                codes = json.loads(row[1]).get("open_at_submit")
+            except (ValueError, AttributeError):
+                continue
+            if codes:
+                out["applied_with_open"].append({"application_id": int(row[0]), "codes": [str(c) for c in codes]})
+        cur = await db._db.execute(
+            "SELECT e.application_id, e.id, e.event_type FROM application_events e "
+            "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
+            "WHERE e.user_id = ? AND a.status = 'considering' "
+            "AND e.event_type IN ('form_filled', 'submit_approved', 'submit_declined') ORDER BY e.id",
+            (user_id,),
+        )
+        by_app: dict[int, list[tuple[int, str]]] = {}
+        for row in await cur.fetchall():
+            by_app.setdefault(int(row[0]), []).append((int(row[1]), str(row[2])))
+        from src.services.applications.next_step import kit_flags  # noqa: PLC0415
+
+        holding = [app_id for app_id, evs in by_app.items() if kit_flags(evs)[1]][:SUBMIT_RULE_MAX]
+        for app_id in holding:
+            codes = await kit_service.open_rule_items(db, user_id, app_id)
+            if codes:
+                out["yes_with_open"].append({"application_id": app_id, "codes": codes})
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "doctor_submit_rule_failed",
+            extra={"event": "doctor_submit_rule_failed", "user_id": safe_log_value(user_id)},
+            exc_info=True,
+        )
+    if out["applied_with_open"] or out["yes_with_open"]:
+        out["next_step"] = SUBMIT_RULE_NEXT
+    return out
 
 
 async def _sweep_ghosted(db: JobDatabase, user_id: str, now: datetime) -> list[int]:

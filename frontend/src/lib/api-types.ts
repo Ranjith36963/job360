@@ -5847,6 +5847,13 @@ export interface components {
             /** Why */
             why: string;
         };
+        /** DoctorOpenItem */
+        DoctorOpenItem: {
+            /** Application Id */
+            application_id: number;
+            /** Codes */
+            codes: string[];
+        };
         /**
          * DoctorOutreach
          * @description Today's outreach (the user's own day): ``sent_today`` recorded sends,
@@ -5933,6 +5940,14 @@ export interface components {
              */
             stale_hint: string;
             /**
+             * @default {
+             *       "applied_with_open": [],
+             *       "next_step": "",
+             *       "yes_with_open": []
+             *     }
+             */
+            submit_rule: components["schemas"]["DoctorSubmitRule"];
+            /**
              * Tools
              * @default {}
              */
@@ -6013,6 +6028,28 @@ export interface components {
             last_interview_at: string;
             /** Last Interview Event Id */
             last_interview_event_id: number;
+        };
+        /**
+         * DoctorSubmitRule
+         * @description Owner rule 2026-10-31: no `applied` with an open item. What got past it (the user's own click) or
+         *     could (a held yes with an item open).
+         */
+        DoctorSubmitRule: {
+            /**
+             * Applied With Open
+             * @default []
+             */
+            applied_with_open: components["schemas"]["DoctorOpenItem"][];
+            /**
+             * Next Step
+             * @default
+             */
+            next_step: string;
+            /**
+             * Yes With Open
+             * @default []
+             */
+            yes_with_open: components["schemas"]["DoctorOpenItem"][];
         };
         /** DueItemOut */
         DueItemOut: {

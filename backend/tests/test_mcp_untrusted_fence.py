@@ -342,6 +342,22 @@ def test_fit_judged_carries_the_ads_visa_sentence_fenced():
     assert ev["payload"]["visa"]["signal"] == "sponsors"
 
 
+
+async def _user_approves_cv(client, app_id: int, text: str = "Ada Lovelace. Python engineer.") -> dict:
+    """Owner rule 2026-10-31: an assistant records applied only after the USER approved the CV (web)."""
+    import hashlib
+
+    saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": text})
+    assert saved.status_code == 201, saved.text
+    cv = saved.json()
+    approved = await client.post(
+        f"/api/applications/{app_id}/events",
+        json={"event_type": "submit_approved", "payload": {
+            "artifact_id": cv["artifact_id"], "sha256": hashlib.sha256(text.encode()).hexdigest(), "where": "web"}},
+    )
+    assert approved.status_code == 201, approved.text
+    return cv
+
 @pytest.mark.asyncio
 async def test_a_fenced_read_written_back_through_every_mcp_door_stores_plain_text(authenticated_async_context):
     """Read fenced -> write it back with a line appended -> the stored value (web read) has no markers."""
@@ -408,6 +424,13 @@ async def test_a_fenced_read_written_back_through_every_mcp_door_stores_plain_te
             _payload(await mcp.call_tool("save_artifact", {
                 "application_id": app_id, "kind": "answers", "text": "Notes:\n" + fenced_desc,
             }))
+            # Owner rule 2026-10-31: the user (web) answers the open ask and approves a CV first.
+            async with authenticated_async_context() as web:
+                for ask in (await web.get("/api/asks")).json()["asks"]:
+                    if not ask.get("answered_at") and not ask.get("withdrawn_at"):
+                        done = await web.post(f"/api/asks/{ask['id']}/withdraw", json={"reason": "answered in chat"})
+                        assert done.status_code == 200, done.text
+                await _user_approves_cv(web, app_id)
             _payload(await mcp.call_tool("record_application", {
                 "application_id": app_id, "channel": "email", "note": "Confirmed: " + replied["source"]["subject"],
             }))
