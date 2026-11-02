@@ -9892,6 +9892,11 @@
       },
       "NeedsYouCountOut": {
         "properties": {
+          "answer_once": {
+            "default": 0,
+            "title": "Answer Once",
+            "type": "integer"
+          },
           "by_actor": {
             "additionalProperties": {
               "type": "integer"

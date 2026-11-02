@@ -7707,6 +7707,11 @@ export interface components {
         /** NeedsYouCountOut */
         NeedsYouCountOut: {
             /**
+             * Answer Once
+             * @default 0
+             */
+            answer_once: number;
+            /**
              * By Actor
              * @default {}
              */

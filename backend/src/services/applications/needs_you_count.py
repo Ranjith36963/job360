@@ -11,6 +11,10 @@ OTHER items (each counts once):
 * setting requests waiting; outcome suggestions; unmatched mail;
 * New connections: people with no job whose newest drafted note is not sent (at most 25, the page cap).
 
+ANSWER ONCE: the questionnaire card (``ask_once.questionnaire``) counts as one item while any of its rows
+waits; ``answer_once`` is how many rows. It shows under the "Answer once" chip with the jobs whose first
+blocker is ``answers``.
+
 The page caps some lists (50 outcome suggestions, 50 unmatched mail, 25 new connections, 500
 contacts); the same caps are applied here so the two totals agree to the last unit.
 
@@ -23,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core import settings
 from src.services.applications import inbox_items, outcome_suggestions, test_marker
-from src.services.profile import setting_requests
+from src.services.profile import ask_once, setting_requests
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -165,7 +169,9 @@ async def needs_you_count(db: JobDatabase, user_id: str) -> dict[str, Any]:
         + min(await inbox_items.count_open(db, user_id), MAIL_LIST_MAX)
         + connections
     )
+    # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
+    answer_once = ask_once.open_questions(user_id)
     return {
-        "n": jobs + other, "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
-        "other_ask_ids": other_ask_ids, **first,
+        "n": jobs + other + (1 if answer_once else 0), "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
+        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first,
     }

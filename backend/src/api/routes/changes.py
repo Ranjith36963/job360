@@ -168,12 +168,13 @@ async def changes(
 
 
 class NeedsYouCountOut(BaseModel):
-    n: int  # the Needs-you page's total: jobs + other
+    n: int  # the Needs-you page's total: jobs + other + 1 while the Answer-once card has rows
     jobs: int  # jobs whose first blocker is the user (= jobs_waiting_on_you)
     other: int  # asks with no job, waiting setting requests, outcome suggestions, unmatched mail, new connections
     jobs_waiting_on_you: int = 0  # = by_actor["you"]
     by_actor: dict[str, int] = {}  # open jobs once each, by first blocker's actor
     by_kind: dict[str, int] = {}  # the same jobs, by the kind of that first blocker
+    answer_once: int = 0  # questionnaire rows waiting (the one "Answer once" card counts 1 in n while > 0)
     other_ask_ids: list[int] = []  # open asks tied to a job that is not a row (e.g. proof missing): shown in Other
     job_ids: list[int] = []  # the jobs waiting on the user, oldest first blocker first (the page's rows)
     job_ids_by_kind: dict[str, list[int]] = {}  # the same ids grouped by their first blocker's kind

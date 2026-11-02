@@ -78,20 +78,10 @@ were deleted, along with `OPENAI_API_KEY`, `OPENAI_MODEL`, `GEMINI_API_KEY`,
 `GEMINI_MODEL`, `GROQ_API_KEY` and `CEREBRAS_API_KEY`.
 
 **Fix: connect an agent and let it fill the profile.** Point Claude / ChatGPT /
-any MCP client at `/api/mcp` (see `docs/product/VISION.md`), then ask it to:
-
-1. call `get_profile` — the `raw` key carries the CV text, the LinkedIn export
-   text, the GitHub bio, the profile README and the repo briefs. The
-   `editable_paths` key lists the exact dotted paths `update_profile` accepts
-   right now — read it, don't assume a shape;
-2. read the raw text, and call `update_profile` with the certifications,
-   education, the skills that are only stated in prose, the dated work
-   history (`cv_data.cv_positions`) and the projects (`cv_data.cv_projects`).
-   The two lists take records with a closed key set — the `update_profile`
-   tool description gives the shape — and a write replaces the whole list.
-   A record with an unknown key, a wrong type, an over-long field or a date
-   that is not a range like `Jan 2020 – Present` is refused with a 422 that
-   names the problem.
+any MCP client at `/api/mcp` (see `docs/product/VISION.md`) and ask it to read the
+profile and write the missing fields back. Which call returns what, and the
+parameters each one needs, is the `get_profile` / `update_profile` docstrings in
+`api/mcp_server.py` — that text is what the agent itself reads.
 
 What the agent writes survives every later re-upload — nothing in the extractor
 clears a field the agent set.

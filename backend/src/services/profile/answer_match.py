@@ -82,14 +82,11 @@ def _pick(cands: list[dict[str, Any]]) -> tuple[Optional[dict[str, Any]], Option
     return (cands[0] if cands else None), None
 
 
-def resolve_answer(
-    answers: Any, *, topic: Optional[str] = None, question: Optional[str] = None,
-    company_key: Optional[str] = None, country: Optional[str] = None,
-) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """``(record, note)``. Only approved, in-scope answers. Order: the ``topic``
-    (canonical key), then the question wording or an alias; within each, the
-    company-scoped answer (narrower) before the unscoped one. Two disagreeing
-    candidates at one level = ``(None, note)``; nothing matching = ``(None, None)``."""
+def _candidates(
+    answers: Any, *, topic: Optional[str], question: Optional[str],
+    company_key: Optional[str], country: Optional[str],
+) -> list[dict[str, Any]]:
+    """The approved, in-scope records at the first level that matches (see :func:`resolve_answer`)."""
     usable = [
         r for r in (answers if isinstance(answers, list) else [])
         if isinstance(r, dict) and r.get("approved") is True and _in_scope(r, company_key)
@@ -105,9 +102,26 @@ def resolve_answer(
     for test in stages:
         for scoped in (True, False):
             cands = [r for r in usable if test(r) and bool(str(r.get("company") or "").strip()) is scoped]
+            # Narrower wins (ask once): an answer the owner bound to THIS country by pressing "remember"
+            # outranks one saved for no country, as a company's own answer outranks the unscoped one.
+            bound = [r for r in cands if str(r.get("country") or "").strip()]
+            if bound:
+                return bound
             if cands:
-                return _pick(cands)
-    return None, None
+                return cands
+    return []
+
+
+def resolve_answer(
+    answers: Any, *, topic: Optional[str] = None, question: Optional[str] = None,
+    company_key: Optional[str] = None, country: Optional[str] = None,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """``(record, note)``. Only approved, in-scope answers. Order: the ``topic``
+    (canonical key), then the question wording or an alias; within each, the
+    company-scoped answer (narrower) before the unscoped one, and an answer bound to
+    the job's country before one bound to none. Two disagreeing candidates at one
+    level = ``(None, note)``; nothing matching = ``(None, None)``."""
+    return _pick(_candidates(answers, topic=topic, question=question, company_key=company_key, country=country))
 
 
 def find_answer(

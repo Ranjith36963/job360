@@ -130,3 +130,19 @@ def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str,
         todo.sort(key=lambda r: (r["label"] != "guessed", -int(r["seen"])))
         out.append({"country": cc, "questions": todo[:PER_COUNTRY]})
     return out
+
+
+def open_questions(user_id: str) -> int:
+    """How many questionnaire rows wait on the user, every country together (the Needs-you count's
+    ``answer_once``). Read-only; 0 when the profile cannot be read, so a bad profile never breaks the badge."""
+    import logging  # noqa: PLC0415
+
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    try:
+        loaded, overlay = load_profile_with_overlay(user_id)
+        return sum(len(c["questions"]) for c in questionnaire(loaded or UserProfile(), overlay))
+    except Exception:  # noqa: BLE001 - the count must answer; the card's own read shows the error
+        logging.getLogger(__name__).exception("ask_once.open_questions failed")
+        return 0
