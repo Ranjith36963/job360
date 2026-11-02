@@ -26,6 +26,8 @@ export function AskQuestions({
   busy,
   onChange,
   onSave,
+  onRemember,
+  remembered,
 }: {
   items: MergedRow[];
   rows: Record<string, RowState>;
@@ -33,6 +35,11 @@ export function AskQuestions({
   onChange: (rowId: string, row: RowState) => void;
   /** Saves one row at once (Save after an Edit, OK, a choice): the owner's click is the consent. */
   onSave?: (rowId: string, value: string) => void;
+  /** Ask once (owner 2026-11-02): saves the row AND remembers it for later jobs in this country. Only
+   *  this press (or "OK all and remember") saves an answer for reuse. */
+  onRemember?: (rowId: string, value: string) => void;
+  /** Rows already remembered on this card. */
+  remembered?: Set<string>;
 }) {
   // Open editors, each with the row as it was, so Cancel puts it back.
   const [editing, setEditing] = useState<Map<string, RowState>>(new Map());
@@ -119,6 +126,15 @@ export function AskQuestions({
                         onSave?.(id, row.value);
                       }}>
                       OK
+                    </button>
+                  )}
+                  {!stub && onRemember && !remembered?.has(id) && (
+                    <button type="button" disabled={busy} data-testid={`q-remember-${askId}-${q.key}`}
+                      aria-label={`OK and remember: ${q.question}`} className={btn} onClick={() => {
+                        onChange(id, { value: row.value, ok: true });
+                        onRemember(id, row.value);
+                      }}>
+                      Remember
                     </button>
                   )}
                 </div>

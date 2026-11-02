@@ -8,7 +8,7 @@ import { ApplicationDecisions } from "./ApplicationDecisions";
 
 vi.mock("@/lib/api", () => ({
   answerAsk: vi.fn(), answerAskQuestions: vi.fn(), downloadApplicationArtifact: vi.fn(), markCvSeen: vi.fn(),
-  markOutreachSent: vi.fn(), rememberAnswers: vi.fn(), saveAskRowAnswers: vi.fn(), updateContact: vi.fn(),
+  markOutreachSent: vi.fn(), rememberAskAnswers: vi.fn(), saveAskRowAnswers: vi.fn(), updateContact: vi.fn(),
   approveSend: vi.fn(), clearDuplicate: vi.fn(), declineSend: vi.fn(), resolveBlocked: vi.fn(),
   setAutofill: vi.fn(), submittedBlocked: vi.fn(), refillForm: vi.fn(), browserLive: vi.fn(),
 }));

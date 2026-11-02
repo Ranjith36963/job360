@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.services.profile import common_questions
 
 router = APIRouter(tags=["profile"])
@@ -63,3 +63,60 @@ async def list_common_questions(user: CurrentUser = Depends(require_user)) -> di
     loaded, overlay = load_profile_with_overlay(user.id)
     rows = common_questions.common_questions(loaded or UserProfile(), overlay)
     return {"questions": rows, "summary": common_questions.summary(rows)}
+
+
+class QuestionnaireCountry(BaseModel):
+    country: str
+    questions: list[CommonQuestionOut]
+
+
+class QuestionnaireOut(BaseModel):
+    countries: list[QuestionnaireCountry]
+
+
+@router.get("/profile/questionnaire", response_model=QuestionnaireOut, dependencies=AUTH_FIRST)
+async def get_questionnaire(user: CurrentUser = Depends(require_user)) -> dict[str, Any]:  # noqa: B008
+    """Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed
+    or not known, most-guessed first (``ask_once.questionnaire``). Read-only."""
+    from src.services.profile import ask_once  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    loaded, overlay = load_profile_with_overlay(user.id)
+    return {"countries": ask_once.questionnaire(loaded or UserProfile(), overlay)}
+
+
+class RememberItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    topic: str = Field(min_length=1, max_length=60)
+    question: str = Field(min_length=1, max_length=500)
+    answer: str = Field(min_length=1, max_length=2000)
+
+
+class RememberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    country: str = Field(min_length=2, max_length=2)
+    items: list[RememberItem] = Field(min_length=1, max_length=10)
+
+
+class RememberOut(BaseModel):
+    saved: list[str]
+
+
+@router.post("/profile/questionnaire/remember", response_model=RememberOut, dependencies=AUTH_FIRST)
+async def remember_questionnaire(
+    body: RememberRequest, user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer,
+    bound to ``country`` when it is country-specific (right to work, salary...), else global.
+    Session only (no MCP twin): nothing is remembered without that press."""
+    from src.services.profile import ask_once  # noqa: PLC0415
+    from src.services.profile.edits import ProfileEditError  # noqa: PLC0415
+
+    try:
+        saved = ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
+    except ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {"saved": saved}

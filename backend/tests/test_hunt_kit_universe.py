@@ -235,6 +235,9 @@ def test_cursor_advances_only_by_finished_boards_and_a_stopped_run_leaves_the_re
         return []
 
     hist = str(tmp_path / "h.json")
+    # a saved cursor at row 0: since #1436 a run with NO cursor file starts at the calendar-day slice, so a test
+    # about how the cursor advances must not depend on today's date
+    hk.save_rotation_cursor(hist, {"icims": 0})
     # first run: the budget lets only one of the two slice boards start
     state = {"n": 0}
     orig_admit = hk.Stream.admit
@@ -277,7 +280,9 @@ def test_a_board_that_raises_still_counts_as_visited(monkeypatch: pytest.MonkeyP
     def fetch(row: dict, http: Any, st: dict) -> list:
         raise RuntimeError("boom")
 
-    col = _cursor_run(monkeypatch, tmp_path, [], fetch=fetch)
+    hist = str(tmp_path / "h.json")
+    hk.save_rotation_cursor(hist, {"icims": 0})  # start at row 0 whatever today's date is (#1436)
+    col = _cursor_run(monkeypatch, tmp_path, [], fetch=fetch, hist=hist)
     assert col.cursor == {"icims": 2} and len(col.failed) == 2
 
 

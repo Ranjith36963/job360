@@ -76,6 +76,7 @@ ROUTE_MODULES = [
     "browser",
     "asks",
     "changes",
+    "common_questions",
 ]
 
 # Route modules main.py mounts at the site ROOT (no "/api"). Only the OAuth
@@ -194,6 +195,8 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/contacts/{contact_id}/own-browser-send"): "the user's own yes to one LinkedIn send",
     ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
     ("POST", "/api/asks/{ask_id}/answers/save"): "the user's own saved rows read as checked on Needs you",
+    ("POST", "/api/asks/{ask_id}/answers/remember"): "the owner's own remember press: reused on later jobs",
+    ("POST", "/api/profile/questionnaire/remember"): "the owner's own remember press on the questionnaire",
     ("POST", "/api/applications/{application_id}/browser/refill"): "the user's own Refill the form: replays and holds",
     ("GET", "/api/changes"): "the web page's own live poll; agents have whats_new, and a token never polls it",
     ("GET", "/api/needs-you-count"): "the web menu badge's own count; an agent reads whats_due, not this",

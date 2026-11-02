@@ -64,11 +64,13 @@
     "email_drafted",
     "outcome_suggested",
     "outcome_dismissed",
-    "process_log"
+    "process_log",
+    "autonomy_shadow"
   ],
   "process": [
     "process_log",
     "kit_read",
-    "ask_withdrawn"
+    "ask_withdrawn",
+    "autonomy_shadow"
   ]
 }

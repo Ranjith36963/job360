@@ -96,7 +96,7 @@ _EQUALITY: dict[str, str] = {
     "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
 EQUALITY_KEYS: frozenset[str] = frozenset(_EQUALITY)
-_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases")
+_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases", "country")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
 _SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
 PREFER_NOT_TO_SAY = "Prefer not to say"
@@ -608,7 +608,10 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
                 f"{where}.answer exceeds the {settings.USER_INFO_ANSWER_MAX_CHARS}-character "
                 "limit (USER_INFO_ANSWER_MAX_CHARS)"
             )
-        key = " ".join(q.lower().split())
+        # Ask once (owner 2026-11-02): one answer per question AND country, so the UK and US answers to
+        # "Do you need sponsorship?" are two records; ``country`` binds a record to that job country only.
+        country = _iso2(f"{where}.country", raw["country"]) if raw.get("country") else None
+        key = " ".join(q.lower().split()) + "|" + (country or "")
         if key in seen:
             raise _fail(f"{path}: the same question appears twice")
         seen.add(key)
@@ -624,6 +627,8 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
             company_line = _line(f"{where}.company", company, 200)
             if company_line:
                 record["company"] = company_line
+        if country:
+            record["country"] = country
         topic = raw.get("topic")
         if topic is not None and topic != "":
             if not isinstance(topic, str):
@@ -660,7 +665,8 @@ def _one_per_topic(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _company_key(rec: dict[str, Any]) -> str:
-    return " ".join(str(rec.get("company") or "").lower().split())
+    """The record's scope: its company, and its country when it is bound to one (ask once)."""
+    return " ".join(str(rec.get("company") or "").lower().split()) + "|" + str(rec.get("country") or "").upper()
 
 
 def answer_upsert_index(records: list[Any], new: Any) -> int | None:

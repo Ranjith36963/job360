@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
-import { answerAskQuestions, rememberAnswers, saveAskRowAnswers } from "@/lib/api";
-import { initialRow, isStoredSource, mergeQuestions } from "@/lib/job-cards";
+import { answerAskQuestions, saveAskRowAnswers } from "@/lib/api";
+import { initialRow, mergeQuestions } from "@/lib/job-cards";
 import type { RowState } from "./AskQuestions";
 
 /** The open asks of ONE job that list form questions (what a Ready card must show before Send). */
@@ -47,11 +47,7 @@ export function useReadyAsks(asks: Ask[]) {
       const given = Object.fromEntries((merged.byAsk.get(ask.id) ?? []).map((k) => [k.key, finalOf(k.rowId)]));
       await answerAskQuestions(ask.id, given);
     }
-    await rememberAnswers(
-      merged.rows
-        .filter((m) => !(isStoredSource(m.q.source) && finalOf(m.id) === m.q.answer.trim()))
-        .map((m) => ({ topic: m.q.key || m.id, question: m.q.question, answer: finalOf(m.id) })),
-    );
+    // Send is not a "remember" press (owner 2026-11-02): nothing is saved for later jobs here.
   }
 
   return {

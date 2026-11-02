@@ -11729,6 +11729,43 @@
         "title": "ProvenanceSegment",
         "type": "object"
       },
+      "QuestionnaireCountry": {
+        "properties": {
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/CommonQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "country",
+          "questions"
+        ],
+        "title": "QuestionnaireCountry",
+        "type": "object"
+      },
+      "QuestionnaireOut": {
+        "properties": {
+          "countries": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionnaireCountry"
+            },
+            "title": "Countries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "countries"
+        ],
+        "title": "QuestionnaireOut",
+        "type": "object"
+      },
       "QueueOut": {
         "properties": {
           "count": {
@@ -13734,6 +13771,113 @@
           "reason"
         ],
         "title": "ReleaseOut",
+        "type": "object"
+      },
+      "RememberItem": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "topic": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "question",
+          "answer"
+        ],
+        "title": "RememberItem",
+        "type": "object"
+      },
+      "RememberOut": {
+        "properties": {
+          "saved": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Saved",
+            "type": "array"
+          }
+        },
+        "required": [
+          "saved"
+        ],
+        "title": "RememberOut",
+        "type": "object"
+      },
+      "RememberRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Country",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RememberItem"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "country",
+          "items"
+        ],
+        "title": "RememberRequest",
+        "type": "object"
+      },
+      "RememberRowsOut": {
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "saved": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Saved",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "saved",
+          "skipped"
+        ],
+        "title": "RememberRowsOut",
         "type": "object"
       },
       "ResolveInboxItemRequest": {
@@ -17208,6 +17352,18 @@
           "application_id": {
             "title": "Application Id",
             "type": "integer"
+          },
+          "autonomy_shadow": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomy Shadow"
           },
           "company_left": {
             "anyOf": [
@@ -22448,7 +22604,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form\nrules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.\nAn unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form\nrules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.\nAn unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12). The verdict is read-only; each call also appends one\nserver-only ``autonomy_shadow`` event (verdict codes, no answer text; autonomy slice 3, watch-only).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -22951,6 +23107,91 @@
           }
         },
         "summary": "Answer Ask",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/asks/{ask_id}/answers/remember": {
+      "post": {
+        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific\none for THIS job's country only, the rest global), so the next job asking them needs no owner.\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
+        "operationId": "remember_ask_row_answers_api_asks__ask_id__answers_remember_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRowAnswersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RememberRowsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remember Ask Row Answers",
         "tags": [
           "asks"
         ]
@@ -29374,6 +29615,148 @@
           }
         },
         "summary": "Upsert Preferences",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/questionnaire": {
+      "get": {
+        "description": "Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed\nor not known, most-guessed first (``ask_once.questionnaire``). Read-only.",
+        "operationId": "get_questionnaire_api_profile_questionnaire_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionnaireOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Questionnaire",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/questionnaire/remember": {
+      "post": {
+        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer,\nbound to ``country`` when it is country-specific (right to work, salary...), else global.\nSession only (no MCP twin): nothing is remembered without that press.",
+        "operationId": "remember_questionnaire_api_profile_questionnaire_remember_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RememberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RememberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remember Questionnaire",
         "tags": [
           "profile"
         ]

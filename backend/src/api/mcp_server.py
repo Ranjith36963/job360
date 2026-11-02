@@ -2579,7 +2579,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         not_email_channel, no_email, email_bounced, no_linkedin_url, already_sent, replied, application_closed,
         linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long, invite_limit_reached,
         linkedin_daily_cap_reached, too_soon, claimed_by_other_session, needs_claim, daily_outreach_cap_reached,
-        company_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via, unlinked_contact, needs_owner_click.
+        company_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via, unlinked_contact,
+        unsupported_numbers (a number or years claim the profile lacks: fix or ask), needs_owner_click.
         Send: auto_mode, owner_clicked. `sent_today` / `daily_max` = email sends today vs the cap."""
         try:
             async with _request_db() as db:

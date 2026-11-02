@@ -65,6 +65,7 @@ from src.services.applications import (
     queue_preflight,
     spine,
 )
+from src.services.applications import evidence as evidence_service
 from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
@@ -1600,6 +1601,9 @@ class SubmitCheckResponse(BaseModel):
     # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
     daily_left: Optional[int] = None
     company_left: Optional[int] = None
+    # Autonomy slice 3 (watch-only, never changes `decision`): {watch_only, essays: [{question_key,
+    # would_clear, reasons}], cv: {would_clear, reasons}, rtw: {ok, detail}}; null when the checker failed.
+    autonomy_shadow: Optional[dict[str, Any]] = None
 
 
 class OutreachCheckResponse(BaseModel):
@@ -2996,10 +3000,15 @@ async def outreach_check(
             db, user.id, contact, message_id, session=session, actor=actor_for(user), now=now
         )
         counts = await settings_rules.load_outreach_counts(db, user.id, now, facts.company or None)
+        unsupported = await contacts_service.unsupported_numbers_detail(db, user.id, contact_id, message_id, profile)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     verdict = settings_rules.may_send_outreach(cfg, facts, counts, now)
+    if verdict.decision == "send" and unsupported:  # a number the profile cannot back: ask, never send
+        verdict = settings_rules.OutreachDecision(
+            "ask", "unsupported_numbers", f"The draft states a number your profile does not support. {unsupported}"
+        )
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",
@@ -3749,7 +3758,8 @@ async def submit_check(
     ``get_application_kit``; 422 when malformed): another session's live kit hold
     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
     ``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an
-    application that is not the caller's (rule #12)."""
+    application that is not the caller's (rule #12). The verdict is read-only; each call also appends one
+    server-only ``autonomy_shadow`` event (verdict codes, no answer text; autonomy slice 3, watch-only)."""
     try:
         label = kit_service.clean_session(session)
         app_row = await spine.get_owned_application(db, user.id, application_id)
@@ -3763,7 +3773,7 @@ async def submit_check(
         hold = await kit_service.live_hold(db, user, application_id, now, label)
         facts = await kit_service.gate_facts(
             db, user.id, app_row, email_verified=email_verification_satisfied(user),
-            other_session_hold=kit_service.hold_fact(hold),
+            other_session_hold=kit_service.hold_fact(hold), shadow=True,
         )
     except SpineError as exc:
         _raise(exc)
@@ -3782,8 +3792,12 @@ async def submit_check(
             "channel": "email" if settings_rules.is_mailto(form_url) else "form", "result": "ok",
         },
     )
+    if facts.autonomy_shadow is not None:
+        await kit_service.record_autonomy_shadow(db, user, application_id, facts.autonomy_shadow, shown["decision"])
     return {
         "application_id": application_id, **shown, "type_first": type_first,
+        # Autonomy slice 3: what autonomy WOULD clear (watch-only; the verdict above never reads it).
+        "autonomy_shadow": facts.autonomy_shadow,
         # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
         "daily_left": settings_rules.daily_left(cfg, counts),
         "company_left": settings_rules.company_left(cfg, counts.company_applied_in_window),
@@ -3899,6 +3913,8 @@ async def _record_event(
         spine.validate_event_type(body.event_type)
         if body.event_type in proof_service.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
+        if body.event_type == evidence_service.EVENT_TYPE:
+            raise SpineError(422, f"{body.event_type} is written by Job360 itself (check_submit), not by a caller")
         if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
             # Slice 29: the receipt trusts it as the file that was sent, so no caller may forge one.
             raise SpineError(

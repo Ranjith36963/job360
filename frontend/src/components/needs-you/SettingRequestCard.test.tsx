@@ -14,6 +14,10 @@ const getNeedsYouCount = vi.hoisted(() => vi.fn());
 const ZERO_COUNT = { n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {} };
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
+  // Ask once: the Questionnaire card reads this; no countries = nothing to answer, so it hides itself.
+  getQuestionnaire: async () => ({ countries: [] }),
+  rememberQuestionnaire: vi.fn().mockResolvedValue({ saved: [] }),
+  rememberAskAnswers: vi.fn().mockResolvedValue({ saved: [], skipped: [] }),
   getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: vi.fn(),
