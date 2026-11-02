@@ -62,7 +62,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 from urllib.parse import urlsplit
@@ -929,6 +929,9 @@ class SubmitFacts:
     # draft). An email application (check_submit ``form_url`` = ``mailto:``) stops ``email_not_drafted``
     # without one, or when the mailto address is not this recipient; a yes never clears it.
     email_to: Optional[str] = None
+    # Autonomy slice 3 (watch-only): ``evidence.for_application`` when ``kit.gate_facts(shadow=True)``.
+    # ``may_submit`` NEVER reads it; it is not compared or hashed, so it cannot change a verdict.
+    autonomy_shadow: Optional[dict[str, Any]] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

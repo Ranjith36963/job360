@@ -968,7 +968,8 @@ export interface paths {
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
          *     ``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an
-         *     application that is not the caller's (rule #12).
+         *     application that is not the caller's (rule #12). The verdict is read-only; each call also appends one
+         *     server-only ``autonomy_shadow`` event (verdict codes, no answer text; autonomy slice 3, watch-only).
          */
         get: operations["submit_check_api_applications__application_id__submit_check_get"];
         put?: never;
@@ -10343,6 +10344,10 @@ export interface components {
         SubmitCheckResponse: {
             /** Application Id */
             application_id: number;
+            /** Autonomy Shadow */
+            autonomy_shadow?: {
+                [key: string]: unknown;
+            } | null;
             /** Company Left */
             company_left?: number | null;
             /** Daily Left */
