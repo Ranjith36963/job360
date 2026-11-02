@@ -1,7 +1,7 @@
 """A chat approval carries the owner's own words (owner 2026-11-02).
 
 An assistant with the owner's token could record ``cv_seen`` / ``submit_approved`` with where="chat" and
-nothing showed the owner said yes. Now where=chat needs ``owner_words`` (his reply, verbatim) and ``asked``
+nothing showed the owner said yes. Now where=chat needs ``user_words`` (his reply, verbatim) and ``asked``
 (exactly what he was shown); both are stored on the event. where=web (his own click) is unchanged. A claim
 on a duty does not name its caller, so a chat approval written while a scheduled run holds one is flagged
 ``during_duty_claim`` (server-computed), never refused by time window.
@@ -27,7 +27,7 @@ _AD = {
     "apply_url": "https://northwind.example/careers/7", "description": "Build the pipelines. Python, dbt.",
 }
 ASKED = "Here is the CV for Data Engineer at Northwind. OK to use it?"
-MISSING = "quote the owner's own reply in owner_words"
+MISSING = "quote the user's own reply in user_words"
 
 
 def _bearer_client(token: str) -> AsyncClient:
@@ -87,7 +87,7 @@ def _claim_now(user_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_approval_without_owner_words_is_422(authenticated_async_context):
+async def test_chat_approval_without_user_words_is_422(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id, cv, token = await _setup(client)
     async with _bearer_client(token) as agent:
@@ -96,13 +96,13 @@ async def test_chat_approval_without_owner_words_is_422(authenticated_async_cont
             assert bare.status_code == 422, bare.text
             assert MISSING in bare.json()["detail"]
             for words in ("", "   ", "\x00\x07"):
-                empty = await _event(agent, app_id, event_type, {**cv, "where": "chat", "owner_words": words, "asked": ASKED})
+                empty = await _event(agent, app_id, event_type, {**cv, "where": "chat", "user_words": words, "asked": ASKED})
                 assert empty.status_code == 422 and MISSING in empty.json()["detail"], empty.text
-            no_ask = await _event(agent, app_id, event_type, {**cv, "where": "chat", "owner_words": "yes"})
+            no_ask = await _event(agent, app_id, event_type, {**cv, "where": "chat", "user_words": "yes"})
             assert no_ask.status_code == 422 and "asked" in no_ask.json()["detail"], no_ask.text
-            long_words = {**cv, "where": "chat", "owner_words": "y" * 501, "asked": ASKED}
+            long_words = {**cv, "where": "chat", "user_words": "y" * 501, "asked": ASKED}
             assert (await _event(agent, app_id, event_type, long_words)).status_code == 422
-            long_ask = {**cv, "where": "chat", "owner_words": "yes", "asked": "a" * 2001}
+            long_ask = {**cv, "where": "chat", "user_words": "yes", "asked": "a" * 2001}
             assert (await _event(agent, app_id, event_type, long_ask)).status_code == 422
         assert await _payloads(agent, app_id, "cv_seen") == []
 
@@ -113,10 +113,10 @@ async def test_chat_approval_stores_the_owners_words_verbatim(authenticated_asyn
         app_id, cv, token = await _setup(client)
     words = "Yes, that CV is fine.\nGo ahead\x07"
     async with _bearer_client(token) as agent:
-        ok = await _event(agent, app_id, "cv_seen", {**cv, "where": "chat", "owner_words": words, "asked": ASKED})
+        ok = await _event(agent, app_id, "cv_seen", {**cv, "where": "chat", "user_words": words, "asked": ASKED})
         assert ok.status_code == 201, ok.text
         [stored] = await _payloads(agent, app_id, "cv_seen")
-    assert stored["owner_words"] == "Yes, that CV is fine.\nGo ahead"
+    assert stored["user_words"] == "Yes, that CV is fine.\nGo ahead"
     assert stored["asked"] == ASKED
     assert stored["where"] == "chat" and stored["by"] == "token:claude-code"
     assert stored["during_duty_claim"] is False
@@ -129,7 +129,7 @@ async def test_web_cv_seen_is_unchanged(authenticated_async_context):
         assert (await client.post(f"/api/applications/{app_id}/cv-seen", json={})).status_code == 201
         [stored] = await _payloads(client, app_id, "cv_seen")
         assert set(stored) == {"artifact_id", "sha256", "where", "version", "by"} and stored["where"] == "web"
-        extra = await _event(client, app_id, "cv_seen", {**cv, "where": "web", "owner_words": "x", "asked": "y"})
+        extra = await _event(client, app_id, "cv_seen", {**cv, "where": "web", "user_words": "x", "asked": "y"})
         assert extra.status_code == 422 and "unknown payload keys" in extra.json()["detail"], extra.text
 
 
@@ -141,7 +141,7 @@ async def test_chat_approval_while_a_run_holds_a_claim_is_flagged_not_refused(
         app_id, cv, token = await _setup(client)
     _claim_now(fixture_user_id)
     async with _bearer_client(token) as agent:
-        yes = {**cv, "where": "chat", "owner_words": "yes, send it", "asked": "Shall I submit it?"}
+        yes = {**cv, "where": "chat", "user_words": "yes, send it", "asked": "Shall I submit it?"}
         assert (await _event(agent, app_id, "submit_approved", yes)).status_code == 201
         [stored] = await _payloads(agent, app_id, "submit_approved")
         assert stored["during_duty_claim"] is True
@@ -160,13 +160,13 @@ async def test_mcp_record_event_applies_the_same_rule(authenticated_async_contex
             "record_event", {"event_type": "cv_seen", "application_id": app_id, "payload": {**cv, "where": "chat"}}
         )
         assert bare.is_error and "422" in bare.content[0].text and MISSING in bare.content[0].text
-        payload = {**cv, "where": "chat", "owner_words": "Looks good", "asked": ASKED}
+        payload = {**cv, "where": "chat", "user_words": "Looks good", "asked": ASKED}
         ok = await mcp.call_tool("record_event", {"event_type": "cv_seen", "application_id": app_id, "payload": payload})
         assert not ok.is_error, ok.content[0].text
         assert json.loads(ok.content[0].text)["event_type"] == "cv_seen"
     async with _bearer_client(token) as agent:
         [stored] = await _payloads(agent, app_id, "cv_seen")
-    assert (stored["owner_words"], stored["asked"], stored["during_duty_claim"]) == ("Looks good", ASKED, False)
+    assert (stored["user_words"], stored["asked"], stored["during_duty_claim"]) == ("Looks good", ASKED, False)
 
 
 def test_the_record_event_description_names_the_chat_keys():

@@ -31,11 +31,11 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
     },
     "cv_seen": {
         "artifact_id": 7, "sha256": "<sha256 from get_application_kit>", "where": "chat",
-        "owner_words": "Looks good, use it", "asked": "Here is the CV for Data Engineer at Acme. OK to use it?",
+        "user_words": "Looks good, use it", "asked": "Here is the CV for Data Engineer at Acme. OK to use it?",
     },
     "submit_approved": {
         "artifact_id": 7, "sha256": "<sha256 from get_application_kit>", "where": "chat",
-        "owner_words": "yes, send it", "asked": "The form for Data Engineer at Acme is filled. Shall I submit it?",
+        "user_words": "yes, send it", "asked": "The form for Data Engineer at Acme is filled. Shall I submit it?",
     },
     "submit_declined": {"where": "chat"},
     "autofill_set": {"mode": "deny"},

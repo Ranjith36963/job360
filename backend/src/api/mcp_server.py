@@ -1929,7 +1929,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
-        chat adds owner_words (reply verbatim), asked;
+        chat adds user_words (reply verbatim), asked;
         submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         email_drafted {to, subject, attachments, gmail_draft_id};

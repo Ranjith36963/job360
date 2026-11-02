@@ -39,7 +39,7 @@ describe("answered event label", () => {
 
 describe("chat approval label", () => {
   it("quotes the owner's own words for a chat cv_seen / submit_approved", () => {
-    const payload = { artifact_id: 7, sha256: "x", where: "chat", owner_words: "yes, send it", asked: "Send?" };
+    const payload = { artifact_id: 7, sha256: "x", where: "chat", user_words: "yes, send it", asked: "Send?" };
     expect(eventLabel({ event_type: "submit_approved", payload, recorded_by: "agent:Claude" })).toBe(
       "Approved in chat: “yes, send it”",
     );

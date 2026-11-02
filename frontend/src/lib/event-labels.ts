@@ -136,8 +136,8 @@ function relayedWords(payload: unknown): boolean {
  * owner's reply verbatim, so the timeline shows what he said, not only that an assistant recorded a yes. */
 function chatApprovalWords(e: { event_type: string; payload?: unknown }): string {
   if (e.event_type !== "cv_seen" && e.event_type !== "submit_approved") return "";
-  const p = (e.payload ?? {}) as { where?: unknown; owner_words?: unknown };
-  return p.where === "chat" && typeof p.owner_words === "string" ? p.owner_words.trim() : "";
+  const p = (e.payload ?? {}) as { where?: unknown; user_words?: unknown };
+  return p.where === "chat" && typeof p.user_words === "string" ? p.user_words.trim() : "";
 }
 
 /** The label for one timeline row. A status event reads "Status → <label>";

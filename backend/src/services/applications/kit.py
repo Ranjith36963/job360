@@ -86,7 +86,7 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "else the user uploads it by hand. An expired link: call the kit again.",
     "Show the CV to the user. When the user says it is OK in chat, record_event cv_seen with where=chat. "
     "When the user says yes to submitting, record_event submit_approved with where=chat. Both take "
-    "owner_words (the user's reply, word for word) and asked (the exact text you showed them).",
+    "user_words (the user's reply, word for word) and asked (the exact text you showed them).",
     "`autofill` deny: do not type into the form - give the user the kit answers to paste. Still record form_filled.",
     "After filling the form, record_event form_filled {form_url, fields_count}. "
     "Then re-read EVERY field on the page, fix what is wrong, and record_event form_swept "
@@ -1309,17 +1309,17 @@ def _where(user: CurrentUser, event_type: str, payload: dict[str, Any]) -> str:
         raise SpineError(
             403,
             "where=web needs the user's own click on the Job360 website; an assistant records where=chat, "
-            "only after the user said so in chat, quoting their reply in owner_words",
+            "only after the user said so in chat, quoting their reply in user_words",
         )
     return str(where)
 
 
 # Owner 2026-11-02: a chat approval is real only when it carries the owner's own words and exactly what he was
 # shown. where=web (his own click) takes neither; where=chat needs both.
-CHAT_APPROVAL_KEYS = frozenset({"owner_words", "asked"})
-OWNER_WORDS_MAX = 500
+CHAT_APPROVAL_KEYS = frozenset({"user_words", "asked"})
+USER_WORDS_MAX = 500
 ASKED_MAX = 2000
-OWNER_WORDS_MISSING = "quote the owner's own reply in owner_words"
+USER_WORDS_MISSING = "quote the user's own reply in user_words"
 ASKED_MISSING = "put the exact question or text you showed the owner in asked"
 
 
@@ -1330,11 +1330,11 @@ def approval_keys(event_type: str, payload: dict[str, Any]) -> frozenset[str]:
 
 
 def chat_words(payload: dict[str, Any], problems: list[str]) -> dict[str, str]:
-    """``owner_words`` and ``asked`` as stored: control characters removed, ends trimmed, otherwise verbatim
+    """``user_words`` and ``asked`` as stored: control characters removed, ends trimmed, otherwise verbatim
     (never re-worded). An empty, non-text or too-long one is a problem; only the good ones are returned."""
     out: dict[str, str] = {}
     for name, limit, missing in (
-        ("owner_words", OWNER_WORDS_MAX, OWNER_WORDS_MISSING), ("asked", ASKED_MAX, ASKED_MISSING)
+        ("user_words", USER_WORDS_MAX, USER_WORDS_MISSING), ("asked", ASKED_MAX, ASKED_MISSING)
     ):
         raw = payload.get(name)
         text = spine._strip_control_chars(raw).strip() if isinstance(raw, str) else ""

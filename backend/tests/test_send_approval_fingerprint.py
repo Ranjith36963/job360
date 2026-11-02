@@ -241,7 +241,7 @@ async def test_the_yes_expires_and_so_does_a_legacy_yes_without_a_fingerprint(
         cv = [e for e in detail["events"] if e["event_type"] == "submit_approved"][-1]["payload"]
     # A chat yes (and every yes stored before slice 8) carries no fingerprint: CV + time only.
     async with _bearer_client(token) as agent:
-        legacy = {"artifact_id": cv["artifact_id"], "sha256": cv["sha256"], "where": "chat", "owner_words": "yes", "asked": "OK?"}
+        legacy = {"artifact_id": cv["artifact_id"], "sha256": cv["sha256"], "where": "chat", "user_words": "yes", "asked": "OK?"}
         await _event(agent, app_id, "submit_approved", legacy)
         await _fill(agent, app_id, [{**NOTICE, "answer": "3 months"}])
         assert (await _check(agent, app_id))["reason"] == "user_approved", "not bound to the fill"

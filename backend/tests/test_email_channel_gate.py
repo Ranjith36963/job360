@@ -315,7 +315,7 @@ async def test_a_chat_yes_and_a_form_application_keep_working(authenticated_asyn
     # A chat yes (the user said yes in chat; no fingerprint) is bound to the CV, as before slice 31.
     async with _bearer_client(token) as agent:
         yes = await _event(agent, email_app, "submit_approved",
-                           {"artifact_id": cv_2["artifact_id"], "sha256": sha(CV_2), "where": "chat", "owner_words": "yes", "asked": "OK?"})
+                           {"artifact_id": cv_2["artifact_id"], "sha256": sha(CV_2), "where": "chat", "user_words": "yes", "asked": "OK?"})
         assert yes.status_code == 201, yes.text
         verdict = await _gate_route(agent, email_app, "mailto:jobs@southwind.example")
     assert (verdict["decision"], verdict["reason"]) == ("submit", "user_approved")
