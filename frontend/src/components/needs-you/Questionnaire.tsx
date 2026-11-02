@@ -18,7 +18,7 @@ const rowKey = (cc: string, q: QuestionnaireRow) => `${cc}:${q.topic}`;
 
 /** The one-time questionnaire on Needs you. Nothing is saved for later jobs until the owner presses
  *  "OK" on a row or "OK all and remember"; a right-to-work or salary answer counts for that country only. Silent when empty. */
-export function Questionnaire() {
+export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
   const [data, setData] = useState<Data | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -50,6 +50,7 @@ export function Questionnaire() {
     try {
       await rememberQuestionnaire(cc, items);
       await load();
+      onChanged?.();
     } catch (err) {
       toast.apiError(err, "Couldn't remember those answers");
     } finally {

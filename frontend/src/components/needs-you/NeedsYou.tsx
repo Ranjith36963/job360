@@ -488,6 +488,10 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         {active === "all" && jobs.settled && jobs.total === 0 && !jobs.connections && general.length === 0 && waiting.length > 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}
+        {/* Answer once (owner 2026-11-02): the questions asked on every form, answered once per country. */}
+        {(active === "all" || active === "answers") && (count === null || count.answerOnce) && (
+          <Questionnaire onChanged={() => setCountTick((t) => t + 1)} />
+        )}
         <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>
@@ -503,7 +507,6 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         <>
           <StartedNotConfirmed />
           <DueFollowUps />
-          <Questionnaire />
         </>
       )}
 
