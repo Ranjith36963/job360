@@ -41,7 +41,7 @@ from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import email_channel, event_examples, spine
 from src.services.applications.authorship import actor_for
-from src.services.applications.job_checks import checks_for_application
+from src.services.applications.job_checks import checks_for_application, classify_host
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.answer_match import fits_country
@@ -802,9 +802,10 @@ async def latest_form_url(db: JobDatabase, user_id: str, application_id: int) ->
 
 async def gate_facts(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool,
-    other_session_hold: Optional[tuple[str, str, str]] = None,
+    other_session_hold: Optional[tuple[str, str, str]] = None, shadow: bool = False,
 ) -> settings_rules.SubmitFacts:
-    """The facts :func:`settings_rules.may_submit` reads for this application.
+    """The facts :func:`settings_rules.may_submit` reads for this application. ``shadow`` (check_submit
+    only) also fills the watch-only ``autonomy_shadow`` (:func:`autonomy_shadow`); no verdict reads it.
     ``email_verified`` comes from the caller's :class:`CurrentUser`
     (``auth_deps.email_verification_satisfied``) - it is about the account, not
     the application. ``other_session_hold`` is :func:`hold_fact` of the caller's
@@ -826,7 +827,7 @@ async def gate_facts(
     dup = state["duplicate"]
     form_host = await _newest_form_host(db, user_id, application_id)
     draft = await email_channel.newest_draft(db, user_id, application_id)
-    return settings_rules.SubmitFacts(
+    facts = settings_rules.SubmitFacts(
         status=str(app_row["status"]),
         has_receipt=has_receipt,
         submit_override=await spine.submit_override(db, user_id, application_id),
@@ -866,6 +867,53 @@ async def gate_facts(
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
+    if shadow:
+        from dataclasses import replace  # noqa: PLC0415
+
+        facts = replace(facts, autonomy_shadow=await autonomy_shadow(db, user_id, app_row))
+    return facts
+
+
+async def autonomy_shadow(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Autonomy slice 3, watch-only: :func:`evidence.for_application`, or ``None`` when the checker fails.
+    A checker bug is logged and never reaches a submit."""
+    from src.services.applications import evidence  # noqa: PLC0415
+
+    try:
+        return await evidence.for_application(db, user_id, app_row)
+    except Exception as exc:  # noqa: BLE001 - watch-only: nothing may break the gate
+        get_audit_logger().warning("autonomy_shadow_failed", extra={
+            "event": "autonomy_shadow_failed", "user_id": safe_log_value(user_id),
+            "application_id": int(app_row["id"]), "error": safe_log_value(type(exc).__name__), "result": "error",
+        })
+        return None
+
+
+async def record_autonomy_shadow(
+    db: JobDatabase, user: CurrentUser, application_id: int, shadow: dict[str, Any], decision: str,
+) -> None:
+    """One server-only ``autonomy_shadow`` event per check_submit: verdict codes only, never answer text.
+    A rtw mismatch is logged loudly. A failure here is logged, never raised."""
+    from src.services.applications import evidence  # noqa: PLC0415
+
+    log = get_audit_logger()
+    try:
+        payload = {**evidence.event_payload(shadow), "decision": decision}
+        await spine.append_event(
+            db, user_id=user.id, application_id=application_id, event_type=evidence.EVENT_TYPE, payload=payload,
+            occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=actor_for(user),
+        )
+    except Exception as exc:  # noqa: BLE001 - watch-only
+        log.warning("autonomy_shadow_failed", extra={
+            "event": "autonomy_shadow_failed", "user_id": safe_log_value(user.id),
+            "application_id": application_id, "error": safe_log_value(type(exc).__name__), "result": "error",
+        })
+        return
+    if not shadow["rtw"]["ok"]:
+        log.warning("autonomy_shadow_rtw_mismatch", extra={
+            "event": "autonomy_shadow_rtw_mismatch", "user_id": safe_log_value(user.id),
+            "application_id": application_id, "result": "flagged",
+        })
 
 
 # ── The applied rule (owner, 2026-10-31) ─────────────────────────────────────
@@ -1167,8 +1215,10 @@ async def _new_site(db: JobDatabase, user_id: str, application_id: int, host: Op
     """Bulk-apply R2: ``host`` (the newest ``form_filled``'s) has no earlier application of this
     user with a RECEIPT (``record_application``; a bare ``applied`` event is not enough) that is not
     marked ``simulation`` (at any position) and has a ``form_filled`` on that same host (security
-    review 2026-10-18). ``False`` when there is no host (``unknown_site`` handles that)."""
-    if not host:
+    review 2026-10-18). ``False`` when there is no host (``unknown_site`` handles that), and for an official
+    ATS host (``job_checks.classify_host``: Greenhouse, Lever...; autonomy slice 3, 2026-11-02): a known
+    application platform, not a new site."""
+    if not host or classify_host(host) == "official_ats":
         return False
     cur = await db._db.execute(
         "SELECT f.payload FROM application_events f WHERE f.user_id = ? AND f.event_type = 'form_filled' "

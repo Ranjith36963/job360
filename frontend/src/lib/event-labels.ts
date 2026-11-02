@@ -123,6 +123,8 @@ export const EVENT_LABEL: Record<string, string> = {
   outcome_dismissed: "Suggested outcome ignored",
   // S9 (2026-10-29): the assistant's own work log, hidden from the timeline by type.
   process_log: "Assistant's work log",
+  // Autonomy slice 3 (2026-11-02): watch-only check of what autonomy would clear (work log, by type).
+  autonomy_shadow: "Autonomy check (watch-only)",
 };
 
 function relayedWords(payload: unknown): boolean {
