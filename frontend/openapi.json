@@ -19972,7 +19972,7 @@
     },
     "/api/applications/{application_id}/answers/{index}/confirm": {
       "post": {
-        "description": "Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is\nsaved as the user's own word in memory, so the assistant uses it next time.\nSession only - an assistant can never vouch for its own answer. Returns the\ncard again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.",
+        "description": "Verify or Edit one answer on a ready card (owner decision 2026-10-18, narrowed 2026-11-02): the\nuser's word is approved for THIS application only (an ``answer_verified`` event); it is never saved\nfor other jobs - that is the \"remember\" press. Session only - an assistant can never vouch for its own\nanswer. Returns the card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.",
         "operationId": "confirm_answer_api_applications__application_id__answers__index__confirm_post",
         "parameters": [
           {
