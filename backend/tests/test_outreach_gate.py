@@ -58,8 +58,10 @@ def _ok_facts(**kw: Any) -> rules.OutreachFacts:
     return rules.OutreachFacts(**base)
 
 
-def _counts(today: int = 0, company: int = 0) -> rules.OutreachCounts:
-    return rules.OutreachCounts(sent_today=today, company_sent_in_window=company)
+def _counts(today: int = 0, company: int = 0, email: int = 0, network_hour: int = 0) -> rules.OutreachCounts:
+    return rules.OutreachCounts(
+        sent_today=today, company_sent_in_window=company, email_sent_today=email, network_sent_last_hour=network_hour,
+    )
 
 
 def _gate(cfg=None, facts=None, counts=None) -> rules.OutreachDecision:
@@ -79,8 +81,10 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "already_sent", {"facts": {"already_sent": True}}),
     ("stop", "replied", {"facts": {"replied": True}}),
     ("stop", "application_closed", {"facts": {"application_closed": True}}),
-    ("stop", "daily_outreach_cap_reached", {"counts": {"today": 10}}),
-    ("stop", "company_cap_reached", {"counts": {"company": 2}}),
+    # The user's default email day (40) and job sends per company (5); owner 2026-11-02.
+    ("stop", "daily_outreach_cap_reached", {"counts": {"email": 40}}),
+    ("stop", "company_cap_reached", {"facts": {"linked": True}, "counts": {"company": 5}}),
+    ("stop", "network_hourly_cap_reached", {"facts": {"linked": False}, "counts": {"network_hour": 5}}),
     ("ask", "email_guessed", {"facts": {"email_source": "pattern_guess"}}),
     ("ask", "mode_not_auto", {"cfg": {"outreach_send": "draft_only"}}),
     ("ask", "no_found_via", {"facts": {"found_via": None}}),
@@ -93,10 +97,12 @@ def _run(trips: list[dict[str, Any]]) -> rules.OutreachDecision:
     cfg: dict[str, Any] = {}
     facts: dict[str, Any] = {}
     counts: dict[str, Any] = {}
-    for t in trips:
+    for t in trips:  # where two trips set the same fact, the EARLIER one (the rule under test) wins
         cfg.update(t.get("cfg", {}))
-        facts.update(t.get("facts", {}))
-        counts.update(t.get("counts", {}))
+        for key, value in t.get("facts", {}).items():
+            facts.setdefault(key, value)
+        for key, value in t.get("counts", {}).items():
+            counts.setdefault(key, value)
     return _gate(_cfg(**cfg), _ok_facts(**facts), _counts(**counts))
 
 
@@ -576,7 +582,9 @@ async def test_mcp_check_outreach_parity(authenticated_async_context, fixture_us
             mcp_server._current_user.reset(token)
     assert (route_send["decision"], route_send["reason"]) == ("send", "auto_mode")
     assert (route_stop["decision"], route_stop["reason"]) == ("stop", "not_email_channel")
-    assert set(route_send) == {"decision", "reason", "detail", "sent_today", "daily_max"}
+    assert set(route_send) == {
+        "decision", "reason", "detail", "sent_today", "daily_max", "job_sent_today", "network_sent_today",
+    }
 
 
 def test_instructions_and_recipes_carry_the_outreach_gate():

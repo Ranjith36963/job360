@@ -711,13 +711,21 @@ OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_M
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
 OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 — per USER
-# The outreach SEND gate (check_outreach, feature 10). Operator ceilings, not user
-# settings: OUTREACH_MAX_PER_HOUR above throttles WRITES; these cap SENDS. Only
-# recorded `sent` marks count. Day = the user's own today (as for check_submit).
-OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "10"))
-# At most this many sends to people at the same (lower-cased) job_company within
-# the window, so one company is never carpet-bombed.
-OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
+# The outreach SEND gate (check_outreach, feature 10). OUTREACH_MAX_PER_HOUR above throttles WRITES; these cap
+# SENDS. Only recorded `sent` marks count. Day = the user's own today (as for check_submit). Owner 2026-11-02: two
+# kinds of send - JOB outreach (a contact linked to an application) and NETWORK (no application). The limits are
+# the user's own assistant_settings (defaults below); the *_MAX values are operator BACKSTOPS above them that no
+# stored setting can pass, so a typo can never send thousands.
+OUTREACH_PER_COMPANY_DEFAULT = 5  # job-outreach sends per company within OUTREACH_COMPANY_WINDOW_DAYS
+NETWORK_PER_HOUR_DEFAULT = 5  # network sends per rolling hour
+LINKEDIN_SENDS_PER_DAY_DEFAULT = 20
+EMAIL_SENDS_PER_DAY_DEFAULT = 40
+OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "10"))
+OUTREACH_NETWORK_MAX_PER_HOUR = int(os.getenv("OUTREACH_NETWORK_MAX_PER_HOUR", "20"))
+OUTREACH_LINKEDIN_MAX_PER_DAY = int(os.getenv("OUTREACH_LINKEDIN_MAX_PER_DAY", "100"))
+OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))
+# Every channel together, per user per day (the email gate checks it first).
+OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "300"))
 OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
 # Outreach pack #5/#6 (2026-10-20): contact ledger entries beyond message/sent/reply. Stored
 # only — Job360 sends nothing, and these never count as sends (check_outreach reads `sent`).
@@ -959,6 +967,9 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.people_hunt",
     # Owner 2026-10-25 - when the user's PC is on: {days, from, to}; null = any time. Always safer.
     "assistant_settings.pc_on_hours",
+    # Owner 2026-11-02 - the user's own outreach send limits (whole numbers; null = the default). Raising is riskier.
+    "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
+    "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -1018,7 +1029,8 @@ SCHEDULE_DUTY_RECIPES: dict[str, str] = {
 }
 # Owner 2026-10-24 - the PEOPLE hunt (duty `reach`): open applications (considering/applied) brought or
 # applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
-# first, at most REACH_MAX_PER_RUN per run. Sends stay capped by check_outreach (OUTREACH_COMPANY_MAX).
+# first, at most REACH_MAX_PER_RUN per run, up to 5 people each. Sends stay capped by check_outreach
+# (assistant_settings.outreach_per_company).
 REACH_WINDOW_DAYS = 14
 # Owner 2026-10-25 - one run per duty at a time: a duty `whats_due` lists to an assistant is that run's for
 # DUTY_CLAIM_MINUTES (another run, an hourly tick or a Run now, is not given it); mark_done frees it sooner.
@@ -1033,8 +1045,9 @@ REACH_MAX_PER_RUN = 5
 # NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
 # (not one job) and stores them as cold contacts. Job360 only says it is due and how many; the assistant
 # finds and judges them (VISION rule 4: Job360 never sources or ranks).
-NETWORK_EVERY_HOURS = 24
-NETWORK_MAX_PER_RUN = 10
+# Owner 2026-11-02: 5 new people an hour (about 100 a day), was 10 once a day.
+NETWORK_EVERY_HOURS = 1
+NETWORK_MAX_PER_RUN = 5
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and

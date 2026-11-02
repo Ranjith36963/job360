@@ -2051,12 +2051,13 @@ async def _linkedin_gate_facts(
 
 
 async def count_company_sends(db: JobDatabase, user_id: str, key: str, since: str) -> int:
-    """Recorded `sent` marks since `since` to this user's contacts whose effective
-    company key (contact_company_key, edits applied) equals `key`. Cold contacts count."""
+    """Recorded JOB-outreach `sent` marks since `since` to this user's contacts whose effective
+    company key (contact_company_key, edits applied) equals `key`. Owner 2026-11-02: only contacts linked to an
+    application count; a network (cold) contact's send never counts against a company's job-outreach cap."""
     cur = await db._db.execute(
         "SELECT ac.id AS contact_id, ac.company, a.job_company FROM contact_outreach co "
         "JOIN application_contacts ac ON ac.id = co.contact_id "
-        "LEFT JOIN applications a ON a.id = ac.application_id "
+        "JOIN applications a ON a.id = ac.application_id "
         "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ?",
         (user_id, user_id, since),
     )

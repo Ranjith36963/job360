@@ -43,13 +43,16 @@ def _facts(**kw: Any) -> rules.OutreachFacts:
     return rules.OutreachFacts(**base)
 
 
-def _gate(cfg: rules.EffectiveSettings | None = None, **facts: Any) -> rules.OutreachDecision:
+def _gate(
+    cfg: rules.EffectiveSettings | None = None, counts: dict[str, Any] | None = None, **facts: Any
+) -> rules.OutreachDecision:
     return rules.may_send_outreach(
-        cfg or _cfg(), _facts(**facts), rules.OutreachCounts(sent_today=0), NOW
+        cfg or _cfg(), _facts(**facts), rules.OutreachCounts(sent_today=0, **(counts or {})), NOW
     )
 
 
 _RECENT = NOW - timedelta(seconds=30)
+_DAY = 3  # a LinkedIn day the user set low (assistant_settings.linkedin_sends_per_day), so the API tests stay fast
 _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "paused", {"cfg": {"paused_until": "until_resumed"}}),
     ("stop", "message_not_found", {"message_found": False}),
@@ -63,7 +66,10 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "note_too_long", {"linkedin_state": "not_connected", "text_chars": 201}),
     ("stop", "message_too_long", {"linkedin_state": "connected", "text_chars": 401}),
     ("stop", "invite_limit_reached", {"linkedin_state": "not_connected", "invite_limit_until": NOW + timedelta(days=1)}),
-    ("stop", "linkedin_daily_cap_reached", {"linkedin_sent_today": own_browser.LINKEDIN_DAILY_MAX}),
+    # Owner 2026-11-02: a job contact's company cap and a network contact's hourly cap hold on LinkedIn too.
+    ("stop", "company_cap_reached", {"linked": True, "company": "northwind", "counts": {"company_sent_in_window": 5}}),
+    ("stop", "network_hourly_cap_reached", {"counts": {"network_sent_last_hour": 5}}),
+    ("stop", "linkedin_daily_cap_reached", {"linkedin_sent_today": settings.LINKEDIN_SENDS_PER_DAY_DEFAULT}),
     ("stop", "too_soon", {"last_linkedin_sent_at": _RECENT}),
     ("stop", "claimed_by_other_session", {"claimed_by_other": True}),
     ("ask", "needs_owner_click", {"owner_approved": False}),
@@ -77,13 +83,17 @@ def _run(trips: list[dict[str, Any]]) -> rules.OutreachDecision:
     under test). A pause is the only config trip."""
     merged: dict[str, Any] = {}
     cfg: dict[str, Any] = {}
+    counts: dict[str, Any] = {}
     for trip in trips:
         for key, value in trip.items():
             if key == "cfg":
                 cfg.update(value)
+            elif key == "counts":
+                for name, n in value.items():
+                    counts.setdefault(name, n)
             else:
                 merged.setdefault(key, value)
-    return _gate(_cfg(**cfg), **merged)
+    return _gate(_cfg(**cfg), counts, **merged)
 
 
 def test_the_linkedin_reason_table_is_the_gates_own_order():
@@ -105,7 +115,7 @@ def test_an_earlier_linkedin_reason_beats_every_later_one(index):
 
 
 def test_the_answers_the_contract_words_exactly_and_every_linkedin_answer_says_what_its_counts_are():
-    note = " (sent_today and daily_max count email only.)"
+    note = " (sent_today and daily_max count every channel; LinkedIn's is linkedin_sends_per_day.)"
     assert _gate(owner_approved=False).detail == (
         "The user has not pressed Send on this person's card for this draft. Do not send; it waits on Needs you."
         + note
@@ -150,8 +160,8 @@ def test_note_and_message_limits_and_the_invite_limit_hit_only_their_own_kind():
 def test_the_gap_is_the_take_gap_and_the_day_is_the_take_day(monkeypatch):
     assert _gate(last_linkedin_sent_at=NOW - timedelta(seconds=own_browser.LINKEDIN_MIN_GAP_SECONDS)).reason == "owner_clicked"
     assert _gate(last_linkedin_sent_at=NOW - timedelta(seconds=119)).reason == "too_soon"
-    assert _gate(linkedin_sent_today=own_browser.LINKEDIN_DAILY_MAX - 1).reason == "owner_clicked"
-    monkeypatch.setattr(own_browser, "LINKEDIN_DAILY_MAX", 3)
+    assert _gate(linkedin_sent_today=settings.LINKEDIN_SENDS_PER_DAY_DEFAULT - 1).reason == "owner_clicked"
+    monkeypatch.setattr(settings, "OUTREACH_LINKEDIN_MAX_PER_DAY", 3)  # the operator backstop holds under the user's
     assert _gate(linkedin_sent_today=3).reason == "linkedin_daily_cap_reached"
 
 
@@ -319,9 +329,11 @@ async def test_the_click_and_a_claim_turn_ask_into_send_on_the_route_and_the_mcp
     assert taken["status"] == "task" and taken["task"]["contact_id"] == cid
     assert _verdict(via_tool) == ("send", "owner_clicked") == _verdict(via_route)
     assert _verdict(tool_other) == ("stop", "claimed_by_other_session")
-    assert set(via_route) == {"decision", "reason", "detail", "sent_today", "daily_max"}
+    assert set(via_route) == {
+        "decision", "reason", "detail", "sent_today", "daily_max", "job_sent_today", "network_sent_today",
+    }
     assert via_route["detail"].startswith("The user pressed Send for this draft")
-    assert via_route["detail"].endswith("(sent_today and daily_max count email only.)")
+    assert via_route["detail"].endswith("(sent_today and daily_max count every channel; LinkedIn's is linkedin_sends_per_day.)")
 
 
 @pytest.mark.asyncio
@@ -588,9 +600,10 @@ async def test_an_unreleased_claim_on_someone_else_counts_like_take_counts_it(au
 
 
 @pytest.mark.asyncio
-async def test_the_eleventh_send_of_the_day_stops(authenticated_async_context):
+async def test_the_send_past_the_users_day_stops(authenticated_async_context):
     async with authenticated_async_context() as client:
-        for n in range(own_browser.LINKEDIN_DAILY_MAX):
+        await _profile_edit(client, "assistant_settings.linkedin_sends_per_day", _DAY)  # the user's own LinkedIn day
+        for n in range(_DAY):
             _a, done, _m = await _person(client, n)
             await _sent(client, done)
         _age_sends()
@@ -599,13 +612,14 @@ async def test_the_eleventh_send_of_the_day_stops(authenticated_async_context):
         assert (await _take(client, last))["status"] == "daily_limit"
         got = await _check(client, last, mid, "desk")
         assert _verdict(got) == ("stop", "linkedin_daily_cap_reached")
-        assert str(own_browser.LINKEDIN_DAILY_MAX) in got["detail"]
+        assert f"{_DAY} LinkedIn sends" in got["detail"]
 
 
 @pytest.mark.asyncio
-async def test_the_tenth_send_of_the_day_is_allowed(authenticated_async_context):
+async def test_the_last_send_under_the_users_day_is_allowed(authenticated_async_context):
     async with authenticated_async_context() as client:
-        for n in range(own_browser.LINKEDIN_DAILY_MAX - 1):
+        await _profile_edit(client, "assistant_settings.linkedin_sends_per_day", _DAY)
+        for n in range(_DAY - 1):
             _a, done, _m = await _person(client, n)
             await _sent(client, done)
         _age_sends()
@@ -616,12 +630,12 @@ async def test_the_tenth_send_of_the_day_is_allowed(authenticated_async_context)
 
 @pytest.mark.asyncio
 async def test_the_day_is_the_users_own_day_not_utc(authenticated_async_context, fixture_user_id):
-    """Ten sends before the user's local midnight are not today's, though their UTC date is the gate's UTC today."""
+    """Sends before the user's local midnight are not today's, though their UTC date is the gate's UTC today."""
     from src.api.routes import browser as browser_routes
 
     now = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)  # 02:00 on 27 Oct in Pacific/Kiritimati (UTC+14)
     async with authenticated_async_context() as client:
-        for n in range(own_browser.LINKEDIN_DAILY_MAX):
+        for n in range(_DAY):
             _a, done, _m = await _person(client, n)
             await _sent(client, done)
         _sql("UPDATE users SET timezone = ? WHERE id = ?", ("Pacific/Kiritimati", fixture_user_id))
@@ -634,8 +648,8 @@ async def test_the_day_is_the_users_own_day_not_utc(authenticated_async_context,
             _last, today_count = await own_browser.pace_facts(db, fixture_user_id, now)
             _sql("UPDATE users SET timezone = ? WHERE id = ?", ("UTC", fixture_user_id))
             _last, utc_count = await own_browser.pace_facts(db, fixture_user_id, now)
-    assert (yesterday_count, today_count) == (0, own_browser.LINKEDIN_DAILY_MAX)
-    assert utc_count == own_browser.LINKEDIN_DAILY_MAX  # the same instants are all "today" on the UTC clock
+    assert (yesterday_count, today_count) == (0, _DAY)
+    assert utc_count == _DAY  # the same instants are all "today" on the UTC clock
 
 
 async def _second_user_cookie(email: str = "second@example.com") -> str:
