@@ -906,13 +906,13 @@ async def record_autonomy_shadow(
     except Exception as exc:  # noqa: BLE001 - watch-only
         log.warning("autonomy_shadow_failed", extra={
             "event": "autonomy_shadow_failed", "user_id": safe_log_value(user.id),
-            "application_id": application_id, "error": safe_log_value(type(exc).__name__), "result": "error",
+            "application_id": int(application_id), "error": safe_log_value(type(exc).__name__), "result": "error",
         })
         return
     if not shadow["rtw"]["ok"]:
         log.warning("autonomy_shadow_rtw_mismatch", extra={
             "event": "autonomy_shadow_rtw_mismatch", "user_id": safe_log_value(user.id),
-            "application_id": application_id, "result": "flagged",
+            "application_id": int(application_id), "result": "flagged",
         })
 
 
