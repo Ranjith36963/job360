@@ -18,6 +18,7 @@ vi.mock("@/lib/api", () => ({
   // Ask once: the Questionnaire card reads this; no countries = nothing to answer, so it hides itself.
   getQuestionnaire: async () => ({ countries: [] }),
   rememberQuestionnaire: vi.fn().mockResolvedValue({ saved: [] }),
+  getSentOnItsOwn: async () => ({ items: [] }),
   rememberAskAnswers: vi.fn().mockResolvedValue({ saved: [], skipped: [] }),
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),
