@@ -5607,6 +5607,7 @@ export interface components {
             links?: string[];
             /** Name */
             name: string;
+            note_rewrite?: components["schemas"]["NoteRewriteOut"] | null;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
@@ -7778,6 +7779,17 @@ export interface components {
             /** Rule */
             rule: string;
         };
+        /**
+         * NoteRewriteOut
+         * @description The newest LinkedIn draft is over the connection-note ``limit`` (it has ``chars``) and the person is not
+         *     known to be connected: the ASSISTANT rewrites it (never the user); it is not ready to send.
+         */
+        NoteRewriteOut: {
+            /** Chars */
+            chars: number;
+            /** Limit */
+            limit: number;
+        };
         /** OAuthGrantOut */
         OAuthGrantOut: {
             /** Client Name */
@@ -8044,6 +8056,7 @@ export interface components {
             links?: string[];
             /** Name */
             name: string;
+            note_rewrite?: components["schemas"]["NoteRewriteOut"] | null;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];

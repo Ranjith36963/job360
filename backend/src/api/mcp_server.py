@@ -1714,10 +1714,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         For a cv or cover_letter, the reply's `checks` lists claims not found in the profile and PDF problems
         (each `{code, severity, detail}`); fix them and save a new version, or tell
         the user. They warn only - the save always succeeds.
-        Outreach `draft_kind`: connection_note|message|inmail|email. A note over 200 chars (300 with
-        preferences.linkedin_premium) or an InMail over 1,900 is refused.
+        `draft_kind`: connection_note|message|inmail|email. LinkedIn over 200 chars (300 with
+        preferences.linkedin_premium) is refused, kind or not, unless connected (400) or inmail (1,900).
 
-        Give `contact_id` (a person from add_contact/list_people) to draft a
+        Give `contact_id` (from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and
         `channel` ("linkedin" | "email" | "other") is required. Works for a
         cold contact (no job) too: leave `application_id` out. Recording the
@@ -1730,7 +1730,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         kind "outreach_template" + `label`, no application_id or contact_id: a reusable template; each save
         is a new version, get_profile `outreach_templates` returns the newest.
         Give outreach messages a `label` for stats by variant.
-        `client_key` (optional): a retry with the same key returns the first reply."""
+        `client_key`: a retry with the same key returns the first reply."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         text, ats_notes = _unfence_in(text), _unfence_in(ats_notes)
         if kind in settings.USER_TEMPLATE_KINDS:

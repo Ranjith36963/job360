@@ -4667,6 +4667,16 @@
             "title": "Name",
             "type": "string"
           },
+          "note_rewrite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteRewriteOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "notes": {
             "title": "Notes",
             "type": "string"
@@ -10004,6 +10014,25 @@
         "title": "NormalizedOut",
         "type": "object"
       },
+      "NoteRewriteOut": {
+        "description": "The newest LinkedIn draft is over the connection-note ``limit`` (it has ``chars``) and the person is not\nknown to be connected: the ASSISTANT rewrites it (never the user); it is not ready to send.",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "chars"
+        ],
+        "title": "NoteRewriteOut",
+        "type": "object"
+      },
       "OAuthGrantOut": {
         "properties": {
           "client_name": {
@@ -10659,6 +10688,16 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note_rewrite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteRewriteOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notes": {
             "title": "Notes",

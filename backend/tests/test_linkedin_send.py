@@ -58,9 +58,9 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "already_sent", {"already_sent": True}),
     ("stop", "replied", {"replied": True}),
     ("stop", "application_closed", {"application_closed": True}),
-    ("stop", "linkedin_state_unknown", {"linkedin_state": None}),
-    ("stop", "linkedin_pending", {"linkedin_state": "pending"}),
     ("stop", "note_too_long", {"linkedin_state": "not_connected", "text_chars": 201}),
+    ("stop", "linkedin_state_unknown", {"linkedin_state": None, "text_chars": 120}),
+    ("stop", "linkedin_pending", {"linkedin_state": "pending"}),
     ("stop", "message_too_long", {"linkedin_state": "connected", "text_chars": 401}),
     ("stop", "invite_limit_reached", {"linkedin_state": "not_connected", "invite_limit_until": NOW + timedelta(days=1)}),
     ("stop", "linkedin_daily_cap_reached", {"linkedin_sent_today": own_browser.LINKEDIN_DAILY_MAX}),
@@ -142,6 +142,8 @@ def test_note_and_message_limits_and_the_invite_limit_hit_only_their_own_kind():
     assert _gate(linkedin_state="not_connected", text_chars=301, premium=True).reason == "note_too_long"
     assert _gate(text_chars=400).reason == "owner_clicked"  # connected: a message, 400 allowed
     assert _gate(text_chars=300, linkedin_state="not_connected").reason == "note_too_long"
+    assert _gate(text_chars=201, linkedin_state=None).reason == "note_too_long"  # fail closed: unknown = a note
+    assert _gate(text_chars=200, linkedin_state=None).reason == "linkedin_state_unknown"
     limit = NOW + timedelta(hours=5)
     assert _gate(invite_limit_until=limit).reason == "owner_clicked"  # a message to a connection is not an invite
     assert _gate(linkedin_state="not_connected", invite_limit_until=NOW - timedelta(seconds=1)).reason == "owner_clicked"
@@ -192,10 +194,21 @@ async def _person(
     added = await client.post(f"/api/applications/{app_id}/contacts", json=body)
     assert added.status_code == 201, added.text
     contact_id = int(added.json()["contact"]["id"])
-    if state:
-        patched = await client.patch(f"/api/contacts/{contact_id}", json={"linkedin_state": state})
+    return app_id, contact_id, await _stored_draft(client, app_id, contact_id, text, state)
+
+
+async def _stored_draft(
+    client: AsyncClient, app_id: int, contact_id: int, text: str, state: str | None, channel: str = "linkedin"
+) -> int:
+    """A draft that is saved while the person is connected (any length up to 400 saves), then the state the page
+    showed is saved: the way a stored draft ends up over the note limit (a save to anyone else is refused)."""
+    patched = await client.patch(f"/api/contacts/{contact_id}", json={"linkedin_state": "connected"})
+    assert patched.status_code == 200, patched.text
+    message_id = await _draft(client, app_id, contact_id, text, channel)
+    if state != "connected":
+        patched = await client.patch(f"/api/contacts/{contact_id}", json={"linkedin_state": state or ""})
         assert patched.status_code == 200, patched.text
-    return app_id, contact_id, await _draft(client, app_id, contact_id, text)
+    return message_id
 
 
 async def _draft(client: AsyncClient, app_id: int, contact_id: int, text: str, channel: str = "linkedin") -> int:
@@ -457,7 +470,16 @@ async def test_note_length_is_200_and_a_message_is_400(authenticated_async_conte
         _a, ok200, m1 = await _person(client, 0, state="not_connected", text="n" * 200)
         _b, long201, m2 = await _person(client, 1, state="not_connected", text="n" * 201)
         _c, msg400, m3 = await _person(client, 2, text="m" * 400)
-        _d, msg401, m4 = await _person(client, 3, text="m" * 401)
+        _d, msg401, m4 = await _person(client, 3, text="m" * 400)
+        # A 401-character message cannot be saved any more; an old stored one still stops at the gate.
+        _sql(
+            "INSERT INTO contact_outreach (user_id, contact_id, entry, channel, text, version_no, occurred_at, "
+            "recorded_at, recorded_by, source_message_id) VALUES ((SELECT user_id FROM application_contacts "
+            "WHERE id = ?), ?, 'message', 'linkedin', ?, 2, '2026-11-01T00:00:00+00:00', "
+            "'2026-11-01T00:00:00+00:00', 'web', '')",
+            (msg401, msg401, "m" * 401),
+        )
+        m4 = (await client.get(f"/api/people?contact_id={msg401}")).json()["person"]["outreach"]["messages"][-1]["id"]
         for cid, mid in ((ok200, m1), (long201, m2), (msg400, m3), (msg401, m4)):
             await _click(client, cid, mid)
         assert await _held_check(client, ok200, m1) == ("send", "owner_clicked")
@@ -480,7 +502,7 @@ async def test_premium_widens_the_note_to_300_only_when_the_user_set_it_themselv
         # the user sets it on the web: now 300 is theirs
         await _profile_edit(client, "preferences.linkedin_premium", True)
         assert await _held_check(client, cid, mid) == ("send", "owner_clicked")
-        too_long = await _draft(client, app_id, cid, "n" * 301)
+        too_long = await _stored_draft(client, app_id, cid, "n" * 301, "not_connected")
         await _click(client, cid, too_long)
         assert _verdict(await _check(client, cid, too_long, "desk")) == ("stop", "note_too_long")
 

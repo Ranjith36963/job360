@@ -1596,24 +1596,80 @@ async def _linkedin_premium_by_user(user_id: str, contact_id: int) -> bool:
     return bool(rows) and rows[0]["value"] is True and not profile_edits.is_assistant_actor(str(rows[0]["set_by"]))
 
 
+async def _linkedin_state_now(db: JobDatabase, user_id: str, contact_id: int) -> str:
+    """The contact's saved LinkedIn state (newest ``linkedin_state`` edit), or ``unknown`` when none is saved."""
+    cur = await db._db.execute(
+        "SELECT value FROM contact_edits WHERE user_id = ? AND contact_id = ? AND field = 'linkedin_state' "
+        "ORDER BY id DESC LIMIT 1",
+        (user_id, contact_id),
+    )
+    row = await cur.fetchone()
+    return str((row[0] if row else "") or "") or "unknown"
+
+
+async def over_limit_notes(db: JobDatabase, user_id: str, contact_ids: list[int]) -> dict[int, dict[str, int]]:
+    """``{contact_id: {limit, chars}}`` for each of these people whose NEWEST drafted LinkedIn message is over the
+    connection-note limit while they are not known to be connected (``own_browser.note_over_limit``). Such a
+    draft is never ready to send: the assistant rewrites it (Needs you shows it as the assistant's job and the
+    own-browser queue leaves it out). Read-only; scoped by ``user_id``; the profile is read only if one is long."""
+    if not contact_ids:
+        return {}
+    marks = ",".join("?" for _ in contact_ids)
+    cur = await db._db.execute(
+        "SELECT o.contact_id, o.channel, o.text FROM contact_outreach o "  # noqa: S608 - only "?" is formatted in
+        f"WHERE o.user_id = ? AND o.entry = 'message' AND o.contact_id IN ({marks}) "
+        "AND o.id = (SELECT MAX(x.id) FROM contact_outreach x WHERE x.contact_id = o.contact_id "
+        "AND x.entry = 'message')",
+        (user_id, *contact_ids),
+    )
+    long = {
+        int(r["contact_id"]): len(str(r["text"] or ""))
+        for r in await cur.fetchall()
+        if r["channel"] == "linkedin" and len(str(r["text"] or "")) > settings.LINKEDIN_NOTE_MAX_CHARS
+    }
+    if not long:
+        return {}
+    premium = await _linkedin_premium_by_user(user_id, next(iter(long)))
+    out: dict[int, dict[str, int]] = {}
+    for cid, chars in long.items():
+        limit = own_browser.note_over_limit("linkedin", await _linkedin_state_now(db, user_id, cid), chars, premium)
+        if limit is not None:
+            out[cid] = {"limit": limit, "chars": chars}
+    return out
+
+
 async def _check_draft_kind(
-    user_id: str, contact_id: int, entry: str, channel: str, text: str, draft_kind: str
+    db: JobDatabase, user_id: str, contact_id: int, entry: str, channel: str, text: str, draft_kind: str
 ) -> None:
     """Owner 2026-10-24: a draft that says what it is must fit it. LinkedIn's own limits: a connection
-    note is 200 characters (300 with Premium), an InMail body 1,900. Refused, never stored cut."""
+    note is 200 characters (300 with Premium), an InMail body 1,900, a message to a connection 400. Refused,
+    never stored cut. Fail closed (2026-11-02): a LinkedIn draft that is not an InMail or an email is a
+    connection note unless the person's saved LinkedIn state is ``connected``, whatever ``draft_kind`` says
+    (``record_outreach`` passes ``message`` when the caller gave none)."""
     if draft_kind not in settings.OUTREACH_DRAFT_KINDS:
         raise SpineError(422, f"draft_kind must be one of {', '.join(settings.OUTREACH_DRAFT_KINDS)}")
     if entry != "message":
         raise SpineError(422, "draft_kind is only for a drafted message")
     if (draft_kind == "email") != (channel == "email"):
         raise SpineError(422, "an email draft goes on channel email; a LinkedIn draft on channel linkedin")
-    if draft_kind == "connection_note":
-        premium = await _linkedin_premium(user_id, contact_id)
-        limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
-        if len(text) > limit:
+    if channel == "linkedin" and draft_kind in ("connection_note", "message"):
+        state = await _linkedin_state_now(db, user_id, contact_id)
+        if draft_kind == "connection_note" or state != "connected":
+            premium = await _linkedin_premium(user_id, contact_id)
+            limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+            if len(text) > limit:
+                hint = (
+                    " If they are already a connection, save update_contact(linkedin_state=\"connected\") first."
+                    if draft_kind == "message" else ""
+                )
+                raise SpineError(
+                    422, f"a connection note is at most {limit} characters on LinkedIn "
+                    f"({'Premium' if premium else 'a free account'}); this one is {len(text)}. Shorten it.{hint}",
+                )
+        elif len(text) > settings_rules.LINKEDIN_MESSAGE_MAX_CHARS:
             raise SpineError(
-                422, f"a connection note is at most {limit} characters on LinkedIn "
-                f"({'Premium' if premium else 'a free account'}); this one is {len(text)}. Shorten it.",
+                422, f"a LinkedIn message is at most {settings_rules.LINKEDIN_MESSAGE_MAX_CHARS} characters; "
+                f"this one is {len(text)}. Shorten it.",
             )
     if draft_kind == "inmail" and len(text) > settings.LINKEDIN_INMAIL_BODY_MAX_CHARS:
         raise SpineError(
@@ -1722,8 +1778,10 @@ async def record_outreach(
             raise SpineError(
                 422, "a bounce takes no text: Job360 stores the contact's current email as the bounced address"
             )
+    if draft_kind is None and entry == "message" and channel == "linkedin":
+        draft_kind = "message"  # fail closed: undeclared = a connection note unless they are connected
     if draft_kind is not None:
-        await _check_draft_kind(user_id, contact_id, entry, channel, text or "", draft_kind)
+        await _check_draft_kind(db, user_id, contact_id, entry, channel, text or "", draft_kind)
     clean_label = clean_variant_label(label)
     if clean_label and entry != "message":
         raise SpineError(422, "label is only meaningful on a message version")
@@ -1908,14 +1966,9 @@ async def record_outreach(
         # Returned with the reply, not stored; the message is saved as written.
         from src.services.applications import cv_checks  # noqa: PLC0415
 
+        # The LinkedIn connection-note limit is no longer a warning: a draft over it is refused above
+        # (``_check_draft_kind``) unless the person is connected, and a message to a connection may be longer.
         checks = cv_checks.check_text("outreach", clean_text, await _load_profile_or_none(user_id))
-        if channel == "linkedin":
-            # S16 - the connection-note limit; the profile is read only for this channel.
-            note = cv_checks.linkedin_note_too_long(
-                clean_text, premium=await _linkedin_premium(user_id, contact_id)
-            )
-            if note is not None:
-                checks.append(note)
         outreach["checks"] = checks
     return {
         "outreach": outreach, "already_existed": False, "event_id": event_id,
@@ -2162,6 +2215,10 @@ async def _full_contact_view(
     view["outreach"] = _outreach_view(rows, include_text=include_text)
     view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
     view["own_browser_task"] = own_browser.public_task(own_browser.derive(rows, datetime.now(timezone.utc)))
+    # A newest draft over the note limit that nobody has sent or skipped: the assistant's job, not the user's.
+    last_msg = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
+    closed = any(r["entry"] in ("sent", "reply", "skipped") and int(r["id"]) > last_msg for r in rows)
+    view["note_rewrite"] = None if closed else (await over_limit_notes(db, user_id, [contact_id])).get(contact_id)
     return view
 
 
