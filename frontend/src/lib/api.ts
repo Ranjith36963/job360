@@ -867,20 +867,26 @@ export async function saveAskRowAnswers(id: number, answers: Record<string, stri
   });
 }
 
-/** "Remember these answers for every form": each one becomes an approved saved answer on the
- *  profile (user_info.answers), replacing an older one with the same topic. */
-export async function rememberAnswers(items: { topic: string; question: string; answer: string }[]): Promise<void> {
-  if (items.length === 0) return;
-  await request("/api/profile", {
-    method: "PATCH",
-    body: JSON.stringify({
-      edits: items.map((i) => ({
-        path: "user_info.answers",
-        op: "upsert",
-        value: { question: i.question, answer: i.answer, approved: true, topic: i.topic },
-      })),
-    }),
-  });
+/** Ask once (owner 2026-11-02): the owner's own "remember" press on rows of a job's ask. The server saves
+ *  each as an approved answer (country-specific ones for THAT job's country only); per-job rows are skipped. */
+export async function rememberAskAnswers(id: number, answers: Record<string, string>): Promise<_Schemas["RememberRowsOut"]> {
+  return request(`/api/asks/${id}/answers/remember`, { method: "POST", body: JSON.stringify({ answers }) });
+}
+
+export type Questionnaire = _Schemas["QuestionnaireOut"];
+export type QuestionnaireRow = Questionnaire["countries"][number]["questions"][number];
+
+/** Up to 10 still-guessed or unknown common questions per country the owner works in. */
+export async function getQuestionnaire(): Promise<Questionnaire> {
+  return request("/api/profile/questionnaire");
+}
+
+/** The questionnaire's "remember" press: each answer saved as the owner's approved answer
+ *  (a right-to-work or salary one for `country` only, the rest global). */
+export async function rememberQuestionnaire(
+  country: string, items: { topic: string; question: string; answer: string }[],
+): Promise<_Schemas["RememberOut"]> {
+  return request("/api/profile/questionnaire/remember", { method: "POST", body: JSON.stringify({ country, items }) });
 }
 
 export async function confirmAsk(id: number): Promise<Ask> {

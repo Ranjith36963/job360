@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Ask } from "@/lib/api";
-import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, recordApplicationReceipt, rememberAnswers, resolveSubmit, saveAskRowAnswers } from "@/lib/api";
+import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, recordApplicationReceipt, rememberAskAnswers, resolveSubmit, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
 import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
@@ -139,9 +139,26 @@ export function JobCard({
   });
   const prefillMode = merged.rows.some((m) => !rowOf(m.id, m.q).ok || !rowOf(m.id, m.q).value.trim());
 
+  const [remembered, setRemembered] = useState<Set<string>>(new Set());
+
+  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; the server
+   *  binds a country-specific one (right to work, salary) to this job's country, the rest are
+   *  global. A stored fact left unchanged is not saved again. */
+  async function rememberRows(values: Map<string, string>) {
+    for (const { ask } of structured) {
+      const given = (merged.byAsk.get(ask.id) ?? []).filter((k) => {
+        const m = merged.rows.find((r) => r.id === k.rowId);
+        const text = values.get(k.rowId);
+        return m && text && !(isStoredSource(m.q.source) && text === m.q.answer.trim());
+      });
+      if (given.length) await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+    }
+    setRemembered((prev) => new Set([...prev, ...values.keys()]));
+  }
+
   /** Owner bug 2026-10-26: an edit saves at once, one row on its own (a row still waiting never holds
-   *  it back): onto every open ask that lists the row, and as a remembered answer unless it is the stored
-   *  fact unchanged. The row shows checked first and goes back if the save fails. */
+   *  it back), onto every open ask that lists the row. The row shows checked first and goes back if the
+   *  save fails. */
   async function persistRow(id: string, value: string) {
     const m = merged.rows.find((r) => r.id === id);
     const text = value.trim();
@@ -150,11 +167,9 @@ export function JobCard({
       const keys = (merged.byAsk.get(ask.id) ?? []).filter((k) => k.rowId === id).map((k) => k.key);
       if (keys.length) await saveAskRowAnswers(ask.id, Object.fromEntries(keys.map((k) => [k, text])));
     }
-    if (!(isStoredSource(m.q.source) && text === m.q.answer.trim()))
-      await rememberAnswers([{ topic: m.q.key || m.id, question: m.q.question, answer: text }]);
   }
 
-  function saveRows(entries: [string, string][]) {
+  function saveRows(entries: [string, string][], remember = false) {
     const before = Object.fromEntries(entries.map(([id]) => [id, rows[id]]));
     const now = Object.fromEntries(entries.map(([id, value]) => [id, { value: value.trim(), ok: true }]));
     setRows((prev) => ({ ...prev, ...now }));
@@ -162,6 +177,7 @@ export function JobCard({
     void (async () => {
       try {
         for (const [id] of entries) await persistRow(id, now[id].value);
+        if (remember) await rememberRows(new Map(entries.map(([id]) => [id, now[id].value])));
         await onChanged();
       } catch (err) {
         setRows((prev) => {
@@ -180,7 +196,8 @@ export function JobCard({
   }
 
   const saveRow = (id: string, value: string) => saveRows([[id, value]]);
-  const approvePrefilled = () => saveRows(prefillable.map((m) => [m.id, rowOf(m.id, m.q).value]));
+  const rememberRow = (id: string, value: string) => saveRows([[id, value]], true);
+  const approvePrefilled = () => saveRows(prefillable.map((m) => [m.id, rowOf(m.id, m.q).value]), true);
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
     setBusy(true);
@@ -206,12 +223,8 @@ export function JobCard({
         const given = Object.fromEntries((merged.byAsk.get(ask.id) ?? []).map((k) => [k.key, finalOf(k.rowId)]));
         await answerAskQuestions(ask.id, given);
       }
-      // Every confirmed answer becomes a permanent fact, except one already stored and unchanged.
-      if (rowCount > 0) await rememberAnswers(
-        merged.rows
-          .filter((m) => !(isStoredSource(m.q.source) && finalOf(m.id) === m.q.answer.trim()))
-          .map((m) => ({ topic: m.q.key || m.id, question: m.q.question, answer: finalOf(m.id) })),
-      );
+      // "OK all and remember" is the owner's press: every answer is remembered for this job's country.
+      if (rowCount > 0) await rememberRows(new Map(merged.rows.map((m) => [m.id, finalOf(m.id)])));
       if (card.cv) await markCvSeen(card.applicationId, card.cv.artifactId);
     }, "Couldn't save everything");
 
@@ -340,7 +353,8 @@ export function JobCard({
           {rowCount > 0 && (
             <AskQuestions items={merged.rows} busy={busy}
               rows={Object.fromEntries(merged.rows.map((m) => [m.id, rowOf(m.id, m.q)]))}
-              onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} onSave={saveRow} />
+              onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} onSave={saveRow}
+              onRemember={rememberRow} remembered={remembered} />
           )}
           {questions.map(({ ask, kind }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`question-${ask.id}`}>
