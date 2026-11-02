@@ -39,7 +39,12 @@ def normalize_question(text: Any) -> str:
 
 def fits_country(rec: dict[str, Any], country: Optional[str]) -> bool:
     """False when ``rec`` is a country-bound answer (:data:`COUNTRY_BOUND_TOPIC_PREFIXES`) for another
-    country, or for no named country while the job is not that employer's own (company-scoped) one."""
+    country, or for no named country while the job is not that employer's own (company-scoped) one.
+    Ask once (owner 2026-11-02): a record with its own ``country`` (the user's "remember" press on a job
+    or the questionnaire) matches only a job in that country; an unknown job country matches none."""
+    bound = str(rec.get("country") or "").upper()
+    if bound:
+        return bool(country) and str(country).upper() == bound
     topic = str(rec.get("topic") or "").casefold()
     if not topic.startswith(COUNTRY_BOUND_TOPIC_PREFIXES):
         return True

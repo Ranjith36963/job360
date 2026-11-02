@@ -218,6 +218,34 @@ async def save_ask_row_answers(
         raise AssertionError("unreachable")  # _raise always raises
 
 
+class RememberRowsOut(BaseModel):
+    saved: list[str]
+    skipped: list[str]
+    country: Optional[str] = None
+
+
+@router.post("/asks/{ask_id}/answers/remember", response_model=RememberRowsOut, dependencies=AUTH_FIRST)
+async def remember_ask_row_answers(
+    ask_id: int,
+    body: SaveRowAnswersRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the owner's own "remember" press
+) -> dict[str, Any]:
+    """Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific
+    one for THIS job's country only, the rest global), so the next job asking them needs no owner.
+    Only the owner's press saves for reuse: session only, no MCP twin.
+    Per-job rows (how you heard, consent, essays) are skipped."""
+    from src.services.profile.edits import ProfileEditError  # noqa: PLC0415
+
+    try:
+        return await asks_service.remember_row_answers(db, user.id, ask_id, body.answers)
+    except ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+
+
 @router.post("/asks/{ask_id}/confirm", response_model=AskOut, dependencies=AUTH_FIRST)
 async def confirm_ask(
     ask_id: int,

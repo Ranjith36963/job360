@@ -1053,6 +1053,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asks/{ask_id}/answers/remember": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remember Ask Row Answers
+         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific
+         *     one for THIS job's country only, the rest global), so the next job asking them needs no owner.
+         *     Only the owner's press saves for reuse: session only, no MCP twin.
+         *     Per-job rows (how you heard, consent, essays) are skipped.
+         */
+        post: operations["remember_ask_row_answers_api_asks__ask_id__answers_remember_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asks/{ask_id}/answers/save": {
         parameters: {
             query?: never;
@@ -3158,6 +3181,49 @@ export interface paths {
          *     actually changed — see :func:`_record_web_preference_changes`.
          */
         post: operations["upsert_preferences_api_profile_preferences_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/questionnaire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Questionnaire
+         * @description Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed
+         *     or not known, most-guessed first (``ask_once.questionnaire``). Read-only.
+         */
+        get: operations["get_questionnaire_api_profile_questionnaire_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/questionnaire/remember": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remember Questionnaire
+         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer,
+         *     bound to ``country`` when it is country-specific (right to work, salary...), else global.
+         *     Session only (no MCP twin): nothing is remembered without that press.
+         */
+        post: operations["remember_questionnaire_api_profile_questionnaire_remember_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8424,6 +8490,18 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** QuestionnaireCountry */
+        QuestionnaireCountry: {
+            /** Country */
+            country: string;
+            /** Questions */
+            questions: components["schemas"]["CommonQuestionOut"][];
+        };
+        /** QuestionnaireOut */
+        QuestionnaireOut: {
+            /** Countries */
+            countries: components["schemas"]["QuestionnaireCountry"][];
+        };
         /** QueueOut */
         QueueOut: {
             /** Count */
@@ -9146,6 +9224,36 @@ export interface components {
             released: boolean;
             /** Task Id */
             task_id: string;
+        };
+        /** RememberItem */
+        RememberItem: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
+            /** Topic */
+            topic: string;
+        };
+        /** RememberOut */
+        RememberOut: {
+            /** Saved */
+            saved: string[];
+        };
+        /** RememberRequest */
+        RememberRequest: {
+            /** Country */
+            country: string;
+            /** Items */
+            items: components["schemas"]["RememberItem"][];
+        };
+        /** RememberRowsOut */
+        RememberRowsOut: {
+            /** Country */
+            country?: string | null;
+            /** Saved */
+            saved: string[];
+            /** Skipped */
+            skipped: string[];
         };
         /** ResolveInboxItemRequest */
         ResolveInboxItemRequest: {
@@ -12619,6 +12727,45 @@ export interface operations {
             };
         };
     };
+    remember_ask_row_answers_api_asks__ask_id__answers_remember_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ask_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveRowAnswersRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RememberRowsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     save_ask_row_answers_api_asks__ask_id__answers_save_post: {
         parameters: {
             query?: never;
@@ -15930,6 +16077,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_questionnaire_api_profile_questionnaire_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionnaireOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remember_questionnaire_api_profile_questionnaire_remember_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RememberRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RememberOut"];
                 };
             };
             /** @description Validation Error */

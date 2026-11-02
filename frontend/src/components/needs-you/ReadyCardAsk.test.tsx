@@ -6,14 +6,12 @@ import { sendableCard } from "./ready-fixtures";
 
 const approveSend = vi.fn();
 const answerAskQuestions = vi.fn();
-const rememberAnswers = vi.fn();
 const saveAskRowAnswers = vi.fn();
 vi.mock("@/lib/api", () => ({
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: vi.fn(),
   confirmAnswer: vi.fn(),
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
-  rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
   saveAskRowAnswers: (...a: unknown[]) => saveAskRowAnswers(...a),
 }));
 vi.mock("@/lib/assistant-start", () => ({ startAssistantAfterSend: vi.fn() }));
@@ -31,7 +29,7 @@ const ask166 = {
 } as unknown as Ask;
 
 beforeEach(() => {
-  for (const f of [approveSend, answerAskQuestions, rememberAnswers, saveAskRowAnswers]) f.mockReset().mockResolvedValue({});
+  for (const f of [approveSend, answerAskQuestions, saveAskRowAnswers]) f.mockReset().mockResolvedValue({});
 });
 
 describe("Send with an open ask", () => {

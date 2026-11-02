@@ -176,7 +176,7 @@ async def answer_flags_for(
             if isinstance(a, dict) and "question" in a and ("answer" in a or a.get("redacted"))
         ]
         company = _company_key(str(f.get("job_company") or ""))
-        out[app_id] = _answer_rows(typed, have, saved, profile, company, f["filled_at"])[1]
+        out[app_id] = _answer_rows(typed, have, saved, profile, company, f["filled_at"], country)[1]
     return out
 
 
@@ -275,14 +275,22 @@ def _company_key(company: str) -> Optional[str]:
     return kit.normalized_company_key(company) if company.strip() else None
 
 
+def _job_country(app_row: dict[str, Any]) -> Optional[str]:
+    return (str(app_row.get("job_country") or "").strip().upper()) or None
+
+
 def _approved_record(
-    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None
+    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None,
+    country: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """The user's approved answer RECORD to ``question`` (or one of its other wordings), for this
     company or any company; the last one in the list wins. None when there is none.
     ``topic`` (the key the fill named) wins over the wording, as check_form matches it: a
     "Current location" saved on an India form is not the answer on a UK form that typed the
-    international topic (application 107, 2026-10-20)."""
+    international topic (application 107, 2026-10-20). ``country`` = the job's: an answer bound to
+    another country (``answer_match.fits_country``) is not this job's (ask once, owner 2026-11-02)."""
+    from src.services.profile.answer_match import fits_country  # noqa: PLC0415
+
     q = _norm(question)
     by_topic: Optional[dict[str, Any]] = None
     hit: Optional[dict[str, Any]] = None
@@ -291,6 +299,8 @@ def _approved_record(
             continue
         scoped = str(rec.get("company") or "").strip()
         if scoped and kit.normalized_company_key(scoped) != company_key:
+            continue
+        if not fits_country(rec, country):
             continue
         if topic and str(rec.get("topic") or "") == topic:
             by_topic = rec
@@ -301,10 +311,11 @@ def _approved_record(
 
 
 def _approved_for(
-    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None
+    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None,
+    country: Optional[str] = None,
 ) -> Optional[str]:
     """The answer text of :func:`_approved_record`; None when there is none."""
-    rec = _approved_record(profile, question, company_key, topic)
+    rec = _approved_record(profile, question, company_key, topic, country)
     return None if rec is None else str(rec["answer"])
 
 
@@ -345,13 +356,13 @@ def _memory_text(profile: Any, key: str) -> Optional[str]:
 
 def _user_check(
     a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]], company_key: Optional[str],
-    have: dict[str, dict[str, Any]], filled_at: Any = None,
+    have: dict[str, dict[str, Any]], filled_at: Any = None, country: Optional[str] = None,
 ) -> tuple[bool, Optional[str], Optional[str]]:
     """(verified, changed_to, changed_reason) for one typed answer, read from the user's OWN word:
     their approved answer to this question, else a memory row they saved on the web
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed; ``changed_reason`` says whose act made it differ (see OWNER_EDIT)."""
-    rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None)
+    rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None, country)
     if rec is not None:
         word = str(rec["answer"])
         if _typed_is(a, word):
@@ -402,11 +413,11 @@ def answer_check(answer: dict[str, Any]) -> str:
 
 
 def _hashed_row(a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]],
-                company_key: Optional[str]) -> dict[str, Any]:
+                company_key: Optional[str], country: Optional[str] = None) -> dict[str, Any]:
     """A row stored as a hash (G023, before 2026-10-26). The user's own saved answer is offered as their
     ``draft`` (owner: "a drafted answer to edit, not a placeholder"); when its hash matches what was
     typed, it IS the typed value, so the row reads as typed again."""
-    draft = _users_word(profile, saved, a, company_key) if profile is not None else None
+    draft = _users_word(profile, saved, a, company_key, country) if profile is not None else None
     if draft and kit.sha256_text(str(draft)) == a.get("value_sha256"):
         return {k: v for k, v in a.items() if k not in ("redacted", "value_sha256")} | {"answer": str(draft)}
     return {**a, "answer": "", "redacted": True, "draft": str(draft) if draft else None}
@@ -415,6 +426,7 @@ def _hashed_row(a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any
 def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
     profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
+    country: Optional[str] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(answers with saved_by / saved_at / verified / changed_to / changed_reason, the flags they
     raise). ``filled_at`` is when the fill was recorded: only a web save after it is an owner edit."""
@@ -422,7 +434,7 @@ def _answer_rows(
     flags: list[dict[str, Any]] = []
     for a in typed:
         if a.get("redacted"):
-            a = _hashed_row(a, profile, saved, company_key)
+            a = _hashed_row(a, profile, saved, company_key, country)
         key, src = a.get("key"), a["source"]
         by = at = None
         if src in ("memory", "approved", "profile") and key in have:
@@ -430,7 +442,7 @@ def _answer_rows(
             if src == "memory":
                 by, at = saved.get(_BLOCK_PATH.get(str(key).split(".", 1)[0], ""), (None, at))
         verified, changed_to, reason = (
-            _user_check(a, profile, saved, company_key, have, filled_at) if profile is not None
+            _user_check(a, profile, saved, company_key, have, filled_at, country) if profile is not None
             else (False, None, None)
         )
         if changed_to is not None and is_file_answer(a, changed_to):
@@ -483,7 +495,8 @@ async def _unverified_flags(
     blocks, _missing = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
-    _answers, flags = _answer_rows(rows, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    _answers, flags = _answer_rows(
+        rows, have, saved, profile, _company_key(str(app_row.get("job_company") or "")), country=country)
     return flags
 
 
@@ -555,7 +568,7 @@ async def blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) 
         if not norm or norm in covered or norm in seen:
             continue
         seen.add(norm)
-        if _approved_record(profile, label, company_key) is None:
+        if _approved_record(profile, label, company_key, country=_job_country(app_row)) is None:
             out.append(label)
     return out
 
@@ -596,7 +609,7 @@ async def blank_or_placeholder(
         if not norm or norm in seen:
             continue
         seen.add(norm)
-        if not asks_service.is_leave_blank(_approved_for(profile, label, company_key)):
+        if not asks_service.is_leave_blank(_approved_for(profile, label, company_key, country=_job_country(app_row))):
             blank.append(label)
     return blank, placeholder
 
@@ -649,11 +662,11 @@ def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
 
 
 def _users_word(profile: Any, saved: dict[str, tuple[Any, Any]], answer: dict[str, Any],
-                company_key: Optional[str]) -> Optional[str]:
+                company_key: Optional[str], country: Optional[str] = None) -> Optional[str]:
     """The user's OWN answer to ``answer``'s question - their approved answer, else a plain field
     (equality / email / phone) they saved on the web - the words an Edit on the card writes. None
     when the user has given none."""
-    word = _approved_for(profile, str(answer["question"]), company_key)
+    word = _approved_for(profile, str(answer["question"]), company_key, country=country)
     if word is not None:
         return word
     key = str(answer.get("key") or "")
@@ -704,7 +717,7 @@ async def refill_keeps_answers(
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
     company_key = _company_key(str(app_row.get("job_company") or ""))
     for a in changed:
-        word = _users_word(profile, saved, a, company_key)
+        word = _users_word(profile, saved, a, company_key, _job_country(app_row))
         if word is None or _norm(word) != _norm(a["answer"]):
             return False
     return True
@@ -732,7 +745,8 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     blocks, _ = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
-    answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    answers, _ = _answer_rows(
+        typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")), country=country)
     # A CV / letter file field is not typed text: the file sent is the CV gates' (cv_not_seen,
     # document_uploaded), so a saved label like "CV v1, artifact 128" is never demanded in it.
     pending = [{"question": a["question"], "answer": str(a["changed_to"])}
@@ -795,7 +809,7 @@ async def ready_cards(
             flags.append(_flag("no_answers", "Your assistant did not list the answers it typed"))
             typed = []
         answers, answer_flags = _answer_rows(
-            typed, have, saved, profile, _company_key(r["job_company"] or ""), r["filled_at"]
+            typed, have, saved, profile, _company_key(r["job_company"] or ""), r["filled_at"], country
         )
         flags += answer_flags + _missing_flags(profile, missing, country)
         cv = await _doc(db, user_id, app_id, "cv")

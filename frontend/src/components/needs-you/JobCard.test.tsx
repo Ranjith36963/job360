@@ -10,7 +10,7 @@ const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
 const markOutreachSkipped = vi.fn();
 const answerAskQuestions = vi.fn();
-const rememberAnswers = vi.fn();
+const rememberAskAnswers = vi.fn();
 const saveAskRowAnswers = vi.fn();
 const recordApplicationReceipt = vi.fn();
 const resolveSubmit = vi.fn();
@@ -20,7 +20,7 @@ vi.mock("@/lib/api", () => ({
   markOutreachSent: (...a: unknown[]) => markOutreachSent(...a),
   markOutreachSkipped: (...a: unknown[]) => markOutreachSkipped(...a),
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
-  rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
+  rememberAskAnswers: (...a: unknown[]) => rememberAskAnswers(...a),
   saveAskRowAnswers: (...a: unknown[]) => saveAskRowAnswers(...a),
   recordApplicationReceipt: (...a: unknown[]) => recordApplicationReceipt(...a),
   resolveSubmit: (...a: unknown[]) => resolveSubmit(...a),
@@ -57,7 +57,7 @@ beforeEach(() => {
   markOutreachSent.mockReset().mockResolvedValue({});
   markOutreachSkipped.mockReset().mockResolvedValue({});
   answerAskQuestions.mockReset().mockResolvedValue({});
-  rememberAnswers.mockReset().mockResolvedValue(undefined);
+  rememberAskAnswers.mockReset().mockResolvedValue({ saved: [], skipped: [], country: "GB" });
   saveAskRowAnswers.mockReset().mockResolvedValue({});
   onChanged.mockClear();
 });
@@ -174,10 +174,7 @@ describe("JobCard", () => {
     const answers = { country: "Germany", visa: "No", salary: "€55,000" };
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(listed.id, answers));
     // Called without a checkbox; the memory answer left unchanged is not saved again.
-    expect(rememberAnswers).toHaveBeenCalledWith([
-      { topic: "visa", question: "Do you need visa sponsorship?", answer: "No" },
-      { topic: "salary", question: "Expected salary", answer: "€55,000" },
-    ]);
+    expect(rememberAskAnswers).toHaveBeenCalledWith(listed.id, { visa: "No", salary: "€55,000" });
   });
 
   const listing = (over: Partial<Ask>, questions: unknown[]) => ({ ...ask("Form answers"), kind: "question", questions, ...over }) as unknown as Ask;
@@ -256,19 +253,21 @@ describe("JobCard", () => {
     await waitFor(() => expect(screen.getByTestId("approve-all-7")).toBeEnabled());
     fireEvent.click(screen.getByTestId("approve-all-7"));
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(a.id, { city: "Berlin", gdpr: "Yes", gender: "Female", empty: "No" }));
-    expect(rememberAnswers).toHaveBeenLastCalledWith(expect.arrayContaining([
-      { topic: "empty", question: "Anything else?", answer: "No" },
-    ]));
+    expect(rememberAskAnswers).toHaveBeenLastCalledWith(a.id, expect.objectContaining({ empty: "No" }));
   });
 
-  it("a personal answer the owner edits is saved at once, before Approve all (2026-10-26)", async () => {
+  it("a personal answer the owner edits is saved at once, and remembered only on the Remember press", async () => {
     const a = listing({}, [Q("gender", "Gender", "Male", "guess"), Q("city", "City?", "", "none")]);
     render(<JobCard card={card([a])} onChanged={onChanged} />);
     fireEvent.click(screen.getByTestId(`q-edit-${a.id}-gender`));
     fireEvent.change(screen.getByTestId(`q-input-${a.id}-gender`), { target: { value: "Female" } });
-    expect(rememberAnswers).not.toHaveBeenCalled(); // nothing saved while typing
     fireEvent.click(screen.getByTestId(`q-save-${a.id}-gender`));
-    await waitFor(() => expect(rememberAnswers).toHaveBeenCalledWith([{ topic: "gender", question: "Gender", answer: "Female" }]));
+    await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { gender: "Female" }));
+    expect(rememberAskAnswers).not.toHaveBeenCalled(); // owner 2026-11-02: no press, nothing kept for later jobs
+    await waitFor(() => expect(screen.getByTestId(`q-remember-${a.id}-gender`)).toBeEnabled());
+    fireEvent.click(screen.getByTestId(`q-remember-${a.id}-gender`));
+    await waitFor(() => expect(rememberAskAnswers).toHaveBeenCalledWith(a.id, { gender: "Female" }));
+    await waitFor(() => expect(screen.queryByTestId(`q-remember-${a.id}-gender`)).toBeNull());
     expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the card itself is not done yet
   });
 
@@ -515,9 +514,7 @@ describe("JobCard saves each answer row on its own", () => {
     fireEvent.change(screen.getByTestId(`q-input-${a.id}-equality.ethnicity`), { target: { value: " South Asian " } });
     fireEvent.click(screen.getByTestId(`q-save-${a.id}-equality.ethnicity`));
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { "equality.ethnicity": "South Asian" }));
-    await waitFor(() => expect(rememberAnswers).toHaveBeenCalledWith([
-      { topic: "equality.ethnicity", question: "Use 'Indian' for ethnicity on this form?", answer: "South Asian" },
-    ]));
+    expect(rememberAskAnswers).not.toHaveBeenCalled(); // saved on the ask only: no remember press
     expect(answerAskQuestions).not.toHaveBeenCalled(); // the ask stays open for the waiting row
     expect(onChanged).toHaveBeenCalled();
     expect(screen.queryByTestId(`q-input-${a.id}-equality.ethnicity`)).toBeNull(); // Save closes the editor
@@ -546,7 +543,7 @@ describe("JobCard saves each answer row on its own", () => {
     expect(within(screen.getByTestId(`q-${a.id}-gender`)).getByText("Male")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { gender: "Male" }));
-    expect(rememberAnswers).not.toHaveBeenCalled(); // the stored fact, unchanged: nothing new to remember
+    expect(rememberAskAnswers).not.toHaveBeenCalled(); // a plain OK is not a remember press
     fireEvent.click(await screen.findByRole("button", { name: "No" }));
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { demographic_consent: "No" }));
   });
