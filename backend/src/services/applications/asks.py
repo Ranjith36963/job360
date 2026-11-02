@@ -916,6 +916,35 @@ async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: 
     return ask
 
 
+async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: Any) -> dict[str, Any]:
+    """Ask once (owner 2026-11-02): the user pressed "remember" on rows of a job's ask. Each answer is saved
+    as their approved answer under the row's key (``ask_once.remember``: a country-specific one is bound to
+    THIS job's country, any other is global); a per-job row is skipped.
+    The ask itself is not changed. Session only (the route). 404 / 422 write nothing."""
+    from src.services.profile import ask_once  # noqa: PLC0415
+
+    existing = await _get_ask(db, user_id, ask_id)
+    if existing is None or existing["withdrawn_at"] or existing["application_id"] is None:
+        raise SpineError(404, "ask not found")
+    if not isinstance(answers, dict) or not answers:
+        raise SpineError(422, "pass `answers` with at least one question key")
+    by_key = {q["key"]: q for q in existing["questions"]}
+    unknown = [k for k in answers if k not in by_key]
+    if unknown:
+        raise SpineError(422, f"no such question on this ask: {', '.join(map(str, unknown))}")
+    app_row = await get_owned_application(db, user_id, int(existing["application_id"]))
+    country = (str((app_row or {}).get("job_country") or "").strip().upper()) or None
+    rows = [{"topic": k, "question": str(by_key[k]["question"]),
+             "answer": _item_text(f"answers.{k}", v, ASK_ITEM_ANSWER_MAX_CHARS)} for k, v in answers.items()]
+    saved = ask_once.remember(user_id, rows, country)
+    get_audit_logger().info(
+        "ask_rows_remembered",
+        extra={"event": "ask_rows_remembered", "user_id": user_id, "ask_id": safe_log_value(ask_id),
+               "count": len(saved)},
+    )
+    return {"saved": saved, "skipped": [k for k in answers if k not in saved], "country": country}
+
+
 def carried_answers(
     olds: list[dict[str, Any]], keep: Optional[dict[str, Any]], rows: list[dict[str, Any]]
 ) -> dict[str, str]:

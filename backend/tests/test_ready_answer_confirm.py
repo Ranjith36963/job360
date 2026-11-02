@@ -372,7 +372,7 @@ async def test_an_approved_answer_saved_before_the_fill_is_a_saved_answer_not_an
     from src.services.applications import ready, spine
 
     rtw = {"question": "Location and right to work", "answer": "Yes", "approved": True,
-           "topic": "right_to_work.GB.yes_no"}
+           "topic": "right_to_work.IN.yes_no"}
     async with authenticated_async_context() as client:
         resp = await client.patch("/api/profile", json={"edits": [_e("user_info.answers", [rtw])]})
         assert resp.status_code == 200, resp.text
