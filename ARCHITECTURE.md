@@ -156,10 +156,9 @@ into one shared `CVData`. Which function runs for which input is the body of
 "two_pass" is historical: there was a second, LLM pass per input until decision
 28 removed it.
 
-**What fills the rest of the profile:** the user's own agent. It reads the
-stored raw text through the MCP tool `get_profile` (key `raw`) and writes the
-structured fields back with `update_profile`. Job360 never overwrites or clears
-what the agent wrote — every merge in the extractor is fill-if-present.
+**What fills the rest of the profile:** the user's own agent. Job360 never
+overwrites or clears what the agent wrote — every merge in the extractor is
+fill-if-present.
 
 Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
 `github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each step
