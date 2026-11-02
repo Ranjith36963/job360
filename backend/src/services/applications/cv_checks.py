@@ -236,6 +236,25 @@ def unsupported_numbers(text: str, source: str) -> Optional[dict[str, str]]:
     )
 
 
+_YEARS_CLAIM_RE = re.compile(r"(?<![\w.])(\d{1,2})\+?[ \t]{0,3}(?:years?|yrs?)(?![A-Za-z])", re.I)
+
+
+def unsupported_year_claims(text: str, source: str) -> Optional[dict[str, str]]:
+    """"7 years" style claims (single digits too, which ``number_tokens`` skips) whose count is not
+    stated as years/yrs anywhere in the profile. Outreach only; linear scan, no nested quantifiers."""
+    have = {m.group(1).lstrip("0") for m in _YEARS_CLAIM_RE.finditer(source)}
+    bad: list[str] = []
+    for m in _YEARS_CLAIM_RE.finditer(_scrub(text)):
+        if m.group(1).lstrip("0") not in have and m.group(0).strip() not in bad:
+            bad.append(m.group(0).strip())
+    if not bad:
+        return None
+    return _issue(
+        "unsupported_years", "warn",
+        f"Years not stated anywhere in the profile: {_listed(bad)}. Confirm with the user or remove.",
+    )
+
+
 # ── (b) terms ───────────────────────────────────────────────────────────────
 
 _SKILL_LINE_RE = re.compile(r"^\s*(?P<label>[A-Za-z][A-Za-z &/+-]{1,30}):\s*(?P<body>\S.*)$")
@@ -764,6 +783,8 @@ def check_text(kind: str, text: str, profile: Any) -> list[dict[str, str]]:
         source = profile_source_text(profile)
         if source.strip():
             out.append(unsupported_numbers(text, source))
+            if kind == "outreach":
+                out.append(unsupported_year_claims(text, source))
             if kind == "cv":
                 out.append(unsupported_terms(text, source))
                 out.append(missing_current_roles(text, profile))

@@ -1908,7 +1908,7 @@ async def record_outreach(
         # Returned with the reply, not stored; the message is saved as written.
         from src.services.applications import cv_checks  # noqa: PLC0415
 
-        checks = cv_checks.check_text("outreach", clean_text, None)
+        checks = cv_checks.check_text("outreach", clean_text, await _load_profile_or_none(user_id))
         if channel == "linkedin":
             # S16 - the connection-note limit; the profile is read only for this channel.
             note = cv_checks.linkedin_note_too_long(
@@ -1921,6 +1921,40 @@ async def record_outreach(
         "outreach": outreach, "already_existed": False, "event_id": event_id,
         "follow_up_on": final_follow_up_on,
     }
+
+
+async def _load_profile_or_none(user_id: str) -> Any:
+    """The user's profile for claim checks, or ``None`` (checks are advisory; a read must not break a save)."""
+    import asyncio  # noqa: PLC0415
+
+    try:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - rule #16
+
+        return await asyncio.to_thread(load_profile, user_id)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("job360.contacts").exception("outreach_profile_unavailable")
+        return None
+
+
+async def unsupported_numbers_detail(
+    db: JobDatabase, user_id: str, contact_id: int, message_id: int, profile: Any
+) -> Optional[str]:
+    """Plain-words detail when message version ``message_id`` of this OWNED contact states a number the
+    profile does not support; ``None`` when all are supported, the message is not found, or the profile
+    has no text to check against (an empty source would flag everything). Read-only."""
+    from src.services.applications import cv_checks  # noqa: PLC0415
+
+    rows = await _outreach_rows(db, contact_id)
+    target = next((r for r in rows if r["entry"] == "message" and int(r["id"]) == int(message_id)), None)
+    if target is None or profile is None:
+        return None
+    if not cv_checks.profile_source_text(profile).strip():
+        return None
+    found = [
+        i["detail"] for i in cv_checks.check_text("outreach", str(target.get("text") or ""), profile)
+        if i["code"] in ("unsupported_numbers", "unsupported_years")
+    ]
+    return " ".join(found) or None
 
 
 async def outreach_gate_facts(

@@ -2996,10 +2996,15 @@ async def outreach_check(
             db, user.id, contact, message_id, session=session, actor=actor_for(user), now=now
         )
         counts = await settings_rules.load_outreach_counts(db, user.id, now, facts.company or None)
+        unsupported = await contacts_service.unsupported_numbers_detail(db, user.id, contact_id, message_id, profile)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     verdict = settings_rules.may_send_outreach(cfg, facts, counts, now)
+    if verdict.decision == "send" and unsupported:  # a number the profile cannot back: ask, never send
+        verdict = settings_rules.OutreachDecision(
+            "ask", "unsupported_numbers", f"The draft states a number your profile does not support. {unsupported}"
+        )
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",
