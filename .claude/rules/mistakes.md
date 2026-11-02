@@ -60,6 +60,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   never `"host" in url`: CodeQL flags it high (2026-10-21: #1054 and #1060).
 - A date assert takes its expected value from the fixture's own clock, never a second `now()`
   (2026-10-21: a run crossing midnight turned #1026 red).
+- When code starts reading today's date, run its tests under several fixed dates: a test that passed on the PR's day can
+  fail the next (2026-11-02: #1436's calendar seed broke two cursor tests on main the day after it merged).
 - Before resuming a saved workflow script, check every script and file it names still exists on main;
   never tell a worker to loosen a test assert or budget.
 - When a reader for a host lands, take that host off `_UNSUPPORTED_HOSTS` in the same commit.
