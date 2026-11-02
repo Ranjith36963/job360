@@ -144,7 +144,7 @@ async def test_approve_cv_lists_unseen_cvs_and_a_chat_or_web_cv_seen_clears_it(
         token = (await client.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
         async with _bearer_client(token) as agent:
             sha = hashlib.sha256(CV_TEXT.encode("utf-8")).hexdigest()
-            seen = await _event(agent, one, "cv_seen", {"artifact_id": cv_one, "sha256": sha, "where": "chat"})
+            seen = await _event(agent, one, "cv_seen", {"artifact_id": cv_one, "sha256": sha, "where": "chat", "owner_words": "yes", "asked": "OK?"})
             assert seen.status_code == 201, seen.text
         # Web: the user's own click.
         assert (await client.post(f"/api/applications/{two}/cv-seen", json={"artifact_id": cv_two})).status_code == 201
@@ -179,7 +179,7 @@ async def test_the_gate_takes_a_chat_cv_seen_as_well_as_a_web_one(authenticated_
         async with _bearer_client(token) as agent:
             sha = hashlib.sha256(CV_TEXT.encode("utf-8")).hexdigest()
             assert (await _event(agent, app_id, "cv_seen", {
-                "artifact_id": cv_id, "sha256": sha, "where": "chat",
+                "artifact_id": cv_id, "sha256": sha, "where": "chat", "owner_words": "yes", "asked": "OK?",
             })).status_code == 201
         assert await reason() != "cv_not_seen"
 

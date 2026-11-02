@@ -277,7 +277,7 @@ async def test_check_submit_asks_held_by_other_session_even_with_a_yes(authentic
         assert kit_b["settings"]["submit_preview"]["reason"] == "held_by_other_session"
         cv = kit_b["cv"]
         await _event(agent, app_id, "submit_approved", {"artifact_id": cv["artifact_id"], "sha256": cv["sha256"],
-                                                       "where": "chat"})
+                                                       "where": "chat", "owner_words": "yes", "asked": "OK?"})
         await _event(agent, app_id, "form_filled", {"form_url": FORM, "fields_count": 1})
         await _event(agent, app_id, "form_swept", {"fields_checked": 1, "fixed": 0})
         decision, reason, detail = await _check(agent, app_id, "b")

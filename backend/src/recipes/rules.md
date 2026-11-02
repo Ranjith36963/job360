@@ -664,9 +664,10 @@ call with `queue_summary`; 409 `not open` / `already queued` / `not queued`). `c
 notes that the user changed an answer; save it to memory only after their yes. See `get_recipe("batch")`.
 
 APPLY-KIT events (closed payloads, anything else is 422): `cv_seen`
-{artifact_id, sha256, where:"chat"} - ONLY after you showed the user the CV and
-they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
-ONLY when the user typed yes to submitting THIS application; `submit_declined`
+{artifact_id, sha256, where:"chat", owner_words, asked} - ONLY after you showed the user the CV and
+they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat", owner_words, asked} -
+ONLY when the user typed yes to submitting THIS application (owner_words = their reply, word for word, at most 500 chars;
+asked = the exact question or text you showed them; missing = 422; a scheduled run with no human never approves); `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
 may only send deny; `form_filled` {form_url, fields_count, fields_skipped?, answers?} - after you filled
 the form (form_url = the page the fields are on; stored as https + host + path + job-id keys only, never a
@@ -678,7 +679,7 @@ resend. `record_application` answers take the same shape as `form_filled`
 answers: {question, answer, source?, key?} (source: memory|profile|approved|written|guessed),
 and `source`/`key` are returned when you read the receipt. Examples:
 `form_filled` {"form_url":"https://jobs.example.com/apply/1","fields_count":1,"answers":[{"question":"Right to work?","answer":"Yes","source":"profile","key":"work_authorization"}]};
-`form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat"};
+`form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat","owner_words":"Looks good","asked":"Here is the CV. OK?"};
 `hold_released` {"reason":"done"}; `site_account` {"host":"jobs.example.com"};
 `blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried","note":"upload worked"} (`note`: optional why, at most 200 chars);
 `proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.

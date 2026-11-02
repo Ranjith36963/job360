@@ -37,6 +37,22 @@ describe("answered event label", () => {
   });
 });
 
+describe("chat approval label", () => {
+  it("quotes the owner's own words for a chat cv_seen / submit_approved", () => {
+    const payload = { artifact_id: 7, sha256: "x", where: "chat", owner_words: "yes, send it", asked: "Send?" };
+    expect(eventLabel({ event_type: "submit_approved", payload, recorded_by: "agent:Claude" })).toBe(
+      "Approved in chat: “yes, send it”",
+    );
+    expect(eventLabel({ event_type: "cv_seen", payload, recorded_by: "agent:Claude" })).toBe(
+      "Approved in chat: “yes, send it”",
+    );
+  });
+  it("keeps the plain label for a web click", () => {
+    const payload = { artifact_id: 7, sha256: "x", where: "web" };
+    expect(eventLabel({ event_type: "cv_seen", payload, recorded_by: "web" })).toBe("CV checked");
+  });
+});
+
 describe("EVENT_LABEL", () => {
   it("has a label for every note-family event type", () => {
     for (const type of APPLICATION_NOTE_EVENT_TYPES) {
