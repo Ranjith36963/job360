@@ -431,4 +431,8 @@ Apify web-fetch tool, before you build. Never cite from memory.
 - 2026-10-28: I told a worker to revert `frontend/AGENTS.md` after `next dev`; `frontend/AGENTS.md` itself says
   the opposite. **Rule:** a rewrite means installed Next differs from the commit: `npm ci`, and if it still
   changes, commit the new block.
-
+- 2026-11-02: #1436 made a hunt-kit run with no saved cursor start at the calendar-day slice. Two existing
+  cursor tests ran with no cursor file and expected row 0; on 1 Nov the calendar start happened to be 0, so the PR
+  was green, and from 2 Nov main was red (#1452's offline shard). **Rule:** when code starts reading today's date,
+  run its tests with the date forced to several days (a fixture patching `hk._dt`), and give tests that are not
+  about the date a fixed input (here a saved cursor at 0).
