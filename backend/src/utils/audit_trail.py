@@ -29,6 +29,7 @@ import json
 import logging
 import logging.handlers
 import queue
+import threading
 import time
 from typing import Any, Optional
 
@@ -50,6 +51,10 @@ _DETAIL_DENYLIST = frozenset({"email"})
 
 _queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10_000)
 _listener: Optional[logging.handlers.QueueListener] = None
+
+# A LogRecord carrying this attribute is a ``flush()`` barrier, not an audit
+# record: the handler sets the Event and writes no row. See ``flush``.
+_FLUSH_MARKER = "_job360_audit_flush"
 
 
 class _DBAuditHandler(logging.Handler):
@@ -103,6 +108,15 @@ class _DBAuditHandler(logging.Handler):
     # -- Handler API ----------------------------------------------------------
 
     def emit(self, record: logging.LogRecord) -> None:  # noqa: D102
+        # A flush barrier, not an audit record: release the waiter and write
+        # NOTHING. First statement on purpose — ahead of `_row_from` so a
+        # marker can never become a user-less row in the security trail, and
+        # ahead of the blanket `except` below so the waiter can never be
+        # starved by a swallowed failure.
+        done = getattr(record, _FLUSH_MARKER, None)
+        if done is not None:
+            done.set()
+            return
         try:
             row = self._row_from(record)
             try:
@@ -145,10 +159,43 @@ def install_db_audit_trail(audit_logger: logging.Logger) -> None:
         _listener.start()  # daemon thread — never blocks process exit
 
 
-def flush(timeout: float = 5.0) -> None:
-    """Wait until queued audit records have been written. Test helper."""
+def _drain_and_sleep(timeout: float) -> None:
+    """The pre-barrier wait, kept only for the degraded path in ``flush``."""
     deadline = time.monotonic() + timeout
     while not _queue.empty() and time.monotonic() < deadline:
         time.sleep(0.02)
-    # The listener may still be mid-write on the last record; one more beat.
     time.sleep(0.05)
+
+
+def flush(timeout: float = 5.0) -> None:
+    """Wait until queued audit records have been COMMITTED. Test helper.
+
+    A marker record goes onto the queue and this blocks on its Event. The
+    listener is one FIFO thread, so the marker reaching ``emit`` proves every
+    record queued before it finished its INSERT + commit.
+
+    Why not the obvious wait: this used to spin on ``_queue.empty()`` and then
+    sleep a flat 50 ms, which is NOT the promise above. The queue goes empty
+    the instant the listener *dequeues* a record — before its
+    ``pgsync.connect`` + INSERT + commit have run — so a caller could read
+    ``audit_log`` and legitimately find nothing. 50 ms covered that gap on an
+    idle box and did not under four xdist workers sharing one Postgres, which
+    is what flaked
+    ``test_api_changes.py::test_an_mcp_tool_call_alone_moves_only_the_assistant_marker``.
+
+    Never raises, and never hangs: with no listener there is nothing draining
+    the queue, so there is nothing to wait for; a full queue falls back to the
+    old drain-and-sleep; a timed-out wait returns, having already spent the
+    caller's whole timeout budget.
+    """
+    if _listener is None:
+        return
+    done = threading.Event()
+    marker = logging.makeLogRecord({"msg": "audit-flush", "levelno": logging.INFO})
+    setattr(marker, _FLUSH_MARKER, done)
+    try:
+        _queue.put_nowait(marker)
+    except queue.Full:
+        _drain_and_sleep(timeout)
+        return
+    done.wait(timeout)
