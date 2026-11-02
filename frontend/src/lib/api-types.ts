@@ -3566,6 +3566,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sent-on-its-own": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sent On Its Own Route
+         * @description Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
+         *     sources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything.
+         */
+        get: operations["sent_on_its_own_route_api_sent_on_its_own_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sent-on-its-own/{item_id}/wrong-fact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Wrong Fact Route
+         * @description The user's "Wrong fact" press on one item. Autonomy step 4 records it and stops reusing that fact;
+         *     until it ships there is no item to press on, so every id is 404.
+         */
+        post: operations["report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -9484,6 +9526,47 @@ export interface components {
              * @enum {string}
              */
             state: "waiting_on_you" | "queued" | "in_progress" | "declined";
+        };
+        /** SentItem */
+        SentItem: {
+            /** Answer */
+            answer: string;
+            /** Application Id */
+            application_id: number;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Kind */
+            kind: string;
+            /** Question */
+            question: string;
+            /**
+             * Reported Wrong
+             * @default false
+             */
+            reported_wrong: boolean;
+            /** Sent At */
+            sent_at: string;
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["SentSource"][];
+        };
+        /** SentOnItsOwnOut */
+        SentOnItsOwnOut: {
+            /** Items */
+            items: components["schemas"]["SentItem"][];
+        };
+        /** SentSource */
+        SentSource: {
+            /** Label */
+            label: string;
+            /** Text */
+            text: string;
         };
         /**
          * SetVisaRequest
@@ -16677,6 +16760,72 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduleStatusOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sent_on_its_own_route_api_sent_on_its_own_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentOnItsOwnOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                item_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

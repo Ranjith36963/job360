@@ -200,6 +200,8 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/applications/{application_id}/browser/refill"): "the user's own Refill the form: replays and holds",
     ("GET", "/api/changes"): "the web page's own live poll; agents have whats_new, and a token never polls it",
     ("GET", "/api/needs-you-count"): "the web menu badge's own count; an agent reads whats_due, not this",
+    ("GET", "/api/sent-on-its-own"): "the Needs-you page's own log of what went without the user",
+    ("POST", "/api/sent-on-its-own/{item_id}/wrong-fact"): "the user's own Wrong fact press; never an agent's",
     ("POST", "/api/applications/{application_id}/artifacts/{artifact_id}/{action}"):
         "the user's own Hide this version / Show again; no assistant hides a CV (S11a)",
     ("POST", "/api/applications/{application_id}/events/{event_id}/{action}"):

@@ -889,6 +889,18 @@ export async function rememberQuestionnaire(
   return request("/api/profile/questionnaire/remember", { method: "POST", body: JSON.stringify({ country, items }) });
 }
 
+/** Sent on its own (owner plan 2026-11-02): answers and essays that went to an employer without the user,
+ *  with the sources they were checked against. A log, never a to-do. Empty until autonomy step 4 sends. */
+export type SentOnItsOwnItem = _Schemas["SentItem"];
+export async function getSentOnItsOwn(): Promise<_Schemas["SentOnItsOwnOut"]> {
+  return request("/api/sent-on-its-own");
+}
+
+/** The user's "Wrong fact" press on one item sent on its own. */
+export async function reportWrongFact(id: number): Promise<void> {
+  await request(`/api/sent-on-its-own/${id}/wrong-fact`, { method: "POST" });
+}
+
 export async function confirmAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/confirm`, { method: "POST" });
 }
