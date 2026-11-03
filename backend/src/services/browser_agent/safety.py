@@ -89,6 +89,31 @@ _LINK_ROLES = ("link", "tab", "switch", "option")
 _APPLY_VERBS = re.compile(
     r"\b(apply|bewerben|postuler|postular|candidatar|candidati|solliciteren|solliciteer)\b", re.IGNORECASE
 )
+# The whole label of a job ad's "open the form" button, word for word (2026-11-02: Oracle HCM "APPLY NOW",
+# BambooHR "Apply for This Job"). Exact matches only: "Submit application", "Send", "Finish", "Apply and send"
+# or any other wording is never one, and stays the final submit wherever the other rules say so.
+OPENER_LABELS = frozenset({
+    ("apply",), ("apply", "now"), ("apply", "for", "this", "job"), ("apply", "for", "this", "position"),
+    ("apply", "for", "this", "role"), ("apply", "to", "this", "job"), ("apply", "for", "job"),
+    ("im", "interested"), ("i", "am", "interested"),
+})
+_APOSTROPHES = frozenset("'’")
+
+
+def label_words(name: str) -> tuple[str, ...]:
+    """A label's words, lower case, one character at a time (no regex over page text): letters and digits
+    stay, an apostrophe is dropped ("I'm" -> "im"), anything else splits words."""
+    out = []
+    for ch in (name or "").casefold():
+        if ch in _APOSTROPHES:
+            continue
+        out.append(ch if ch.isalnum() else " ")
+    return tuple("".join(out).split())
+
+
+def opener_label(name: str) -> bool:
+    """The label is exactly one of a job ad's "open the form" buttons (``OPENER_LABELS``)."""
+    return label_words(name) in OPENER_LABELS
 
 
 def control_kind(
@@ -103,6 +128,7 @@ def control_kind(
     toggle: bool = False,
     page_is_ad: bool = False,
     site_knows_user: bool = False,
+    known_ad: bool = False,
 ) -> str:
     """``password`` | ``submit`` | ``field`` for one control on the page.
 
@@ -122,6 +148,12 @@ def control_kind(
     ``site_knows_user``: a saved sign-in of the user may reach this site (agent._signed_in_for), or that is not
     known. Then every button with an apply verb is the final submit, form or no form, answers or none: a
     signed-in one-click page can send the profile the site already holds (owner decision, #1227 review).
+    ``known_ad``: the gate's read that the page is a known applicant system's job-ad page whose form lives
+    behind its opener (agent._known_ad: ``sites.job_ad_page``, nothing put into a field of the page, no saved
+    sign-in, no visible required field, no visible field holding a value but a link to the same site). There a
+    button whose WHOLE label is in ``OPENER_LABELS`` ("APPLY NOW", "Apply for This Job"), outside every form
+    and unable to submit one, opens the form. Every other label, and any button a form owns, keeps the rules
+    below (fail closed).
     "Apply" / "Send" / "Finish" on a
     button counts as the final submit inside a form OR on a page with answers
     (React forms often have no ``<form>``); on a page with nothing typed it is
@@ -149,6 +181,10 @@ def control_kind(
         return "field"
     if is_button and site_knows_user and _APPLY_VERBS.search(name):
         return "submit"
+    # The known ad's opener (Oracle HCM's "APPLY NOW", a <button type=submit> with no form): the exact label,
+    # on a button no form owns, on a page the gate read as a known job ad. Nothing else is let through here.
+    if is_button and known_ad and not site_knows_user and not in_form and not owns and opener_label(name):
+        return "field"
     # A <button role="tab"> (the ARIA tab pattern) that cannot submit its form needs the whole word "submit"
     # ("Submitted applications" is a tab); every other button rule still holds ("Finish", "Send application").
     tab_button = is_button and role in _LINK_ROLES and not native_submit

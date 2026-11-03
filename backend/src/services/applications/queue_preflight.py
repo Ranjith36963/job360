@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import kit, ready, spine
-from src.services.browser_agent import routing
+from src.services.browser_agent import learned, routing
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -147,7 +147,8 @@ async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
 async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     """Queued rows still missing their tailored CV (owner 2026-11-01), oldest queued first. Writing a CV needs
     neither the owner nor a browser, so an open ask, a site block or the owner's own browser does not excuse
-    it; only another session's live hold and a closed posting do. Scoped by ``user_id``; read-only.
+    it; only another session's live hold, a closed posting and a site saying the user already applied do.
+    Scoped by ``user_id``; read-only.
     ``[{"id", "company"}]``."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
@@ -159,7 +160,7 @@ async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     skip = await _with_kind(db, user_id, ids, "cv")
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    skip |= {i for i, p in blocks.items() if p.get("reason") == "posting_closed"}
+    skip |= {i for i, p in blocks.items() if p.get("reason") in ("posting_closed", blocked_service.ALREADY_APPLIED)}
     todo = [i for i in ids if i not in skip]
     if not todo:
         return []
@@ -276,8 +277,9 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     (``routing.label``). The route of its apply link (``routing.browser_for``, the link Ready to send uses);
     when Job360's own browser wrote the open block (``by: browser``) the block's reason moves it to the
     user's own browser (the same mapping Needs you shows, ``routing.JOB360_FAILURES``), and a one-time code
-    is the user's alone. Two queries for the whole queue (links, then open blocks), never N+1; scoped by
-    ``user_id``. Read-only."""
+    is the user's alone. A link on a host where Job360's browser was blocked twice for THIS user
+    (``learned.blocked_hosts``) starts in the user's own browser. A fixed number of queries for the whole
+    queue (links, open blocks, learned hosts), never N+1; scoped by ``user_id``. Read-only."""
     ids = sorted(set(queued_ids))
     if not ids:
         return {}
@@ -287,19 +289,22 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     )
     urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {})) for app_id in ids}
+    hosts = await learned.blocked_hosts(db, user_id)
+    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {}), hosts) for app_id in ids}
 
 
-def route_label(url: str, block: dict[str, Any]) -> dict[str, str]:
+def route_label(url: str, block: dict[str, Any], hosts: frozenset[str] = frozenset()) -> dict[str, str]:
     """The browser (``routing.label``) that runs one queued application: its apply link plus its open block's
-    payload (``{}`` = none). Pure; ``queue_browsers`` and ``blockers`` share it."""
+    payload (``{}`` = none) and the user's learned blocked ``hosts`` (``learned.blocked_hosts``). The label
+    carries the plain reason ("Job360's browser was blocked twice on <site>"). Pure; ``queue_browsers`` and
+    ``blockers`` share it."""
     reason = str(block.get("reason") or "")
     by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
     return routing.label(routing.browser_for(
         url=url, queue_kind="application",
         job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
-        page_stop="otp_needed" if reason == "otp_needed" else "",
-    ))
+        page_stop="otp_needed" if reason == "otp_needed" else "", route=learned.route_for(url, hosts),
+    ), site=routing.site_of(url)[1])
 
 
 async def queue_summary(
