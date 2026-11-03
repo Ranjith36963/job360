@@ -63,6 +63,25 @@ beforeEach(() => {
 });
 
 describe("JobCards", () => {
+  it("focusJob unfolds that row (even past the first page) and scrolls it into view", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    window.history.replaceState(null, "", "/needs-you?show=site_step&job=3");
+    render(<JobCards open={twenty} onChanged={async () => {}} focusJob={3} />);
+    // Job 3 is the 18th row, beyond the first 8: it is listed anyway, and unfolded; the others stay folded.
+    await waitFor(() => expect(screen.getByTestId("job-row-3-toggle")).toHaveAttribute("aria-expanded", "true"));
+    expect(screen.getByTestId("job-row-20-toggle")).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+    expect(scroll.mock.contexts[0]).toBe(screen.getByTestId("job-row-3"));
+    expect(window.location.search).toBe("?show=site_step"); // ?job= is used up
+  });
+
+  it("a focusJob that is not listed unfolds nothing", async () => {
+    render(<JobCards open={twenty} onChanged={async () => {}} focusJob={999} />);
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/)).toHaveLength(8));
+    expect(document.querySelectorAll('[aria-expanded="true"]')).toHaveLength(0);
+  });
+
   it("renders every header at once but loads only the first 8 jobs", async () => {
     const onReport = vi.fn();
     render(<JobCards open={twenty} onChanged={async () => {}} onReport={onReport} />);

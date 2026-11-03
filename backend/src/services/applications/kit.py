@@ -85,7 +85,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Chat app - ask the user to attach the PDF once for this job. Otherwise paste `text` if the form allows, "
     "else the user uploads it by hand. An expired link: call the kit again.",
     "Show the CV to the user. When the user says it is OK in chat, record_event cv_seen with where=chat. "
-    "When the user says yes to submitting, record_event submit_approved with where=chat.",
+    "When the user says yes to submitting, record_event submit_approved with where=chat. Both take "
+    "user_words (the user's reply, word for word) and asked (the exact text you showed them).",
     "`autofill` deny: do not type into the form - give the user the kit answers to paste. Still record form_filled.",
     "After filling the form, record_event form_filled {form_url, fields_count}. "
     "Then re-read EVERY field on the page, fix what is wrong, and record_event form_swept "
@@ -1314,9 +1315,57 @@ def _where(user: CurrentUser, event_type: str, payload: dict[str, Any]) -> str:
         raise SpineError(
             403,
             "where=web needs the user's own click on the Job360 website; an assistant records where=chat, "
-            "only after the user said so in chat",
+            "only after the user said so in chat, quoting their reply in user_words",
         )
     return str(where)
+
+
+# Owner 2026-11-02: a chat approval is real only when it carries the owner's own words and exactly what he was
+# shown. where=web (his own click) takes neither; where=chat needs both.
+CHAT_APPROVAL_KEYS = frozenset({"user_words", "asked"})
+USER_WORDS_MAX = 500
+ASKED_MAX = 2000
+USER_WORDS_MISSING = "quote the user's own reply in user_words"
+ASKED_MISSING = "put the exact question or text you showed the owner in asked"
+
+
+def approval_keys(event_type: str, payload: dict[str, Any]) -> frozenset[str]:
+    """The closed keys of a ``cv_seen`` / ``submit_approved`` payload: chat adds :data:`CHAT_APPROVAL_KEYS`."""
+    base = EVENT_PAYLOAD_KEYS[event_type]
+    return base | CHAT_APPROVAL_KEYS if payload.get("where") == "chat" else base
+
+
+def chat_words(payload: dict[str, Any], problems: list[str]) -> dict[str, str]:
+    """``user_words`` and ``asked`` as stored: control characters removed, ends trimmed, otherwise verbatim
+    (never re-worded). An empty, non-text or too-long one is a problem; only the good ones are returned."""
+    out: dict[str, str] = {}
+    for name, limit, missing in (
+        ("user_words", USER_WORDS_MAX, USER_WORDS_MISSING), ("asked", ASKED_MAX, ASKED_MISSING)
+    ):
+        raw = payload.get(name)
+        text = spine._strip_control_chars(raw).strip() if isinstance(raw, str) else ""
+        if not text:
+            problems.append(missing)
+        elif len(text) > limit:
+            problems.append(f"{name} must be at most {limit} characters")
+        else:
+            out[name] = text
+    return out
+
+
+async def chat_approval_extra(db: JobDatabase, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """What a where=chat approval stores beside its payload: the owner's words, what he was asked, and
+    ``during_duty_claim`` (server-computed, never the caller's): a scheduled run held a duty claim when it was
+    written. A claim does not name its caller (``schedule.claim`` stores user + duty + time only), so this
+    flags the event; it does not refuse it - the owner's own chats run while hourly duties hold claims."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    problems: list[str] = []
+    words = chat_words(payload, problems)
+    if problems:
+        raise SpineError(422, "; ".join(problems))
+    held = await schedule.claim_held(db, user_id, datetime.now(timezone.utc))
+    return {**words, "during_duty_claim": held}
 
 
 # The closed payload keys of each kit event - the validator below reads these, and a test pins the
@@ -1638,9 +1687,12 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
     rules that read the application's history, are checked after)."""
     problems: list[str] = []
     if event_type in ("cv_seen", "submit_approved"):
-        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        keys = approval_keys(event_type, payload)
+        problems += _keys_problem(payload, keys, keys)
         if payload.get("where") not in SEEN_WHERE:
             problems.append("where must be 'web' or 'chat'")
+        if payload.get("where") == "chat":
+            chat_words(payload, problems)
         artifact_id, sha = payload.get("artifact_id"), payload.get("sha256")
         no_cv = event_type == "submit_approved" and artifact_id is None and sha in ("", None)
         bad_id = isinstance(artifact_id, bool) or not isinstance(artifact_id, int)
@@ -1755,14 +1807,15 @@ async def _check_kit_event(
     if event_type in SERVER_ONLY_EVENTS:
         raise SpineError(422, f"{event_type} is written by Job360 itself (get_application_kit), not by a caller")
     if event_type in ("cv_seen", "submit_approved"):
-        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
+        _closed_payload(event_type, payload, approval_keys(event_type, payload))
         where = _where(user, event_type, payload)
+        extra = await chat_approval_extra(db, user.id, payload) if where == "chat" else {}
         kinds = ("cv", "cover_letter") if event_type == "cv_seen" else ("cv",)
         artifact_id, sha = payload.get("artifact_id"), payload.get("sha256")
         if artifact_id is None and event_type == "submit_approved" and sha in ("", None):
             if await spine.latest_artifact(db, user.id, application_id, "cv") is not None:
                 raise SpineError(409, "this CV changed - show the new version")
-            return {"artifact_id": None, "sha256": "", "where": where, "version": None, "by": actor}
+            return {"artifact_id": None, "sha256": "", "where": where, "version": None, "by": actor, **extra}
         if isinstance(artifact_id, bool) or not isinstance(artifact_id, int) or not isinstance(sha, str):
             raise SpineError(422, f"{event_type} needs artifact_id (a whole number) and sha256 (text)")
         row = await spine.get_artifact(db, user.id, application_id, artifact_id)
@@ -1771,7 +1824,10 @@ async def _check_kit_event(
         latest = await spine.latest_artifact(db, user.id, application_id, row["kind"])
         if latest is None or latest["id"] != row["id"] or sha != sha256_text(row["text"]):
             raise SpineError(409, "this CV changed - show the new version")
-        return {"artifact_id": row["id"], "sha256": sha, "where": where, "version": row["version_no"], "by": actor}
+        return {
+            "artifact_id": row["id"], "sha256": sha, "where": where, "version": row["version_no"], "by": actor,
+            **extra,
+        }
     if event_type == "submit_declined":
         _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         return {"where": _where(user, event_type, payload), "by": actor}

@@ -169,7 +169,7 @@ async def test_a_chat_yes_three_hours_old_does_not_cover_a_new_fill(authenticate
         await _send(client, app_id, fill)
         detail = (await client.get(f"/api/applications/{app_id}")).json()
         web = [e for e in detail["events"] if e["event_type"] == "submit_approved"][-1]["payload"]
-        chat_yes = {"artifact_id": web["artifact_id"], "sha256": web["sha256"], "where": "chat"}
+        chat_yes = {"artifact_id": web["artifact_id"], "sha256": web["sha256"], "where": "chat", "user_words": "yes, send it", "asked": "Send this one?"}
         resp = await client.post("/api/tokens", json={"name": "claude-code"})
         assert resp.status_code == 201, resp.text
         from httpx import ASGITransport
