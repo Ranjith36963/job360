@@ -3523,6 +3523,9 @@ async def approve_send(
     await asks_service.withdraw_open_matching(
         db, user.id, application_id, "web", "answered by Send", blockers=False
     )
+    # A Sent job must be on the batch queue: the apply run reads only the queue, and a job that was never
+    # queued (production application 90, 30 Oct) stayed invisible to every run after the user's Send.
+    await spine.queue_if_open(db, user.id, application_id, recorded_by="web")
     from src.services.browser_agent import duty_trigger  # noqa: PLC0415
 
     await duty_trigger.ignite(user.id, ("batch",), "send_yes", [application_id], db=db)

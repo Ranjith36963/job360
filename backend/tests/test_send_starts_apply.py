@@ -158,3 +158,19 @@ async def test_a_job_the_owner_pressed_send_on_is_first_in_queue_order(authentic
         await _send(client, third, fill)
         resp = await client.get("/api/applications", params={"queued": True})
         assert [r["id"] for r in resp.json()["applications"]] == [third, first, second], "the Sent job leads"
+
+
+@pytest.mark.asyncio
+async def test_send_puts_a_job_that_was_never_queued_on_the_queue(authenticated_async_context, fixture_user_id):
+    """Production application 90: the job had no `queued` event, so the apply runs (which read only the
+    queue) never saw it after the owner's Send. Send now puts it on the queue, first."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        other, _ = await _filled_app(client, 7)
+        app_id, fill = await _filled_app(client, 8)
+        await _event(client, app_id, "unqueued", {})
+        resp = await client.get("/api/applications", params={"queued": True})
+        assert [r["id"] for r in resp.json()["applications"]] == [other], "off the queue before Send"
+        await _send(client, app_id, fill)
+        resp = await client.get("/api/applications", params={"queued": True})
+        assert [r["id"] for r in resp.json()["applications"]] == [app_id, other], "Send queues it, first"
