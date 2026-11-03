@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ApiError, friendlyAuthError, apiErrorMessage } from "./api-error";
+import { ApiError, detailText, friendlyAuthError, apiErrorMessage } from "./api-error";
 
 describe("ApiError", () => {
   it("extends Error with correct name", () => {
@@ -122,5 +122,23 @@ describe("apiErrorMessage", () => {
 
   it("falls back for a non-Error value", () => {
     expect(apiErrorMessage(42, "fallback text")).toBe("fallback text");
+  });
+});
+
+describe("ApiError detail is always text (prod crash 2026-11-03: React #31)", () => {
+  it("a FastAPI 422 list becomes one readable line, never an object", () => {
+    const err = new ApiError(422, [
+      { type: "missing", loc: ["body", "answers", 0, "answer"], msg: "Field required", input: {} },
+      { type: "string_type", loc: ["query", "fmt"], msg: "Input should be a valid string", input: 3 },
+    ]);
+    expect(typeof err.detail).toBe("string");
+    expect(err.detail).toBe("answers.0.answer: Field required; query.fmt: Input should be a valid string");
+  });
+
+  it("a refusal object gives its message; text and empty stay as they are", () => {
+    expect(new ApiError(409, { code: "private_approval", message: "Ask the user first" }).detail).toBe("Ask the user first");
+    expect(new ApiError(400, "Plain words").detail).toBe("Plain words");
+    expect(new ApiError(500, null).detail).toBe("");
+    expect(detailText({ weird: 1 })).toBe('{"weird":1}');
   });
 });
