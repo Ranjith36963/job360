@@ -535,6 +535,43 @@ async def test_one_verify_does_not_approve_a_two_essay_case(authenticated_async_
 
 
 @pytest.mark.asyncio
+async def test_one_rtw_edit_never_turns_twenty_superseded_shadows_into_agreements(
+    authenticated_async_context, fixture_user_id
+):
+    """Q3: 20 refills each judged 'not cleared', then ONE edit on the 21st card: no case, no agree."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        for n in range(20):
+            fill = await _fill(fixture_user_id, app_id, rtw=True, answer=f"essay {n}", rtw_answer="No")
+            await _shadow(fixture_user_id, app_id, fill, essay=None, cv=None, rtw=False)
+        last = await _fill(fixture_user_id, app_id, rtw=True, answer="essay last", rtw_answer="No")
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": last})
+        body = await _report(client)
+    assert _kind(body, "fixed") == (0, 0, None, 0, False)
+    assert body["pending"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_correction_on_a_fill_without_a_rtw_row_reaches_only_the_newest_older_shadow(
+    authenticated_async_context, fixture_user_id
+):
+    """Q1: two older shadows with different right-to-work answers; the correction is charged to the newest only,
+    and since that one was not cleared it is left out, not scored as an agreement."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        one = await _fill(fixture_user_id, app_id, rtw=True, answer="essay one", rtw_answer="No")
+        await _shadow(fixture_user_id, app_id, one, essay=None, cv=None, rtw=True)
+        two = await _fill(fixture_user_id, app_id, rtw=True, answer="essay two", rtw_answer="Yes")
+        await _shadow(fixture_user_id, app_id, two, essay=None, cv=None, rtw=False)
+        three = await _fill(fixture_user_id, app_id, rtw=False, answer="essay three")
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": three})
+        body = await _report(client)
+    assert _kind(body, "fixed") == (0, 0, None, 0, False)
+
+
+@pytest.mark.asyncio
 async def test_session_only_and_signed_in(authenticated_async_context):
     from src.api.main import app
 

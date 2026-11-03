@@ -125,7 +125,8 @@ def _rtw_edits(
     group_of: dict[int, dict[int, dict[str, Any]]],
 ) -> tuple[dict[tuple[int, int], list[dict[str, Any]]], dict[tuple[int, int], int]]:
     """A right-to-work edit made on fill F counts against every shadow on the application whose fill is F or
-    older and whose right-to-work answer is the one F carries (F with no such row: every older one); never
+    older and whose right-to-work answer is the one F carries (F with no such row: only the newest older
+    shadow that had one); never
     against a newer fill. Returns (edits per shadow, wrong facts per shadow): each edit is ONE wrong fact,
     charged to the newest such shadow that would have cleared."""
     shadows = {k: v[2] for k, v in newest.items() if k[1] is not None and v[1].get("rtw_present") is True
@@ -146,8 +147,11 @@ def _rtw_edits(
             if at is None:
                 continue
             sig = _rtw_sig(fills[app_id][at["start"]])
-            hit = [k for k, g in shadows.items() if k[0] == app_id and g["start"] <= at["start"]
-                   and (sig is None or _rtw_sig(fills[app_id][g["start"]]) == sig)]
+            older = [k for k, g in shadows.items() if k[0] == app_id and g["start"] <= at["start"]]
+            if sig is None:  # no right-to-work row to compare: only the newest older shadow that had one
+                hit = [max(older, key=lambda k: k[1] or 0)] if older else []
+            else:
+                hit = [k for k in older if _rtw_sig(fills[app_id][shadows[k]["start"]]) == sig]
             for k in hit:
                 quals.setdefault((k[0], k[1]), []).append(e)
             cleared = [k for k in hit if clears[k]]
@@ -220,7 +224,9 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
             return
         if state == DECLINED and not would:
             return  # a decline of something autonomy would not have cleared: not a case
-        agree = (would and state == APPROVED) or (not would and state == EDITED)
+        if state == EDITED and not would:
+            return  # an edit never makes an agreement; of something autonomy would not have cleared it is no case
+        agree = would and state == APPROVED
         row = per_kind[kind]
         row["cases"] += 1
         row["agree"] += int(agree)
