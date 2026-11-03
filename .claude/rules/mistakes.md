@@ -19,7 +19,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Before editing a multi-line regex or string, print it whole and diff it against the reference.
 - Every worker prompt starts with "read session-lessons". Workers run targeted tests
   only; CI runs the full suite.
-- Before every backend push: `ruff check .` and `python scripts/mypy_ratchet.py`.
+- Before every backend push, from `backend/`: `python -m ruff check .` and `python scripts/mypy_ratchet.py` (it is `backend/scripts/`, not root `scripts/`).
 - After merging main into a PR: never chain past a conflict; regenerate
   frontend types; re-run `test_recipes` (70-line recipe cap)
   and `test_outreach_people` (MCP tool count).
