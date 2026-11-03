@@ -251,3 +251,13 @@ def test_the_fact_check_reads_bare_names_spelled_numbers_and_ignores_case():
     assert cv_checks.outreach_claims_unsupported("I have seven years of Python.", profile) is False
     assert cv_checks.outreach_claims_unsupported("I have twelve years of Python.", profile) is True
     assert cv_checks.outreach_claims_unsupported("I shipped forty pipelines.", profile) is True
+
+
+def test_a_name_ends_at_the_end_of_its_sentence():
+    from src.services.applications import cv_checks
+
+    source = "Python data engineer at Acme Data."
+    text = "I am a Python data engineer at Acme Data. Could you refer me? Thanks! Best wishes"
+    assert cv_checks.unsupported_names(text, source) is None
+    got = cv_checks.unsupported_names("I worked at Globex! Happy to chat.", source)
+    assert got is not None and got["detail"] == "Not found anywhere in the profile: Globex."

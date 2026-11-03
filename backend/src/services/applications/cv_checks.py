@@ -799,7 +799,9 @@ def spelled_to_digits(text: str) -> str:
 def unsupported_names(text: str, source: str) -> Optional[dict[str, str]]:
     """Capitalised names after ``_NAME_LEADS`` ("worked at Acme Corp") that the profile never mentions. Word by
     word, no regex on the caller's text (CodeQL: no backtracking)."""
-    words = [w.strip(_OUTER_PUNCT) for w in _scrub(text).split()]
+    raw = _scrub(text).split()
+    words = [w.strip(_OUTER_PUNCT) for w in raw]
+    ends = [w.rstrip("\"')]").endswith((".", "!", "?")) for w in raw]  # a sentence ends after this token
     hay = _norm(source)
     bad: list[str] = []
     for i, word in enumerate(words):
@@ -811,10 +813,12 @@ def unsupported_names(text: str, source: str) -> Optional[dict[str, str]]:
             continue
         start += 1 if follow else 0
         name: list[str] = []
-        for w in words[start:start + 4]:
-            if not w[:1].isupper():
+        for j in range(start, min(start + 4, len(words))):
+            if not words[j][:1].isupper():
                 break
-            name.append(w)
+            name.append(words[j])
+            if ends[j]:
+                break
         shown = " ".join(name)
         if shown and _norm(shown) not in hay and shown not in bad:
             bad.append(shown)
