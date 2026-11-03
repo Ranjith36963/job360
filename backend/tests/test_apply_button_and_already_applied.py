@@ -451,3 +451,24 @@ async def test_needs_you_shows_the_one_question_and_i_applied_closes_it(authenti
         assert await _open_asks(client, app_id) == []
         counted = await needs_you_count.needs_you_count(db, user_id)
         assert app_id not in counted.get("job_ids", [])
+
+
+@pytest.mark.asyncio
+async def test_only_the_user_can_withdraw_the_already_applied_question(authenticated_async_context):
+    """Owner rule (2026-11-01, #1442): an assistant may not clear a question only the user can answer. The
+    "already applied" ask has no kind and no keyed questions, so it was outside that rule (agent got 200)."""
+    from tests.test_application_kit import _bearer_client, _mint_token
+
+    async with authenticated_async_context() as client:
+        app_id, _job_id = await _bring(client)
+        token = await _mint_token(client)
+        async with _bearer_client(token) as agent:
+            await _event(agent, app_id, "blocked", {"reason": "already_applied_on_site"})
+            (ask,) = await _open_asks(client, app_id)
+            assert ask["question"] == blocked_service.ALREADY_APPLIED_QUESTION
+            refused = await agent.post(f"/api/asks/{ask['id']}/withdraw", json={"reason": "stale"})
+            assert refused.status_code == 409, refused.text
+            assert len(await _open_asks(client, app_id)) == 1, "the question stays for the user"
+        mine = await client.post(f"/api/asks/{ask['id']}/withdraw", json={"reason": "not needed"})
+        assert mine.status_code == 200, mine.text
+        assert await _open_asks(client, app_id) == []

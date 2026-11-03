@@ -296,7 +296,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             yes = s["approved"]
             if yes is None:
                 out.append(_b("send_yes", "you", "Send", s["fill"]["recorded_at"], {"event_id": s["fill"]["id"]}))
-            elif kit._approval_age_over(yes["recorded_at"], now):
+            elif kit._approval_age_over(yes["recorded_at"], now, yes.get("payload")):
                 label = "Send again (your yes expired)"
                 out.append(_b("send_yes", "you", label, yes["recorded_at"], {"event_id": yes["id"]}))
             elif not s["below"]:

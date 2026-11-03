@@ -132,3 +132,57 @@ async def test_remembering_a_guessed_row_makes_it_verified(authenticated_async_c
         rows = {r["id"]: r for r in (await client.get("/api/profile/common-questions")).json()["questions"]}
         assert (rows["website"]["answer"], rows["website"]["verified"], rows["website"]["label"]) == (
             PORTFOLIO, True, "memory")
+
+
+@pytest.mark.asyncio
+async def test_an_age_answer_is_read_only_when_the_whole_answer_is_a_number(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        for answer, want in (("Under 18", ""), ("I am 17 now", ""), ("17", "No"), (" 30 ", "Yes")):
+            await _save(client, {"path": "user_info.answers", "op": "upsert", "value": {
+                "question": "How old are you?", "answer": answer, "approved": True, "topic": "age"}})
+            assert (await _asked(client))["over_18"]["value"] == want, answer
+
+
+def _set_github_username(user_id: str, name: str) -> None:
+    """``preferences.github_username`` is set by the CV/GitHub import, not by an editable path."""
+    from src.services.profile.storage import load_profile, save_profile
+
+    profile = load_profile(user_id)
+    assert profile is not None
+    profile.preferences.github_username = name
+    save_profile(profile, user_id, source_action="test_seed")
+
+
+@pytest.mark.asyncio
+async def test_website_falls_back_to_the_saved_github_username(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        await _save(client)
+        _set_github_username(fixture_user_id, "ada-l")
+        row = (await _asked(client))["website"]
+        assert (row["value"], row["from"], row["verified"]) == (
+            "https://github.com/ada-l", "from your GitHub username", False)
+        await _save(client, {"path": "cv_data.links", "value": [GITHUB]})
+        assert (await _asked(client))["website"]["from"] == "from your GitHub link", "a saved link wins"
+        await _save(client, {"path": "cv_data.links", "value": []})
+        _set_github_username(fixture_user_id, "ada/../evil")
+        assert (await _asked(client))["website"]["value"] == "", "not a plain GitHub login: no guess"
+        _set_github_username(fixture_user_id, "a" * 40)
+        assert (await _asked(client))["website"]["value"] == "", "longer than 39 characters: no guess"
+
+
+@pytest.mark.asyncio
+async def test_an_answer_the_user_said_in_chat_reads_as_said_in_chat(authenticated_async_context):
+    from src.api.main import app
+
+    async with authenticated_async_context() as client:
+        await _save(client)
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as agent:
+            put = await agent.patch("/api/profile", json={"edits": [
+                {"path": "user_info.logistics", "value": {"countries": [{"country": "GB", "travel_ok_pct": 25}]},
+                 "source": "user_said"}]})
+            assert put.status_code == 200, put.text
+        row = (await _asked(client))["travel.GB"]
+        assert (row["value"], row["from"], row["guess_source"], row["verified"]) == (
+            "25", "you said it in chat", "user_said", False)

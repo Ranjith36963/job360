@@ -1035,6 +1035,10 @@ def _user_only_to_clear(ask: dict[str, Any]) -> bool:
         return False
     if ask.get("kind") in BLOCKER_FAMILY:
         return True
+    # The site said the user already applied (blocked already_applied_on_site): only the user answers whether
+    # it is true, like a CAPTCHA. The ask has no kind and no keyed questions, so it is matched by its question.
+    if str(ask.get("question") or "") == ALREADY_APPLIED_QUESTION:
+        return True
     keys = [str(q.get("key", "")) for q in ask.get("questions") or [] if isinstance(q, dict)]
     return any(not k.startswith(("said_", "earlier_", "doctor_repeat_")) for k in keys)
 

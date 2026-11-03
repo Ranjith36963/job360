@@ -239,3 +239,34 @@ def test_a_fact_the_user_remembers_for_the_country_replaces_the_drafted_guess():
     assert (items["right_to_work.AE.needs_sponsorship"]["value"], items["right_to_work.AE.needs_sponsorship"]["state"]) \
         == ("No", "confirmed")
     assert items["right_to_work.AE.work_authorization"]["state"] == "sensitive"
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_approved_answer_does_not_confirm_a_drafted_country_fact(
+    authenticated_async_context, fixture_user_id
+):
+    """Cross-check of #1474: an assistant can save approved: true itself. On a drafted country that is still
+    the assistant's guess - only the user's own save of the answer replaces it (kit and page alike)."""
+    from src.api.main import app
+
+    ae = {"country": "AE", "work_authorization": "needs_sponsorship", "needs_sponsorship": True}
+    answer = {"question": "Need sponsorship in AE?", "answer": "No", "approved": True,
+              "topic": "right_to_work.AE.needs_sponsorship", "country": "AE"}
+    key = "right_to_work.AE.needs_sponsorship"
+    async with authenticated_async_context() as client:
+        await _patch(client, _rtw(GB, ANY))
+        token = (await client.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
+        ae_app = await _bring(client, "AE")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        await _patch(agent, _rtw(GB, ANY, ae))
+        await _patch(agent, {"path": "user_info.answers", "value": [answer]})
+        item = next(i for i in (await _kit(agent, ae_app))["answers"]["right_to_work"] if i["key"] == key)
+        assert (item["value"], item["state"]) == (True, "sensitive"), "the assistant's own approval is a guess"
+    async with authenticated_async_context() as client:
+        assert key in (await _page(client, "AE"))["to_confirm"]
+        await _patch(client, {"path": "user_info.answers", "value": [answer]})
+        assert key not in (await _page(client, "AE"))["to_confirm"]
+        item = next(i for i in (await _kit(client, ae_app))["answers"]["right_to_work"] if i["key"] == key)
+        assert (item["value"], item["state"]) == ("No", "confirmed"), "the user's own save confirms that one fact"

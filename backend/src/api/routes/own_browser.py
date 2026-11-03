@@ -26,6 +26,7 @@ router = APIRouter(tags=["own-browser"])
 Why = Literal["any_time", "pc_on_hours", "run_now", "closed", "paused"]
 Reason = Literal[
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
+    "done",
 ]
 
 
@@ -42,7 +43,7 @@ class TaskBrowserOut(BaseModel):
 
 class OwnBrowserTaskItemOut(BaseModel):
     task_id: str
-    kind: Literal["linkedin_outreach", "application"]
+    kind: Literal["linkedin_outreach", "application", "linkedin_search", "profile_read"]
     what: str
     url: str = ""
     contact_id: Optional[int] = None
@@ -57,6 +58,10 @@ class OwnBrowserTaskItemOut(BaseModel):
     owner_yes: bool = False
     claim: Optional[TaskClaimOut] = None
     browser: TaskBrowserOut
+    # Only on `profile_read` (owner 2026-11-03): the applications that still need people (up to 5 each), and how
+    # many new people for the user's network.
+    application_ids: Optional[list[int]] = None
+    max_people: Optional[int] = None
 
 
 class QueueOut(BaseModel):
@@ -96,6 +101,11 @@ class ReleaseOut(BaseModel):
     released: bool
     task_id: str
     reason: str
+    # Only for a hunt or people task: how it closed, and the jobs brought / people added since the claim.
+    outcome: Optional[Literal["done", "failed"]] = None
+    count: Optional[int] = None
+    summary: Optional[str] = None
+    failures_in_row: Optional[int] = None
 
 
 class RunNowOut(BaseModel):
@@ -155,13 +165,16 @@ async def take(
     return TakeOut(**got)
 
 
-@router.post("/own-browser/release", response_model=ReleaseOut, dependencies=AUTH_FIRST)
+@router.post(
+    "/own-browser/release", response_model=ReleaseOut, response_model_exclude_none=True, dependencies=AUTH_FIRST
+)
 async def release(
     body: ReleaseIn,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> ReleaseOut:
-    """Give a claimed person back (409 unless this session holds the live claim)."""
+    """Give a claimed person back, or close a hunt or people task: ``done`` answers the count, any other reason
+    records it failed (409 unless this session holds the live claim)."""
     try:
         got = await own_browser.release(
             db, user, body.session, body.task_id, body.reason, datetime.now(timezone.utc)

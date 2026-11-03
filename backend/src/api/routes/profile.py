@@ -1224,7 +1224,9 @@ async def get_country_page(
     profile, overlay = load_profile_with_overlay(user.id)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
-    page = country_pages.country_page(profile, place, country_pages.path_confirmed(overlay))
+    page = country_pages.country_page(
+        profile, place, country_pages.path_confirmed(overlay), country_pages.answers_by_user(overlay)
+    )
     if page is None:
         raise HTTPException(status_code=422, detail="place must be an ISO alpha-2 country, a region or ANY")
     return page
