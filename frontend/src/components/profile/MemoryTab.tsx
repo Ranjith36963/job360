@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
+import { CountryPages, confirmRow } from "@/components/profile/CountryPages";
 import { AddPlace, JobPriority, withPlace } from "@/components/profile/JobPriority";
 import { isRegion } from "@/lib/regions";
 import { MemoryRow } from "@/components/profile/MemoryRow";
@@ -192,6 +193,21 @@ export function MemoryTab() {
       latest.current = updated;
       setProfile(updated);
       setJustAdded(code);
+      const [, rows] = await loadHistory(RTW);
+      if (rows) setHistories((h) => ({ ...h, [RTW]: rows }));
+    };
+    const done = queue.current.then(run, run);
+    queue.current = done.catch(() => undefined);
+    return done;
+  }, [loadHistory]);
+
+  /** Confirm an assistant-drafted country: its row is sent back WITHOUT the assistant's mark, so it becomes the
+   *  user's. The only write that does this besides an edit of the row; other saves send rows as stored. */
+  const confirmCountry = useCallback((code: string): Promise<void> => {
+    const run = async () => {
+      const updated = await updateProfileFields([{ path: RTW, value: confirmRow(blockOf(latest.current, RTW), code) }]);
+      latest.current = updated;
+      setProfile(updated);
       const [, rows] = await loadHistory(RTW);
       if (rows) setHistories((h) => ({ ...h, [RTW]: rows }));
     };
@@ -422,6 +438,8 @@ export function MemoryTab() {
             );
           })}
         </div>
+
+        <CountryPages codes={countries} version={profile} onConfirm={confirmCountry} />
 
         <Section title="OK'd answers" hint="Answers you said OK to once. Reused word for word.">
           {approved.length === 0 ? (

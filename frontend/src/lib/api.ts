@@ -11,6 +11,7 @@ import type {
   HealthResponse,
   JsonResumeResponse,
   PreferencesRequest,
+  CountryPage,
   ProfileResponse,
   ProfileVersionDiff,
   ProfileVersionsListResponse,
@@ -154,6 +155,11 @@ export async function getProfile(): Promise<ProfileResponse> {
  * Returns the freshly-merged profile so a caller never needs a second
  * round trip.
  */
+/** One country's (or region's) page: instructions, right to work, salary, logistics, saved answers. */
+export async function getCountryPage(place: string): Promise<CountryPage> {
+  return request<CountryPage>(`/api/profile/countries/${encodeURIComponent(place)}`);
+}
+
 export async function updateProfileFields(
   edits: { path: string; value: unknown }[]
 ): Promise<ProfileResponse> {
