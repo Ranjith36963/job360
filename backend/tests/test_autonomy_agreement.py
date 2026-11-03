@@ -5,6 +5,7 @@ owner's decisions are seeded through the spine door, the same append the routes 
 Helpers are copied, never imported from another test module (schema isolation)."""
 from __future__ import annotations
 
+import itertools
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -43,10 +44,16 @@ async def _add(user_id: str, app_id: int, event_type: str, payload: dict[str, An
     return int(ev["event_id"])
 
 
-async def _fill(user_id: str, app_id: int, *, rtw: bool = False) -> int:
-    answers = [{"question": ESSAY_Q, "answer": SECRET, "source": "written", "key": "why_role"}]
+_FILLS = itertools.count(1)
+
+
+async def _fill(user_id: str, app_id: int, *, rtw: bool = False, answer: Optional[str] = None) -> int:
+    """A form_filled event. Each call types different answers (a new fill) unless ``answer`` repeats one."""
+    text = answer or f"{SECRET}-{next(_FILLS)}"
+    answers = [{"question": ESSAY_Q, "answer": text, "source": "written", "key": "why_role"},
+               {"question": "Second question", "answer": text, "source": "written", "key": "q2"}]
     if rtw:
-        answers.append({"question": RTW_Q, "answer": SECRET, "source": "memory", "key": RTW_KEY})
+        answers.append({"question": RTW_Q, "answer": text, "source": "memory", "key": RTW_KEY})
     return await _add(user_id, app_id, "form_filled", {"form_url": "https://x.example/apply", "answers": answers})
 
 
@@ -212,14 +219,14 @@ def test_the_shadow_event_records_what_it_judged():
 
 @pytest.mark.asyncio
 async def test_a_right_to_work_wrong_fact_survives_a_later_fill(authenticated_async_context, fixture_user_id):
-    """C1: the edit is on the later fill; the shadow was on the earlier one. Still a wrong fact."""
+    """C1: the edit is on the fill the shadow judged; a later fill with no right-to-work row does not hide it."""
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 1)
         first = await _fill(fixture_user_id, app_id, rtw=True)
         await _shadow(fixture_user_id, app_id, first, rtw=True, cv=None)
-        second = await _fill(fixture_user_id, app_id, rtw=False)  # the newest fill has no right-to-work row
         await _add(fixture_user_id, app_id, "answer_verified", {
-            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": second})
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": first})
+        await _fill(fixture_user_id, app_id, rtw=False)  # the newest fill has no right-to-work row
         body = await _report(client)
     assert _kind(body, "fixed") == (1, 0, 0.0, 1, False)
 
@@ -356,6 +363,109 @@ async def test_one_wrong_fact_blocks_the_bar_despite_a_high_percentage(authentic
             await _agreeing_case(client, fixture_user_id, n, agree=True)
         await _agreeing_case(client, fixture_user_id, 41, agree=True, edit=True)
         assert _kind(await _report(client), "essay") == (41, 40, 97.6, 1, False)
+
+
+@pytest.mark.asyncio
+async def test_one_early_rtw_edit_does_not_make_twenty_refills_agree(authenticated_async_context, fixture_user_id):
+    """N4: the edit was made on fill 0; the 20 later fills' shadows are judged by their own fill only."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        first = await _fill(fixture_user_id, app_id, rtw=True)
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": first})
+        for _ in range(20):
+            fill = await _fill(fixture_user_id, app_id, rtw=True)
+            await _shadow(fixture_user_id, app_id, fill, essay=None, cv=None, rtw=False)
+        body = await _report(client)
+    assert _kind(body, "fixed") == (0, 0, None, 0, False)
+    assert body["pending"] == 1  # only the newest fill is still waiting
+
+
+@pytest.mark.asyncio
+async def test_a_corrected_refill_that_is_sent_is_not_a_permanent_wrong_fact(authenticated_async_context, fixture_user_id):
+    """N9: edit the right-to-work answer on fill 1, the assistant refills it correctly, the owner sends."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        first = await _fill(fixture_user_id, app_id, rtw=True)
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": first})
+        second = await _fill(fixture_user_id, app_id, rtw=True)
+        await _shadow(fixture_user_id, app_id, second, essay=None, cv=None, rtw=True)
+        await _send(fixture_user_id, app_id)
+        body = await _report(client)
+    assert _kind(body, "fixed") == (1, 1, 100.0, 0, False)
+
+
+@pytest.mark.asyncio
+async def test_two_edits_of_one_answer_are_two_wrong_facts_not_one_per_shadow(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        fill = await _fill(fixture_user_id, app_id, rtw=True)
+        await _shadow(fixture_user_id, app_id, fill, essay=None, cv=None, rtw=True)
+        await _shadow(fixture_user_id, app_id, fill, essay=None, cv=None, rtw=True)
+        for _ in range(2):
+            await _add(fixture_user_id, app_id, "answer_verified", {
+                "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": fill})
+        assert _kind(await _report(client), "fixed") == (1, 0, 0.0, 2, False)
+
+
+@pytest.mark.asyncio
+async def test_one_send_is_one_cv_case_even_across_refills(authenticated_async_context, fixture_user_id):
+    """N3: two fills, two shadows, one CV, one Send: one case."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        one = await _fill(fixture_user_id, app_id)
+        await _shadow(fixture_user_id, app_id, one, essay=None)
+        await _send(fixture_user_id, app_id)
+        two = await _fill(fixture_user_id, app_id)
+        await _shadow(fixture_user_id, app_id, two, essay=None)
+        assert _kind(await _report(client), "cv") == (1, 1, 100.0, 0, False)
+
+
+@pytest.mark.asyncio
+async def test_a_later_yes_does_not_cancel_an_earlier_cv_decline(authenticated_async_context, fixture_user_id):
+    """N5: declined on fill 1, refilled, then sent: the decline of a fill using that CV still disagrees."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        one = await _fill(fixture_user_id, app_id)
+        await _shadow(fixture_user_id, app_id, one, essay=None)
+        await _send(fixture_user_id, app_id, "submit_declined")
+        two = await _fill(fixture_user_id, app_id)
+        await _shadow(fixture_user_id, app_id, two, essay=None)
+        await _send(fixture_user_id, app_id)
+        body = await _report(client)
+    assert _kind(body, "cv") == (1, 0, 0.0, 0, False)
+
+
+@pytest.mark.asyncio
+async def test_a_decline_after_a_retype_of_the_same_answers_still_pairs(authenticated_async_context, fixture_user_id):
+    """N6: the assistant retypes the same answers (a new form_filled), then the owner declines."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        one = await _fill(fixture_user_id, app_id, answer="same words")
+        await _shadow(fixture_user_id, app_id, one)
+        await _fill(fixture_user_id, app_id, answer="same words")
+        await _send(fixture_user_id, app_id, "submit_declined")
+        body = await _report(client)
+    assert _kind(body, "essay") == (1, 0, 0.0, 0, False)
+    assert _kind(body, "cv") == (1, 0, 0.0, 0, False)
+
+
+@pytest.mark.asyncio
+async def test_one_verify_does_not_approve_a_two_essay_case(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        fill = await _fill(fixture_user_id, app_id)
+        two = [{"question_key": k, "would_clear": True, "reasons": []} for k in ("why_role", "q2")]
+        await _add(fixture_user_id, app_id, "autonomy_shadow", {
+            "form_filled_event_id": fill, "essays": two, "decision": "needs_you"})
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": ESSAY_Q, "answer": SECRET, "edited": False, "key": "why_role", "form_filled_event_id": fill})
+        body = await _report(client)
+        assert _kind(body, "essay") == (0, 0, None, 0, False) and body["pending"] == 1
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": "Second question", "answer": SECRET, "edited": False, "key": "q2", "form_filled_event_id": fill})
+        assert _kind(await _report(client), "essay") == (1, 1, 100.0, 0, False)
 
 
 @pytest.mark.asyncio

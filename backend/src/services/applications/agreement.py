@@ -6,16 +6,20 @@ owner's WEB events for that same fill and says, per kind (``essay``, ``fixed`` r
 often they agree. It mirrors the offline ``grade_agreement`` and tightens it:
 
 * only ``recorded_by = 'web'`` events are the owner's; an assistant's, a token's or an agent's never count;
-* a decision pairs with a shadow only when it is bound to that fill: its own ``form_filled_event_id`` (the
-  Send fingerprint, a Verify/Edit) equals the shadow's, or it has none and its id lies after that fill and
-  before the next one. A yes recorded before the fill never pairs. An unpaired case is ``pending``;
-* an AGREE needs a positive owner decision (Send, or a Verify without edit; ``cv_seen`` / Send for the CV).
-  A decline is a disagreement when the shadow would have cleared, and is left out when it would not;
+* a fill is a run of consecutive ``form_filled`` events with the same answers hash (a retype of the same
+  answers is the same fill, as ``kit.approval_stale`` reads it). A decision pairs with a shadow only when it
+  is bound to that fill: its own ``form_filled_event_id`` (Send fingerprint, Verify/Edit) is one of the fill's,
+  or it has none and lies after the fill's first event and before the next fill. A yes before the fill never
+  pairs. An unpaired case is ``pending``; a fill replaced before the owner decided is not waiting any more;
+* an AGREE needs a positive owner decision (Send, or a Verify without edit of EVERY essay; ``cv_seen`` / Send
+  for the CV). A decline is a disagreement when the shadow would have cleared, and is left out when it would not;
 * one essay case per application and fill (all its essays together), so one Send is never 20 cases;
-* a ``fixed`` case opens only from the shadow's own ``rtw_present``;
-* ``wrong_facts``: a shadow that would have cleared something the owner edited or corrected. A right-to-work
-  edit counts whichever fill it was made on.
+* a ``fixed`` case opens only from the shadow's own ``rtw_present``, and is judged only by the decisions on
+  its own fill: a right-to-work edit is a wrong fact once, for the shadow of the fill it was made on;
+* one CV case per application and CV: any web decline of a fill using that CV is a disagreement when the
+  shadow cleared it, else an approval of that CV agrees.
 
+``wrong_facts``: a shadow that would have cleared something the owner edited or corrected on that fill.
 ``bar_met`` compares integers (``100 * agree >= MIN_PCT * cases``). Examples carry ids and codes, never text.
 Test applications (``simulation``) are left out. Every query is scoped by ``user_id``.
 """
@@ -25,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import evidence
-from src.services.applications.kit import _json
+from src.services.applications.kit import _json, answers_sha256
 from src.services.applications.test_marker import TEST_ID_SQL
 from src.services.profile.answer_match import normalize_question
 
@@ -45,13 +49,31 @@ def _int(value: Any) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _paired(ev: dict[str, Any], fill: Optional[int], next_fill: int) -> bool:
+def _groups(fills: dict[int, dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """Fill id -> its fill group ``{start, members, next}``: consecutive fills with the same answers hash."""
+    out: dict[int, dict[str, Any]] = {}
+    runs: list[dict[str, Any]] = []
+    prev: Optional[str] = None
+    for fid in sorted(fills):
+        sha = answers_sha256(fills[fid])
+        if runs and sha is not None and sha == prev:
+            runs[-1]["members"].add(fid)
+        else:
+            runs.append({"start": fid, "members": {fid}, "next": _NO_NEXT})
+        prev = sha
+        out[fid] = runs[-1]
+    for before, after in zip(runs, runs[1:]):
+        before["next"] = after["start"]
+    return out
+
+
+def _paired(ev: dict[str, Any], grp: Optional[dict[str, Any]]) -> bool:
     """The decision belongs to this fill: bound to it by its own id, else recorded after it and before the next."""
-    if fill is None:
+    if grp is None:
         return False
     if ev["fill"] is not None:
-        return bool(ev["fill"] == fill)
-    return bool(fill < ev["id"] < next_fill)
+        return ev["fill"] in grp["members"]
+    return bool(grp["start"] < ev["id"] < grp["next"])
 
 
 def _matches(ev: dict[str, Any], aliases: set[str]) -> bool:
@@ -76,6 +98,18 @@ def _empty() -> dict[str, Any]:
     return {k: {"cases": 0, "agree": 0, "wrong_facts": 0} for k in KINDS}
 
 
+def _aliases(essay_key: str, answers: list[Any]) -> set[str]:
+    """The ways an owner's event can name this essay: the shadow's key, the fill row's key and its question text."""
+    out = {essay_key}
+    for a in answers:
+        if isinstance(a, dict):
+            full = normalize_question(a.get("question"))
+            if essay_key in (str(a.get("key") or ""), full[:_KEY_MAX]):
+                out |= {str(a.get("key") or ""), full, full[:_KEY_MAX]}
+    out.discard("")
+    return out
+
+
 async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
     test_sql, test_params = TEST_ID_SQL("e.application_id", "e.user_id")
     cur = await db._db.execute(
@@ -83,13 +117,11 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
         f"WHERE e.user_id = ? AND e.event_type = ? AND NOT {test_sql} ORDER BY e.id",
         (user_id, evidence.EVENT_TYPE, *test_params),
     )
-    # The newest shadow of each (application, fill): a second check_submit on the same fill is not a second case.
-    shadows: dict[tuple[int, Optional[int]], dict[str, Any]] = {}
+    shadows: list[tuple[int, int, dict[str, Any]]] = []  # (event id, application id, payload), ascending
     for r in await cur.fetchall():
         d = dict(r)
-        payload = _json(d["payload"])
-        shadows[(int(d["application_id"]), _int(payload.get("form_filled_event_id")))] = payload
-    apps = sorted({a for a, _ in shadows})
+        shadows.append((int(d["id"]), int(d["application_id"]), _json(d["payload"])))
+    apps = sorted({a for _, a, _ in shadows})
     decisions: dict[int, list[dict[str, Any]]] = {a: [] for a in apps}
     fills: dict[int, dict[int, dict[str, Any]]] = {a: {} for a in apps}
     if apps:
@@ -121,12 +153,20 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
         for r in await cur.fetchall():
             d = dict(r)
             fills[int(d["application_id"])][int(d["id"])] = _json(d["payload"])
+    group_of = {a: _groups(f) for a, f in fills.items()}
+
+    # The newest shadow of each (application, fill group): a second check_submit on the same fill is not a second case.
+    newest: dict[tuple[int, Optional[int]], tuple[int, dict[str, Any], Optional[dict[str, Any]]]] = {}
+    for seq, app_id, payload in shadows:
+        fill = _int(payload.get("form_filled_event_id"))
+        grp = group_of[app_id].get(fill) if fill is not None else None
+        newest[(app_id, grp["start"] if grp else None)] = (seq, payload, grp)
 
     per_kind = _empty()
     pending = 0
     examples: list[dict[str, Any]] = []
 
-    def case(app_id: int, kind: str, qkey: str, would: bool, state: Optional[str], wrong: bool) -> None:
+    def case(app_id: int, kind: str, qkey: str, would: bool, state: Optional[str], wrong: int) -> None:
         nonlocal pending
         if state is None:
             pending += 1
@@ -137,55 +177,61 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
         row = per_kind[kind]
         row["cases"] += 1
         row["agree"] += int(agree)
-        row["wrong_facts"] += int(wrong)
+        row["wrong_facts"] += wrong
         if not agree or wrong:
             examples.append({"application_id": app_id, "kind": kind, "question_key": qkey,
                              "would_clear": would, "owner": "approved" if state == APPROVED else "disagreed"})
 
-    for (app_id, fill), sh in sorted(shadows.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
+    cvs: dict[tuple[int, Optional[int]], dict[str, Any]] = {}
+    for (app_id, _start), (seq, sh, grp) in sorted(newest.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
         evs = decisions[app_id]
-        later = [f for f in fills[app_id] if fill is not None and f > fill]
-        nxt = min(later) if later else _NO_NEXT
+        mine = [e for e in evs if _paired(e, grp)]
         # a refill replaced this fill before the owner decided: nothing is waiting on it any more
-        superseded = bool(later) and not any(_paired(e, fill, nxt) for e in evs)
-        mine = [e for e in evs if _paired(e, fill, nxt)]
+        superseded = grp is not None and grp["next"] != _NO_NEXT and not mine
         sends = [e for e in mine if e["type"] in ("submit_approved", "submit_declined")]
         verified = [e for e in mine if e["type"] == "answer_verified" and not e["edit"]]
         neg = [e for e in sends if e["type"] == "submit_declined"]
         send_yes = [e for e in sends if e["type"] == "submit_approved"]
 
+        if isinstance(sh.get("cv"), dict):
+            cv_id = _int(sh.get("cv_artifact_id"))
+            slot = cvs.setdefault((app_id, cv_id), {"seq": -1, "sh": sh, "declined": False})
+            slot["declined"] = slot["declined"] or bool(neg)
+            if seq > slot["seq"]:
+                slot["seq"], slot["sh"] = seq, sh
+        if superseded:
+            continue
+
         essays = [e for e in sh.get("essays") or [] if isinstance(e, dict) and e.get("question_key")]
-        if essays and not superseded:
-            aliases: set[str] = set()
-            keys = {str(e["question_key"]) for e in essays}
-            aliases |= keys
-            for a in (fills[app_id].get(fill or -1) or {}).get("answers") or []:
-                if isinstance(a, dict) and (str(a.get("key") or "") in keys
-                                            or normalize_question(a.get("question"))[:_KEY_MAX] in keys):
-                    aliases |= {str(a.get("key") or ""), normalize_question(a.get("question")),
-                                normalize_question(a.get("question"))[:_KEY_MAX]}
-            aliases.discard("")
-            hits = [e for e in mine if e["type"] in ("answer_verified", "answer_corrected") and _matches(e, aliases)]
+        if essays:
+            answers = (fills[app_id].get(grp["start"]) or {}).get("answers") if grp else None
+            per_essay = {str(e["question_key"]): _aliases(str(e["question_key"]), answers or []) for e in essays}
+            allnames = set().union(*per_essay.values())
+            hits = [e for e in mine if e["type"] in ("answer_verified", "answer_corrected") and _matches(e, allnames)]
             edited = any(e["edit"] for e in hits)
-            yes = send_yes + [e for e in hits if not e["edit"]]
+            every_verified = all(
+                any(not e["edit"] and e["type"] == "answer_verified" and _matches(e, names) for e in hits)
+                for names in per_essay.values()
+            )
+            # without a Send, a Verify approves the case only when it covers every essay in it
+            yes = send_yes + ([e for e in hits if not e["edit"]] if every_verified else [])
             would = all(e.get("would_clear") is True for e in essays)
             first = next((str(e["question_key"]) for e in essays if e.get("would_clear") is not True),
                          str(essays[0]["question_key"]))
-            case(app_id, "essay", first, would, _verdict(yes, neg, edited), would and edited)
+            case(app_id, "essay", first, would, _verdict(yes, neg, edited), int(would and edited))
 
         if sh.get("rtw_present") is True and "rtw_ok" in sh:
             would = sh.get("rtw_ok") is True
-            # a right-to-work edit counts whichever fill it was made on: that answer was wrong
-            edited = any(e["edit"] and evidence._is_rtw(e["question"], e["key"]) for e in evs)
+            rtw_edits = [e for e in mine if e["edit"] and evidence._is_rtw(e["question"], e["key"])]
             yes = send_yes + [e for e in verified if evidence._is_rtw(e["question"], e["key"])]
-            if not superseded or edited:
-                case(app_id, "fixed", "right_to_work", would, _verdict(yes, neg, edited), would and edited)
+            case(app_id, "fixed", "right_to_work", would, _verdict(yes, neg, bool(rtw_edits)),
+                 len(rtw_edits) if would else 0)
 
-        if isinstance(sh.get("cv"), dict) and not superseded:
-            cv_id = _int(sh.get("cv_artifact_id"))
-            cv_yes = [e for e in evs if e["type"] in ("cv_seen", "submit_approved")
-                      and cv_id is not None and e["artifact"] == cv_id]
-            case(app_id, "cv", "cv", sh["cv"].get("would_clear") is True, _verdict(cv_yes, neg, False), False)
+    for (app_id, cv_id), slot in sorted(cvs.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
+        approved = cv_id is not None and any(
+            e["type"] in ("cv_seen", "submit_approved") and e["artifact"] == cv_id for e in decisions[app_id])
+        state = DECLINED if slot["declined"] else (APPROVED if approved else None)
+        case(app_id, "cv", "cv", slot["sh"]["cv"].get("would_clear") is True, state, 0)
 
     kinds: dict[str, Any] = {}
     for k, v in per_kind.items():
