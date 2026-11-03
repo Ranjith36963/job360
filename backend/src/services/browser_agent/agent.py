@@ -240,6 +240,9 @@ class Session:
     # the route stores them as that job's replayable fill script and drops them from the answer.
     record: bool = False
     steps: list[dict[str, Any]] = field(default_factory=list)
+    # Each tab's latest main-document response as (status, headers, requested url), so look can report an error
+    # page (429, 4xx, 5xx) the way open does. Cleared when the tab starts a new navigation.
+    doc_status: dict[Any, tuple[int, dict[str, str], str]] = field(default_factory=dict)
 
 
 def _held(s: Session, now: float) -> bool:
@@ -471,8 +474,16 @@ class BrowserPool:
                 # The tab moves on: its refusal (by tab or by address) is over.
                 s.blocked_tabs.pop(frame.page, None)
                 s.blocked_urls.pop(frame.page.url, None)
+                s.doc_status.pop(frame.page, None)
 
         def _on_response(response: Any) -> None:
+            try:
+                if response.request.is_navigation_request():
+                    doc = _main_frame(response)
+                    if doc is not None:
+                        s.doc_status[doc.page] = (int(response.status), dict(response.headers), response.url)
+            except Exception:  # noqa: BLE001 - a response with no frame yet: no transport fact
+                pass
             # Only the proxy's own 403 holds its per-process mark: a site cannot send it.
             reason = _REFUSAL.get(response.headers.get(BLOCK_HEADER, "")) if response.status == 403 else None
             if reason is None:
@@ -1049,11 +1060,26 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
         if blocker.from_text:
             out[STOP_KEY] = outcomes.TEXT_STOP
+    elif (error := _http_error(s, page)) is not None:
+        # The document's own response was an error (429, 4xx, 5xx): never an "ok" read, whatever the body says.
+        # A 403 stays a page here: only the proxy's own refusal is a refusal (_refusal), and a site's 403 is
+        # a bot wall the open route reads from ``transport``, which is attached below for it too.
+        out.update(status="error", reason="http_error", detail=f"The site answered this page with HTTP {error}.")
     elif not s.submitted_on[1] and already_applied_said(text):
         # The site says the user already applied (never after this browser's own submit: that is the
         # confirmation path). The job leaves the queue and waits on the user's one question (blocked.py).
         out.update(status="needs_you", reason=ALREADY_APPLIED, detail=ALREADY_APPLIED_DETAIL)
+    doc = getattr(s, "doc_status", {}).get(page)
+    if doc is not None and doc[0] >= 400:  # the same transport facts open reports
+        out["transport"] = outcomes.transport_of(doc[0], doc[1], doc[2], str(page.url or ""))
     return out
+
+
+def _http_error(s: Session, page: Any) -> Optional[int]:
+    """The error status of this tab's current document that look reports as an error, or None: 400 or more,
+    except 403 (a site's 403 is a page, see look; its transport still carries the status)."""
+    doc = getattr(s, "doc_status", {}).get(page)
+    return doc[0] if doc is not None and doc[0] >= 400 and doc[0] != 403 else None
 
 
 ALREADY_APPLIED = "already_applied"
