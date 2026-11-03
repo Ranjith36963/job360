@@ -1,5 +1,6 @@
 "use client";
 
+import { SEND_EXPIRED_LABEL, SEND_EXPIRED_NOTE } from "@/lib/blocker-words";
 import Link from "next/link";
 import type { JobCardData } from "@/lib/job-cards";
 import { hasFormHandoff, waitSummary } from "@/lib/job-cards";
@@ -7,6 +8,7 @@ import { cameFrom, nextStep, oldestAt, type RowFacts } from "@/lib/job-row";
 import type { JobHeader } from "@/lib/needs-you-items";
 import { heldText } from "@/lib/ready-to-send";
 import { cn, relativeTime } from "@/lib/utils";
+import { useAppHref } from "@/lib/app-href";
 
 // A job's folded row on Needs you: one scannable status line (owner 2026-10-27). Every value is
 // untrusted text (an assistant or a job site wrote it): React text only, never HTML.
@@ -54,6 +56,7 @@ export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
   /** The title link's test id (the loading row keeps the old `title-link-<id>`). */
   linkTestid: string;
 }) {
+  const appLink = useAppHref();
   const company = card?.company || h.company;
   const role = card?.role || h.role;
   const step = nextStep(h);
@@ -61,7 +64,7 @@ export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
   const from = cameFrom(facts);
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", COLS)}>
-      <Link href={`/applications/${h.id}`} data-testid={linkTestid} className="min-w-0 truncate text-sm underline-offset-2 hover:underline">
+      <Link href={appLink(h.id)} data-testid={linkTestid} className="min-w-0 truncate text-sm underline-offset-2 hover:underline">
         <span className="font-semibold">{company || "Unknown company"}</span>{" "}
         <span className="text-muted-foreground">{role || "Untitled role"}</span>
       </Link>
@@ -72,6 +75,9 @@ export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
               {step}
             </span>}
           <span className="min-w-0 break-words" data-testid={`job-what-${h.id}`}>{nextText || whatWaits(h, card)}</span>
+          {nextText.includes(SEND_EXPIRED_LABEL) && (
+            <span className="basis-full text-[11px] text-faint" data-testid={`send-expired-note-${h.id}`}>{SEND_EXPIRED_NOTE}</span>
+          )}
         </span>
         {since && <span className={CELL} title="Waiting since"><span className="lg:hidden">since </span>{relativeTime(since)}</span>}
         <span className={CELL}>{facts.location}</span>

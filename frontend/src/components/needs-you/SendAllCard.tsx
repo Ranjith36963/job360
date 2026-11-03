@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/api-error";
 import type { ReadyCardData } from "@/lib/api";
 import { answerHref, flagText, guardSend, rowDetail } from "@/lib/ready-to-send";
 import { cn } from "@/lib/utils";
+import { useAppHref } from "@/lib/app-href";
 
 // Company, title and every flag come from the user's assistants - untrusted
 // text nodes only.
@@ -30,6 +31,7 @@ export function SendAllCard({
   paused: boolean;
   onChanged: () => void;
 }) {
+  const appLink = useAppHref();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const n = clean.length;
@@ -121,7 +123,7 @@ export function SendAllCard({
               <span className="text-muted-foreground">{[c.job_title, c.job_location].filter(Boolean).join(" · ")}</span>
             </span>
             <span className="font-mono text-xs text-muted-foreground">{rowDetail(c)}</span>
-            <Link href={`/applications/${c.application_id}`} className={cn(tap, "inline-flex items-center text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline")}>
+            <Link href={appLink(c.application_id)} className={cn(tap, "inline-flex items-center text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline")}>
               Open
             </Link>
           </li>

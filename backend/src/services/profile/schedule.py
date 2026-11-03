@@ -15,8 +15,10 @@ Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
   there to say yes.
 * ``reach`` (recipe ``reach``, owner 2026-10-24: the PEOPLE hunt) - only while the user's own switch
   ``assistant_settings.people_hunt`` is on: open applications (considering or
-  applied) brought or applied in the last ``REACH_WINDOW_DAYS`` that have no assistant-added person and
-  no ``reach:<id>`` stamp, newest first, at most ``REACH_MAX_PER_RUN``; listed as ``application_ids``.
+  applied) brought or applied in the last ``REACH_WINDOW_DAYS`` with fewer than ``REACH_TARGET_PEOPLE``
+  assistant-added people, not worked in the last ``REACH_RETRY_HOURS`` and worked fewer than
+  ``REACH_MAX_ATTEMPTS`` times (the ``reach:<id>`` stamp counts them), newest first, at most
+  ``REACH_MAX_PER_RUN``; listed as ``application_ids``.
   An application whose only people are still an invite pending on LinkedIn is not listed. One whose
   fit score is BELOW the user's own line (``assistant_settings.apply_min_score``, ``line_side``) is not
   listed either; no score or no line stays in (rule 29: an empty shelf is silent).
@@ -219,7 +221,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     elif f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
-    if f.people_hunt:  # the network hunt: once a day while the people hunt is on
+    if f.people_hunt:  # the network hunt: every NETWORK_EVERY_HOURS (hourly) while the people hunt is on
         last = f.stamps.get("network")
         failed = f.failures.get("network", 0)
         every = backoff_hours(failed) if failed > 0 else settings.NETWORK_EVERY_HOURS
@@ -307,6 +309,13 @@ async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime)
     return got
 
 
+async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
+    """True while a run holds any duty claim (taken less than ``DUTY_CLAIM_MINUTES`` ago, not yet freed by
+    ``mark``). A claim row is user + duty + time only: it never says WHICH caller holds it (rule #12)."""
+    window = timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+    return any(k.startswith(RUNNING) and now - at < window for k, at in (await load_stamps(db, user_id)).items())
+
+
 def reach_key(application_id: int) -> str:
     """The stamp slot for one application the people hunt has worked."""
     return f"reach:{application_id}"
@@ -351,11 +360,18 @@ async def mark(
     await db._db.execute(  # the run is over: the duty is free for the next run
         "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, RUNNING + duty)
     )
-    names = [TICK] + ([] if failed else [reach_key(a) for a in (application_ids or [])])
-    for name in names:
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+        (user_id, TICK, stamp),
+    )
+    # Each reach stamp counts its runs in `failures` (here: tries), so an application nobody more can be
+    # proven for stops after REACH_MAX_ATTEMPTS (owner 2026-11-03: up to 5 people per job).
+    for name in [] if failed else [reach_key(a) for a in (application_ids or [])]:
         await db._db.execute(
-            "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
-            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+            "INSERT INTO assistant_duty_runs (user_id, duty, done_at, failures) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, "
+            "failures = assistant_duty_runs.failures + 1",
             (user_id, name, stamp),
         )
     await db._db.commit()
@@ -490,17 +506,20 @@ async def _reach_ids(db: JobDatabase, user_id: str, now: datetime, line: Optiona
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
 
     since = (now - timedelta(days=settings.REACH_WINDOW_DAYS)).astimezone(timezone.utc).isoformat()
+    # A worked application waits REACH_RETRY_HOURS before its next try (stamps are UTC ISO text, so they compare).
+    retry_after = (now - timedelta(hours=settings.REACH_RETRY_HOURS)).astimezone(timezone.utc).isoformat()
     test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
         "SELECT a.id, a.fit_score FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "  # noqa: S608
         "AND (a.created_at >= ? OR EXISTS (SELECT 1 FROM application_events e WHERE e.application_id = a.id "
         "     AND e.user_id = a.user_id AND e.event_type = 'applied' AND e.occurred_at >= ?)) "
-        "AND NOT EXISTS (SELECT 1 FROM application_contacts c WHERE c.application_id = a.id "
-        "     AND c.user_id = a.user_id AND c.added_by <> 'web') "
+        "AND (SELECT COUNT(*) FROM application_contacts c WHERE c.application_id = a.id "
+        "     AND c.user_id = a.user_id AND c.added_by <> 'web') < ? "
         "AND NOT EXISTS (SELECT 1 FROM assistant_duty_runs r WHERE r.user_id = a.user_id "
-        "     AND r.duty = 'reach:' || a.id) "
+        "     AND r.duty = 'reach:' || a.id AND (r.done_at > ? OR r.failures >= ?)) "
         f"AND NOT {test_sql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
-        (user_id, since, since, *test_params, REACH_SCAN_LIMIT),
+        (user_id, since, since, settings.REACH_TARGET_PEOPLE, retry_after, settings.REACH_MAX_ATTEMPTS,
+         *test_params, REACH_SCAN_LIMIT),
     )
     candidates = [
         int(row["id"]) for row in map(dict, await cur.fetchall())

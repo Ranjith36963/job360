@@ -13,10 +13,14 @@ import { ApplicationClient } from "./ApplicationClient";
 
 export default async function ApplicationPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string | string[]; show?: string | string[] }>;
 }) {
   const { id } = await params;
+  // Where the user came from (?from=&show=); ApplicationClient allow-lists both.
+  const { from, show } = await searchParams;
 
-  return <ApplicationClient applicationId={Number(id)} />;
+  return <ApplicationClient applicationId={Number(id)} from={from} show={show} />;
 }
