@@ -190,9 +190,9 @@ async def test_an_application_below_the_users_line_is_not_listed(authenticated_a
         assert await _reach(client) == [unscored, above]
 
 
+# Owner 2026-11-03: up to 5 people per job. Fewer than REACH_TARGET_PEOPLE keeps it listed; 5 take it off.
 @pytest.mark.asyncio
 async def test_five_people_the_assistant_added_take_the_application_off(authenticated_async_context, fixture_user_id):
-    """Owner 2026-11-03: up to 5 people per job. Fewer than REACH_TARGET_PEOPLE keeps it listed; 5 take it off."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         await _patch(client, PEOPLE, True)
