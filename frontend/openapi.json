@@ -21217,6 +21217,81 @@
         ]
       }
     },
+    "/api/applications/{application_id}/auto/undo": {
+      "post": {
+        "description": "\"Undo\" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting\nclosed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;\nalso records \"It was not sent\"). A ``note`` correcting that status event. 409 when the newest status event\nis neither. Session only; no MCP twin.",
+        "operationId": "undo_auto_api_applications__application_id__auto_undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo Auto",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/autofill": {
       "post": {
         "description": "\"Autofill\" / \"Don't autofill\" - may the assistant type into this form at\nall. Latest wins; unset means the assistant follows its own app permission.",

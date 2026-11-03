@@ -705,7 +705,10 @@ one-time code; `id_or_payment_asked` = selfie, ID, card or SSN: never entered, n
 = timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
 limit message: stop this site for the run); `step` is plain text up to 120 characters;
 `page_host` is the host only (jobs.example.com), never a full URL; `detail`
-is up to 300 plain characters. Any other key is 422; never put a password, a
+is up to 300 plain characters. `posting_closed` read on the ad's own page adds `evidence`:
+page_says_closed | http_404 | http_410 (what the page itself showed; never an email). Then Job360
+closes the job itself (`withdrawn` "posting closed"; the user can Undo it on the website); without
+it, or on another site, the user decides. Any other key is 422; never put a password, a
 token or page text in it. Job360 fills in who you are and opens one Needs-you
 ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
 login page means the user signs in themselves. Until `unblocked`
@@ -734,7 +737,7 @@ application); never paste it anywhere else. Never invent proof: no page text
 and no email means "claimed, unverified". Only the user deletes a screenshot,
 on the website.
 A confirmation email for an application already applied: record_event `applied` with the email `source`; Job360 stores it as the submission confirmation (proof), never a second applied.
-A confirmation email while `record_application` is refused (`submit_rule_open`, or `submit_not_cleared`: the user sent it without your check_submit): record_event `note`, detail "Submission confirmed: <subject>", with the email `source`. It is proof only; Needs you asks the user "Employer confirmed - did it go out?". Never write `applied` yourself, never withdraw asks to get round the rule.
+A confirmation email while `record_application` is refused (`submit_rule_open`, or `submit_not_cleared`: the user sent it without your check_submit): record_event `note`, detail "Submission confirmed: <subject>", with the email `source`. Job360 itself then records `applied` (by `system`; the user can Undo it on the website) when the job is still considering, a `submit_attempted` or `form_filled` is on it with no "not sent" or decline after, its submit was cleared (check_submit said submit, or the user's own Send), the email's `received_at` is after the fill, and the email (not stored on any other job or event) matches only this job in `match_email` by more than the company name; the reply says so. Otherwise Needs you asks the user "Employer confirmed - did it go out?". A started submit with no email asks the user after 3 days. Never write `applied` yourself, never withdraw asks to get round the rule.
 
 ## Profile
 

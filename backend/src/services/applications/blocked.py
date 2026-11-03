@@ -71,7 +71,10 @@ UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped", OWN_BROWSE
 # ID or payment asked, a closed posting, a test, a code, its own limit): those still need the user.
 OWN_BROWSER_CLEARS = frozenset({"captcha", "bot_check", "login_needed", "account_creation", "site_error"})
 NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked", ALREADY_APPLIED})
-BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
+BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail", "evidence"})
+# Owner 2026-11-03: what proves a posting closed, read off the job's OWN page (never an email). Only with
+# ``posting_closed``; such a block on the ad's own site closes the application by itself (auto_close.py).
+CLOSED_EVIDENCE = frozenset({"page_says_closed", "http_404", "http_410"})
 # Written only by Job360's own browser (``record_browser_block``), never accepted from a caller: the
 # CAPTCHA hold and "Finish it here" trust a block only when it carries this (review of #1176).
 BY_KEY, BY_BROWSER = "by", "browser"
@@ -138,9 +141,13 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
     step = event_examples.collect(problems, _plain, "step", payload.get("step"), STEP_MAX_CHARS)
     page_host = event_examples.collect(problems, _page_host, payload.get("page_host"))
     text = event_examples.collect(problems, _plain, "detail", payload.get("detail"), DETAIL_MAX_CHARS)
+    evidence = payload.get("evidence")
+    if evidence is not None and (reason != "posting_closed" or evidence not in CLOSED_EVIDENCE):
+        problems.append("evidence goes only with posting_closed and is one of: " + ", ".join(sorted(CLOSED_EVIDENCE)))
     if problems:
         raise event_examples.refusal(event_type, problems)
-    return {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
+    stored = {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
+    return {**stored, "evidence": evidence} if evidence is not None else stored
 
 
 _USER_TODO: dict[str, str] = {
@@ -530,6 +537,12 @@ async def record(
         await db._db.execute(
             "SELECT id FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
         )
+        proven = event_type == "blocked" and bool(stored.get("evidence"))
+        if proven:
+            from src.services.applications import auto_close  # noqa: PLC0415 - auto_close records `unblocked` here
+
+            # Read before this block opens (or merges into) an ask: an older ask to the owner keeps the job his.
+            asked_before = await auto_close.has_open_ask(db, user.id, application_id)
         stored = await before_append(db, user, application_id, event_type, stored)
         result = await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=event_type,
@@ -540,6 +553,12 @@ async def record(
         await after_append(db, user, application_id, event_type, stored)
         if event_type == "blocked" and stored["reason"] == ALREADY_APPLIED:
             await _leave_queue(db, user, application_id)
+        if proven:
+            closed = await auto_close.close_if_proven(
+                db, user, application_id, int(result["event_id"]), stored, asked_before=asked_before,
+            )
+            if closed is not None:
+                result = {**result, "status": "withdrawn", "warnings": [*result.get("warnings", []), closed]}
     return result
 
 

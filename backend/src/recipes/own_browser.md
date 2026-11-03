@@ -23,7 +23,7 @@ Print this checklist and tick each step:
    `pending`; Connect (also under More) = `not_connected`. Save it: `update_contact(contact_id, linkedin_state=...)`.
    A login page, CAPTCHA or security check: `own_browser_queue(action="release", session, task_id,
    reason="login_wall" or "captcha")`, then `ask_user` (kind login or captcha) and STOP. Never solve it, never type
-   or ask for a password. Profile gone: release `profile_not_found`. Pending: release `already_pending`, next person.
+   or ask for a password. Gone, or now at another company: release `profile_not_found`. Pending: `already_pending`.
 3. **The right draft.** `not_connected`: by default a request WITHOUT a note; the draft is the message sent once they
    accept (`draft_kind="after_connect"`, at most 400; the task says `no_note`). A note only if the user asked: at most
    200 characters (300 with Premium, only if the user set it). `connected`: a message of at most 400. Wrong kind or too

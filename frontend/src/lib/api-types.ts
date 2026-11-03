@@ -433,6 +433,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/auto/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo Auto
+         * @description "Undo" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting
+         *     closed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;
+         *     also records "It was not sent"). A ``note`` correcting that status event. 409 when the newest status event
+         *     is neither. Session only; no MCP twin.
+         */
+        post: operations["undo_auto_api_applications__application_id__auto_undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/autofill": {
         parameters: {
             query?: never;
@@ -11894,6 +11917,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoEmailCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_auto_api_applications__application_id__auto_undo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */
