@@ -1109,6 +1109,9 @@ SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "1008
 # A yes WITHOUT a fingerprint (said in chat, or stored before slice 8) is bound to the CV and the clock only,
 # so it must not outlive a changed fill or letter for days: it lapses after this many minutes (2 hours).
 SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES", "120"))
+# Owner 2026-11-02: a started submit (``submit_attempted``) with no confirmation email, no applied and no
+# "It was not sent" asks the user "did it go out?" on Needs you only after this many days (auto_applied.py).
+CONFIRM_SENT_WAIT_DAYS = int(os.getenv("CONFIRM_SENT_WAIT_DAYS", "3"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window

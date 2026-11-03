@@ -21084,7 +21084,7 @@
     },
     "/api/applications/{application_id}/auto/undo": {
       "post": {
-        "description": "\"Undo\" - the user reopens an application the AI closed by itself (posting closed, auto_close.py):\na ``note`` correcting that ``withdrawn``. 409 when the newest status event is not Job360's own close.\nSession only; no MCP twin.",
+        "description": "\"Undo\" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting\nclosed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;\nalso records \"It was not sent\"). A ``note`` correcting that status event. 409 when the newest status event\nis neither. Session only; no MCP twin.",
         "operationId": "undo_auto_api_applications__application_id__auto_undo_post",
         "parameters": [
           {
