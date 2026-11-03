@@ -63,6 +63,7 @@ _SITE_WORDS = {
     "captcha": "solve the CAPTCHA", "bot_check": "solve the CAPTCHA", "login_needed": "sign in",
     "login": "sign in", "otp_needed": "enter the code", "account_creation": "create an account",
     "upload_failed": "attach your CV", "upload": "attach your CV",
+    blocked.ALREADY_APPLIED: "mark it applied",
 }
 _FILL_TYPES = ("blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen")
 
@@ -277,7 +278,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         elif considering and (site_asks or (s["block"] is not None and reason != "unknown_question")):
             ask_kind = site_asks[0]["kind"] if site_asks else ""
             word = _SITE_WORDS.get(reason) or _SITE_WORDS.get(ask_kind) or "finish on the site"
-            ref = {k: v for k, v in (("ask_id", site_asks[0]["id"] if site_asks else None),
+            ask_id = site_asks[0]["id"] if site_asks else None
+            if reason == blocked.ALREADY_APPLIED:  # its ask is a plain question, linked by the block itself
+                ask_id = (s["block"] or {}).get("ask_id")
+            ref = {k: v for k, v in (("ask_id", ask_id),
                                      ("event_id", block_ev["id"] if block_ev else None)) if v is not None}
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
@@ -320,6 +324,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if spine._follow_up_due(a.get("follow_up_on"), a["status"], today_iso):
             out.append(_b("follow_up", "assistant", "follow up", a["follow_up_on"]))
         out += notes.get(app_id, [])
+        if considering and reason == blocked.ALREADY_APPLIED:
+            # The site says the user already applied: only their answer waits ("mark it applied"), nothing else.
+            out[:] = [b for b in out if b["kind"] in ("confirm_sent", "site_step")]
 
 
 def settings_line_side(score: Optional[int], line: Optional[int]) -> str:
