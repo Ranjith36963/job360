@@ -4,8 +4,8 @@
 Print this checklist and tick each step:
 [ ] 1 Find  [ ] 2 Check  [ ] 3 Record  [ ] 4 Write  [ ] 5 Send by mode
 
-**A scheduled run** (`whats_due` lists `reach`): steps 1-4 for its `application_ids` ONLY (at most 2 people per company
-and role a week), then `mark_done("reach", application_ids)`. It never sends: the user sends from Needs you.
+**A scheduled run** (`whats_due` lists `reach`): steps 1-4 for its `application_ids` ONLY (up to 5 people per
+application: recruiter, hiring manager, team), then `mark_done("reach", application_ids)`. It never sends: the user sends from Needs you.
 **A network run** (`whats_due` lists `network`): no job. Find up to `max_people` NEW people who fit the user's
 `get_profile` (people in their target roles, recruiters for them, alumni, ex-colleagues, founders and leads),
 steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `mark_done("network")`.
@@ -47,7 +47,7 @@ steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `ma
      call `check_outreach(contact_id, message_id)` (`message_id` = the
      `artifact_id` `save_artifact` gave you). It checks the user's settings,
      an earlier send or reply (the Gmail Sent folder too: look there first),
-     the daily and per-company caps.
+     the user's own limits (settings: per company, network per hour, a day per channel).
      - `send`: press Send in Gmail in the user's browser, when you control
        the browser. Never send through a Gmail connector - connectors only
        draft. No browser control: treat it as `ask`. Then record
