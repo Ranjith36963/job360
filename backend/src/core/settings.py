@@ -406,12 +406,17 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # Autonomy slice 3 (2026-11-02, watch-only): what autonomy WOULD clear, one per check_submit. SERVER-WRITTEN
     # (record_event refuses it), verdict codes only, never answer text (services/applications/evidence.py).
     "autonomy_shadow",
+    # Autonomy A8 (2026-11-02): check_submit's `submit` = one single-use clearance an assistant's receipt
+    # needs; `submit_cleared_used` spends it. SERVER-WRITTEN (services/applications/submit_clearance.py).
+    "submit_cleared", "submit_cleared_used",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
 # Read-side only: every row stays, and the export keeps them. A `process_log` that corrects an
 # assistant's own note moves that note into the log the same way (process_log.py).
-APPLICATION_PROCESS_EVENT_TYPES = ("process_log", "kit_read", "ask_withdrawn", "autonomy_shadow")
+APPLICATION_PROCESS_EVENT_TYPES = (
+    "process_log", "kit_read", "ask_withdrawn", "autonomy_shadow", "submit_cleared", "submit_cleared_used",
+)
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
 APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())

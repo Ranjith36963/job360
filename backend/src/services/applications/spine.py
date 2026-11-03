@@ -1857,6 +1857,10 @@ async def record_receipt(
         replay = await _receipt_replay(db, user_id, request_id, idem_body)
         if replay is not None:
             return replay
+    # Autonomy A8: an assistant's receipt spends one unused check_submit `submit` (the user's web click: none).
+    from src.services.applications import submit_clearance  # noqa: PLC0415 - submit_clearance imports spine
+
+    clearance = await submit_clearance.required(db, user_id, application_id, recorded_by)
 
     # The referrer must be the caller's own contact linked to THIS application. One message for
     # unknown, foreign and other-job contacts, so it is no existence oracle. (Not via contacts:
@@ -2035,6 +2039,10 @@ async def record_receipt(
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
+            if clearance is not None:  # locks the row; a receipt racing for the same clearance is 409
+                await submit_clearance.use(
+                    db, user_id, application_id, recorded_by, clearance, {"receipt_id": receipt_id}
+                )
             event = await append_event(
                 db, user_id=user_id, application_id=application_id, event_type="applied",
                 payload={

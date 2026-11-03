@@ -1346,7 +1346,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         else the newest, with a warning), the
         named cover letter and any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere.
-        Refused (409) while a CAPTCHA, question, unapproved CV or answer is open. `channel` is where they
+        Refused (409) while a CAPTCHA, question, unapproved CV or answer is open, and `submit_not_cleared`
+        unless an unused check_submit `submit` came first (one per receipt). `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
         "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
@@ -2503,7 +2504,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         held_by_other_session: tell the user.
         Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
         changed on the web - type each in, then form_swept with `answers`.
-        Read-only; after a real submit, call `record_application`."""
+        Its `submit` is spent by record_application (one each)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.submit_check(

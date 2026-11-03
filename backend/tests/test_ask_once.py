@@ -198,3 +198,47 @@ def test_only_country_specific_questions_are_bound_to_a_country():
             ("contact.linkedin_url", "LinkedIn profile"), ("contact.email", "Email")]
     assert [k for k, q in bound if not is_country_specific(k, q)] == []
     assert [k for k, q in free if is_country_specific(k, q)] == []
+
+
+def test_an_answer_the_owner_bound_to_this_country_outranks_one_bound_to_none():
+    from src.services.profile.answer_match import resolve_answer
+
+    legacy = {"question": "Expected salary?", "answer": "60000", "approved": True, "topic": "salary.pay"}
+    pressed = {**legacy, "answer": "70000", "country": "GB"}
+    assert resolve_answer([legacy, pressed], topic="salary.pay", country="GB") == (pressed, None)
+    assert resolve_answer([legacy, pressed], topic="salary.pay", country="US") == (legacy, None)
+    two = [legacy, {**legacy, "answer": "65000"}]  # still never a guess between two at one level
+    assert resolve_answer(two, topic="salary.pay", country="US")[0] is None
+
+
+@pytest.mark.asyncio
+async def test_the_answer_once_card_counts_once_and_the_newer_press_wins(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        saved = await client.patch("/api/profile", json={"edits": [
+            {"path": "user_info.right_to_work", "value": {"countries": [
+                {"country": "GB", "work_authorization": "citizen"}, {"country": "US", "work_authorization": "visa"}]}},
+            {"path": "user_info.answers", "value": [{"question": "Phone number", "answer": "+44 7700 900123",
+                                                     "approved": True, "topic": "contact.phone"}]},
+        ]})
+        assert saved.status_code == 200, saved.text
+        topics = {c["country"]: [q["topic"] for q in c["questions"]]
+                  for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
+        assert "contact.phone" not in topics["GB"] and "contact.phone" not in topics["US"]
+        rtw = "right_to_work.GB.needs_sponsorship"
+        count = (await client.get("/api/needs-you-count")).json()
+        rows = sum(len(t) for t in topics.values())
+        assert (count["answer_once"], count["n"]) == (rows, 1), "the questionnaire is one card on the count"
+        question = "Do you need sponsorship to work in GB?"
+        for answer in ("Yes", "No"):  # pressed twice: the newer press replaces the older, never a tie
+            resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
+                {"topic": rtw, "question": question, "answer": answer}]})
+            assert resp.status_code == 200, resp.text
+        from src.services.profile.answer_match import find_answer
+        from src.services.profile.storage import load_profile
+
+        answers = load_profile(fixture_user_id).user_info.answers
+        assert find_answer(answers, topic=rtw, country="GB")["answer"] == "No"
+        gb = [q["topic"] for q in (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]]
+        assert rtw not in gb

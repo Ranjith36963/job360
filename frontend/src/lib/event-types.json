@@ -65,12 +65,16 @@
     "outcome_suggested",
     "outcome_dismissed",
     "process_log",
-    "autonomy_shadow"
+    "autonomy_shadow",
+    "submit_cleared",
+    "submit_cleared_used"
   ],
   "process": [
     "process_log",
     "kit_read",
     "ask_withdrawn",
-    "autonomy_shadow"
+    "autonomy_shadow",
+    "submit_cleared",
+    "submit_cleared_used"
   ]
 }

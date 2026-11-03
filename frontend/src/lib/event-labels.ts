@@ -125,6 +125,9 @@ export const EVENT_LABEL: Record<string, string> = {
   process_log: "Assistant's work log",
   // Autonomy slice 3 (2026-11-02): watch-only check of what autonomy would clear (work log, by type).
   autonomy_shadow: "Autonomy check (watch-only)",
+  // Autonomy A8 (2026-11-02): check_submit's single-use submit clearance and its use by a receipt.
+  submit_cleared: "Submit check passed",
+  submit_cleared_used: "Submit check used by the receipt",
 };
 
 function relayedWords(payload: unknown): boolean {

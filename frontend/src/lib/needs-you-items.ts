@@ -104,7 +104,7 @@ export const KIND_CHIPS: { key: string; label: string }[] = [
   { key: "posting_closed", label: "Posting closed" },
   { key: "site_step", label: "On the site" },
   { key: "approve_cv", label: "Approve CV" },
-  { key: "answers", label: "Answers" },
+  { key: "answers", label: "Answer once" },
   { key: "send_yes", label: "Send" },
   { key: "apply_by_hand", label: "Apply" },
   { key: "outreach_send", label: "Notes" },
@@ -126,6 +126,8 @@ export type NeedsYouCount = {
   idsByKind: Record<string, number[]>;
   /** Open asks tied to a job that is not a row (e.g. proof missing on a closed job): listed in Other. */
   otherAskIds: number[];
+  /** The Answer-once card has rows waiting: it shows under All and Answer once. */
+  answerOnce: boolean;
 };
 
 /** The page's count IS the server's (GET /api/needs-you-count): N = jobs waiting on you + Other, All = N = the
@@ -133,13 +135,21 @@ export type NeedsYouCount = {
  *  response; nothing is counted or derived here. */
 export function fromServerCount(c: NeedsYouCountOut): NeedsYouCount {
   const idsByKind = c.job_ids_by_kind ?? {};
-  const kinds = KIND_CHIPS.map((k) => k.key).filter((k) => (idsByKind[k]?.length ?? 0) > 0);
+  // The Answer-once card is one item on the server's n while any of its rows wait (`answer_once`).
+  const answerOnce = (c.answer_once ?? 0) > 0 ? 1 : 0;
+  const extra: Record<string, number> = { answers: answerOnce };
+  const size = (k: string) => (idsByKind[k]?.length ?? 0) + (extra[k] ?? 0);
+  const kinds = KIND_CHIPS.map((k) => k.key).filter((k) => size(k) > 0);
   const byChip: Record<Chip, number> = { all: c.n, other: c.other };
-  for (const k of kinds) byChip[k] = idsByKind[k].length;
-  return { n: c.n, jobs: c.jobs, other: c.other, byChip, chips: ["all", ...kinds, ...(c.other > 0 ? ["other"] : [])], jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [] };
+  for (const k of kinds) byChip[k] = size(k);
+  return {
+    n: c.n, jobs: c.jobs, other: c.other, byChip, chips: ["all", ...kinds, ...(c.other > 0 ? ["other"] : [])],
+    jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [], answerOnce: answerOnce > 0,
+  };
 }
 export const EMPTY_COUNT: NeedsYouCount = fromServerCount({
   n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, other_ask_ids: [],
+  answer_once: 0,
 });
 
 /** "57 things need you" (owner plan §2.6). */

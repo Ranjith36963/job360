@@ -12,7 +12,8 @@ Print this checklist and tick each step:
 1. **Take ONE person.** Use ONE `session` label for the whole run. `own_browser_queue(action="list")` (`open_now`
    false: tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session` (one person
    the user just clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`).
-   `empty`, `wait`, `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead.
+   `empty`, `wait`, `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead;
+   call check_submit right before Submit (record_application refuses without its `submit`).
    Open the person's `linkedin_url` in the own browser. **Done when** you hold one person.
 2. **Read their state** on the page: a `1st` badge or a Message button with no Connect = `connected`; Pending =
    `pending`; Connect (also under More) = `not_connected`. Save it: `update_contact(contact_id, linkedin_state=...)`.

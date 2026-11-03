@@ -64,6 +64,7 @@ from src.services.applications import (
     process_log,
     queue_preflight,
     spine,
+    submit_clearance,
 )
 from src.services.applications import evidence as evidence_service
 from src.services.applications import inbox_items as inbox_items_service
@@ -3794,6 +3795,9 @@ async def submit_check(
     )
     if facts.autonomy_shadow is not None:
         await kit_service.record_autonomy_shadow(db, user, application_id, facts.autonomy_shadow, shown["decision"])
+    if shown["decision"] == "submit":
+        # Autonomy A8: this `submit` is the one single-use clearance an assistant's receipt needs.
+        await submit_clearance.record(db, user.id, application_id, actor_for(user), form_url, verdict.reason)
     return {
         "application_id": application_id, **shown, "type_first": type_first,
         # Autonomy slice 3: what autonomy WOULD clear (watch-only; the verdict above never reads it).
@@ -3913,7 +3917,7 @@ async def _record_event(
         spine.validate_event_type(body.event_type)
         if body.event_type in proof_service.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
-        if body.event_type == evidence_service.EVENT_TYPE:
+        if body.event_type == evidence_service.EVENT_TYPE or body.event_type in submit_clearance.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (check_submit), not by a caller")
         if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
             # Slice 29: the receipt trusts it as the file that was sent, so no caller may forge one.
@@ -3994,15 +3998,20 @@ async def _record_event(
         # patch here (coordinator review, 2026-09-25).
         # G338: `submit_attempted` is a claim - the row lock, the 409 checks and the append are
         # one transaction, so of two sessions that both passed check_submit only one may click.
+        clearance: Optional[int] = None
         if body.event_type == "applied":
             # Owner rule 2026-10-31: an assistant cannot record applied with items open (409); the user's
             # own click is stamped with what was open.
             open_at_submit = await kit_service.enforce_applied_rule(db, user.id, application_id, actor_for(user))
             if open_at_submit:
                 payload = {**(payload or {}), "open_at_submit": open_at_submit}
+            # Autonomy A8: an assistant's first `applied` spends one check_submit `submit` (a repeat is a note).
+            if not await kit_service.already_applied(db, user.id, application_id):
+                clearance = await submit_clearance.required(db, user.id, application_id, actor_for(user))
         claim: contextlib.AbstractAsyncContextManager[Any] = (
             kit_service.submit_claim(db, user, application_id)
-            if body.event_type == "submit_attempted" else contextlib.nullcontext()
+            if body.event_type == "submit_attempted"
+            else db._db.transaction() if clearance is not None else contextlib.nullcontext()
         )
         async with claim:
             result = await spine.append_event(
@@ -4014,6 +4023,11 @@ async def _record_event(
                 # stored as the submission-confirmation note, never a second applied.
                 repeat_applied_as_confirmation=True,
             )
+            if clearance is not None:
+                await submit_clearance.use(
+                    db, user.id, application_id, actor_for(user), clearance,
+                    {"applied_event_id": int(result["event_id"])},
+                )
         if source:
             # Feature 10: this message was waiting as an unmatched inbox item - it now has its application.
             await inbox_items_service.resolve_by_event(

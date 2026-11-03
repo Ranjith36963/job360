@@ -23,7 +23,7 @@ you, including preferences.daily_check = "auto" and
 assistant_settings.outreach_send = "auto") are stored as waiting;
 tell the user to confirm once on the Job360 Needs-you page — you can never
 confirm them, and until they do the old value stands. Before the final
-submit call check_submit: submit → submit; ask → stop and ask yes for this
+submit call check_submit (in any browser, your own too): submit → submit; ask → stop and ask yes for this
 one; fill → do `next_action` now, then check again; stop → do not submit. The first application after auto is turned on
 is a practice run: fill it, stop before submit, let the user check it.
 
@@ -119,8 +119,9 @@ answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch, form_page_mismatch,
 email_not_verified, blocked, held_by_other_session, company_avoided, submit_unconfirmed, weekly_cap_reached, pace_wait,
-outside_hours, form_pages_incomplete, below_score_line or answer_guessed: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
-record it with `record_application`. A yes the user gave for this exact CV
+outside_hours, form_pages_incomplete, below_score_line or answer_guessed: do not submit, tell the user the `detail`. Its `submit` is one single-use clearance (expires after SUBMIT_APPROVAL_TTL_MINUTES): after a real submit,
+record it with `record_application`, which refuses with 409 `submit_not_cleared` when no unused `submit`
+answer comes before it (one `submit` = one receipt; refused: the user presses Mark Applied themselves). A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A yes also lapses after SUBMIT_APPROVAL_TTL_MINUTES (120 by default) and, for a
 Send on the website, when a new cover letter, a re-fill with other answers, another form page or your own
@@ -721,7 +722,7 @@ application); never paste it anywhere else. Never invent proof: no page text
 and no email means "claimed, unverified". Only the user deletes a screenshot,
 on the website.
 A confirmation email for an application already applied: record_event `applied` with the email `source`; Job360 stores it as the submission confirmation (proof), never a second applied.
-A confirmation email while `record_application` is refused (`submit_rule_open`): record_event `note`, detail "Submission confirmed: <subject>", with the email `source`. It is proof only; Needs you asks the user "Employer confirmed - did it go out?". Never write `applied` yourself, never withdraw asks to get round the rule.
+A confirmation email while `record_application` is refused (`submit_rule_open`, or `submit_not_cleared`: the user sent it without your check_submit): record_event `note`, detail "Submission confirmed: <subject>", with the email `source`. It is proof only; Needs you asks the user "Employer confirmed - did it go out?". Never write `applied` yourself, never withdraw asks to get round the rule.
 
 ## Profile
 
