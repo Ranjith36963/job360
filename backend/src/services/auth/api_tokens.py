@@ -40,6 +40,9 @@ class TokenOwner:
     # `made_by="token:<name>"` / `recorded_by="token:<name>"` on the
     # application spine (spec 2026-09-04-application-spine S3).
     name: str
+    # Owner 2026-11-02: minted for the user's scheduled runs (migration 0093). Such a token may do run
+    # work but never approve for the user (``services.auth.run_credential``).
+    for_scheduled_runs: bool = False
 
 
 def _hash(token: str) -> str:
@@ -73,7 +76,9 @@ async def count_active(db_path: str, user_id: str) -> int:
     return int(row[0]) if row else 0
 
 
-async def mint(db_path: str, *, user_id: str, name: str, cap: int = 0) -> Optional[dict[str, Any]]:
+async def mint(
+    db_path: str, *, user_id: str, name: str, cap: int = 0, for_scheduled_runs: bool = False
+) -> Optional[dict[str, Any]]:
     """Create a token, enforcing ``cap`` under a per-user row lock so concurrent
     mints for the same user serialise and can never together exceed it; returns
     ``None`` (nothing inserted) when the cap is already reached."""
@@ -95,15 +100,18 @@ async def mint(db_path: str, *, user_id: str, name: str, cap: int = 0) -> Option
                 return None
             cur = await db.execute(
                 """
-                INSERT INTO api_tokens(user_id, name, token_hash, prefix, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO api_tokens(user_id, name, token_hash, prefix, created_at, for_scheduled_runs)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, name, _hash(token), prefix, created_at),
+                (user_id, name, _hash(token), prefix, created_at, bool(for_scheduled_runs)),
             )
             token_id = cur.lastrowid
     get_audit_logger().info(
         "api_token_create",
-        extra={"event": "api_token_create", "user_id": user_id, "token_id": token_id, "prefix": prefix},
+        extra={
+            "event": "api_token_create", "user_id": safe_log_value(user_id), "token_id": int(token_id),
+            "prefix": prefix, "for_scheduled_runs": bool(for_scheduled_runs),
+        },
     )
     return {
         "id": int(token_id),
@@ -111,6 +119,7 @@ async def mint(db_path: str, *, user_id: str, name: str, cap: int = 0) -> Option
         "prefix": prefix,
         "created_at": created_at,
         "last_used_at": None,
+        "for_scheduled_runs": bool(for_scheduled_runs),
         "token": token,
     }
 
@@ -121,7 +130,7 @@ async def list_active(db_path: str, user_id: str) -> list[dict[str, Any]]:
         db.row_factory = pg.Row
         cur = await db.execute(
             """
-            SELECT id, name, prefix, created_at, last_used_at
+            SELECT id, name, prefix, created_at, last_used_at, for_scheduled_runs
             FROM api_tokens
             WHERE user_id = ? AND revoked_at IS NULL
             ORDER BY created_at DESC, id DESC
@@ -136,6 +145,7 @@ async def list_active(db_path: str, user_id: str) -> list[dict[str, Any]]:
             "prefix": r["prefix"],
             "created_at": str(r["created_at"]),
             "last_used_at": str(r["last_used_at"]) if r["last_used_at"] else None,
+            "for_scheduled_runs": bool(r["for_scheduled_runs"]),
         }
         for r in rows
     ]
@@ -172,7 +182,7 @@ async def resolve(db_path: str, token: str) -> Optional[TokenOwner]:
         db.row_factory = pg.Row
         cur = await db.execute(
             """
-            SELECT t.id AS token_id, t.last_used_at, t.name AS token_name,
+            SELECT t.id AS token_id, t.last_used_at, t.name AS token_name, t.for_scheduled_runs,
                    u.id AS user_id, u.email, u.email_verified_at
             FROM api_tokens t
             JOIN users u ON u.id = t.user_id
@@ -197,4 +207,5 @@ async def resolve(db_path: str, token: str) -> Optional[TokenOwner]:
         email=row["email"],
         email_verified=row["email_verified_at"] is not None,
         name=row["token_name"],
+        for_scheduled_runs=bool(row["for_scheduled_runs"]),
     )

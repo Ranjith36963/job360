@@ -497,6 +497,7 @@ function CreateTokenCard({
   onCreated: (t: TokenCreated) => void;
 }) {
   const [name, setName] = useState("");
+  const [forRuns, setForRuns] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -510,8 +511,9 @@ function CreateTokenCard({
     }
     setSubmitting(true);
     try {
-      const created = await createToken(trimmed);
+      const created = await createToken(trimmed, forRuns);
       setName("");
+      setForRuns(false);
       onCreated(created);
       toast.success("Token created");
     } catch (err) {
@@ -552,6 +554,15 @@ function CreateTokenCard({
             {submitting ? "Creating..." : "Create token"}
           </Button>
         </form>
+        <label className="mt-3 flex items-center gap-2 text-sm" data-testid="token-for-runs">
+          <input
+            type="checkbox"
+            checked={forRuns}
+            onChange={(e) => setForRuns(e.target.checked)}
+            className="size-4 accent-[#1d9bf0]"
+          />
+          For scheduled runs only: this token can never approve for you
+        </label>
         {error && (
           <p className="mt-2 text-xs text-danger" role="alert">
             {error}

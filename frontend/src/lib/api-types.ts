@@ -5827,6 +5827,11 @@ export interface components {
         };
         /** CreateTokenRequest */
         CreateTokenRequest: {
+            /**
+             * For Scheduled Runs
+             * @default false
+             */
+            for_scheduled_runs: boolean;
             /** Name */
             name: string;
         };
@@ -10615,6 +10620,11 @@ export interface components {
         TokenCreated: {
             /** Created At */
             created_at: string;
+            /**
+             * For Scheduled Runs
+             * @default false
+             */
+            for_scheduled_runs: boolean;
             /** Id */
             id: number;
             /** Last Used At */
@@ -10635,6 +10645,11 @@ export interface components {
         TokenSummary: {
             /** Created At */
             created_at: string;
+            /**
+             * For Scheduled Runs
+             * @default false
+             */
+            for_scheduled_runs: boolean;
             /** Id */
             id: number;
             /** Last Used At */

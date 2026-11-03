@@ -5322,6 +5322,11 @@
       },
       "CreateTokenRequest": {
         "properties": {
+          "for_scheduled_runs": {
+            "default": false,
+            "title": "For Scheduled Runs",
+            "type": "boolean"
+          },
           "name": {
             "maxLength": 100,
             "minLength": 1,
@@ -17941,6 +17946,11 @@
             "title": "Created At",
             "type": "string"
           },
+          "for_scheduled_runs": {
+            "default": false,
+            "title": "For Scheduled Runs",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -18001,6 +18011,11 @@
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "for_scheduled_runs": {
+            "default": false,
+            "title": "For Scheduled Runs",
+            "type": "boolean"
           },
           "id": {
             "title": "Id",

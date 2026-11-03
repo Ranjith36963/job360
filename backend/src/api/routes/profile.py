@@ -42,6 +42,7 @@ from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
 from src.services.applications import cv_checks
 from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
+from src.services.auth import run_credential
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
 from src.services.profile import forgiving, grant_scope, refusals, setting_requests, user_info
@@ -603,6 +604,38 @@ def _remember_line(path: str) -> str:
     )
 
 
+def _approval_key(record: dict[str, Any]) -> tuple[str, ...]:
+    """An answer record's identity for "was this already approved?": everything that decides where the
+    approval applies (wording, topic, aliases, country, company) and the answer itself."""
+    raw_aliases = record.get("aliases")
+    aliases: list[Any] = raw_aliases if isinstance(raw_aliases, list) else []
+    return (
+        " ".join(str(record.get("question") or "").lower().split()),
+        str(record.get("topic") or "").strip(),
+        "\n".join(sorted(" ".join(str(a).lower().split()) for a in aliases)),
+        str(record.get("country") or "").upper(),
+        str(record.get("company") or "").strip(),
+        str(record.get("answer") or "").strip(),
+    )
+
+
+def _refuse_run_approvals(user: CurrentUser, body: UpdateProfileRequest, pairs: list[tuple[str, Any]]) -> None:
+    """Owner 2026-11-02 (option b): a scheduled-run token may save a guess, never the user's approval:
+    no ``remember: true`` and no ``user_info.answers`` record turned ``approved: true`` that was not
+    already approved as-is. 403 ``chat_approval_from_run``; nothing is saved."""
+    if not user.scheduled_run:
+        return
+    if any(e.remember for e in body.edits):
+        run_credential.refuse_if_run(user, "remember")
+    sent = [r for p, v in pairs if p == user_info.USER_INFO_ANSWERS_PATH for r in (v or []) if isinstance(r, dict)]
+    if not any(r.get("approved") is True for r in sent):
+        return
+    stored = (load_profile(user.id) or UserProfile()).user_info.answers or []
+    approved = {_approval_key(r) for r in stored if isinstance(r, dict) and r.get("approved") is True}
+    if any(r.get("approved") is True and _approval_key(r) not in approved for r in sent):
+        run_credential.refuse_if_run(user, "approved_answer")
+
+
 AVOID_COMPANIES_PATH = "preferences.avoid_companies"
 
 
@@ -982,6 +1015,8 @@ def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> Updat
         raise EditRefused(
             exc.status_code, refusals.self_correcting_message([p for p, _ in pairs], [(bad, exc.detail)]), reason
         ) from exc
+
+    _refuse_run_approvals(user, body, pairs)
 
     # VALIDATE BEFORE BOOTSTRAPPING. The blank-profile creation below is a
     # WRITE — it inserts a `user_profiles` row and a `user_profile_versions`

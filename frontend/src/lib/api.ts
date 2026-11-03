@@ -679,10 +679,12 @@ export async function getReceipt(receiptId: number): Promise<Receipt> {
 export type TokenCreated = _Schemas["TokenCreated"];
 export type TokenSummary = _Schemas["TokenSummary"];
 
-export async function createToken(name: string): Promise<TokenCreated> {
+// forScheduledRuns: the token for the user's scheduled tasks only; the server refuses every
+// approval it sends for the user (403 chat_approval_from_run).
+export async function createToken(name: string, forScheduledRuns = false): Promise<TokenCreated> {
   return request<TokenCreated>("/api/tokens", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, for_scheduled_runs: forScheduledRuns }),
   });
 }
 
