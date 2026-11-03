@@ -14,6 +14,7 @@ import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { FormHandoff } from "@/components/applications/FormHandoff";
+import { AlreadyAppliedRow } from "./AlreadyAppliedRow";
 import { AskQuestions } from "./AskQuestions";
 import { AskText } from "./AskText";
 import { BrowserReason } from "./BrowserReason";
@@ -91,6 +92,7 @@ export function JobCard({
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
+  const alreadyApplied = card.asks.filter((a) => a.kind === "already_applied");
   const allReminders = card.asks.filter((a) => a.kind === "outreach");
   // A reminder about someone already under People to reach is not a second row (owner 2026-10-24).
   const covered = remindersCovered(card.people, allReminders.map((r) => r.ask));
@@ -332,6 +334,11 @@ export function JobCard({
           </div>
         </section>
       )}
+
+      {alreadyApplied.map(({ ask }) => (
+        <AlreadyAppliedRow key={ask.id} ask={ask} applicationId={card.applicationId}
+          openItems={card.openItems ?? []} onChanged={onChanged} />
+      ))}
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
