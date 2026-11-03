@@ -38,6 +38,7 @@ Rows (unconfirmed = confirm on first real run):
 | Teamtailor (unconfirmed) | Labels end in a hidden "Required". Consent boxes: the privacy one is needed; future-job contact is the user's choice, ask. |
 | Agency or unknown site (unconfirmed) | `application_form` false means you are still on the ad: find its Apply link. A register-first wall is `account_creation`. Never fill a `leave_blank` field. |
 | Lever tick-box raises a CAPTCHA (SEEN-rule) | `record_event` `blocked` {reason: captcha, page_host}. The user solves it. Never work around it. |
+| Site says you already applied ("You already have an application for this role") | `blocked` {reason: already_applied_on_site, page_host}; stop. Never retry it; the user says if it is applied. |
 | Site says you applied too much today | `blocked` {reason: site_limit_reached, page_host}; stop this site for the run. |
 | Sign-up wall, one-time code, ID / selfie / card / SSN, timed test or video | `blocked` with `account_creation`, `otp_needed`, `id_or_payment_asked` (never entered), `assessment_required`. Posting closed: `posting_closed`. Cannot be filled: `manual_only`. |
 

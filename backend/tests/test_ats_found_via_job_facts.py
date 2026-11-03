@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
+from tests._clearance import clear
+
 _AD_FR = {
     "title": "ML Engineer",
     "company": "Parisien",
@@ -491,7 +493,7 @@ async def test_stats_by_contact_found_via(authenticated_async_context):
 
 
 @pytest.mark.asyncio
-async def test_mcp_tools_carry_the_new_params(authenticated_async_context):
+async def test_mcp_tools_carry_the_new_params(authenticated_async_context, fixture_user_id):
     pytest.importorskip("mcp")
     import json
 
@@ -564,6 +566,7 @@ async def test_mcp_tools_carry_the_new_params(authenticated_async_context):
                         "where": "web"}},
                 )
                 assert approved.status_code == 201, approved.text
+            await clear(fixture_user_id, app_id)
             receipt = await mcp.call_tool("record_application", {"job_id": brought["job_id"], "channel": "pigeon"})
             assert not receipt.is_error, "an odd channel never costs the user their receipt"
 

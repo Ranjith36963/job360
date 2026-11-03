@@ -114,3 +114,95 @@ async def test_answer_once_shows_a_conflict_row_and_remembering_one_value_remove
         assert not any(q["conflict"] for q in gb)
     mine = [r for r in load_profile(fixture_user_id).user_info.answers if "sponsorship" in str(r.get("topic"))]
     assert [(r["topic"], r["answer"]) for r in mine] == [("sponsorship.GB.yes_no", "No")]
+
+
+# ── Verifier seams (2026-11-03): twins worded differently, and a narrower answer over a broader one ──
+
+VISA_Q = "Do you need a visa?"
+PAY_Q = "What is your expected salary?"
+
+
+def _profile(records: list[dict[str, Any]]) -> Any:
+    from src.services.profile.models import UserInfo, UserProfile
+
+    return UserProfile(user_info=UserInfo(answers=records))
+
+
+def _real_form(records: list[dict[str, Any]], country: str, questions: list[dict[str, Any]],
+               company_key: Any = None) -> dict[str, Any]:
+    """check_form's pure core over a REAL kit (compute_answers), as check_form builds it."""
+    answers, _missing = kit.compute_answers(_profile(records), [], country, company_key)
+    return kit.form_check(answers, questions, records=records, company_key=company_key, country=country)
+
+
+def _ready_verifies(records: list[dict[str, Any]], question: str, typed: str, key: Any, country: str,
+                    company_key: Any = None) -> bool:
+    from src.services.applications import ready
+
+    a = {"question": question, "answer": typed, "key": key, "source": "approved_text"}
+    return ready._user_check(a, _profile(records), {}, company_key, {}, None, country)[0]
+
+
+def _twins_worded_differently() -> list[dict[str, Any]]:
+    return [_rec("sponsorship.GB.yes_no", "Yes"), _rec("sponsorship.gb.yes_no", "No", question=VISA_Q)]
+
+
+def test_twins_worded_differently_are_missing_from_the_kit_as_ambiguous():
+    records = _twins_worded_differently()
+    answers, missing = kit.compute_answers(_profile(records), [], "GB", None)
+    assert [i["value"] for i in answers["approved_text"]] == []
+    ambiguous = [m for m in missing if "ambiguous" in m["why"]]
+    assert [m["key"] for m in ambiguous] == ["sponsorship.GB.yes_no"]
+
+
+@pytest.mark.parametrize("key", [Q, VISA_Q, "sponsorship.GB.yes_no", "sponsorship.gb.yes_no", None])
+@pytest.mark.parametrize("question", [Q, VISA_Q])
+def test_twins_worded_differently_give_no_answer_on_the_form_by_any_key(key, question):
+    form = _real_form(_twins_worded_differently(), "GB", [{"question": question, "key": key}])
+    assert form["answered"] == []
+    assert len(form["missing"]) == 1 and "ambiguous" in form["missing"][0]["why"]
+
+
+@pytest.mark.parametrize("question,typed", [(Q, "Yes"), (VISA_Q, "No"), (Q, "No"), (VISA_Q, "Yes")])
+@pytest.mark.parametrize("key", [None, "sponsorship.GB.yes_no"])
+def test_twins_worded_differently_are_never_verified_on_the_ready_card(question, typed, key):
+    from src.services.applications import ready
+
+    records = _twins_worded_differently()
+    assert ready._approved_record(_profile(records), question, None, None, "GB") is None
+    assert not _ready_verifies(records, question, typed, key, "GB")
+
+
+def _pay(answer: str, **extra: Any) -> dict[str, Any]:
+    return {"question": PAY_Q, "answer": answer, "approved": True, "topic": "salary.expected", **extra}
+
+
+_NARROWER = {
+    "country-bound": ([_pay("50000"), _pay("60000", country="GB")], None),
+    "country-bound saved first": ([_pay("60000", country="GB"), _pay("50000")], None),
+    "company-scoped": ([_pay("50000"), _pay("60000", company="Northwind")], "Northwind"),
+    "company-scoped saved first": ([_pay("60000", company="Northwind"), _pay("50000")], "Northwind"),
+}
+
+
+@pytest.mark.parametrize("case", list(_NARROWER))
+def test_a_narrower_answer_wins_over_a_broader_one_everywhere(case):
+    from src.services.applications import ready
+    from src.services.profile.answer_match import resolve_answer
+
+    records, company = _NARROWER[case]
+    ck = kit.normalized_company_key(company) if company else None
+    assert conflicts(records, country="GB") == [] and conflicts(records, country="GB", company_key=ck) == []
+    rec, note = resolve_answer(records, topic="salary.expected", company_key=ck, country="GB")
+    assert note is None and rec is not None and rec["answer"] == "60000"
+    answers, missing = kit.compute_answers(_profile(records), [], "GB", ck)
+    assert [i["value"] for i in answers["approved_text"]] == ["60000"]
+    assert not [m for m in missing if "ambiguous" in m["why"]]
+    for key in (PAY_Q, "salary.expected", None):
+        form = _real_form(records, "GB", [{"question": PAY_Q, "key": key}], ck)
+        assert [a["value"] for a in form["answered"]] == ["60000"], (key, form["missing"])
+    for key in (None, "salary.expected"):
+        got = ready._approved_record(_profile(records), PAY_Q, ck, key, "GB")
+        assert got is not None and got["answer"] == "60000"
+        assert _ready_verifies(records, PAY_Q, "60000", key, "GB", ck)
+        assert not _ready_verifies(records, PAY_Q, "50000", key, "GB", ck)

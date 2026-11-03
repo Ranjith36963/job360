@@ -7,7 +7,7 @@ other application only after Job360's browser failed on it (an open ``blocked`` 
 ``routing.ask_route`` sends to ``own_browser``). The user's per-card Send click on one LinkedIn person is their
 yes for THAT message and never expires until it is sent or cancelled; a rewritten draft (a new message id)
 needs a new click. A send happens only while the session holds a live claim (:func:`take`, optionally for one
-``contact_id``). Easy Apply is at most ``EASY_APPLY_DAILY_MAX`` a day, enforced in :func:`take`.
+``contact_id``). Easy Apply has no Job360 day cap unless ``EASY_APPLY_DAILY_MAX`` > 0 (then enforced in :func:`take`).
 
 Stored as ``contact_outreach`` entries Job360 writes itself and never accepts from a caller (they are not in
 ``settings.OUTREACH_ENTRIES``, so ``record_outreach`` refuses them): ``send_approved`` / ``send_declined``
@@ -40,7 +40,7 @@ RUN_NOW_MINUTES = 60
 QUEUE_MAX = 50
 ROWS_PER_CONTACT_MAX = 200
 LINKEDIN_MIN_GAP_SECONDS = 120
-EASY_APPLY_DAILY_MAX = 10
+EASY_APPLY_DAILY_MAX = settings.EASY_APPLY_DAILY_MAX  # 0 = no Job360 cap; LinkedIn's own limit decides
 RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
 )
@@ -53,6 +53,7 @@ WHY_WORDS = {
     "default": "You pressed Send for this message.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
     "link_unclear": "This link looks broken or disguised: your own browser checks it.",
+    "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
 }
 
 
@@ -348,6 +349,7 @@ async def _application_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str]
 ) -> list[dict[str, Any]]:
     from src.services.applications import blocked, kit, spine  # noqa: PLC0415
+    from src.services.browser_agent import learned  # noqa: PLC0415
 
     cur = await db._db.execute(
         "SELECT id, job_title, job_company, job_url FROM applications WHERE user_id = ? AND status = 'considering' "
@@ -375,6 +377,17 @@ async def _application_tasks(
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
         routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application")))
+    # Owner 2026-11-02: a site where Job360's browser was blocked twice (CAPTCHA / bot check) for THIS user:
+    # the next queued job there starts here, before Job360's browser meets the wall again.
+    hosts = await learned.blocked_hosts(db, user.id, now)
+    rest = [i for i, a in apps.items() if i not in blocks and i not in queued
+            and learned.route_for(str(a.get("job_url") or ""), hosts) is not None]
+    later = await spine.queued_at_by_app(db, user.id, rest)
+    for app_id in sorted(later, key=lambda i: (later[i], i)):
+        route = routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application",
+                                    route=learned.LEARNED_ROUTE)
+        if route.kind == "own_browser":
+            routes.append((app_id, route))
     out: list[dict[str, Any]] = []
     for app_id, route in routes:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
@@ -386,7 +399,7 @@ async def _application_tasks(
             "url": a.get("job_url") or "", "contact_id": None, "application_id": app_id, "name": "",
             "message_id": None, "draft_text": "", "draft_chars": 0, "linkedin_state": None,
             "why_own_browser": WHY_WORDS.get(route.reason, ""), "owner_yes": False, "claim": None,
-            "browser": routing.label(route),
+            "browser": routing.label(route, site=routing.site_of(str(a.get("job_url") or ""))[1]),
         })
         if len(out) >= QUEUE_MAX:
             break
@@ -582,7 +595,7 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
-    if any(routing.names_linkedin(t["url"]) for t in apps) and (
+    if EASY_APPLY_DAILY_MAX > 0 and any(routing.names_linkedin(t["url"]) for t in apps) and (
         await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
     ):  # Easy Apply's own day cap; any other application is still handed out
         apps = [t for t in apps if not routing.names_linkedin(t["url"])]

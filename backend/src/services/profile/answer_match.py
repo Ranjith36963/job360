@@ -30,6 +30,7 @@ _NON_ALNUM = re.compile(r"[\W_]+", re.UNICODE)
 # ``remote`` / ``any`` segments mean every country; a topic naming no country matches no other job.
 COUNTRY_BOUND_TOPIC_PREFIXES = ("sponsorship.", "right_to_work.")
 _EVERY_COUNTRY = frozenset({"remote", "any"})
+AMBIGUOUS = "ambiguous: more than one saved answer matches; ask the user which one is right"
 
 
 def topic_key(topic: Any) -> str:
@@ -84,7 +85,7 @@ def _pick(cands: list[dict[str, Any]]) -> tuple[Optional[dict[str, Any]], Option
     """One candidate, none, or (ambiguous) none plus a note: two candidates that
     disagree are never resolved by a guess."""
     if len(cands) > 1 and len({normalize_question(c.get("answer")) for c in cands}) > 1:
-        return None, "ambiguous: more than one saved answer matches; ask the user which one is right"
+        return None, AMBIGUOUS
     return (cands[0] if cands else None), None
 
 
@@ -139,9 +140,13 @@ def find_answer(
     return resolve_answer(answers, topic=topic, question=question, company_key=company_key, country=country)[0]
 
 
-def conflicts(answers: Any, *, country: Optional[str] = None) -> list[dict[str, Any]]:
-    """Saved topics whose approved, general (no company) answers disagree for ``country``: the same
-    canonical topic (case-insensitive) resolving to two different answers. ``[{topic, question, values}]``
+def conflicts(
+    answers: Any, *, country: Optional[str] = None, company_key: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Saved topics whose approved answers disagree for ``country`` (and ``company_key``; none = the
+    general answers only) AT ONE SCOPE: the same canonical topic (case-insensitive) resolving, after
+    :func:`resolve_answer`'s precedence, to two different answers. A narrower answer (bound to this
+    country, or this company's own) overriding a broader one is no conflict. ``[{topic, question, values}]``
     in saved order, ``values`` the distinct answers as saved. Read-only: nothing is rewritten, and
     :func:`resolve_answer` already returns no answer for these."""
     out: list[dict[str, Any]] = []
@@ -151,7 +156,7 @@ def conflicts(answers: Any, *, country: Optional[str] = None) -> list[dict[str, 
         if not topic or topic in seen:
             continue
         seen.add(topic)
-        cands = _candidates(answers, topic=topic, question=None, company_key=None, country=country)
+        cands = _candidates(answers, topic=topic, question=None, company_key=company_key, country=country)
         if _pick(cands)[1]:
             values: list[str] = []
             for c in cands:
@@ -161,3 +166,22 @@ def conflicts(answers: Any, *, country: Optional[str] = None) -> list[dict[str, 
             out.append({"topic": str(first.get("topic")), "question": str(first.get("question") or ""),
                         "values": values})
     return out
+
+
+def conflicting_topics(
+    answers: Any, *, country: Optional[str] = None, company_key: Optional[str] = None,
+) -> set[str]:
+    """The :func:`topic_key` of every :func:`conflicts` topic: a record on one of these topics, however it
+    was matched (item key, question wording or topic), is no answer for this job (fail closed)."""
+    return {topic_key(c["topic"]) for c in conflicts(answers, country=country, company_key=company_key)}
+
+
+def superseded(
+    rec: dict[str, Any], answers: Any, *, country: Optional[str] = None, company_key: Optional[str] = None,
+) -> bool:
+    """True when ``rec`` has a topic whose resolved answer (:func:`resolve_answer`: the narrower scope
+    wins) is a different answer, so ``rec`` is a broader answer overridden for this job."""
+    if not topic_key(rec.get("topic")):
+        return False
+    won = find_answer(answers, topic=str(rec.get("topic")), company_key=company_key, country=country)
+    return won is not None and normalize_question(won.get("answer")) != normalize_question(rec.get("answer"))

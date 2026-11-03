@@ -269,7 +269,10 @@ def _guest_read(body: BrowserActionRequest) -> bool:
 
 
 # Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).
-_BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check"}
+_BLOCKED_REASON = {
+    "captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check",
+    browser_agent.ALREADY_APPLIED: "already_applied_on_site",
+}
 
 
 def _open_outcome(result: dict[str, Any], stop_source: str) -> str:
@@ -321,6 +324,10 @@ HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."
 )
+# The site said the user already applied: no browser can help, only the user's answer (blocked.py).
+ALREADY_APPLIED_DETAIL = (
+    "The site says you already applied for this job. Job360's browser stopped and will not try again."
+)
 # A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
 CAPTCHA_DETAIL = (
     "The site asked for a human check. Your filled form is kept open for 30 minutes: press Finish it here, "
@@ -369,9 +376,12 @@ async def _hand_off(
         ):
             return False
         # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
-        payload: dict[str, Any] = {
-            "reason": reason, "step": "Job360 browser", "detail": CAPTCHA_DETAIL if held else HAND_OFF_DETAIL,
-        }
+        detail = HAND_OFF_DETAIL
+        if held:
+            detail = CAPTCHA_DETAIL
+        elif reason == "already_applied_on_site":
+            detail = ALREADY_APPLIED_DETAIL
+        payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": detail}
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
             payload["page_host"] = host

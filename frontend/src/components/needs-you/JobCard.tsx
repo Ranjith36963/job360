@@ -7,7 +7,7 @@ import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, recordApplicationReceipt, rememberAskAnswers, resolveSubmit, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
-import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
+import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, paceText } from "@/lib/browser-labels";
 import { BLOCKER_TITLE, hasFormHandoff, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -62,12 +62,15 @@ export function JobCard({
   showHeader = true,
   ready,
   bare = false,
+  linkedinPerDay,
 }: {
   card: JobCardData;
   onChanged: () => Promise<void>;
   showHeader?: boolean;
   ready?: ReactNode;
   bare?: boolean;
+  /** The user's own `linkedin_sends_per_day.effective`, for the pace line. */
+  linkedinPerDay?: number | null;
 }) {
   const appLink = useAppHref();
   const Root = bare ? "div" : "li";
@@ -406,7 +409,7 @@ export function JobCard({
       {(people.length > 0 || reminders.length > 0) && (
         <section className="flex flex-col gap-2" data-testid={`section-outreach-${card.applicationId}`}>
           <h2 className="font-heading text-base">Outreach</h2>
-          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{PACE_TEXT}</p>
+          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{paceText(linkedinPerDay)}</p>
           <div className="flex flex-col gap-2" data-testid="people-to-reach">
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy} onChanged={onChanged}

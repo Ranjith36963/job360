@@ -466,6 +466,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "process_log",
         # Autonomy slice 3 (2026-11-02) - watch-only shadow verdicts (server-written).
         "autonomy_shadow",
+        # Autonomy A8 (2026-11-02) - the single-use submit clearance (server-written).
+        "submit_cleared", "submit_cleared_used",
         # Owner decision 2026-11-02 - Verify approves one answer for one job (server-written).
         "answer_verified",
     }

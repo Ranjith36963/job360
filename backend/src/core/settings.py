@@ -406,6 +406,9 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # Autonomy slice 3 (2026-11-02, watch-only): what autonomy WOULD clear, one per check_submit. SERVER-WRITTEN
     # (record_event refuses it), verdict codes only, never answer text (services/applications/evidence.py).
     "autonomy_shadow",
+    # Autonomy A8 (2026-11-02): check_submit's `submit` = one single-use clearance an assistant's receipt
+    # needs; `submit_cleared_used` spends it. SERVER-WRITTEN (services/applications/submit_clearance.py).
+    "submit_cleared", "submit_cleared_used",
     # Owner decision 2026-11-02 "A": Verify / Edit of one answer on the Ready card approves it for THAT job
     # only. SERVER-WRITTEN (record_event refuses it): {question, answer, edited, form_filled_event_id, key?}.
     # Read by ready.job_approvals; never part of the profile, so no other job reuses it.
@@ -415,7 +418,9 @@ SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
 # Read-side only: every row stays, and the export keeps them. A `process_log` that corrects an
 # assistant's own note moves that note into the log the same way (process_log.py).
-APPLICATION_PROCESS_EVENT_TYPES = ("process_log", "kit_read", "ask_withdrawn", "autonomy_shadow")
+APPLICATION_PROCESS_EVENT_TYPES = (
+    "process_log", "kit_read", "ask_withdrawn", "autonomy_shadow", "submit_cleared", "submit_cleared_used",
+)
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
 APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())
@@ -723,6 +728,9 @@ OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 —
 OUTREACH_PER_COMPANY_DEFAULT = 5  # job-outreach sends per company within OUTREACH_COMPANY_WINDOW_DAYS
 NETWORK_PER_HOUR_DEFAULT = 5  # network sends per rolling hour
 LINKEDIN_SENDS_PER_DAY_DEFAULT = 20
+# Easy Apply submits a day through the own-browser queue. 0 = no Job360 cap (owner, 2026-11-03): LinkedIn's own
+# Easy Apply limit decides, and the user's browser stops when LinkedIn shows it.
+EASY_APPLY_DAILY_MAX = int(os.getenv("EASY_APPLY_DAILY_MAX", "0"))
 EMAIL_SENDS_PER_DAY_DEFAULT = 40
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "10"))
 OUTREACH_NETWORK_MAX_PER_HOUR = int(os.getenv("OUTREACH_NETWORK_MAX_PER_HOUR", "20"))
@@ -1045,6 +1053,12 @@ DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "30"))
 # (was 25), so the hourly hunt keeps filling the queue from every board instead of stopping at 25.
 HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "1000"))
 REACH_MAX_PER_RUN = 5
+# Owner 2026-11-03: "5 people for one job". An application stays on the people hunt until the assistant has
+# added REACH_TARGET_PEOPLE people to it; a run that worked it holds it back REACH_RETRY_HOURS, and after
+# REACH_MAX_ATTEMPTS runs it is left alone (no more people could be proven), so it cannot loop forever.
+REACH_TARGET_PEOPLE = 5
+REACH_RETRY_HOURS = 24
+REACH_MAX_ATTEMPTS = 3
 # Owner 2026-10-31 - the NETWORK hunt (duty `network`): while `people_hunt` is on, once every
 # NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
 # (not one job) and stores them as cold contacts. Job360 only says it is due and how many; the assistant

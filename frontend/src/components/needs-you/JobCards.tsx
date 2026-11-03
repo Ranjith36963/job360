@@ -142,6 +142,7 @@ export function JobCards({
   fold,
   jobIds,
   idsByKind,
+  linkedinPerDay,
   focusJob = null,
 }: {
   /** The job to unfold and scroll to when the page opens (from `?job=`, set by "Back to Needs you"). */
@@ -151,6 +152,8 @@ export function JobCards({
   jobIds?: number[];
   /** The same ids by first-blocker kind: a chip shows only its kind's jobs. */
   idsByKind?: Record<string, number[]>;
+  /** The user's `linkedin_sends_per_day.effective`, for the pace line on a person's section. */
+  linkedinPerDay?: number | null;
   /** The open asks; the job-tied ones are grouped here, one card per job. */
   open: Ask[];
   /** The order (Most urgent, Newest first, Oldest first). */
@@ -367,7 +370,7 @@ export function JobCards({
               open={open} onToggle={() => toggle(h.id)} actionClass="lg:w-40"
               action={<JobRowAction card={card} onOpen={() => !open && toggle(h.id)} />}
               summary={<JobRowSummary h={h} card={card} facts={facts} nextText={slot?.status === "ready" ? slot.line : ""} linkTestid={header ? `title-link-${h.id}` : `row-title-${h.id}`} />}>
-              {card ? <JobCard card={card} onChanged={onChanged} ready={readyPart(h, true)} showHeader={false} bare />
+              {card ? <JobCard card={card} onChanged={onChanged} ready={readyPart(h, true)} showHeader={false} bare linkedinPerDay={linkedinPerDay} />
                 : slot?.status === "failed" ? (
                   <div className="p-3">
                     {readyPart(h, false) ?? (
@@ -392,7 +395,7 @@ export function JobCards({
           Show {next} more · {pending} left
         </button>
       )}
-      {showPeople && <NewConnections people={connections} onChanged={onChanged}
+      {showPeople && <NewConnections people={connections} onChanged={onChanged} linkedinPerDay={linkedinPerDay}
         onDone={(id) => setDoneIds((s) => new Set(s).add(id))} />}
     </div>
   );

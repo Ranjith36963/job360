@@ -36,6 +36,7 @@ from src.services.applications import (
     spine,
     test_marker,
 )
+from src.services.browser_agent import learned
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -62,6 +63,7 @@ _SITE_WORDS = {
     "captcha": "solve the CAPTCHA", "bot_check": "solve the CAPTCHA", "login_needed": "sign in",
     "login": "sign in", "otp_needed": "enter the code", "account_creation": "create an account",
     "upload_failed": "attach your CV", "upload": "attach your CV",
+    blocked.ALREADY_APPLIED: "mark it applied",
 }
 _FILL_TYPES = ("blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen")
 
@@ -220,6 +222,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         d["questions"] = asks._json_or(d.get("questions"), [])
         open_asks.setdefault(int(d["application_id"]), []).append(d)
     queued_at = await spine.queued_at_by_app(db, user_id, None)
+    hosts = await learned.blocked_hosts(db, user_id) if queued_at else frozenset()
     position = {a: n for n, (a, _t) in enumerate(sorted(queued_at.items(), key=lambda kv: (_when(kv[1]), kv[0])), 1)}
     line = await spine.user_score_line(user_id)
     today_iso = (await spine.user_today(db, user_id)).isoformat()
@@ -275,7 +278,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         elif considering and (site_asks or (s["block"] is not None and reason != "unknown_question")):
             ask_kind = site_asks[0]["kind"] if site_asks else ""
             word = _SITE_WORDS.get(reason) or _SITE_WORDS.get(ask_kind) or "finish on the site"
-            ref = {k: v for k, v in (("ask_id", site_asks[0]["id"] if site_asks else None),
+            ask_id = site_asks[0]["id"] if site_asks else None
+            if reason == blocked.ALREADY_APPLIED:  # its ask is a plain question, linked by the block itself
+                ask_id = (s["block"] or {}).get("ask_id")
+            ref = {k: v for k, v in (("ask_id", ask_id),
                                      ("event_id", block_ev["id"] if block_ev else None)) if v is not None}
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
@@ -297,7 +303,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 step = "submit" if s["swept"] else "check form"
                 out.append(_b("assistant_step", "assistant", step, yes["recorded_at"], {"event_id": yes["id"]}))
         if considering and app_id in queued_at:
-            browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {})
+            browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {}, hosts)
             if browser["kind"] == "own_browser":
                 out.append(_b("queued", "your_pc", "apply on the site", queued_at[app_id]))
             else:
@@ -318,6 +324,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if spine._follow_up_due(a.get("follow_up_on"), a["status"], today_iso):
             out.append(_b("follow_up", "assistant", "follow up", a["follow_up_on"]))
         out += notes.get(app_id, [])
+        if considering and reason == blocked.ALREADY_APPLIED:
+            # The site says the user already applied: only their answer waits ("mark it applied"), nothing else.
+            out[:] = [b for b in out if b["kind"] in ("confirm_sent", "site_step")]
 
 
 def settings_line_side(score: Optional[int], line: Optional[int]) -> str:

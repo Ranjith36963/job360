@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
+from tests._clearance import clear
+
 _AD = {
     "title": "Data Engineer",
     "company": "Northwind",
@@ -83,7 +85,7 @@ async def _user_approves_cv(client, app_id: int, text: str = "Ada Lovelace. Pyth
 
 
 @pytest.mark.asyncio
-async def test_record_application_by_application_id_and_absolute_url(authenticated_async_context):
+async def test_record_application_by_application_id_and_absolute_url(authenticated_async_context, fixture_user_id):
     pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
     from src.core.settings import SITE_BASE_URL
@@ -91,6 +93,7 @@ async def test_record_application_by_application_id_and_absolute_url(authenticat
     async with authenticated_async_context() as client:
         a, _b, token = await _setup(client)
         await _user_approves_cv(client, a["application_id"])
+    await clear(fixture_user_id, a["application_id"])
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             body = _ok(await mcp.call_tool("record_application", {"application_id": a["application_id"]}))
@@ -99,13 +102,14 @@ async def test_record_application_by_application_id_and_absolute_url(authenticat
 
 
 @pytest.mark.asyncio
-async def test_record_application_job_id_back_compat(authenticated_async_context):
+async def test_record_application_job_id_back_compat(authenticated_async_context, fixture_user_id):
     pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:
         a, _b, token = await _setup(client)
         await _user_approves_cv(client, a["application_id"])
+    await clear(fixture_user_id, a["application_id"])
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             body = _ok(await mcp.call_tool("record_application", {"job_id": a["job_id"]}))

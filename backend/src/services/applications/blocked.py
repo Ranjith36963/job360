@@ -34,6 +34,10 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
 
 BLOCKED_EVENT_TYPES = frozenset({"blocked", "unblocked"})
+ALREADY_APPLIED = "already_applied_on_site"
+# The one plain question Needs you shows for it; the web's "I applied" (the job leaves `considering`) closes it
+# (asks.tidy_open_asks).
+ALREADY_APPLIED_QUESTION = asks_service.ALREADY_APPLIED_QUESTION
 # Closed set, with the plain words the user reads.
 BLOCKED_REASONS: dict[str, str] = {
     "captcha": "a CAPTCHA",
@@ -52,10 +56,13 @@ BLOCKED_REASONS: dict[str, str] = {
     "assessment_required": "a timed test or video step",
     "manual_only": "a form that cannot be filled for you",
     "site_limit_reached": "the site's own daily application limit",
+    # 2026-11-02 (Axmed, app 336, tried six more times): the site says the user already applied. The job leaves
+    # the queue, is never retried, and Needs you asks the user one question (ALREADY_APPLIED_QUESTION).
+    ALREADY_APPLIED: "the site saying you already applied",
     "other": "a problem",
 }
 UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped"})
-NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked"})
+NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked", ALREADY_APPLIED})
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
 # Written only by Job360's own browser (``record_browser_block``), never accepted from a caller: the
 # CAPTCHA hold and "Finish it here" trust a block only when it carries this (review of #1176).
@@ -165,6 +172,8 @@ def ask_question(stored: dict[str, Any]) -> str:
     # Owner 2026-10-29: no step name in the words the user reads ("at open_form"); it stays in the payload.
     host = stored.get("page_host") or "the job site"
     reason = stored["reason"]
+    if reason == ALREADY_APPLIED:
+        return ALREADY_APPLIED_QUESTION
     return f"Your assistant got stuck: {BLOCKED_REASONS[reason]} on {host}. " + _USER_TODO.get(
         reason, "Check the form on {host} and finish it or tell your assistant what to do."
     ).format(host=host)
@@ -437,8 +446,8 @@ async def before_append(
         if stored["resolution"] == "retried" and events[0]["payload"].get("reason") in NEVER_RETRIED:
             _log(user, application_id, event_type, stored, "refused")
             raise SpineError(
-                422, "a CAPTCHA, bot check, safety block or ID/payment request is never retried by the assistant; "
-                "the user resolves it (user_did_it) or it is skipped"
+                422, "a CAPTCHA, bot check, safety block, ID/payment request or a site saying you already applied is "
+                "never retried by the assistant; the user resolves it (user_did_it) or it is skipped"
             )
         return stored
     open_ids = await _open_ask_ids(db, user.id, _ask_ids(events, stored["reason"]))
@@ -501,7 +510,20 @@ async def record(
             payload=stored, occurred_at=occurred_at, recorded_by=actor_for(user), follow_up_on=follow_up_on,
         )
         await after_append(db, user, application_id, event_type, stored)
+        if event_type == "blocked" and stored["reason"] == ALREADY_APPLIED:
+            await _leave_queue(db, user, application_id)
     return result
+
+
+async def _leave_queue(db: JobDatabase, user: CurrentUser, application_id: int) -> None:
+    """The site says the user already applied: the job leaves the batch queue (``unqueued`` {reason: blocked}).
+    ``queue_preflight.back_to_queue`` never puts it back (not in ``RETRY_AFTER_CLEARED``). Not queued: nothing."""
+    if application_id not in await spine.queued_at_by_app(db, user.id, [application_id]):
+        return
+    await spine.append_event(
+        db, user_id=user.id, application_id=application_id, event_type="unqueued", payload={"reason": "blocked"},
+        occurred_at=spine.parse_occurred_at(None), recorded_by=actor_for(user),
+    )
 
 
 def _site(value: Any) -> str:
