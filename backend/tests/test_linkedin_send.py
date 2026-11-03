@@ -58,7 +58,10 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "message_not_found", {"message_found": False}),
     ("stop", "not_latest_draft", {"latest_draft": False}),
     ("stop", "no_linkedin_url", {"has_linkedin_url": False}),
-    ("stop", "already_sent", {"already_sent": True}),
+    ("stop", "already_sent", {"already_sent": True, "follow_up": False}),
+    # Owner 2026-11-03: one LinkedIn follow-up, once due.
+    ("stop", "follow_up_used", {"already_sent": True, "follow_up": True, "linkedin_sent_to_person": 2}),
+    ("stop", "follow_up_not_due", {"already_sent": True, "follow_up": True, "linkedin_sent_to_person": 1}),
     ("stop", "replied", {"replied": True}),
     ("stop", "application_closed", {"application_closed": True}),
     ("stop", "note_too_long", {"linkedin_state": "not_connected", "text_chars": 201}),

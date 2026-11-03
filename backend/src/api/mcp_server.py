@@ -2593,19 +2593,21 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         contact_id + channel; email: Gmail message id as `source`). LinkedIn is send only when the user pressed
         Send on that person's card for this draft (owner_clicked; connect_no_note = Connect, Send without a note,
         then own_browser_queue release reason invited), or, with no click: auto_connect (an after_connect draft,
-        outreach_send auto) and auto_after_accept (they accepted a request the user or auto approved); AND you hold
+        outreach_send auto), auto_after_accept (they accepted a request the user or auto approved) and
+        auto_follow_up (one, LINKEDIN_FOLLOW_UP_DAYS after it with no reply); AND you hold
         a live claim: own_browser_queue take (contact_id) first, then pass the same `session`
         (get_recipe("own_browser")). Stop: paused, message_not_found, not_latest_draft,
-        not_email_channel, no_email, email_bounced, no_linkedin_url, already_sent, replied, application_closed,
+        not_email_channel, no_email, email_bounced, no_linkedin_url, already_sent, follow_up_used,
+        follow_up_not_due, replied, application_closed,
         linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long, already_invited,
         invite_limit_reached, weekly_invite_cap_reached, linkedin_daily_cap_reached, too_soon,
         claimed_by_other_session, needs_claim, daily_outreach_cap_reached, company_cap_reached,
         network_hourly_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via, unlinked_contact,
         unsupported_numbers (a number or years claim the profile lacks: fix or ask), unsupported_claims,
         sensitive_topic (visa, salary, age, health), needs_owner_click.
-        Send: auto_mode, owner_clicked, connect_no_note, auto_connect, auto_after_accept. `sent_today` (all sends
-        today) splits into `job_sent_today` (a contact
-        with an application) and `network_sent_today`; the user's limits are get_profile `settings`."""
+        Send: auto_mode, owner_clicked, connect_no_note, auto_connect, auto_after_accept, auto_follow_up. `sent_today`
+        (all sends today) splits into `job_sent_today` (a contact with an application) and `network_sent_today`;
+        the user's limits are get_profile `settings`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.outreach_check(contact_id, message_id, session, db, _user())

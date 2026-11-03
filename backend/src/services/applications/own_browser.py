@@ -124,6 +124,26 @@ def invite_facts(rows: list[dict[str, Any]]) -> Optional[bool]:
     return bool(before) and before[-1]["entry"] == APPROVED
 
 
+def follow_up_facts(rows: list[dict[str, Any]], mid: int, now: datetime) -> dict[str, Any]:
+    """``{follow_up, linkedin_sent_to_person, days_since_sent}`` for draft ``mid`` (the gate's facts): a follow-up is
+    a draft saved after the newest LinkedIn message went."""
+    sent = [r for r in rows if r["entry"] == "sent" and r["channel"] == "linkedin"]
+    last = _when(sent[-1]["recorded_at"]) if sent else None
+    return {
+        "follow_up": bool(sent) and mid > int(sent[-1]["id"]), "linkedin_sent_to_person": len(sent),
+        "days_since_sent": (now - last).days if last is not None else 0,
+    }
+
+
+def follow_up_held(rows: list[dict[str, Any]], mid: int, now: datetime) -> bool:
+    """A follow-up draft the queue must not hand out: a second one, one not yet due, or one after a reply."""
+    got = follow_up_facts(rows, mid, now)
+    if not got["linkedin_sent_to_person"]:
+        return False
+    return (got["linkedin_sent_to_person"] >= 2 or got["days_since_sent"] < settings.LINKEDIN_FOLLOW_UP_DAYS
+            or any(r["entry"] == "reply" for r in rows))
+
+
 def _carried(rows: list[dict[str, Any]], mid: int, auto: bool) -> bool:
     """A yes without a click on this draft: the request they accepted was approved (the user's Send, or auto
     now), or, before any request, an ``after_connect`` draft with ``outreach_send`` auto."""
@@ -356,6 +376,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         task = derive(rows, now, auto)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if follow_up_held(rows, task["message_id"], now):
+            continue  # one follow-up, only once due, never after a reply
         if await contacts.over_limit_notes(db, user_id, [contact_id]):
             continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)

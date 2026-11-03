@@ -2116,6 +2116,7 @@ async def _linkedin_gate_facts(
         "invites_this_week": await own_browser.invites_since(db, user_id, now - timedelta(days=7)),
         "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile),
         "sensitive": bool(cv_checks.sensitive_words(text)),
+        **own_browser.follow_up_facts(rows, int(target["id"]), now),
         "has_linkedin_url": bool((current.get("linkedin_url") or "").strip()),
         "linkedin_state": current.get("linkedin_state") or None,
         "text_chars": len(str(target.get("text") or "")),

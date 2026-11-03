@@ -744,6 +744,8 @@ OUTREACH_SENSITIVE_WORDS = (
     "visa", "visas", "sponsor", "sponsorship", "sponsored", "salary", "salaries", "compensation", "pay", "age",
     "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness",
 )
+# One LinkedIn follow-up per person, this many days after the message with no reply (owner 2026-11-03).
+LINKEDIN_FOLLOW_UP_DAYS = int(os.getenv("LINKEDIN_FOLLOW_UP_DAYS", "6"))
 # How often the user's own browser checks My Network for accepted invites while anyone is pending.
 LINKEDIN_PENDING_CHECK_HOURS = int(os.getenv("LINKEDIN_PENDING_CHECK_HOURS", "4"))
 OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))

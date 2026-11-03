@@ -259,6 +259,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
     notes = await _outreach(db, user_id, sent_ids, now)
+    for app_id, due in (await _linkedin_follow_ups(db, user_id, sent_ids, now)).items():
+        notes.setdefault(app_id, []).extend(due)
 
     confirmed = await kit.pending_confirmations(db, user_id, ids)
     for app_id in ids:
@@ -333,6 +335,40 @@ def settings_line_side(score: Optional[int], line: Optional[int]) -> str:
     from src.services.profile.assistant_settings import line_side  # noqa: PLC0415 - profile imports spine
 
     return line_side(score, line)
+
+
+async def _linkedin_follow_ups(
+    db: JobDatabase, user_id: str, app_ids: list[int], now: datetime
+) -> dict[int, list[Blocker]]:
+    """The people of these applications who got ONE LinkedIn message ``LINKEDIN_FOLLOW_UP_DAYS`` or more ago, never
+    replied and have no newer draft: the assistant drafts their one follow-up (owner 2026-11-03). ``follow_up``,
+    actor ``assistant``, ``ref.reason`` linkedin_follow_up. One query; scoped by ``user_id``."""
+    if not app_ids:
+        return {}
+    cur = await db._db.execute(
+        "SELECT c.id, c.application_id, o.entry, o.channel, o.recorded_at, o.id AS row_id "  # noqa: S608
+        "FROM application_contacts c JOIN contact_outreach o ON o.contact_id = c.id "  # placeholders only
+        f"WHERE c.user_id = ? AND o.user_id = ? AND c.application_id IN ({_marks(app_ids)}) "
+        "AND o.entry IN ('message', 'sent', 'reply') ORDER BY o.id ASC",
+        (user_id, user_id, *app_ids),
+    )
+    rows: dict[int, list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        rows.setdefault(int(r["id"]), []).append(dict(r))
+    grouped: dict[int, list[tuple[int, str]]] = {}
+    for cid, mine in rows.items():
+        sent = [r for r in mine if r["entry"] == "sent" and r["channel"] == "linkedin"]
+        newest = max(int(r["row_id"]) for r in mine)
+        if (len(sent) != 1 or any(r["entry"] == "reply" for r in mine) or newest != int(sent[0]["row_id"])
+                or (now - _when(sent[0]["recorded_at"])).days < settings.LINKEDIN_FOLLOW_UP_DAYS):
+            continue
+        grouped.setdefault(int(mine[0]["application_id"]), []).append((cid, sent[0]["recorded_at"]))
+    out: dict[int, list[Blocker]] = {}
+    for app_id, people in grouped.items():
+        label = f"draft {_plural(len(people), 'LinkedIn follow-up', 'LinkedIn follow-ups')}"
+        ref = {"contact_ids": [c for c, _ in people], "reason": "linkedin_follow_up"}
+        out[app_id] = [_b("follow_up", "assistant", label, min((s for _, s in people), key=_when), ref)]
+    return out
 
 
 async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> dict[int, list[Blocker]]:
