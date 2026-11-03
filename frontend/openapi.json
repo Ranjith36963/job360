@@ -4228,6 +4228,13 @@
             ],
             "title": "Answer"
           },
+          "conflict": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflict",
+            "type": "array"
+          },
           "country": {
             "anyOf": [
               {
@@ -22788,7 +22795,7 @@
     },
     "/api/applications/{application_id}/send/approve": {
       "post": {
-        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\nor a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the\nevent; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES (7 days by\ndefault) passing or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the\nevent; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw). Owner 2026-11-02: Send also puts the job on the\nbatch queue; this route starts no run itself (the web page fires the Apply routine right after Send).",
         "operationId": "approve_send_api_applications__application_id__send_approve_post",
         "parameters": [
           {

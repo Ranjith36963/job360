@@ -857,9 +857,7 @@ def _apply_op(path: str, op: str, value: Any, index: Any, items: list[Any]) -> l
             raise ProfileEditError(
                 422, f"{path}: upsert works only on {user_info.USER_INFO_ANSWERS_PATH}", "bad_value"
             )
-        at = user_info.answer_upsert_index(items, value)
-        if at is not None:
-            return items[:at] + [value] + items[at + 1:]
+        return user_info.upsert_answer(items, value)
     return items + [value]
 
 

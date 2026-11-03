@@ -45,7 +45,13 @@ from src.services.applications.job_checks import checks_for_application, classif
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import country_pages
-from src.services.profile.answer_match import fits_country
+from src.services.profile.answer_match import (
+    AMBIGUOUS,
+    conflicting_topics,
+    fits_country,
+    superseded,
+    topic_key,
+)
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -479,28 +485,34 @@ async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: in
     }
 
 
-def _approval_age_over(recorded_at: Any, now: datetime) -> bool:
+def _approval_age_over(recorded_at: Any, now: datetime, payload: Any = None) -> bool:
+    """True once the yes is older than its clock: ``SUBMIT_APPROVAL_TTL_MINUTES`` for a yes with a
+    ``fingerprint`` (or when ``payload`` is not given), ``SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES`` for one without."""
     at = recorded_at if isinstance(recorded_at, datetime) else datetime.fromisoformat(str(recorded_at))
     at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-    return now - at > timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES)
+    unbound = isinstance(payload, dict) and not isinstance(payload.get("fingerprint"), dict)
+    minutes = settings.SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES if unbound else settings.SUBMIT_APPROVAL_TTL_MINUTES
+    return now - at > timedelta(minutes=minutes)
 
 
 async def approval_stale(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
 ) -> Optional[str]:
     """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
-    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    part that no longer does: ``expired`` (a yes with a fingerprint older than ``SUBMIT_APPROVAL_TTL_MINUTES``,
+    7 days by default), ``expired_chat`` (a yes without one, older than
+    ``SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES``, 2 hours),
     ``cover_letter``, ``form_fill``, ``form_page``, ``profile`` or (slice 31) ``email``: the newest
     ``email_drafted`` has another recipient or
     attachment than the draft the yes was given on. A yes without a ``fingerprint``
-    (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
+    (a chat yes, or one from before slice 8) is bound to the CV and the time only, so it lapses sooner. A part that was
     unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
     only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
-    if _approval_age_over(event["recorded_at"], now):
-        return "expired"
     stamp = event["payload"].get("fingerprint")
     if not isinstance(stamp, dict):
-        return None
+        return "expired_chat" if _approval_age_over(event["recorded_at"], now, event["payload"]) else None
+    if _approval_age_over(event["recorded_at"], now, event["payload"]):
+        return "expired"
     application_id = int(app_row["id"])
     now_fp = await approval_fingerprint(db, user_id, application_id)
     for key in ("cover_letter_id", "cover_letter_sha256"):
@@ -2269,6 +2281,11 @@ def compute_answers(
         if _present(v):
             out["equality"].append(_mk(f"equality.{k}", v, "memory", at, label=EQUALITY_LABEL))
 
+    # Two saved answers to one topic that disagree at one scope (the GB twins "Yes" and "No", 2026-11-03):
+    # neither rides in the kit, however each is worded; the topic is listed in `missing` as ambiguous. A
+    # broader answer a narrower one overrides (bound to this country, or this company's own) is left out.
+    bad = conflicting_topics(info.answers, country=country, company_key=company_key)
+    ambiguous: dict[str, str] = {}
     for rec in _records(info.answers):
         if rec.get("approved") is True and _present(rec.get("answer")) and _present(rec.get("question")):
             scoped = str(rec.get("company") or "").strip()
@@ -2276,6 +2293,11 @@ def compute_answers(
                 continue  # given for ONE employer; this kit is for another (or an unknown) one
             if not fits_country(rec, country):
                 continue  # a sponsorship / right-to-work answer for another country (owner, 2026-10-26)
+            if topic_key(rec.get("topic")) in bad:
+                ambiguous.setdefault(topic_key(rec.get("topic")), str(rec["topic"]))
+                continue
+            if superseded(rec, info.answers, country=country, company_key=company_key):
+                continue
             out["approved_text"].append(
                 _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),
                     by_user=answers_by_user,
@@ -2331,7 +2353,7 @@ def compute_answers(
         for item in items:
             if _is_sensitive(block, str(item["key"])) and consented.get(_SENSITIVE_PATH.get(block, "")):
                 item["remembered_at"] = consented[_SENSITIVE_PATH[block]]  # the user's OK to remember
-    missing: list[dict[str, str]] = []
+    missing: list[dict[str, str]] = [{"key": topic, "why": AMBIGUOUS} for topic in ambiguous.values()]
     for path in dropped:
         missing.append({
             "key": path,
@@ -2952,6 +2974,13 @@ def form_check(
     Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
+    # A topic whose saved answers disagree (conflicting_topics) is never answered, however the question
+    # matched it: by the item key, the question wording or the topic (fail closed, 2026-11-03).
+    bad = conflicting_topics(records, country=country, company_key=company_key)
+
+    def _contradicted(found: Optional[dict[str, Any]]) -> bool:
+        return found is not None and topic_key(found.get("topic")) in bad
+
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
     answers_by_user = any(i.get("by_user") for i in answers.get("approved_text", []))
@@ -2978,24 +3007,28 @@ def form_check(
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
             if item is None:
                 rec, note = resolve_answer(records, topic=key, company_key=company_key, country=country)
-                if note:
-                    why = note
+                if note or _contradicted(rec):
+                    why = note or AMBIGUOUS
                 elif rec is not None:
                     item = _record_item(rec, answers_by_user)
                     matched_by = "topic"
             if item is None and not why:
-                why = f"key '{key}' is not in this application's kit"
+                # A key that is a contradicted question's wording: the kit left it out as ambiguous.
+                rec, note = resolve_answer(records, question=key, company_key=company_key, country=country)
+                why = AMBIGUOUS if note or _contradicted(rec) else f"key '{key}' is not in this application's kit"
         else:
             rec, note = resolve_answer(records, question=text, company_key=company_key, country=country)
             matched_by = "wording"
-            if note:
-                why = note
+            if note or _contradicted(rec):
+                why = note or AMBIGUOUS
             elif rec is not None:
                 item = _record_item(rec, answers_by_user)
             else:
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
                 why = "no saved answer for this question"
+        if _contradicted(item):
+            item, why = None, AMBIGUOUS
         # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
         # answer (production 2026-10-30: a stale "CV v1, artifact 128" label won every form's "Resume");
         # with none saved yet, the saved answer stands. A text question about the CV never gets here.
