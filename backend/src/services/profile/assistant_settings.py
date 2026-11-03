@@ -1861,6 +1861,12 @@ class OutreachFacts:
     ``claimed_by_caller`` - the caller holds a live claim on this person (``own_browser_queue`` take, in
     either browser); ``last_linkedin_sent_at`` / ``linkedin_sent_today`` - the pace ``own_browser.take`` enforces (other
     people's sends and unreleased claims).
+
+    Connect, then message (owner 2026-11-03): ``after_connect`` - this draft is the message for after they
+    accept, so the request goes WITHOUT a note; ``invited`` - a no-note request already went to this person;
+    ``invite_owner_approved`` - the user pressed Send for that request; ``invites_this_week`` - the user's requests
+    in the last 7 days; ``unsupported_claims`` - the text names a number, years or a name the profile lacks;
+    ``sensitive`` - the text names visa, salary, age, health and the like.
     """
 
     message_found: bool
@@ -1885,6 +1891,12 @@ class OutreachFacts:
     invite_limit_until: Optional[datetime] = None
     last_linkedin_sent_at: Optional[datetime] = None
     linkedin_sent_today: int = 0
+    after_connect: bool = False
+    invited: bool = False
+    invite_owner_approved: bool = False
+    invites_this_week: int = 0
+    unsupported_claims: bool = False
+    sensitive: bool = False
 
 
 @dataclass(frozen=True)
@@ -1911,10 +1923,14 @@ OUTREACH_REASONS: tuple[str, ...] = (
 LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
     "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "replied",
     "application_closed", "note_too_long", "linkedin_state_unknown", "linkedin_pending", "message_too_long",
-    "invite_limit_reached", "company_cap_reached", "network_hourly_cap_reached", "linkedin_daily_cap_reached",
-    "too_soon", "claimed_by_other_session",
-    "needs_owner_click", "needs_claim", "owner_clicked",
+    "invite_limit_reached", "weekly_invite_cap_reached", "already_invited", "company_cap_reached",
+    "network_hourly_cap_reached", "linkedin_daily_cap_reached", "too_soon", "claimed_by_other_session",
+    "unsupported_claims", "sensitive_topic", "needs_owner_click", "needs_claim", "owner_clicked",
 )
+# The other LinkedIn yes (owner 2026-11-03), in place of owner_clicked: connect_no_note (the user's Send on an
+# after_connect draft: the request goes without a note), auto_connect (the same request with outreach_send auto),
+# auto_after_accept (they accepted a request the user, or outreach_send auto, approved: the message goes).
+LINKEDIN_AUTO_SEND_REASONS: tuple[str, ...] = ("connect_no_note", "auto_connect", "auto_after_accept")
 # Said on every LinkedIn answer: its counts are every channel's, not LinkedIn's own day limit.
 _LINKEDIN_COUNTS_NOTE = " (sent_today and daily_max count every channel; LinkedIn's is linkedin_sends_per_day.)"
 
@@ -1944,9 +1960,10 @@ def _kind_cap(cfg: EffectiveSettings, facts: OutreachFacts, counts: OutreachCoun
 def _may_send_linkedin(
     cfg: EffectiveSettings, facts: OutreachFacts, counts: OutreachCounts, now: datetime
 ) -> OutreachDecision:
-    """The LinkedIn half of :func:`may_send_outreach`. ``outreach_send`` never applies here: the only yes is
-    the user's click on that person's card for this exact version (``facts.owner_approved``) AND a live claim
-    the caller holds on that person (``facts.claimed_by_caller``), in either browser."""
+    """The LinkedIn half of :func:`may_send_outreach`. A yes is the user's click on that person's card for this
+    exact version (``facts.owner_approved``) or, owner 2026-11-03, a request they approved that was accepted
+    (``auto_after_accept``, fact- and topic-checked) or a no-note request under ``outreach_send`` auto
+    (``auto_connect``); always AND a live claim the caller holds on that person (``facts.claimed_by_caller``)."""
     got = _linkedin_verdict(cfg, facts, counts, now)
     return OutreachDecision(got.decision, got.reason, got.detail + _LINKEDIN_COUNTS_NOTE)
 
@@ -1973,7 +1990,7 @@ def _linkedin_verdict(
     note_max = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if facts.premium else settings.LINKEDIN_NOTE_MAX_CHARS
     # Fail closed (2026-11-02): a draft to anyone not known to be connected is a connection note, so an unsaved
     # state is judged by the note limit too, before it is asked for.
-    if state in ("not_connected", "unknown") and facts.text_chars > note_max:
+    if state in ("not_connected", "unknown") and facts.text_chars > note_max and not facts.after_connect:
         return stop(
             "note_too_long",
             f"A connection note is at most {note_max} characters; this draft is {facts.text_chars}. Shorten it "
@@ -1998,6 +2015,14 @@ def _linkedin_verdict(
             "invite_limit_reached",
             "LinkedIn's weekly invitation limit was reached. Send no connection note until it resets.",
         )
+    week_max = settings.LINKEDIN_INVITES_PER_WEEK_MAX
+    if state == "not_connected" and facts.invites_this_week >= week_max:
+        return stop(
+            "weekly_invite_cap_reached",
+            f"{week_max} connection requests went out in the last 7 days. Send no request until fewer have.",
+        )
+    if state == "not_connected" and facts.invited:
+        return stop("already_invited", "A connection request already went to this person. Never send a second.")
     capped = _kind_cap(cfg, facts, counts)
     if capped is not None:
         return capped
@@ -2020,7 +2045,24 @@ def _linkedin_verdict(
             "claimed_by_other_session",
             "Another session holds this person right now. Do not send; leave it to that session.",
         )
-    if not facts.owner_approved:
+    # Owner 2026-11-03: the message after an approved request, and a no-note request under outreach_send auto,
+    # go without a new Send; the first only when the text passes the fact and sensitive-topic checks.
+    auto = cfg.outreach_send == OUTREACH_SEND_AUTO
+    after_accept = state == "connected" and facts.invited and (facts.invite_owner_approved or auto)
+    auto_invite = state == "not_connected" and facts.after_connect and auto and not facts.owner_approved
+    if after_accept and facts.unsupported_claims:
+        return OutreachDecision(
+            "ask", "unsupported_claims",
+            "The draft names a number, years or a name the profile does not contain. It is not sent on its own: "
+            "fix it with true facts only, or it waits for the user's Send.",
+        )
+    if after_accept and facts.sensitive:
+        return OutreachDecision(
+            "ask", "sensitive_topic",
+            "The draft mentions visa, sponsorship, salary, age or health. It is not sent on its own: it waits "
+            "for the user's Send.",
+        )
+    if not (facts.owner_approved or after_accept or auto_invite):
         return OutreachDecision(
             "ask", "needs_owner_click",
             "The user has not pressed Send on this person's card for this draft. Do not send; it waits on Needs you.",
@@ -2030,6 +2072,17 @@ def _linkedin_verdict(
             "needs_claim",
             "Take this person first: own_browser_queue take, then check_outreach with your session.",
         )
+    no_note = ("Connect, then Send without a note (never paste the draft as a note); then own_browser_queue "
+               "release reason invited. The draft is sent once they accept.")
+    if after_accept:
+        return OutreachDecision(
+            "send", "auto_after_accept",
+            "They accepted the request: paste the draft on LinkedIn exactly, send, then record outreach_sent.",
+        )
+    if auto_invite:
+        return OutreachDecision("send", "auto_connect", "outreach_send is auto: " + no_note)
+    if state == "not_connected" and facts.after_connect:
+        return OutreachDecision("send", "connect_no_note", "The user pressed Send: " + no_note)
     return OutreachDecision(
         "send", "owner_clicked",
         "The user pressed Send for this draft: paste it on LinkedIn exactly, send, then record outreach_sent.",
@@ -2062,9 +2115,9 @@ def may_send_outreach(
     LinkedIn (:func:`_may_send_linkedin`, after not_latest_draft): stop no_linkedin_url, already_sent, replied,
     application_closed, linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long,
     invite_limit_reached, company_cap_reached, network_hourly_cap_reached, linkedin_daily_cap_reached,
-    too_soon, claimed_by_other_session, needs_claim (the click is there but the caller holds no live claim);
-    ask needs_owner_click; SEND owner_clicked.
-    ``outreach_send`` never reaches it.
+    too_soon, claimed_by_other_session, needs_claim (the click is there but the caller holds no live claim),
+    already_invited, weekly_invite_cap_reached; ask unsupported_claims, sensitive_topic, needs_owner_click; SEND
+    owner_clicked or one of ``LINKEDIN_AUTO_SEND_REASONS``.
     """
     if is_paused(cfg.paused_until, now):
         return OutreachDecision("stop", "paused", "Your assistant is paused. Do not send anything.")
@@ -2441,18 +2494,21 @@ async def load_outreach_counts(
     db: JobDatabase, user_id: str, now: datetime, company: Optional[str] = None
 ) -> OutreachCounts:
     """Count what :func:`may_send_outreach` needs: this user's recorded ``sent``
-    marks today (the user's own day, same boundary as :func:`load_submit_counts`), split into job outreach
+    marks today, and LinkedIn requests (a ``send_released`` ``invited`` row, 2026-11-03), on the user's own day
+    (same boundary as :func:`load_submit_counts`), split into job outreach
     (the contact has an application) and network (it has none), email sends today, network sends in the last
     hour and, when ``company`` is given, JOB-outreach ``sent`` marks to that company key (contacts.company_key,
     rule #1; network contacts never count) within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
     sent_today = await count_on_user_today(
         db, user_id, now,
-        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND recorded_at >= ?",
+        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND (entry = 'sent' "
+        "OR (entry = 'send_released' AND text = 'invited')) AND recorded_at >= ?",
         (user_id,),
     )
     sends = (
         "SELECT co.recorded_at FROM contact_outreach co JOIN application_contacts ac ON ac.id = co.contact_id "
-        "WHERE co.user_id = ? AND co.entry = 'sent' AND "
+        "WHERE co.user_id = ? AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited')) "
+        "AND "
     )
     job_today = await count_on_user_today(
         db, user_id, now, sends + "ac.application_id IS NOT NULL AND co.recorded_at >= ?", (user_id,)
@@ -2468,7 +2524,9 @@ async def load_outreach_counts(
     )
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM contact_outreach co JOIN application_contacts ac ON ac.id = co.contact_id "
-        "WHERE co.user_id = ? AND co.entry = 'sent' AND ac.application_id IS NULL AND co.recorded_at >= ?",
+        "WHERE co.user_id = ? AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited')) "
+        "AND ac.application_id IS NULL "
+        "AND co.recorded_at >= ?",
         (user_id, (now - timedelta(hours=1)).isoformat()),
     )
     got = await cur.fetchone()

@@ -26,7 +26,7 @@ router = APIRouter(tags=["own-browser"])
 Why = Literal["any_time", "pc_on_hours", "run_now", "closed", "paused"]
 Reason = Literal[
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
-    "done",
+    "done", "invited",
 ]
 
 
@@ -62,6 +62,8 @@ class OwnBrowserTaskItemOut(BaseModel):
     # many new people for the user's network.
     application_ids: Optional[list[int]] = None
     max_people: Optional[int] = None
+    # Owner 2026-11-03: a person whose request goes WITHOUT a note (Connect, Send without a note, release invited).
+    no_note: bool = False
 
 
 class QueueOut(BaseModel):

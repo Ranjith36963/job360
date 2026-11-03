@@ -199,10 +199,10 @@ class SentSource(BaseModel):
 
 class SentItem(BaseModel):
     id: int
-    application_id: int
+    application_id: Optional[int] = None  # None: a LinkedIn item for a person with no job
     job_company: str
     job_title: str
-    kind: str  # "answer" or "essay"
+    kind: str  # "answer" | "essay" | "linkedin_request" | "linkedin_message"
     question: str
     answer: str
     sources: list[SentSource] = []
@@ -220,7 +220,7 @@ async def sent_on_its_own_route(
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the Needs-you page's own read
 ) -> Any:
     """Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
-    sources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything."""
+    sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed."""
     return SentOnItsOwnOut(items=[SentItem(**i) for i in await sent_alone.list_items(db, user.id)])
 
 

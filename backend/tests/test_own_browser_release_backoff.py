@@ -97,7 +97,11 @@ def _always_open(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reason", [r for r in own_browser.RELEASE_REASONS if r not in ("done", "weekly_limit")])
+# `invited` is a request that went (only for an after_connect draft; the person is then pending), not a give-up:
+# tests/test_linkedin_connect_then_message.py covers it.
+@pytest.mark.parametrize(
+    "reason", [r for r in own_browser.RELEASE_REASONS if r not in ("done", "weekly_limit", "invited")]
+)
 async def test_release_then_take_never_returns_the_same_person(authenticated_async_context, reason):
     async with authenticated_async_context() as client:
         first, _ = await _person(client, 1)
