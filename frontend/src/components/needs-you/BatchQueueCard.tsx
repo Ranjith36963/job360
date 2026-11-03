@@ -20,6 +20,7 @@ import type { OwnTask, QueueBrowserFilter, QueueSummary } from "@/lib/batch-queu
 import { decideOwnBrowserSend, getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
 import { onChanges } from "@/lib/live-changes";
 import { QueueBrowserChip, QueueBrowserFilterRow } from "./QueueBrowser";
+import { useAppHref } from "@/lib/app-href";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const TAG = "mr-1.5 rounded-full border border-border px-2 py-0.5 font-mono text-[10.5px] text-muted-foreground";
@@ -51,9 +52,9 @@ type OutreachRow = {
 };
 
 /** Where a person's card lives: on their job's page when they have one, else the People page. */
-function personHref(o: OutreachRow): string {
+function personHref(o: OutreachRow, appLink: (id: number, hash?: string) => string): string {
   return typeof o.application_id === "number"
-    ? `/applications/${o.application_id}#person-${o.contact_id}`
+    ? appLink(o.application_id, `#person-${o.contact_id}`)
     : "/outreach/people";
 }
 
@@ -62,6 +63,7 @@ function personHref(o: OutreachRow): string {
  *  It also lists the own-browser queue (owner, 2026-10-27), merged in once each; its Run now button
  *  sits on Needs you (RunNowPanel): a trigger, not a permission. */
 export function BatchQueueCard() {
+  const appLink = useAppHref();
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [outreach, setOutreach] = useState<OutreachRow[]>([]);
   const [order, setOrder] = useState<string[] | null>(null);
@@ -180,7 +182,7 @@ export function BatchQueueCard() {
                   <li key={it.key} data-testid={`batch-outreach-${o.contact_id}`} className={li}>
                     <div className="min-w-0 flex-1">
                       <span data-testid={`batch-kind-${it.key}`} className={TAG}>{kindTag(o.outreach_kind)}</span>
-                      <Link href={personHref(o)} className="break-words font-medium underline-offset-2 hover:underline">
+                      <Link href={personHref(o, appLink)} className="break-words font-medium underline-offset-2 hover:underline">
                         {pos}
                         {o.title}
                       </Link>
@@ -210,7 +212,7 @@ export function BatchQueueCard() {
                 <li key={it.key} data-testid={`batch-row-${r.id}`} className={li}>
                   <div className="min-w-0 flex-1">
                     <span data-testid={`batch-kind-${it.key}`} className={TAG}>{kindTag("application")}</span>
-                    <Link href={`/applications/${r.id}`} className="break-words font-medium underline-offset-2 hover:underline">
+                    <Link href={appLink(r.id)} className="break-words font-medium underline-offset-2 hover:underline">
                       {pos}
                       {name}
                     </Link>

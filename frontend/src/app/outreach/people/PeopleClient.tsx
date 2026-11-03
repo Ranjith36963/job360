@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
 import { LinkedinCell, addedByLabel } from "@/components/applications/Contacts";
+import { appHref } from "@/lib/back-link";
 
 const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "" };
 
@@ -138,7 +139,7 @@ function PersonRow({ p, others, onChanged }: { p: Person; others: Person[]; onCh
         <ul data-testid="person-jobs" className="mt-1 flex flex-col text-xs">
           {p.jobs.map((j) => (
             <li key={j.application_id}>
-              <Link href={`/applications/${j.application_id}`} className="underline underline-offset-2">
+              <Link href={appHref(j.application_id, "outreach")} className="underline underline-offset-2">
                 {j.job_title} · {j.job_company}
               </Link>
             </li>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { formatFeedTime } from "@/lib/home";
 import type { FeedItem } from "@/lib/home";
+import { appHref } from "@/lib/back-link";
 
 // The Activity block. It hides itself when it has nothing to say (owner
 // rule #29: empty stays silent) and a block whose call failed is simply not
@@ -28,7 +29,7 @@ export function FeedBlock({ items }: { items: FeedItem[] }) {
                 {it.company && " · "}
                 {it.company && (
                   <Link
-                    href={`/applications/${it.applicationId}`}
+                    href={appHref(it.applicationId, "home")}
                     className="underline-offset-2 hover:underline"
                   >
                     {it.company}

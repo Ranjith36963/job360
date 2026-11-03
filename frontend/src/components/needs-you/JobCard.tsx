@@ -19,6 +19,7 @@ import { AskText } from "./AskText";
 import { BrowserReason } from "./BrowserReason";
 import { PersonRow } from "./PersonRow";
 import type { RowState } from "./AskQuestions";
+import { useAppHref } from "@/lib/app-href";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
 // assistant or a job site: untrusted, rendered only as React text, never as HTML.
@@ -68,6 +69,7 @@ export function JobCard({
   ready?: ReactNode;
   bare?: boolean;
 }) {
+  const appLink = useAppHref();
   const Root = bare ? "div" : "li";
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
@@ -242,7 +244,7 @@ export function JobCard({
         Open the form ↗
       </a>
     ) : (
-      <Link href={`/applications/${card.applicationId}`} className={btn} data-testid={`row-link-${id}`}>
+      <Link href={appLink(card.applicationId)} className={btn} data-testid={`row-link-${id}`}>
         Open the application
       </Link>
     );
@@ -282,11 +284,11 @@ export function JobCard({
       className={bare ? "flex flex-col gap-4 p-4 sm:p-5" : "flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card"}>
       {showHeader && (
       <div className="flex flex-col gap-0.5">
-        <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
+        <Link href={appLink(card.applicationId)} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
           {card.company || "Unknown company"}
         </Link>
         <p className="text-sm">
-          <Link href={`/applications/${card.applicationId}`} data-testid={`title-link-${card.applicationId}`}
+          <Link href={appLink(card.applicationId)} data-testid={`title-link-${card.applicationId}`}
             className="underline-offset-2 hover:underline">
             {card.role || "Untitled role"}
           </Link>
@@ -385,7 +387,7 @@ export function JobCard({
             <p className="text-sm">CV version {card.cv.version}, not approved yet</p>
           </div>
           <div className="flex gap-2">
-            <Link href={`/applications/${card.applicationId}`} className={btn}>
+            <Link href={appLink(card.applicationId)} className={btn}>
               View CV
             </Link>
             <button type="button" className={btn} onClick={() => void downloadCv(card, card.cv!)}>
