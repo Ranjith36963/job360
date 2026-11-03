@@ -984,9 +984,10 @@ class SubmitFacts:
     # draft). An email application (check_submit ``form_url`` = ``mailto:``) stops ``email_not_drafted``
     # without one, or when the mailto address is not this recipient; a yes never clears it.
     email_to: Optional[str] = None
-    # Owner 2026-11-03 (rule 7): the newest fill / sweep was in the user's own browser, or in Job360's browser
-    # with a saved sign-in for the form's site (``kit._signed_in_account``, from recorded events). It only ever
-    # ADDS the ask: a caller that leaves ``browser`` out falls back to the Indeed / LinkedIn host rule.
+    # Owner 2026-11-03 (rule 7): this submit goes through the user's own signed-in account
+    # (``kit._signed_in_account``). For an assistant the SERVER decides the browser: unless Job360's browser makes
+    # this click or holds this application's page, it is the user's own browser; Job360's browser counts only
+    # with a saved sign-in for the form's site. An own_browser / manual label since the last kit read only adds it.
     signed_in_account: bool = False
     # Autonomy slice 3 (watch-only): ``evidence.for_application`` when ``kit.gate_facts(shadow=True)``.
     # ``may_submit`` NEVER reads it; it is not compared or hashed, so it cannot change a verdict.
@@ -1333,15 +1334,16 @@ def may_submit(
         ``line_ask_below``. Checked inside ``_first_ask`` right after the
         duplicate ask, so a stored yes still clears it.
     6. site unknown -> ask ``unknown_site``
-    7. a submit through the user's own signed-in account while ``ask_before_signed_in_submit`` is on (the
-       default) -> ask ``ask_always_site``. Signed-in = the newest fill or sweep was in the user's own browser
-       (``own_browser`` / ``manual``), or in Job360's browser with a saved sign-in for the form's site
-       (``SubmitFacts.signed_in_account``), or the site is Indeed / LinkedIn style (``SUBMIT_ASK_ALWAYS_BRANDS``,
-       also the fallback when the route is unknown). Off (only the user's own web click): rules 8-11 decide
+    7. an Indeed / LinkedIn style site (``SUBMIT_ASK_ALWAYS_BRANDS``) while ``ask_before_signed_in_submit`` is on
+       (the default) -> ask ``ask_always_site``. Off (only the user's own web click): rules 8-11 decide
     8. the mode (the job's override, else ``submit_mode`` - or auto while a counted ``auto_grant`` is active:
        now before ``auto_grant_until`` and fewer than ``auto_grant_count`` applied since it began) is ``confirm`` -> ask
        (``grant_scope`` when a grant is active but does not cover this application: it was not in the user's
        queue when they confirmed the grant, or its form host is not the one snapshotted then - slice 30)
+    8b. auto, and the submit goes through the user's own signed-in account (``SubmitFacts.signed_in_account``: an
+       assistant's submit that Job360's browser neither clicks nor holds the page of, Job360's browser with a saved
+       sign-in for the form's site, or a fill / sweep labelled ``own_browser`` / ``manual``) while
+       ``ask_before_signed_in_submit`` is on -> ask ``ask_always_site`` (confirm mode already asks at rule 8)
     9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
     10. first application since auto-submit was turned on -> ask ``practice_run``
     10b. auto mode and the form host has no earlier applied application -> ask ``new_site_first_time``
@@ -1753,6 +1755,16 @@ def _pace_stop(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) -> O
     return None
 
 
+def _signed_in_ask() -> SubmitDecision:
+    """Rule 7 / 8b: a submit through the user's own signed-in account, while ``ask_before_signed_in_submit`` is on."""
+    return SubmitDecision(
+        "ask", "ask_always_site",
+        "This submit goes through your own signed-in account (your own browser, a sign-in saved in Job360's "
+        "browser, or Indeed / LinkedIn), and you asked to say yes to each one. Fill the form, stop before "
+        "submit and ask yes.",
+    )
+
+
 def _first_ask(
     cfg: EffectiveSettings,
     application: SubmitFacts,
@@ -1801,13 +1813,8 @@ def _first_ask(
         return SubmitDecision(
             "ask", "unknown_site", "The site could not be read. Fill the form, stop before submit and ask yes."
         )
-    if cfg.ask_before_signed_in_submit and not email and (kind == "brand" or application.signed_in_account):
-        return SubmitDecision(
-            "ask", "ask_always_site",
-            "This submit goes through your own signed-in account (your own browser, a sign-in saved in Job360's "
-            "browser, or Indeed / LinkedIn), and you asked to say yes to each one. Fill the form, stop before "
-            "submit and ask yes.",
-        )
+    if cfg.ask_before_signed_in_submit and not email and kind == "brand":
+        return _signed_in_ask()
     if not auto:
         if override is not None:
             return SubmitDecision(
@@ -1819,6 +1826,10 @@ def _first_ask(
         return SubmitDecision(
             "ask", "submit_mode_confirm", "Submit mode is confirm. Fill the form, stop before submit and ask yes."
         )
+    # 8b. In confirm mode every submit already asks (rule 8); in auto mode a submit through the user's own
+    # signed-in account asks while the user's switch is on (owner 2026-11-03).
+    if cfg.ask_before_signed_in_submit and not email and application.signed_in_account:
+        return _signed_in_ask()
     if not (application.cv_seen or application.approved):
         return SubmitDecision(
             "ask", "cv_not_seen",

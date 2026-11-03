@@ -780,22 +780,45 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
     return host if isinstance(host, str) and host else None
 
 
-async def _signed_in_account(db: JobDatabase, user_id: str, application_id: int, host: Optional[str]) -> bool:
+def job360_holds_page(user_id: str, application_id: int) -> bool:
+    """Job360's own browser holds THIS application's page right now (server memory, never a caller's word)."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return False
+    from src.services.applications import which_browser  # noqa: PLC0415 - which_browser imports spine
+
+    return which_browser._open(user_id, application_id)[0] or blocked_service.browser_hold_live(user_id, application_id)
+
+
+async def _signed_in_account(
+    db: JobDatabase, user_id: str, application_id: int, host: Optional[str], *, assistant: bool = False
+) -> bool:
     """Owner 2026-11-03 (``may_submit`` rule 7): does this submit go through the user's own signed-in account?
-    True when the newest ``form_filled`` or ``form_swept`` names the user's own browser (``own_browser`` /
-    ``manual``: the caller's word, which only ever adds an ask), or names ``job360`` (checked server-side,
-    ``which_browser.resolve``) while the user has a saved sign-in for the form's ``host``. Neither said: False,
-    and the Indeed / LinkedIn host rule is the fallback."""
+
+    * Any ``form_filled`` / ``form_swept`` since the newest ``kit_read`` / ``applied`` names the user's own
+      browser (``own_browser`` / ``manual``): True. A label only ever ADDS the ask.
+    * An assistant's check (``assistant``): the SERVER decides the browser. Job360's browser is the route only
+      on its own submit click (``which_browser.SERVER_SAYS`` = job360) or while it holds this application's page
+      (:func:`job360_holds_page`); then True only when a saved sign-in covers ``host``. Anything else can only be
+      the user's own browser: True. (``BROWSER_AGENT_ENABLED`` off: every assistant submit is the own browser.)
+    * The user's own web check: a ``job360`` label with a saved sign-in for ``host``.
+    The Indeed / LinkedIn host rule (``may_submit``) is the fallback on top."""
     from src.services.applications import which_browser  # noqa: PLC0415 - which_browser imports spine
     from src.services.browser_agent import sign_ins  # noqa: PLC0415 - lazy (cryptography)
 
-    newest: dict[str, str] = {}
-    for ev in await _events(db, user_id, application_id, ("form_filled", "form_swept")):
-        newest.setdefault(ev["event_type"], which_browser.read(ev["payload"]))
-    said = set(newest.values())
+    said: set[str] = set()
+    for ev in await _events(db, user_id, application_id, ("form_filled", "form_swept", "kit_read", "applied")):
+        if ev["event_type"] in ("kit_read", "applied"):
+            break
+        said.add(which_browser.read(ev["payload"]))
     if said & {which_browser.OWN, which_browser.MANUAL}:
         return True
-    return which_browser.JOB360 in said and bool(host) and await sign_ins.covers_host(db, user_id, str(host))
+    if assistant:
+        job360 = which_browser.SERVER_SAYS.get() == which_browser.JOB360 or job360_holds_page(user_id, application_id)
+        if not job360:
+            return True
+    elif which_browser.JOB360 not in said:
+        return False
+    return bool(host) and await sign_ins.covers_host(db, user_id, str(host))
 
 
 async def last_fill(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:
@@ -834,7 +857,7 @@ async def latest_form_url(db: JobDatabase, user_id: str, application_id: int) ->
 
 async def gate_facts(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool,
-    other_session_hold: Optional[tuple[str, str, str]] = None, shadow: bool = False,
+    other_session_hold: Optional[tuple[str, str, str]] = None, shadow: bool = False, assistant: bool = False,
 ) -> settings_rules.SubmitFacts:
     """The facts :func:`settings_rules.may_submit` reads for this application. ``shadow`` (check_submit
     only) also fills the watch-only ``autonomy_shadow`` (:func:`autonomy_shadow`); no verdict reads it.
@@ -868,7 +891,7 @@ async def gate_facts(
         company_avoided=company_avoided(user_id, app_row),
         submit_unconfirmed=await submit_unconfirmed(db, user_id, application_id),
         new_site=await _new_site(db, user_id, application_id, form_host),
-        signed_in_account=await _signed_in_account(db, user_id, application_id, form_host),
+        signed_in_account=await _signed_in_account(db, user_id, application_id, form_host, assistant=assistant),
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
         approval_stale=stale,
@@ -1291,7 +1314,7 @@ async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: in
 async def submit_verdict(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], form_url: str, now: datetime,
     *, email_verified: bool, assume_filled: bool = False,
-    other_session_hold: Optional[tuple[str, str, str]] = None,
+    other_session_hold: Optional[tuple[str, str, str]] = None, assistant: bool = False,
 ) -> settings_rules.SubmitDecision:
     """The ONE gate, evaluated for one application (the submit-check route and
     the kit's ``settings.submit_preview`` both call this). The kit is read BEFORE
@@ -1308,7 +1331,8 @@ async def submit_verdict(
         db, user_id, now, int(app_row["id"]), window_days=cfg.company_cap_days
     )
     facts = await gate_facts(
-        db, user_id, app_row, email_verified=email_verified, other_session_hold=other_session_hold
+        db, user_id, app_row, email_verified=email_verified, other_session_hold=other_session_hold,
+        assistant=assistant,
     )
     if assume_filled:
         # The preview imagines the form filled ON this address, so it never
@@ -2808,6 +2832,7 @@ async def build_kit(
     verdict = await submit_verdict(
         db, user.id, app_row, apply_url, now,
         email_verified=email_verification_satisfied(user), assume_filled=True, other_session_hold=hold_fact(hold),
+        assistant=actor_for(user) != WEB_ACTOR,
     )
     preview = {"decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail}
     settings_block = {**settings_block, "submit_preview": preview}

@@ -227,6 +227,9 @@ async def test_mcp_check_submit_and_get_profile_give_the_route_answer(authentica
         route = {app_id: await _check(client, app_id) for app_id in (inside, outside)}
         view = (await client.get("/api/assistant-settings")).json()["auto_grant_scope"]
         token = await _token(client)
+        # 2026-11-03, signed-in submit rule: callers differ, doors must agree - parity is the assistant on both doors.
+        async with _bearer_client(token) as agent:
+            agent_route = {app_id: await _check(agent, app_id) for app_id in (inside, outside)}
     assert _pair(route[inside]) == AUTO and _pair(route[outside]) == ("ask", "grant_scope")
     from src.api.mcp_server import mcp_runtime
 
@@ -236,7 +239,7 @@ async def test_mcp_check_submit_and_get_profile_give_the_route_answer(authentica
             assert not result.is_error, result.content[0].text
             tool = json.loads(result.content[0].text)
             keys = ("decision", "reason", "detail")
-            assert {k: tool[k] for k in keys} == {k: route[app_id][k] for k in keys}
+            assert {k: tool[k] for k in keys} == {k: agent_route[app_id][k] for k in keys}
         profile = await mcp.call_tool("get_profile", {})
         assert not profile.is_error, profile.content[0].text
     got = json.loads(profile.content[0].text)["settings"]["auto_grant_scope"]

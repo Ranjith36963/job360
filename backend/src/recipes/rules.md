@@ -115,7 +115,7 @@ mode but the user has not seen the latest CV), practice_run, user_approved
 what changed), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it), below_score_line (`stop`: below the
 line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them), sensitive_unconfirmed (a private or legal question's answer the user has not confirmed: `ask_user`, a yes does not clear it), blank_unasked (a field left blank that no ask on the job holds: put it in the ask, a yes does not clear it). A submit through the user's
-own signed-in account (a fill or sweep with `browser` own_browser or manual, Job360's browser with a saved sign-in for the site, or Indeed / LinkedIn) answers `ask` (ask_always_site) unless the user turned that off (`ask_before_signed_in_submit` false) or said yes to this CV. The first application after
+own signed-in account (any submit outside Job360's browser, Job360's browser with a saved sign-in for the site, or Indeed / LinkedIn) answers `ask` (ask_always_site) unless the user turned that off (`ask_before_signed_in_submit` false) or said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch, form_page_mismatch,
 email_not_verified, blocked, held_by_other_session, company_avoided, submit_unconfirmed, weekly_cap_reached, pace_wait,

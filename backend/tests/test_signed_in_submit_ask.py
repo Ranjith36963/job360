@@ -11,6 +11,7 @@ from another test module.
 """
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import pytest
@@ -25,6 +26,7 @@ SCORE = "assistant_settings.apply_min_score"
 ABOVE = "assistant_settings.above_line"
 BELOW = "assistant_settings.below_line"
 FORM = "https://careers.northwind.example/apply/7"
+WORKDAY = "https://acme.wd3.myworkdayjobs.com/en-US/careers/job/Data-Engineer_R1/apply"
 LINKEDIN = "https://www.linkedin.com/jobs/view/4100000001/apply"
 
 
@@ -136,19 +138,20 @@ class _Pool:
 
     def __init__(self, keys: list[str]) -> None:
         self.keys = keys
+        self._sessions: dict[str, Any] = {}  # no page under a hand-off hold
 
     def user_keys(self, user_id: str) -> list[str]:
         return [k for k in self.keys if k.split("#job:")[0] == user_id]
 
 
-async def _job360_fill(client: AsyncClient, user_id: str, app_id: int) -> None:
+async def _job360_fill(client: AsyncClient, user_id: str, app_id: int, url: str = FORM) -> None:
     """A fill on FORM in Job360's browser while it has this job's page open, then a sweep that names no browser."""
     from src.services.browser_agent import agent
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(settings, "BROWSER_AGENT_ENABLED", True)
         mp.setattr(agent, "get_pool", lambda: _Pool([agent.browser_key(user_id, app_id)]))
-        fill = {"form_url": FORM, "fields_count": 1, "browser": "job360"}
+        fill = {"form_url": url, "fields_count": 1, "browser": "job360"}
         resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_filled", "payload": fill})
         assert resp.status_code == 201, resp.text
     swept = {"event_type": "form_swept", "payload": {"fields_checked": 1, "fixed": 0}}
@@ -168,6 +171,11 @@ async def _save_sign_in(monkeypatch: pytest.MonkeyPatch, user_id: str, host: str
     monkeypatch.setenv("BROWSER_SIGN_IN_KEY", Fernet.generate_key().decode())
     state = {"cookies": [{"name": "sid", "value": "v", "domain": "." + host, "path": "/"}], "origins": []}
     assert await sign_ins.save(await api_deps.get_db(), user_id, host, state) == 1
+
+
+def _agent_again(agent: AsyncClient) -> AsyncClient:
+    """A fresh client with the same assistant token (an AsyncClient is closed after one ``async with``)."""
+    return _agent(str(agent.headers["Authorization"]).removeprefix("Bearer "))
 
 
 def _agent(token: str) -> AsyncClient:
@@ -326,3 +334,104 @@ async def test_job360s_browser_with_a_saved_sign_in_follows_the_switch(
         assert await _gate(client, app_id, FORM) == ("ask", "ask_always_site")
         await _patch(client, SIGNED_IN, False)
         assert await _gate(client, app_id, FORM) == ("submit", "auto_when_sure")
+
+
+# ── The assistant's route is the server's fact (independent check of #1497) ──────────────────────────
+
+
+async def _workday_ready(client: AsyncClient) -> tuple[int, AsyncClient]:
+    """A Workday job (not Indeed / LinkedIn) with everything else OK, and an assistant's own client."""
+    app_id = await _company_ready(client)
+    minted = await client.post("/api/tokens", json={"name": "claude-code"})
+    assert minted.status_code == 201, minted.text
+    return app_id, _agent(minted.json()["token"])
+
+
+async def _assistant_gate(agent: AsyncClient, app_id: int, url: str = WORKDAY) -> tuple[str, str]:
+    body = (await agent.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})).json()
+    return body["decision"], body["reason"]
+
+
+@contextlib.contextmanager
+def _job360_pages(user_id: str, *app_ids: int):
+    """Job360's browser has these applications' pages open (BROWSER_AGENT_ENABLED on)."""
+    from src.services.browser_agent import agent
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+        mp.setattr(agent, "get_pool", lambda: _Pool([agent.browser_key(user_id, a) for a in app_ids]))
+        yield
+
+
+@pytest.mark.asyncio
+async def test_a_an_assistant_that_names_no_browser_still_asks(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, agent = await _workday_ready(client)
+        await _record(client, app_id, WORKDAY)  # no browser label on the fill or the sweep
+        async with agent:
+            assert await _assistant_gate(agent, app_id) == ("ask", "ask_always_site")
+            await _patch(client, SIGNED_IN, False)
+            assert await _assistant_gate(agent, app_id) == ("submit", "auto_when_sure")
+
+
+@pytest.mark.asyncio
+async def test_b_a_job360_label_while_another_jobs_page_is_open_still_asks(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, agent = await _workday_ready(client)
+        other = await _bring(client, 9)
+        with _job360_pages(fixture_user_id, other):
+            await _record(client, app_id, WORKDAY, "job360")  # accepted: Job360's browser has SOME page open
+            async with agent:
+                assert await _assistant_gate(agent, app_id) == ("ask", "ask_always_site")
+                await _patch(client, SIGNED_IN, False)
+                assert await _assistant_gate(agent, app_id) == ("submit", "auto_when_sure")
+
+
+@pytest.mark.asyncio
+async def test_e_an_own_browser_fill_followed_by_an_unlabelled_fill_still_asks(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, agent = await _workday_ready(client)
+        fill = {"form_url": WORKDAY, "fields_count": 1, "browser": "own_browser"}
+        sweep = {"fields_checked": 1, "fixed": 0}
+        unlabelled = {"form_url": WORKDAY, "fields_count": 1}
+        for event, payload in (("form_filled", fill), ("form_swept", sweep), ("form_filled", unlabelled),
+                               ("form_swept", sweep)):
+            resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": event, "payload": payload})
+            assert resp.status_code == 201, resp.text
+        assert await _gate(client, app_id, WORKDAY) == ("ask", "ask_always_site"), "the web door reads every label"
+        async with agent:
+            assert await _assistant_gate(agent, app_id) == ("ask", "ask_always_site")
+            await _patch(client, SIGNED_IN, False)
+            assert await _assistant_gate(agent, app_id) == ("submit", "auto_when_sure")
+            assert await _gate(client, app_id, WORKDAY) == ("submit", "auto_when_sure")
+
+
+@pytest.mark.asyncio
+async def test_job360s_own_click_on_its_open_page_with_no_saved_sign_in_is_unaffected(
+    authenticated_async_context, fixture_user_id
+):
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_routes
+
+    user = CurrentUser(id=fixture_user_id, email="e2e@example.com", email_verified=True, auth_via="token",
+                       actor_name="claude-code")
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, agent = await _workday_ready(client)
+        await _job360_fill(client, fixture_user_id, app_id, WORKDAY)
+        gate = browser_routes._gate_and_files(user, app_id, "")[0]
+        for on in (True, False):
+            await _patch(client, SIGNED_IN, on)
+            click = await gate.check(WORKDAY)  # Job360's browser's own submit click (SERVER_SAYS job360)
+            assert (click["decision"], click["reason"]) == ("submit", "auto_when_sure")
+        # the same assistant check from outside Job360's click path, with Job360's browser not holding the page
+        await _patch(client, SIGNED_IN, True)
+        async with agent:
+            assert await _assistant_gate(agent, app_id) == ("ask", "ask_always_site")
