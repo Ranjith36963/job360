@@ -52,6 +52,7 @@ SITES: tuple[Site, ...] = (
         "Many pages (form_step says which): fill one, read every value back, then Save and Continue.",
         "Errors show only after Save: fix every field marked invalid, then Save again. Still stuck after 2 "
         "Saves: stop and record blocked.",
+        "The start window takes 3-8 s to appear: wait and look again before deciding the page is empty.",
         "Dates are separate Month and Year boxes: type the real numbers.",
         "Work and school entries: Add one, fill it, then Add the next (the new one is the last on the page).",
         "A sign-in or create-account page is Needs you (account_needed); never make an account.",

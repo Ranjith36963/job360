@@ -13,7 +13,8 @@ Where the server knows, it decides (never the caller's word alone): what Job360'
 submit click, its blocks, a refill) carries ``job360``; a caller's ``job360`` is refused unless Job360's browser
 has a page open for this user; no ``browser`` while this job's own Job360 browser is open reads ``job360``.
 Nothing knows the user's own browser server-side (an own-browser application's hold is the ordinary kit hold),
-so ``own_browser`` and ``manual`` are the caller's word.
+so ``own_browser`` and ``manual`` are the caller's word. ``unblocked`` {resolution: own_browser} (``blocked``) is
+stamped ``own_browser`` by the server: it clears only a block Job360's browser wrote.
 """
 from __future__ import annotations
 
