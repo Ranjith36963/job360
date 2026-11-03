@@ -564,7 +564,7 @@ async def record_browser_block(
     with ``by: browser``, the one key a caller can never write (``check_payload`` refuses it)."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise SpineError(404, "application not found")
-    stored = {**check_payload(user, "blocked", payload, ""), BY_KEY: BY_BROWSER}
+    stored = {**check_payload(user, "blocked", payload, ""), BY_KEY: BY_BROWSER, "browser": "job360"}
     return await record(db, user, application_id, "blocked", stored, occurred_at=spine.parse_occurred_at(None))
 
 

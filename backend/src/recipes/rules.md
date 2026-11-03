@@ -144,6 +144,9 @@ one: leave the task on Needs you and go on. Passwords, one-time codes and MFA ar
 solves a CAPTCHA: it is always solved by the user, on Needs you while Job360's browser holds the page
 (Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your own
 browser: turn your PC on", "Your own browser: runs when your PC is on" (LinkedIn) or "You: on the site".
+**Say which browser did it:** every `form_checked`, `form_filled`, `form_swept`, `submit_attempted`, `blocked` and
+`record_application` takes `browser`: `job360` (the `browser` tool; refused when it has no page open for you),
+`own_browser` (the user's browser your app drives) or `manual` (the user by hand). Left out: `unknown`.
 
 ## Writing the CV
 
@@ -653,7 +656,7 @@ one job always ask before submit, whatever the account setting says. You can
 only send "confirm"; "auto_when_sure" and "inherit" need the user's own click on
 the Job360 website (403).
 
-`submit_attempted` (no payload): Job360's browser records it on the final submit click; before a click anywhere
+`submit_attempted` ({} or {browser}): Job360's browser records it on the final submit click; before a click anywhere
 else, record it yourself; a second submit_attempted while one
 is unresolved, after a receipt, or off considering is refused (409): do not click. The user's website click
 `submit_resolved` {outcome:"not_sent"} (403 from you) says it never went out. A submit that WAS sent is
