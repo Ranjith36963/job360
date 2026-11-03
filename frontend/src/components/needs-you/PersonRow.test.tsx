@@ -33,36 +33,61 @@ describe("PersonRow", () => {
     ["connected", "Connected"],
     ["not_connected", "Not connected"],
     ["pending", "Request pending"],
-    ["unknown", "LinkedIn state unknown"],
-    [null, "LinkedIn state unknown"],
   ])("labels state %s", (state, label) => {
     show(person({ linkedin_state: state }));
     expect(screen.getByTestId("li-state-4")).toHaveTextContent(label);
   });
 
-  it("counts a connection note and warns over 200", () => {
-    const { unmount } = show(person({ linkedin_state: "not_connected" }, "x".repeat(150)));
-    expect(screen.getByTestId("note-count-4")).toHaveTextContent("150/200");
-    expect(screen.getByTestId("note-count-4")).toHaveAttribute("data-over", "false");
-    expect(screen.getByText("LinkedIn connection notes are 200 characters at most")).toBeInTheDocument();
-    unmount();
-    show(person({ linkedin_state: "not_connected", own_browser_task: task("waiting_on_you") }, "x".repeat(201)));
-    expect(screen.getByTestId("note-count-4")).toHaveTextContent("201/200");
-    expect(screen.getByTestId("note-count-4")).toHaveAttribute("data-over", "true");
-    expect(screen.getByTestId("note-count-4")).toHaveClass("text-danger");
-    // Hidden, not just disabled: nothing to press that would send a too-long note.
-    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
-    expect(screen.getByTestId("note-too-long-4")).toHaveTextContent("Too long for a connection note. Use it as a message after you connect, or rewrite it.");
-    expect(screen.getByText("Open profile ↗")).toBeInTheDocument();
-    expect(screen.getByTestId("sent-4")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
+  it.each(["unknown", null, ""])("hides the state chip when the state is %s", (state) => {
+    show(person({ linkedin_state: state }));
+    expect(screen.queryByTestId("li-state-4")).toBeNull();
+    expect(screen.queryByText(/state unknown/i)).toBeNull();
   });
 
-  it("keeps Copy and the browser button at exactly 200 characters", () => {
-    show(person({ linkedin_state: "not_connected", own_browser_task: task("waiting_on_you") }, "x".repeat(200)));
-    expect(screen.getByTestId("own-browser-send-4")).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  it("the name and the LinkedIn chip open the profile; there is no Open profile button", () => {
+    show(person({ linkedin_url: "https://www.linkedin.com/in/ada" }));
+    const name = screen.getByTestId("name-link-4");
+    expect(name).toHaveTextContent("Ada");
+    expect(name).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(name).toHaveAttribute("target", "_blank");
+    expect(name).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByTestId("channel-4")).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(screen.queryByText(/Open profile/)).toBeNull();
+  });
+
+  it.each(["", "javascript:alert(1)", "https://evil.example/in/ada", "linkedin.com.evil.example/in/x"])(
+    "no usable LinkedIn address (%s): a plain name, no link", (url) => {
+      show(person({ linkedin_url: url }));
+      expect(screen.queryByTestId("name-link-4")).toBeNull();
+      expect(screen.getByText("Ada")).toBeInTheDocument();
+      expect(screen.getByTestId("channel-4").tagName).toBe("SPAN");
+    });
+
+  it("hides Found via when it is other or empty, shows it otherwise", () => {
+    const { unmount } = show(person({ found_via: "other" }));
+    expect(screen.queryByText(/Found via/)).toBeNull();
+    unmount();
+    const u2 = show(person({ found_via: "" }));
+    expect(screen.queryByText(/Found via/)).toBeNull();
+    u2.unmount();
+    show(person({ found_via: "company_team_page" }));
+    expect(screen.getByText("Found via Company team page")).toBeInTheDocument();
+  });
+
+  it("note_rewrite: one muted line and no Send, I sent it or Copy", () => {
+    show(person({ linkedin_state: "", note_rewrite: { limit: 200, chars: 264 }, own_browser_task: task("waiting_on_you") }, "x".repeat(264)));
+    expect(screen.getByTestId("note-rewrite-4")).toHaveTextContent("Your assistant is rewriting this note: 264/200");
+    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
+    expect(screen.queryByTestId("sent-4")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    expect(screen.queryByTestId("note-count-4")).toBeNull();
+    expect(screen.queryByText(/rewrite it/)).toBeNull();
+  });
+
+  it("counts a connection note, with no red text", () => {
+    show(person({ linkedin_state: "not_connected" }, "x".repeat(150)));
+    expect(screen.getByTestId("note-count-4")).toHaveTextContent("150/200");
+    expect(screen.getByText("LinkedIn connection notes are 200 characters at most")).toBeInTheDocument();
     expect(screen.queryByTestId("note-too-long-4")).toBeNull();
   });
 

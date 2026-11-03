@@ -26,7 +26,7 @@ export async function newConnections(people: Person[]): Promise<PersonToReach[]>
     .flatMap((p) => p.contact_ids)
     .slice(0, MAX_NEW_CONNECTIONS);
   const rows = await Promise.all(ids.map((id) => getPerson(id).catch(() => null)));
-  return rows.flatMap((c) => (c && c.application_id == null ? (personToReach(c, c.company ?? "") ?? []) : []));
+  return rows.flatMap((c) => (c && c.application_id == null && !c.note_rewrite ? (personToReach(c, c.company ?? "") ?? []) : []));
 }
 
 /** "New connections" on Needs you (owner 2026-10-26): the same row and actions a person on a job card gets.

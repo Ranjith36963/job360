@@ -106,11 +106,11 @@ describe("/people", () => {
     expect(r[0]).toHaveTextContent("Found via Referral");
     expect(within(r[0]).getByRole("link", { name: "Staff Engineer · Northwind" })).toHaveAttribute(
       "href",
-      "/applications/42"
+      "/applications/42?from=outreach"
     );
     expect(within(r[0]).getByRole("link", { name: "Platform Lead · Contoso" })).toHaveAttribute(
       "href",
-      "/applications/57"
+      "/applications/57?from=outreach"
     );
     expect(within(r[0]).getByTestId("person-last-sent")).toHaveTextContent(
       `Sent on ${formatDate("2026-10-03T09:00:00Z")} via LinkedIn`
