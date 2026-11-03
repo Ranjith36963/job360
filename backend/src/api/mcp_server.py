@@ -1910,18 +1910,16 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         channel: Optional[str] = None,
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Append an event.
-
-        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
+        """`source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
         Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (corrects_event_id moves back). A repeat `applied` + `source`
+        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
         is proof, not a 2nd.
-        `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
+        `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`),
+        Outreach: `contact_id` + `channel` with outreach_sent (Sent id as `source`),
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
         outreach_bounced; no application_id if cold.
 
@@ -1939,7 +1937,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail}, then stop;
         unblocked {resolution: retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
-        process_log {} = your hidden work log; unqueued {reason?};
+        process_log {} = your work log (hidden from the user's timeline); unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
