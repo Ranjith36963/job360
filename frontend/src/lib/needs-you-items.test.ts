@@ -86,10 +86,20 @@ describe("fromServerCount", () => {
   it("one chip per kind that waits on you, in plan words; the chips add up to the jobs, All is N", () => {
     const c = fromServerCount(server());
     expect(c.chips).toEqual(["all", "site_step", "approve_cv", "answers", "send_yes", "outreach_send", "other"]);
-    expect(c.chips.map(chipLabel)).toEqual(["All", "On the site", "Approve CV", "Answers", "Send", "Notes", "Other"]);
+    expect(c.chips.map(chipLabel)).toEqual(["All", "On the site", "Approve CV", "Answer once", "Send", "Notes", "Other"]);
     expect(c.byChip).toEqual({ all: 9, other: 2, site_step: 1, approve_cv: 1, answers: 2, send_yes: 2, outreach_send: 1 });
     expect(c.chips.filter((k) => k !== "all" && k !== "other").reduce((t, k) => t + c.byChip[k], 0)).toBe(c.jobs);
     expect(c.jobIds).toHaveLength(c.jobs);
+  });
+
+  it("the Answer-once card is one item under Answer once while the server has rows for it", () => {
+    const c = fromServerCount(server({ n: 10, answer_once: 6 }));
+    expect(c.answerOnce).toBe(true);
+    expect(c.byChip.answers).toBe(3); // jobs 7 and 8, plus the one card (6 rows count once)
+    const only = fromServerCount(server({ n: 1, jobs: 0, other: 0, job_ids: [], job_ids_by_kind: {}, answer_once: 2 }));
+    expect(only.chips.map(chipLabel)).toEqual(["All", "Answer once"]);
+    expect(only.byChip).toEqual({ all: 1, other: 0, answers: 1 });
+    expect(fromServerCount(server({ answer_once: 0 })).answerOnce).toBe(false);
   });
 
   it("a server with nothing waiting on the user has only All", () => {

@@ -32,12 +32,13 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
+from src.services.applications import sent_alone
 from src.services.applications.needs_you_count import needs_you_count
 
 router = APIRouter(tags=["changes"])
@@ -167,12 +168,13 @@ async def changes(
 
 
 class NeedsYouCountOut(BaseModel):
-    n: int  # the Needs-you page's total: jobs + other
+    n: int  # the Needs-you page's total: jobs + other + 1 while the Answer-once card has rows
     jobs: int  # jobs whose first blocker is the user (= jobs_waiting_on_you)
     other: int  # asks with no job, waiting setting requests, outcome suggestions, unmatched mail, new connections
     jobs_waiting_on_you: int = 0  # = by_actor["you"]
     by_actor: dict[str, int] = {}  # open jobs once each, by first blocker's actor
     by_kind: dict[str, int] = {}  # the same jobs, by the kind of that first blocker
+    answer_once: int = 0  # questionnaire rows waiting (the one "Answer once" card counts 1 in n while > 0)
     other_ask_ids: list[int] = []  # open asks tied to a job that is not a row (e.g. proof missing): shown in Other
     job_ids: list[int] = []  # the jobs waiting on the user, oldest first blocker first (the page's rows)
     job_ids_by_kind: dict[str, list[int]] = {}  # the same ids grouped by their first blocker's kind
@@ -188,3 +190,48 @@ async def needs_you_count_route(
     line is written, so a navigation never moves ``/api/changes``."""
     response.headers["Cache-Control"] = "no-store"
     return NeedsYouCountOut(**await needs_you_count(db, user.id))
+
+
+class SentSource(BaseModel):
+    label: str  # where the fact came from: "Your CV", "Saved answer", "Your profile"
+    text: str  # the source sentence the answer was checked against
+
+
+class SentItem(BaseModel):
+    id: int
+    application_id: int
+    job_company: str
+    job_title: str
+    kind: str  # "answer" or "essay"
+    question: str
+    answer: str
+    sources: list[SentSource] = []
+    sent_at: str
+    reported_wrong: bool = False
+
+
+class SentOnItsOwnOut(BaseModel):
+    items: list[SentItem]
+
+
+@router.get("/sent-on-its-own", response_model=SentOnItsOwnOut, dependencies=AUTH_FIRST)
+async def sent_on_its_own_route(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the Needs-you page's own read
+) -> Any:
+    """Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
+    sources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything."""
+    return SentOnItsOwnOut(items=[SentItem(**i) for i in await sent_alone.list_items(db, user.id)])
+
+
+@router.post("/sent-on-its-own/{item_id}/wrong-fact", status_code=204, dependencies=AUTH_FIRST)
+async def report_wrong_fact_route(
+    item_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own press, never an agent's
+) -> Response:
+    """The user's "Wrong fact" press on one item. Autonomy step 4 records it and stops reusing that fact;
+    until it ships there is no item to press on, so every id is 404."""
+    if await sent_alone.get_item(db, user.id, item_id) is None:
+        raise HTTPException(status_code=404, detail="No such item sent on its own.")
+    raise HTTPException(status_code=409, detail="Reporting a wrong fact arrives with autonomy step 4.")

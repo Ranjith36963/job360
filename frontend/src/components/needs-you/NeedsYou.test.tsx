@@ -16,8 +16,9 @@ const ZERO_COUNT = { n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: 
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   // Ask once: the Questionnaire card reads this; no countries = nothing to answer, so it hides itself.
-  getQuestionnaire: async () => ({ countries: [] }),
+  getQuestionnaire: () => questionnaireMock.read(),
   rememberQuestionnaire: vi.fn().mockResolvedValue({ saved: [] }),
+  getSentOnItsOwn: async () => ({ items: [] }),
   rememberAskAnswers: vi.fn().mockResolvedValue({ saved: [], skipped: [] }),
   getNeedsYouCount: (...a: unknown[]) => getNeedsYouCount(...a),
   listAsks: (...a: unknown[]) => listAsks(...a),
@@ -38,6 +39,7 @@ vi.mock("@/lib/api", () => ({
   getReadyToSend: async () => ({ paused: false, total: readyMock.total, unflagged: 0, items: readyMock.items }),
 }));
 const readyMock = vi.hoisted(() => ({ total: 0, items: [] as unknown[] }));
+const questionnaireMock = vi.hoisted(() => ({ read: async (): Promise<unknown> => ({ countries: [] }) }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
@@ -392,6 +394,25 @@ describe("NeedsYou", () => {
     expect(listAsks).toHaveBeenCalledWith("open", 50);
     expect(screen.getByTestId("chip-all")).toHaveTextContent("All 60");
     expect(screen.getByTestId("chip-other")).toHaveTextContent("Other 60");
+  });
+
+  it("the Answer once card shows under All and Answer once only, counted once by the server", async () => {
+    const row = { id: "phone", group: "you", question: "Phone number", topic: "contact.phone", answer: null,
+      state: "missing", verified: false, label: "not_known", seen: 3 };
+    questionnaireMock.read = async () => ({ countries: [{ country: "GB", questions: [row] }] });
+    try {
+      listAsks.mockImplementation(async (status: string) => ({ asks: status === "open" ? [{ ...openAsk, application_id: null }] : [] }));
+      getNeedsYouCount.mockResolvedValue({ n: 2, jobs: 0, other: 1, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, answer_once: 4 });
+      render(<NeedsYou />);
+      expect(await screen.findByTestId("questionnaire")).toBeInTheDocument();
+      expect(screen.getByTestId("chip-answers")).toHaveTextContent("Answer once 1");
+      fireEvent.click(screen.getByTestId("chip-other"));
+      await waitFor(() => expect(screen.queryByTestId("questionnaire")).toBeNull());
+      fireEvent.click(screen.getByTestId("chip-answers"));
+      expect(await screen.findByTestId("questionnaire")).toBeInTheDocument();
+    } finally {
+      questionnaireMock.read = async () => ({ countries: [] });
+    }
   });
 
   it("a chip shows only its part of the page and lives in the link; chips at 0 are hidden", async () => {
