@@ -1898,7 +1898,7 @@ OUTREACH_REASONS: tuple[str, ...] = (
 # The same for a LinkedIn version (:func:`_may_send_linkedin`). All stop except the last two: ask, then send.
 LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
     "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "replied",
-    "application_closed", "linkedin_state_unknown", "linkedin_pending", "note_too_long", "message_too_long",
+    "application_closed", "note_too_long", "linkedin_state_unknown", "linkedin_pending", "message_too_long",
     "invite_limit_reached", "company_cap_reached", "network_hourly_cap_reached", "linkedin_daily_cap_reached",
     "too_soon", "claimed_by_other_session",
     "needs_owner_click", "needs_claim", "owner_clicked",
@@ -1957,6 +1957,17 @@ def _linkedin_verdict(
         return stop("application_closed", "This application is closed. Do not send.")
     state = facts.linkedin_state or "unknown"
     if state not in ("connected", "not_connected", "pending"):
+        state = "unknown"
+    note_max = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if facts.premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    # Fail closed (2026-11-02): a draft to anyone not known to be connected is a connection note, so an unsaved
+    # state is judged by the note limit too, before it is asked for.
+    if state in ("not_connected", "unknown") and facts.text_chars > note_max:
+        return stop(
+            "note_too_long",
+            f"A connection note is at most {note_max} characters; this draft is {facts.text_chars}. Shorten it "
+            "with save_artifact; the user must press Send again for the new text.",
+        )
+    if state == "unknown":
         return stop(
             "linkedin_state_unknown",
             "Their LinkedIn state is not saved. Read Connect / Pending / Message on their page and save it with "
@@ -1964,13 +1975,6 @@ def _linkedin_verdict(
         )
     if state == "pending":
         return stop("linkedin_pending", "A connection request to this person is already pending. Do not send.")
-    note_max = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if facts.premium else settings.LINKEDIN_NOTE_MAX_CHARS
-    if state == "not_connected" and facts.text_chars > note_max:
-        return stop(
-            "note_too_long",
-            f"A connection note is at most {note_max} characters; this draft is {facts.text_chars}. Shorten it "
-            "with save_artifact; the user must press Send again for the new text.",
-        )
     if state == "connected" and facts.text_chars > LINKEDIN_MESSAGE_MAX_CHARS:
         return stop(
             "message_too_long",

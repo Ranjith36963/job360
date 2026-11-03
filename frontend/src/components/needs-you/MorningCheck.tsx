@@ -21,6 +21,7 @@ import {
 import type { Bucket } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 import { applyModeOf, applyModeText } from "@/components/profile/BatchRuleRows";
+import { useAppHref } from "@/lib/app-href";
 
 const SETTINGS_HREF = "/connect?tab=permissions";
 
@@ -36,6 +37,7 @@ const linkBtn = "text-xs font-medium text-muted-foreground underline-offset-2 ho
  * happened since the user last looked: sent, blocked, waiting, failed.
  */
 export function MorningCheck() {
+  const appLink = useAppHref();
   const [data, setData] = useState<MorningCheckData | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Bucket | null>(null);
@@ -200,7 +202,7 @@ export function MorningCheck() {
       {open && tally[open].count > 0 && (
         <ul data-testid={`tally-list-${open}`} className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
           {tally[open].items.map((it) => {
-            const href = open === "sent" && it.receipt_id != null ? `/receipts/${it.receipt_id}` : `/applications/${it.application_id}`;
+            const href = open === "sent" && it.receipt_id != null ? `/receipts/${it.receipt_id}` : appLink(it.application_id);
             return (
               <li key={`${it.application_id}-${it.at}`}>
                 <Link href={href} className="flex min-h-11 flex-wrap items-baseline gap-x-3 px-4 py-2 text-sm hover:bg-muted">

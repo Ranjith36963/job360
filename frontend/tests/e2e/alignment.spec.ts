@@ -130,7 +130,7 @@ test.describe("Alignment — the fit picture on the application page", () => {
     );
 
     await page.goto(`/applications/${APPLICATION_ID}`);
-    await expect(page.getByText("NLP Engineer")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("NLP Engineer", { exact: true })).toBeVisible({ timeout: 20_000 });
 
     await expect(page.getByTestId("next-step")).toHaveText(
       "Next: CV ready — apply, then mark it applied"

@@ -29,6 +29,7 @@ export const ROUTE_LABELS = {
   account_step: "This site wants a new account: your own browser, or sign in once in Job360's browser",
   linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
   link_unclear: "This link looks broken or disguised: your own browser checks it",
+  learned_bot_check: "Job360's browser was blocked twice on {site}: your own browser runs it",
   waiting: "Waiting for your PC",
 } as const;
 
@@ -47,8 +48,12 @@ export const OWN_BROWSER_LABEL = BROWSER_LABELS.own_browser;
 /** The short name of Job360's own browser, on a chip with no server label. */
 export const JOB360_BROWSER_LABEL = "Job360's browser";
 /** The pace line on a job card. */
-export const PACE_TEXT =
-  "LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 10 LinkedIn sends a day.";
+export function paceText(perDay?: number | null): string {
+  const cap = perDay != null && Number.isInteger(perDay) && perDay > 0 ? `at most ${perDay} LinkedIn sends a day` : "a daily limit on LinkedIn sends (set in Settings)";
+  return `LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, ${cap}.`;
+}
+/** The pace line when the user's limit is not known. */
+export const PACE_TEXT = paceText();
 
 export const RUN_OWN_BROWSER_TASKS = "Run my own-browser tasks now";
 export const RUN_NOW_DONE = "Open for the next 60 minutes. Your assistant on your PC takes them one at a time.";
@@ -63,6 +68,7 @@ export const REASON_WORDS: Record<string, string> = {
   mfa: "It asks for a one-time code. Only you can enter it.",
   only_you: "This step is yours: no browser does it for you.",
   link_unclear: "The apply link has no clear web address, so your own browser checks it.",
+  learned_bot_check: "Job360's browser was blocked twice on this site, so your own browser runs it.",
 };
 
 /** The words for a route reason: the plain line for a known code, "" for an unknown code

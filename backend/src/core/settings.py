@@ -1050,6 +1050,12 @@ DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "30"))
 # (was 25), so the hourly hunt keeps filling the queue from every board instead of stopping at 25.
 HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "1000"))
 REACH_MAX_PER_RUN = 5
+# Owner 2026-11-03: "5 people for one job". An application stays on the people hunt until the assistant has
+# added REACH_TARGET_PEOPLE people to it; a run that worked it holds it back REACH_RETRY_HOURS, and after
+# REACH_MAX_ATTEMPTS runs it is left alone (no more people could be proven), so it cannot loop forever.
+REACH_TARGET_PEOPLE = 5
+REACH_RETRY_HOURS = 24
+REACH_MAX_ATTEMPTS = 3
 # Owner 2026-10-31 - the NETWORK hunt (duty `network`): while `people_hunt` is on, once every
 # NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
 # (not one job) and stores them as cold contacts. Job360 only says it is due and how many; the assistant

@@ -24,6 +24,8 @@ import { SendAllCard } from "./SendAllCard";
 import { openQuestionAsks } from "./useReadyAsks";
 import { useSalaryFacts } from "./useSalaryFacts";
 import { useLiveJobs } from "./useLiveLists";
+import { clearJobParam } from "@/lib/back-link";
+import { useAppHref } from "@/lib/app-href";
 
 // Every string here (company, role, asks) is untrusted text: rendered only as React text.
 
@@ -140,12 +142,18 @@ export function JobCards({
   fold,
   jobIds,
   idsByKind,
+  linkedinPerDay,
+  focusJob = null,
 }: {
+  /** The job to unfold and scroll to when the page opens (from `?job=`, set by "Back to Needs you"). */
+  focusJob?: number | null;
   /** The rows: exactly the jobs the server counted as waiting on the user. The page always passes it (an empty
    *  list until the count answers); only a bare list of cards in a test leaves it out and lists what it reads. */
   jobIds?: number[];
   /** The same ids by first-blocker kind: a chip shows only its kind's jobs. */
   idsByKind?: Record<string, number[]>;
+  /** The user's `linkedin_sends_per_day.effective`, for the pace line on a person's section. */
+  linkedinPerDay?: number | null;
   /** The open asks; the job-tied ones are grouped here, one card per job. */
   open: Ask[];
   /** The order (Most urgent, Newest first, Oldest first). */
@@ -157,6 +165,7 @@ export function JobCards({
   /** Which rows are unfolded (the page's Expand all / Fold all); every row starts folded. */
   fold?: FoldSet;
 }) {
+  const appLink = useAppHref();
   const ownFold = useFoldSet();
   const { isOpen, toggle } = fold ?? ownFold;
   const byJob = useMemo(() => groupAsks(open).byJob, [open]);
@@ -263,7 +272,25 @@ export function JobCards({
     [alive, show, idsByKind],
   );
   // The shown jobs: a card that loads with nothing open drops out and the next job takes its place.
-  const page = useMemo(() => shown.slice(0, limit), [shown, limit]);
+  const focusAt = focusJob === null ? -1 : shown.findIndex((h) => h.id === focusJob);
+  const page = useMemo(() => shown.slice(0, Math.max(limit, focusAt + 1)), [shown, limit, focusAt]);
+  // Coming back from a job's page: unfold that job once it is listed, then scroll it into view.
+  const focused = useRef(false);
+  const scrollTo = useRef<number | null>(null);
+  useEffect(() => {
+    if (focusJob === null || focusAt < 0 || focused.current) return;
+    focused.current = true;
+    scrollTo.current = focusJob;
+    if (!isOpen(focusJob)) toggle(focusJob);
+    clearJobParam();
+  }, [focusJob, focusAt, isOpen, toggle]);
+  useEffect(() => {
+    if (scrollTo.current === null) return;
+    const row = document.getElementById(`job-${scrollTo.current}-body`)?.closest("li");
+    if (!row) return;
+    scrollTo.current = null;
+    row.scrollIntoView?.({ block: "start" });
+  });
   // Load the full card of every job on a shown page, at most MAX_IN_FLIGHT at a time.
   useEffect(() => {
     const set = (id: number, slot: Slot, onlyIfAbsent = false) =>
@@ -343,12 +370,12 @@ export function JobCards({
               open={open} onToggle={() => toggle(h.id)} actionClass="lg:w-40"
               action={<JobRowAction card={card} onOpen={() => !open && toggle(h.id)} />}
               summary={<JobRowSummary h={h} card={card} facts={facts} nextText={slot?.status === "ready" ? slot.line : ""} linkTestid={header ? `title-link-${h.id}` : `row-title-${h.id}`} />}>
-              {card ? <JobCard card={card} onChanged={onChanged} ready={readyPart(h, true)} showHeader={false} bare />
+              {card ? <JobCard card={card} onChanged={onChanged} ready={readyPart(h, true)} showHeader={false} bare linkedinPerDay={linkedinPerDay} />
                 : slot?.status === "failed" ? (
                   <div className="p-3">
                     {readyPart(h, false) ?? (
                       <p className="text-sm text-muted-foreground" data-testid={`job-failed-${h.id}`}>
-                        Could not load this job. <Link href={`/applications/${h.id}`} className="underline underline-offset-2">Open it</Link> to see what waits.
+                        Could not load this job. <Link href={appLink(h.id)} className="underline underline-offset-2">Open it</Link> to see what waits.
                       </p>
                     )}
                   </div>
@@ -368,7 +395,7 @@ export function JobCards({
           Show {next} more · {pending} left
         </button>
       )}
-      {showPeople && <NewConnections people={connections} onChanged={onChanged}
+      {showPeople && <NewConnections people={connections} onChanged={onChanged} linkedinPerDay={linkedinPerDay}
         onDone={(id) => setDoneIds((s) => new Set(s).add(id))} />}
     </div>
   );

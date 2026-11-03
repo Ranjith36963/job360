@@ -8,6 +8,7 @@ import { addPerson, getPerson, listContactDuplicates, listPeople, markContactDup
 import type { ContactDuplicate, Person, PersonFull } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { toast } from "@/lib/toast";
+import { countsText, peopleCounts, splitPeople } from "@/lib/outreach-kinds";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { formatDate } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
 import { LinkedinCell, addedByLabel } from "@/components/applications/Contacts";
+import { appHref } from "@/lib/back-link";
 
 const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "" };
 
@@ -118,7 +120,7 @@ function PersonRow({ p, others, onChanged }: { p: Person; others: Person[]; onCh
         <span className="font-medium">{p.name}</span>
         {p.role && <span className="text-muted-foreground">· {p.role}</span>}
       </div>
-      {p.found_via && (
+      {p.found_via && p.found_via !== "other" && (
         <p data-testid="person-found-via" className="mt-1 text-xs text-muted-foreground">
           Found via {closedSetLabel(p.found_via)}
         </p>
@@ -138,7 +140,7 @@ function PersonRow({ p, others, onChanged }: { p: Person; others: Person[]; onCh
         <ul data-testid="person-jobs" className="mt-1 flex flex-col text-xs">
           {p.jobs.map((j) => (
             <li key={j.application_id}>
-              <Link href={`/applications/${j.application_id}`} className="underline underline-offset-2">
+              <Link href={appHref(j.application_id, "outreach")} className="underline underline-offset-2">
                 {j.job_title} · {j.job_company}
               </Link>
             </li>
@@ -199,6 +201,57 @@ function PersonRow({ p, others, onChanged }: { p: Person; others: Person[]; onCh
       )}
       {open && details && <PersonHistory details={details} />}
     </li>
+  );
+}
+
+function SectionHead({ id, title, people }: { id: string; title: string; people: Person[] }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3">
+      <h2 className="font-heading text-base">{title}</h2>
+      <span data-testid={`${id}-counts`} className="font-mono text-[11px] text-faint">
+        {countsText(peopleCounts(people))}
+      </span>
+    </div>
+  );
+}
+
+/** Job outreach (grouped under their job) and Network (people with no job), each with its own counts. */
+function PeopleSections({ rows, reload }: { rows: Person[]; reload: () => Promise<void> }) {
+  const { jobGroups, jobPeople, network } = splitPeople(rows);
+  return (
+    <div data-testid="people-list" className="flex flex-col gap-5">
+      <section data-testid="job-outreach" className="flex flex-col gap-2">
+        <SectionHead id="job-outreach" title="Job outreach" people={jobPeople} />
+        <p className="text-xs text-muted-foreground">People at companies you applied to, under their job.</p>
+        {jobGroups.length === 0 ? (
+          <p data-testid="job-outreach-empty" className="text-xs text-muted-foreground">No one yet.</p>
+        ) : (
+          jobGroups.map((g) => (
+            <div key={g.applicationId} data-testid="job-group" className="flex flex-col gap-2">
+              <p className="text-sm font-medium">{g.title}</p>
+              <ul className="flex flex-col gap-2">
+                {g.people.map((p) => (
+                  <PersonRow key={p.contact_ids.join("-")} p={p} others={rows.filter((o) => o !== p)} onChanged={reload} />
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </section>
+      <section data-testid="network" className="flex flex-col gap-2">
+        <SectionHead id="network" title="Network" people={network} />
+        <p className="text-xs text-muted-foreground">People with no job, to build your network.</p>
+        {network.length === 0 ? (
+          <p data-testid="network-empty" className="text-xs text-muted-foreground">No one yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {network.map((p) => (
+              <PersonRow key={p.contact_ids.join("-")} p={p} others={rows.filter((o) => o !== p)} onChanged={reload} />
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -295,11 +348,7 @@ export function PeopleClient() {
           />
         </div>
       ) : (
-        <ul data-testid="people-list" className="flex flex-col gap-2">
-          {rows.map((p) => (
-            <PersonRow key={p.contact_ids.join("-")} p={p} others={rows.filter((o) => o !== p)} onChanged={() => load()} />
-          ))}
-        </ul>
+        <PeopleSections rows={rows} reload={() => load()} />
       )}
 
       {duplicates.length > 0 && (

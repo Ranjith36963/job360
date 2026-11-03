@@ -694,6 +694,14 @@ class OwnBrowserTaskOut(BaseModel):
     claim_until: Optional[str] = None
 
 
+class NoteRewriteOut(BaseModel):
+    """The newest LinkedIn draft is over the connection-note ``limit`` (it has ``chars``) and the person is not
+    known to be connected: the ASSISTANT rewrites it (never the user); it is not ready to send."""
+
+    limit: int
+    chars: int
+
+
 class ContactOut(BaseModel):
     """A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
     Same shape everywhere a contact appears — detail, export, the add
@@ -728,6 +736,8 @@ class ContactOut(BaseModel):
     send_browser: Optional[BrowserLabelOut] = None
     # The user's own-browser send of the newest LinkedIn draft (null = nothing to send in it).
     own_browser_task: Optional[OwnBrowserTaskOut] = None
+    # Null = nothing to rewrite. Set: the assistant's job ("rewrite needed"), not the user's; never sendable.
+    note_rewrite: Optional[NoteRewriteOut] = None
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)

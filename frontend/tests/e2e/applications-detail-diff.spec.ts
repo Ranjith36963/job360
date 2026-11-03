@@ -150,7 +150,7 @@ test.describe("Application detail — original vs tailored (slice 8)", () => {
     await mockBackend(page);
 
     await page.goto(`/applications/${APPLICATION_ID}`);
-    await expect(page.getByText("Platform Engineer")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Platform Engineer", { exact: true })).toBeVisible({ timeout: 20_000 });
 
     // 1. the receipt names v2 → exactly one Applied badge, on v2's row
     const badges = page.getByTestId("artifact-applied-badge");

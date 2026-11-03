@@ -24,6 +24,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from src.core import settings
 from src.services.applications.spine import SpineError
 from src.services.browser_agent import routing
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -52,6 +53,7 @@ WHY_WORDS = {
     "default": "You pressed Send for this message.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
     "link_unclear": "This link looks broken or disguised: your own browser checks it.",
+    "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
 }
 
 
@@ -74,6 +76,16 @@ def session_label(raw: str) -> str:
 def log_read(user_id: str, count: int) -> None:
     """One audit line for a queue read: who, how many (never the tasks)."""
     _log("own_browser_queue_read", user_id, "ok", count=count)
+
+
+def note_over_limit(channel: str, state: Optional[str], chars: int, premium: bool) -> Optional[int]:
+    """The connection-note limit a stored LinkedIn draft breaks, else ``None`` (fail closed, 2026-11-02): a
+    draft to anyone not known to be connected is a connection note, so an unsaved state counts as not
+    connected. ``connected`` (a message) and ``pending`` (nothing can be sent) are never judged here."""
+    if channel != "linkedin" or (state or "unknown") not in ("not_connected", "unknown"):
+        return None
+    limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    return limit if chars > limit else None
 
 
 def _when(raw: Any) -> Optional[datetime]:
@@ -285,6 +297,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         task = derive(await _rows(db, contact_id), now)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if await contacts.over_limit_notes(db, user_id, [contact_id]):
+            continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
         route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
@@ -335,6 +349,7 @@ async def _application_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str]
 ) -> list[dict[str, Any]]:
     from src.services.applications import blocked, kit, spine  # noqa: PLC0415
+    from src.services.browser_agent import learned  # noqa: PLC0415
 
     cur = await db._db.execute(
         "SELECT id, job_title, job_company, job_url FROM applications WHERE user_id = ? AND status = 'considering' "
@@ -362,6 +377,17 @@ async def _application_tasks(
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
         routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application")))
+    # Owner 2026-11-02: a site where Job360's browser was blocked twice (CAPTCHA / bot check) for THIS user:
+    # the next queued job there starts here, before Job360's browser meets the wall again.
+    hosts = await learned.blocked_hosts(db, user.id, now)
+    rest = [i for i, a in apps.items() if i not in blocks and i not in queued
+            and learned.route_for(str(a.get("job_url") or ""), hosts) is not None]
+    later = await spine.queued_at_by_app(db, user.id, rest)
+    for app_id in sorted(later, key=lambda i: (later[i], i)):
+        route = routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application",
+                                    route=learned.LEARNED_ROUTE)
+        if route.kind == "own_browser":
+            routes.append((app_id, route))
     out: list[dict[str, Any]] = []
     for app_id, route in routes:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
@@ -373,7 +399,7 @@ async def _application_tasks(
             "url": a.get("job_url") or "", "contact_id": None, "application_id": app_id, "name": "",
             "message_id": None, "draft_text": "", "draft_chars": 0, "linkedin_state": None,
             "why_own_browser": WHY_WORDS.get(route.reason, ""), "owner_yes": False, "claim": None,
-            "browser": routing.label(route),
+            "browser": routing.label(route, site=routing.site_of(str(a.get("job_url") or ""))[1]),
         })
         if len(out) >= QUEUE_MAX:
             break
