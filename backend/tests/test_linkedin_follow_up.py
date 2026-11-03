@@ -253,6 +253,20 @@ def test_the_fact_check_reads_bare_names_spelled_numbers_and_ignores_case():
     assert cv_checks.outreach_claims_unsupported("I shipped forty pipelines.", profile) is True
 
 
+def test_the_job_and_person_names_never_vouch_for_a_claim_about_the_user():
+    """The hiring company is in the context, so "the role at Northwind" is fine; "I worked at Northwind" is a claim
+    about the user that only the profile can back (#1498 check: a made-up job at the company went on its own)."""
+    from src.services.applications import cv_checks
+
+    profile = UserProfile(cv_data=CVData(raw_text="Python data engineer at Acme Data for 7 years."))
+    context = "Priya Northwind Northwind Data Engineer"
+    assert cv_checks.outreach_claims_unsupported("I like the role at Northwind.", profile, context) is False
+    for claim in ("I worked at Northwind on pipelines.", "I have experience with Northwind systems.",
+                  "I graduated from Northwind.", "I joined Northwind in spring.", "I interned at Northwind."):
+        assert cv_checks.outreach_claims_unsupported(claim, profile, context) is True, claim
+    assert cv_checks.outreach_claims_unsupported("I worked at Acme Data on pipelines.", profile, context) is False
+
+
 def test_a_name_ends_at_the_end_of_its_sentence():
     from src.services.applications import cv_checks
 

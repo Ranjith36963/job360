@@ -796,16 +796,18 @@ def spelled_to_digits(text: str) -> str:
     return " ".join(out)
 
 
-def unsupported_names(text: str, source: str) -> Optional[dict[str, str]]:
+def unsupported_names(text: str, source: str, allowed: str = "") -> Optional[dict[str, str]]:
     """Capitalised names after ``_NAME_LEADS`` ("worked at Acme Corp") that the profile never mentions. Word by
-    word, no regex on the caller's text (CodeQL: no backtracking)."""
+    word, no regex on the caller's text (CodeQL: no backtracking). ``allowed`` (the person and the job) vouches only
+    after a bare lead ("the role at Globex"), never after a claim lead: "I worked at Globex" needs the profile."""
     raw = _scrub(text).split()
     words = [w.strip(_OUTER_PUNCT) for w in raw]
     ends = [w.rstrip("\"')]").endswith((".", "!", "?")) for w in raw]  # a sentence ends after this token
-    hay = _norm(source)
+    hay, wider = _norm(source), _norm(source + "\n" + allowed)
     bad: list[str] = []
     for i, word in enumerate(words):
-        follow = () if word.casefold() in _BARE_LEADS else _NAME_LEADS.get(word.casefold())
+        bare = word.casefold() in _BARE_LEADS
+        follow = () if bare else _NAME_LEADS.get(word.casefold())
         if follow is None:
             continue
         start = i + 1
@@ -820,7 +822,7 @@ def unsupported_names(text: str, source: str) -> Optional[dict[str, str]]:
             if ends[j]:
                 break
         shown = " ".join(name)
-        if shown and _norm(shown) not in hay and shown not in bad:
+        if shown and _norm(shown) not in (wider if bare else hay) and shown not in bad:
             bad.append(shown)
     if not bad:
         return None
@@ -848,7 +850,7 @@ def outreach_claims_unsupported(text: str, profile: Any, context: str = "") -> b
         return True
     text, digits = spelled_to_digits(text), spelled_to_digits(source)
     return bool(unsupported_numbers(text, digits) or unsupported_year_claims(text, digits)
-                or unsupported_names(text, source + "\n" + context))
+                or unsupported_names(text, source, context))
 
 
 # ── entry points ────────────────────────────────────────────────────────────
