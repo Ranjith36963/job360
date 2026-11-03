@@ -568,6 +568,10 @@ async def take(
         if contact_id is not None:
             free = [t for t in free if t["contact_id"] == contact_id]
             tasks = [t for t in contacts_ if t["contact_id"] == contact_id]
+        if free and await weekly_limit_until(db, user.id, now) is not None:
+            # LinkedIn's invitation limit is live: an invite would fail again, so only people already
+            # connected (a plain message, no invite) are handed out until it is over.
+            free = [t for t in free if t.get("linkedin_state") == "connected"]
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
         if free and not busy:
