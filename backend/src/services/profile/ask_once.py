@@ -87,14 +87,10 @@ def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -
     loaded, _ = load_profile_with_overlay(user_id)
     records = [dict(r) for r in (loaded or UserProfile()).user_info.answers or [] if isinstance(r, dict)]
     for r in keep:
-        new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"],
-               **({"country": country.upper()}
-                  if country and is_country_specific(r["topic"], r["question"]) else {})}
-        at = user_info.answer_upsert_index(records, new)
-        if at is None:
-            records.append(new)
-        else:
-            records[at] = new
+        bound = bool(country) and is_country_specific(r["topic"], r["question"])
+        new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True,
+               "topic": r["topic"], **({"country": str(country).upper()} if bound else {})}
+        records = user_info.upsert_answer(records, new)
     value = profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, records)
     if load_profile(user_id, with_overlay=False) is None:
         save_profile(UserProfile(), user_id, source_action="agent_edit")
@@ -110,12 +106,22 @@ def _key(row: dict[str, Any]) -> str:
     return str(row.get("topic") or row.get("kit_key") or row["id"])
 
 
+def _conflict_row(c: dict[str, Any], cc: str) -> dict[str, Any]:
+    """A questionnaire row for a saved topic whose answers disagree (the same shape as a catalog row)."""
+    return {
+        "id": f"conflict.{c['topic']}", "group": "work", "question": c["question"], "country": cc,
+        "kit_key": None, "topic": c["topic"], "answer": None, "source": None, "state": "missing",
+        "verified": False, "label": "guessed", "seen": 0, "per_job": False, "save_to": "user_info.answers",
+        "set_by": None, "set_at": None, "guess_source": None, "sensitive": False,
+    }
+
+
 def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """``[{country, questions}]``: per saved country, up to :data:`PER_COUNTRY` rows still guessed or not
     known (``summary()``'s to_verify + missing), guessed first, then by how many forms ask it. A row the
     user already remembered is done: a global one for every country, a country-specific one
     (:func:`is_country_specific`) for its country only (``fits_country``). Read-only."""
-    from src.services.profile.answer_match import find_answer  # noqa: PLC0415
+    from src.services.profile.answer_match import conflicts, find_answer, topic_key  # noqa: PLC0415
 
     rows = [r for r in common_questions.common_questions(profile, overlay) if not r["per_job"]]
     saved = getattr(getattr(profile, "user_info", None), "answers", None) or []
@@ -128,6 +134,13 @@ def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str,
             and find_answer(saved, topic=_key(r), country=cc) is None
         ]
         todo.sort(key=lambda r: (r["label"] != "guessed", -int(r["seen"])))
+        # Two saved answers to one topic that disagree (case-insensitive): asked, never picked. Shown first.
+        for c in reversed(conflicts(saved, country=cc)):
+            row = next((r for r in todo if topic_key(r["topic"]) == topic_key(c["topic"])), None)
+            if row is None:
+                row = _conflict_row(c, cc)
+                todo.insert(0, row)
+            row["conflict"] = c["values"]
         out.append({"country": cc, "questions": todo[:PER_COUNTRY]})
     return out
 

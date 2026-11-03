@@ -43,6 +43,9 @@ class CommonQuestionOut(BaseModel):
     set_at: Optional[str] = None
     guess_source: Optional[str] = None
     sensitive: bool = False
+    # Two saved answers to this topic disagree (e.g. Yes and No for GB sponsorship): both values, so the
+    # user is asked which is right. Empty = no conflict.
+    conflict: list[str] = Field(default_factory=list)
     # Answer once (owner 2026-11-02): the text to show filled in ("" = no guess) and where it comes from.
     value: str = ""
     from_: str = Field("", alias="from")
