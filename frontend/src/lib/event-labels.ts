@@ -134,6 +134,14 @@ function relayedWords(payload: unknown): boolean {
   return typeof w === "string" && w.trim().length > 0;
 }
 
+/** A chat approval's own words (owner 2026-11-02): cv_seen / submit_approved with where=chat carry the
+ * owner's reply verbatim, so the timeline shows what he said, not only that an assistant recorded a yes. */
+function chatApprovalWords(e: { event_type: string; payload?: unknown }): string {
+  if (e.event_type !== "cv_seen" && e.event_type !== "submit_approved") return "";
+  const p = (e.payload ?? {}) as { where?: unknown; user_words?: unknown };
+  return p.where === "chat" && typeof p.user_words === "string" ? p.user_words.trim() : "";
+}
+
 /** The label for one timeline row. A status event reads "Status → <label>";
  * a note-family event reads its own label; anything unrecognised (a future
  * `APPLICATION_EXTRA_EVENT_TYPES` addition, or drift) falls back to the raw
@@ -144,6 +152,8 @@ export function eventLabel(e: { event_type: string; payload?: unknown; recorded_
     const via = e.recorded_by && e.recorded_by !== "web" ? whoLabel(e.recorded_by).name : "";
     return via ? `Your answer (via ${via})` : "Your answer (via your assistant)";
   }
+  const words = chatApprovalWords(e);
+  if (words) return `Approved in chat: “${words}”`;
   if (STATUS_EVENT_TYPES.has(e.event_type)) {
     const status = EVENT_TYPE_TO_STATUS[e.event_type] ?? e.event_type;
     return `Status → ${STATUS_LABEL[status] ?? status}`;
