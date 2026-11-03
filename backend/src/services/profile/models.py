@@ -764,6 +764,13 @@ class AssistantSettings:
     # in their timezone. Tasks Job360's own browser could not finish wait for it. None = any time (rule #29).
     # Always a safer change: every send in the user's own browser still needs the user's click.
     pc_on_hours: Optional[dict[str, Any]] = None
+    # Owner 2026-11-02: the user's own outreach send limits (check_outreach). None = the default in core/settings
+    # (5 job sends per company in OUTREACH_COMPANY_WINDOW_DAYS, 5 network sends an hour, 20 LinkedIn and 40 email
+    # sends a day); an operator backstop (core/settings *_MAX) always holds above them. Raising one is riskier.
+    outreach_per_company: Optional[int] = None
+    network_per_hour: Optional[int] = None
+    linkedin_sends_per_day: Optional[int] = None
+    email_sends_per_day: Optional[int] = None
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

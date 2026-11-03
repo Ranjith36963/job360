@@ -219,7 +219,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     elif f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
-    if f.people_hunt:  # the network hunt: once a day while the people hunt is on
+    if f.people_hunt:  # the network hunt: every NETWORK_EVERY_HOURS (hourly) while the people hunt is on
         last = f.stamps.get("network")
         failed = f.failures.get("network", 0)
         every = backoff_hours(failed) if failed > 0 else settings.NETWORK_EVERY_HOURS

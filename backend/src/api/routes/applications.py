@@ -1610,13 +1610,17 @@ class OutreachCheckResponse(BaseModel):
     """The answer to "may I press Send on this outreach email?" - one gate
     (``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then
     record ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:
-    do not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap."""
+    do not send. ``sent_today`` / ``daily_max``: recorded sends today (every channel) vs the operator ceiling;
+    ``job_sent_today`` / ``network_sent_today`` split them (owner 2026-11-02: a contact with an application is
+    job outreach, one without is network). The user's own limits are in get_profile ``settings``."""
 
     decision: Literal["send", "ask", "stop"]
     reason: str
     detail: str
     sent_today: int
     daily_max: int
+    job_sent_today: int = 0
+    network_sent_today: int = 0
 
 
 class ExportHistoryResponse(BaseModel):
@@ -3021,6 +3025,7 @@ async def outreach_check(
     return {
         "decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail,
         "sent_today": counts.sent_today, "daily_max": settings.OUTREACH_AUTO_SENDS_MAX_PER_DAY,
+        "job_sent_today": counts.job_sent_today, "network_sent_today": counts.network_sent_today,
     }
 
 
