@@ -420,6 +420,7 @@ async def test_a_claim_belongs_to_the_actor_as_well_as_the_label(authenticated_a
 @pytest.mark.asyncio
 async def test_an_unrecorded_send_still_counts_toward_the_gap(authenticated_async_context, monkeypatch):
     """A claim Job360 wrote itself that nobody released or marked sent is a send nobody recorded: it counts."""
+    monkeypatch.setattr(own_browser, "RELEASE_BACKOFF_MINUTES", 0)  # this test is about the pace, not the backoff
     monkeypatch.setattr(own_browser, "CLAIM_MINUTES", 0)  # claims expire at once, so only the pace can stop a take
     async with authenticated_async_context() as client:
         contact_id, message_id = await _person(client)
@@ -450,6 +451,7 @@ async def test_unrecorded_sends_count_toward_the_day(authenticated_async_context
 @pytest.mark.asyncio
 async def test_a_looping_take_and_release_can_never_block_the_users_click(authenticated_async_context, monkeypatch):
     monkeypatch.setattr(own_browser, "ROWS_PER_CONTACT_MAX", 3)
+    monkeypatch.setattr(own_browser, "RELEASE_BACKOFF_MINUTES", 0)  # this test is about the row cap, not the backoff
     monkeypatch.setattr(own_browser, "LINKEDIN_MIN_GAP_SECONDS", 0)
     async with authenticated_async_context() as client:
         contact_id, message_id = await _person(client)

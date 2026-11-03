@@ -197,3 +197,50 @@ async def test_the_mcp_record_event_door_closes_it_too(authenticated_async_conte
                 assert json.loads(result.content[0].text)["status"] == "withdrawn"
         assert (await _detail(web, app_id))["status"] == "withdrawn"
         assert app_id not in (await _count(web))["job_ids"]
+
+
+@pytest.mark.asyncio
+async def test_a_job_the_owner_said_send_on_is_never_auto_closed(authenticated_async_context):
+    import hashlib
+
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, 9)
+        cv = await web.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
+        assert cv.status_code == 201, cv.text
+        yes = await web.post(f"/api/applications/{app_id}/events", json={"event_type": "submit_approved", "payload": {
+            "artifact_id": int(cv.json()["artifact_id"]), "sha256": hashlib.sha256(b"Ada, Python.").hexdigest(),
+            "where": "web"}})
+        assert yes.status_code == 201, yes.text
+        async with await _agent(web) as agent:
+            resp = await _closed(agent, app_id, evidence="http_404")
+        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        detail = await _detail(web, app_id)
+        assert detail["status"] == "considering" and _events(detail, "withdrawn") == []
+        assert (await _count(web))["job_ids_by_kind"]["posting_closed"] == [app_id]
+
+
+@pytest.mark.asyncio
+async def test_a_job_with_an_open_ask_to_the_owner_is_never_auto_closed(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, 10)
+        async with await _agent(web) as agent:
+            ask = await agent.post("/api/asks", json={"application_id": app_id, "question": "Notice period?"})
+            assert ask.status_code == 201, ask.text
+            resp = await _closed(agent, app_id, evidence="page_says_closed")
+        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        assert _events(await _detail(web, app_id), "withdrawn") == []
+        assert len(await _open_asks(web, app_id)) == 1  # the owner's question (merged with the block's) stays open
+
+
+@pytest.mark.asyncio
+async def test_an_assistants_look_alike_withdrawn_is_not_undoable(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, 11)
+        async with await _agent(web) as agent:
+            block = await _closed(agent, app_id)  # no evidence: a real block, never a proven close
+            fake = await agent.post(f"/api/applications/{app_id}/events", json={
+                "event_type": "withdrawn", "detail": "posting closed",
+                "payload": {"closed_by": "posting_closed", "blocked_event_id": block.json()["event_id"]}})
+            assert fake.status_code == 201 and fake.json()["status"] == "withdrawn", fake.text
+        assert (await web.post(f"/api/applications/{app_id}/auto/undo")).status_code == 409
+        assert (await _detail(web, app_id))["status"] == "withdrawn"
