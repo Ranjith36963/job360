@@ -195,7 +195,7 @@ def test_recipes_carry_the_assistant_settings_rules():
         assert word in setup, word
     apply = flat(load_recipe("apply").text)
     for word in ("settings.paused", "line.switch", "check_submit", "practice run",
-                 "indeed and linkedin always answer `ask`", "after the user says yes to this one application"):
+                 "indeed and linkedin answer `ask` unless the user turned that off", "after the user says yes to this one application"):
         assert word in apply, word
     daily = flat(load_recipe("daily").text)
     assert "settings.paused" in daily and "do all apply work as stopped" in daily
@@ -441,7 +441,7 @@ def test_the_own_browser_recipe_runs_linkedin_in_the_own_browser_only_and_keeps_
     for words in (
         "check_outreach(contact_id, message_id, session)", "owner_clicked", "needs_owner_click",
         "never solve it", "never type or ask for a password", "weekly invitation limit", "`weekly_limit`",
-        "at most `settings.linkedin_sends_per_day` sends a day (default 20)", "never under 120 seconds", "press send again for the new text",
+        "at most `settings.linkedin_sends_per_day` sends a day (default 15)", "never under 120 seconds", "press send again for the new text",
         "`outreach_send` = auto does not", "update_contact(contact_id, linkedin_state=",
         "at most 200 characters (300 with premium, only if the user set it)", "at most 400",
         "take one person.", "own_browser_queue(action=\"take\", session, contact_id)", "`needs_claim`: take the person first",

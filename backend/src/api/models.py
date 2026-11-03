@@ -302,6 +302,8 @@ class AssistantSettingsView(BaseModel):
     network_per_hour: SettingFieldOut
     linkedin_sends_per_day: SettingFieldOut
     email_sends_per_day: SettingFieldOut
+    # Owner 2026-11-03 - Indeed / LinkedIn style sites always ask before submit (default true).
+    always_ask_job_boards: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""

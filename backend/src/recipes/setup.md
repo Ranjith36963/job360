@@ -36,7 +36,7 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
    / apply on its own (`assistant_settings.above_line` = ask | auto); *jobs below
    your line* - ask me / drop it (`assistant_settings.below_line` = ask | skip); not chosen = ask.
    *Submitting* - `confirm` (default) / `auto_when_sure` (you submit when
-   `check_submit` says go; Indeed and LinkedIn always ask; the first is a practice
+   `check_submit` says go; Indeed and LinkedIn ask unless the user turned that off; the first is a practice
    run) -> `assistant_settings.submit_mode`. *A daily limit* - a number or none, no
    cap by default, never assume a number -> `assistant_settings.daily_cap`.
    *Gmail* - the offer and `check_every` from rules -> `preferences.daily_check`

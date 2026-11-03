@@ -15,7 +15,7 @@ Stored as ``contact_outreach`` entries Job360 writes itself and never accepts fr
 Append-only: the state is derived from the newest rows, nothing is updated. Run now is one slot in
 ``assistant_duty_runs`` named ``own_browser:run_now`` (it is not a scheduled duty). Pace: LinkedIn sends are
 at least ``LINKEDIN_MIN_GAP_SECONDS`` apart and at most the user's own ``assistant_settings.linkedin_sends_per_day``
-(``rules.linkedin_daily_max``: default 20, operator backstop 100) a day, enforced in :func:`take`.
+(``rules.linkedin_daily_max``: default 15, operator backstop 100) a day, enforced in :func:`take`.
 Assistant-neutral on purpose. Logs ids and closed values only, never message text.
 """
 from __future__ import annotations

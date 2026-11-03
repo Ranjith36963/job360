@@ -36,6 +36,9 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
 * ``outreach_per_company`` / ``network_per_hour`` / ``linkedin_sends_per_day`` / ``email_sends_per_day`` - the
   user's own outreach send limits (owner 2026-11-02); ``None`` = the default, and an operator backstop
   (:data:`OUTREACH_LIMITS`) always holds above them. Raising one is riskier.
+* ``always_ask_job_boards`` — ``True`` (default) | ``False``: Indeed / LinkedIn style sites
+  (``SUBMIT_ASK_ALWAYS_BRANDS``) always answer ``ask`` (``ask_always_site``). Turning it off is riskier, so
+  only the user's own web click applies it (owner 2026-11-03); every other submit rule still holds.
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -117,6 +120,7 @@ HUNT_EVERY_MAX = 168  # one week
 PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
 PC_ON_HOURS_PATH = f"{HEAD}.pc_on_hours"
 PC_ON_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+ALWAYS_ASK_BOARDS_PATH = f"{HEAD}.always_ask_job_boards"
 # Owner 2026-11-02 - the user's own outreach send limits: field -> (default, operator backstop setting name).
 OUTREACH_LIMITS: dict[str, tuple[int, str]] = {
     "outreach_per_company": (settings.OUTREACH_PER_COMPANY_DEFAULT, "OUTREACH_COMPANY_MAX"),
@@ -130,7 +134,7 @@ SETTING_PATHS: tuple[str, ...] = (
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
-    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS,
+    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, ALWAYS_ASK_BOARDS_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -387,7 +391,7 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, ALWAYS_ASK_BOARDS_PATH):
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
@@ -433,6 +437,8 @@ class EffectiveSettings:
     network_per_hour: int = settings.NETWORK_PER_HOUR_DEFAULT
     linkedin_sends_per_day: int = settings.LINKEDIN_SENDS_PER_DAY_DEFAULT
     email_sends_per_day: int = settings.EMAIL_SENDS_PER_DAY_DEFAULT
+    # Owner 2026-11-03 - rule 7 (ask_always_site) applies only while this is on.
+    always_ask_job_boards: bool = True
 
 
 def outreach_backstop(name: str) -> int:
@@ -537,6 +543,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         people_hunt=bool(s.people_hunt),
         pc_on_hours=_pc_on_hours(s.pc_on_hours),
         **{name: outreach_limit(name, getattr(s, name)) for name in OUTREACH_LIMITS},
+        always_ask_job_boards=s.always_ask_job_boards is not False,
     )
 
 
@@ -601,6 +608,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return _pc_on_hours(raw)
     if path in OUTREACH_LIMIT_PATHS:
         return outreach_limit(OUTREACH_LIMIT_PATHS[path], raw)
+    if path == ALWAYS_ASK_BOARDS_PATH:
+        return raw is not False  # only a stored false turns it off; anything else reads as on
     raise KeyError(path)
 
 
@@ -701,6 +710,8 @@ def classify_change(
     network_per_hour     raised                                         lowered, or equal
     linkedin_sends_      raised                                         lowered, or equal
     per_day / email_...
+    always_ask_job_      on -> off (Indeed / LinkedIn style sites may   off -> on (applies at once)
+    boards               auto-submit when every other rule allows)
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -763,6 +774,8 @@ def classify_change(
         return "safer"
     if path in OUTREACH_LIMIT_PATHS:
         return "riskier" if after > before else "safer"
+    if path == ALWAYS_ASK_BOARDS_PATH:
+        return "riskier" if (bool(before) and not bool(after)) else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -1315,7 +1328,8 @@ def may_submit(
         ``line_ask_below``. Checked inside ``_first_ask`` right after the
         duplicate ask, so a stored yes still clears it.
     6. site unknown -> ask ``unknown_site``
-    7. Indeed / LinkedIn style site -> ask ``ask_always_site``
+    7. Indeed / LinkedIn style site while the user's ``always_ask_job_boards`` is on (the default) -> ask
+       ``ask_always_site``; off (only the user's own web click), such a site goes on to rules 8-11 like any other
     8. the mode (the job's override, else ``submit_mode`` - or auto while a counted ``auto_grant`` is active:
        now before ``auto_grant_until`` and fewer than ``auto_grant_count`` applied since it began) is ``confirm`` -> ask
        (``grant_scope`` when a grant is active but does not cover this application: it was not in the user's
@@ -1779,7 +1793,7 @@ def _first_ask(
         return SubmitDecision(
             "ask", "unknown_site", "The site could not be read. Fill the form, stop before submit and ask yes."
         )
-    if kind == "brand":
+    if kind == "brand" and cfg.always_ask_job_boards:
         return SubmitDecision(
             "ask", "ask_always_site",
             "This site does not allow automatic applying. Fill the form, stop before submit and ask yes.",
@@ -2630,6 +2644,7 @@ def build_settings_view(
         "people_hunt": {"value": raw.people_hunt, "effective": eff.people_hunt},
         "pc_on_hours": {"value": raw.pc_on_hours, "effective": eff.pc_on_hours},
         **{name: {"value": getattr(raw, name), "effective": getattr(eff, name)} for name in OUTREACH_LIMITS},
+        "always_ask_job_boards": {"value": raw.always_ask_job_boards, "effective": eff.always_ask_job_boards},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

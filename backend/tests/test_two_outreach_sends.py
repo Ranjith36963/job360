@@ -139,12 +139,12 @@ def _linkedin(**kw: Any) -> rules.OutreachFacts:
     return rules.OutreachFacts(**base)
 
 
-def test_the_21st_linkedin_send_stops_while_an_email_still_passes():
+def test_the_16th_linkedin_send_stops_while_an_email_still_passes():
     cfg = rules.effective(AssistantSettings(outreach_send="auto"))
-    assert (cfg.linkedin_sends_per_day, cfg.email_sends_per_day) == (20, 40)
-    counts = rules.OutreachCounts(sent_today=20, network_sent_last_hour=0)
-    assert rules.may_send_outreach(cfg, _linkedin(linkedin_sent_today=19), counts, NOW).reason == "owner_clicked"
-    stopped = rules.may_send_outreach(cfg, _linkedin(linkedin_sent_today=20), counts, NOW)
+    assert (cfg.linkedin_sends_per_day, cfg.email_sends_per_day) == (15, 40)
+    counts = rules.OutreachCounts(sent_today=15, network_sent_last_hour=0)
+    assert rules.may_send_outreach(cfg, _linkedin(linkedin_sent_today=14), counts, NOW).reason == "owner_clicked"
+    stopped = rules.may_send_outreach(cfg, _linkedin(linkedin_sent_today=15), counts, NOW)
     assert (stopped.decision, stopped.reason) == ("stop", "linkedin_daily_cap_reached")
     email = rules.OutreachFacts(
         message_found=True, latest_draft=True, channel="email", has_email=True, linked=True,
@@ -172,7 +172,7 @@ async def test_the_own_browser_queue_reads_the_users_linkedin_day(authenticated_
         async with browser_routes._db() as db:  # noqa: SLF001
             later = datetime.now(timezone.utc) + timedelta(minutes=10)  # past the 2-minute gap
             assert await own_browser._pace(db, fixture_user_id, later) == ("daily_limit", 0)  # noqa: SLF001
-            await _patch(client, LINKEDIN_DAY, None)  # back to the default 20
+            await _patch(client, LINKEDIN_DAY, None)  # back to the default 15
             assert await own_browser._pace(db, fixture_user_id, later) is None  # noqa: SLF001
 
 
@@ -195,7 +195,7 @@ async def test_the_user_changes_a_limit_and_an_assistants_raise_waits_for_the_co
         assert await _limits(client) == {
             "outreach_per_company": {"value": None, "effective": 5},
             "network_per_hour": {"value": None, "effective": 5},
-            "linkedin_sends_per_day": {"value": None, "effective": 20},
+            "linkedin_sends_per_day": {"value": None, "effective": 15},
             "email_sends_per_day": {"value": None, "effective": 40},
         }
         await _patch(client, PER_COMPANY, 3)  # the user's own web click applies at once

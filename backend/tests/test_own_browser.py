@@ -314,7 +314,7 @@ async def test_linkedin_sends_are_two_minutes_apart_and_the_users_day_default_tw
             assert wait["status"] == "wait" and 0 < wait["wait_seconds"] <= own_browser.LINKEDIN_MIN_GAP_SECONDS
             long_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
             _sql("UPDATE contact_outreach SET recorded_at = ? WHERE entry = 'sent'", (long_ago,))
-            for n in range(2, settings.LINKEDIN_SENDS_PER_DAY_DEFAULT + 1):  # the rest of the default day of 20
+            for n in range(2, settings.LINKEDIN_SENDS_PER_DAY_DEFAULT + 1):  # the rest of the default day of 15
                 other, _ = await _person(client, n)
                 await _mark(client, other, "sent")
             _sql("UPDATE contact_outreach SET recorded_at = ? WHERE entry = 'sent'", (long_ago,))
