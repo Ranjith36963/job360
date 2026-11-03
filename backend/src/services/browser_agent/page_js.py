@@ -22,7 +22,8 @@ _SUBMIT_REGEX_JS = (
 # Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int,
 # places: [[dist, above], ...]} (one place per element).
 # Each element: {ref, tag, type, role, name, value, checked, group, required, disabled, autocomplete,
-# in_form, options, via_label, hints} (group: the question a radio or checkbox answers; hints: a typed
+# in_form, options, via_label, hints} (group: the question a radio or checkbox answers; group_required: one
+# option of that group is needed, so required is false on each option; hints: a typed
 # control's title and name attribute, each its own string, for look's trap-field check only).
 #
 # Learned from the open-source browser agents (docs/product/BROWSER_AGENT.md, research 2026-10-19):
@@ -179,13 +180,74 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
     questions.set(el, answer);
     return answer;
   };
-  // Which question a Yes / No choice answers: its fieldset's legend, its radiogroup's name, or the block above.
+  // The text of the elements an aria-labelledby attribute names (ids split on spaces, never a regex on text).
+  const labelledBy = (node) => {
+    const root = node.getRootNode();
+    if (!root.getElementById) return '';
+    return (node.getAttribute('aria-labelledby') || '').split(' ').filter(Boolean)
+      .map((id) => { const t = root.getElementById(id); return t ? (t.innerText || t.textContent || '').trim() : ''; })
+      .filter(Boolean).join(' ');
+  };
+  // A question's own label above a group of choices (Greenhouse: a <label> or a class "label" element next
+  // to the options, not wrapped around one): the first such sibling within five levels, one that holds no
+  // control and is no option's own label.
+  const questionLabel = (el) => {
+    const g = groupOf(el);
+    const skip = new Set();
+    for (const m of g.members) { skip.add(m); const l = labelEl(m); if (l) skip.add(l); }
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n && n !== el.ownerDocument.body; i++, n = n.parentElement) {
+      for (const c of n.children) {
+        const lab = c.matches('label, legend, [class*="label"]') ? c : null;
+        if (!lab || skip.has(lab) || lab.querySelector(fieldSel)) continue;
+        const t = (lab.innerText || '').trim();
+        if (t) return t;
+      }
+    }
+    return '';
+  };
+  // Which question a Yes / No choice answers: its fieldset's legend, its group's aria-labelledby / aria-label,
+  // the question label beside the options, or the block above.
   const choiceGroup = (el) => {
     const fs = el.closest('fieldset'), legend = fs && fs.querySelector(':scope > legend');
     if (legend && legend.innerText.trim()) return legend.innerText;
     const g = el.closest('[role=radiogroup], [role=group]');
-    if (g && (g.getAttribute('aria-label') || '').trim()) return g.getAttribute('aria-label');
-    return questionOf(el);
+    if (g) {
+      const by = labelledBy(g);
+      if (by) return by;
+      if ((g.getAttribute('aria-label') || '').trim()) return g.getAttribute('aria-label');
+    }
+    return questionOf(el) || questionLabel(el);
+  };
+  // A group of choices is required once: one option is needed, not every option. True when any option of the
+  // group, or its group element, says required. A lone checkbox (consent) keeps its own required.
+  const choiceBox = (el) => el.closest('fieldset, [role=radiogroup], [role=group]');
+  const choiceMembers = (el) => {
+    const box = choiceBox(el);
+    const inBox = box ? Array.from(box.querySelectorAll('input[type=radio], input[type=checkbox]')) : [];
+    return inBox.length > 1 ? inBox : Array.from(groupOf(el).members);
+  };
+  const groupRequired = (el) => {
+    for (const m of choiceMembers(el)) if (m.required || m.getAttribute('aria-required') === 'true') return true;
+    const g = el.closest('[role=radiogroup], [role=group]');
+    return !!(g && g.getAttribute('aria-required') === 'true');
+  };
+  // react-select draws a second, blank <input required tabindex=-1 aria-hidden> (zero height, no opacity)
+  // beside its visible combobox. It is no field of its own: the visible combobox is the control. Returns
+  // the combobox it duplicates, or null.
+  const selectTwin = (el) => {
+    if (el.tagName !== 'INPUT' || ['checkbox', 'radio', 'file', 'hidden'].includes(el.type)) return null;
+    if (el.getAttribute('tabindex') !== '-1') return null;
+    if ((el.getAttribute('role') || '').toLowerCase() === 'combobox') return null;
+    const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+    const quiet = el.getAttribute('aria-hidden') === 'true' || parseFloat(cs.opacity) < 0.05 || r.height <= 1;
+    if (!quiet || (el.value || '') !== '') return null;
+    let n = el.parentElement;
+    for (let i = 0; i < 4 && n && n !== el.ownerDocument.body; i++, n = n.parentElement) {
+      const combo = n.querySelector('input[role=combobox], [role=combobox]');
+      if (combo && combo !== el) return combo;
+    }
+    return null;
   };
   // A button can belong to a form it sits outside of (form="id"): el.form knows, closest() does not.
   // Inside an open shadow root the <form> is around the host, so climb out host by host.
@@ -290,7 +352,10 @@ SNAPSHOT_JS = r"""
   };
   let n = 0, hasPassword = false;
   const candidates = [];
+  const twinRequired = new Set();  // visible comboboxes whose hidden twin carried the required mark
   all.forEach((el, order) => {
+    const combo = selectTwin(el);
+    if (combo) { if (el.required) twinRequired.add(combo); return; }
     const tag = el.tagName.toLowerCase();
     const type = (el.type || el.getAttribute('type') || '').toLowerCase();
     let box = el, viaLabel = false;
@@ -329,7 +394,7 @@ SNAPSHOT_JS = r"""
     const item = {
       ref, tag: clip(tag, maxAttr), type: clip(type, maxAttr), role: clip(el.getAttribute('role'), maxAttr),
       name: clip(labelOf(el), maxName),
-      required: !!(el.required || el.getAttribute('aria-required') === 'true'),
+      required: !!(el.required || el.getAttribute('aria-required') === 'true' || twinRequired.has(el)),
       disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
       autocomplete: clip(el.getAttribute('autocomplete'), maxAttr), in_form: inForm(el),
     };
@@ -348,6 +413,10 @@ SNAPSHOT_JS = r"""
         item.checked = el.checked;
         const group = clip(choiceGroup(el), maxName);
         if (group && group !== item.name) item.group = group;
+        if (choiceMembers(el).length > 1) {  // one option needed, not every option
+          item.required = false;
+          if (groupRequired(el)) item.group_required = true;
+        }
       }
       else if (type === 'file') item.value = Array.from(el.files || []).map(f => f.name).join(', ');
       else item.value = clip(el.value || chosenOf(el), 300);
