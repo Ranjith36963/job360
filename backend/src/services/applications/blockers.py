@@ -36,6 +36,7 @@ from src.services.applications import (
     spine,
     test_marker,
 )
+from src.services.browser_agent import learned
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -220,6 +221,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         d["questions"] = asks._json_or(d.get("questions"), [])
         open_asks.setdefault(int(d["application_id"]), []).append(d)
     queued_at = await spine.queued_at_by_app(db, user_id, None)
+    hosts = await learned.blocked_hosts(db, user_id) if queued_at else frozenset()
     position = {a: n for n, (a, _t) in enumerate(sorted(queued_at.items(), key=lambda kv: (_when(kv[1]), kv[0])), 1)}
     line = await spine.user_score_line(user_id)
     today_iso = (await spine.user_today(db, user_id)).isoformat()
@@ -297,7 +299,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 step = "submit" if s["swept"] else "check form"
                 out.append(_b("assistant_step", "assistant", step, yes["recorded_at"], {"event_id": yes["id"]}))
         if considering and app_id in queued_at:
-            browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {})
+            browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {}, hosts)
             if browser["kind"] == "own_browser":
                 out.append(_b("queued", "your_pc", "apply on the site", queued_at[app_id]))
             else:
