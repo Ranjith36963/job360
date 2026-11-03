@@ -14,10 +14,13 @@ Guardrails, each a reason to leave the application to the user exactly as before
 * no ``evidence`` (a block can carry no email ``source``: an email alone never closes anything);
 * ``page_host`` is not the site of the application's own ad link (``applications.job_url``);
 * the application is not ``considering``, has a receipt or a surviving ``applied``, or has a started
-  submit with no outcome (``kit.submit_unconfirmed``: it may have gone out).
+  submit with no outcome (``kit.submit_unconfirmed``: it may have gone out);
+* the owner said Send on it (any ``submit_approved``), or an ask to him is open on it (other than the one
+  this block just opened): it stays his to drop.
 
 ``undo`` is the user's one web action (``POST /applications/{id}/auto/undo``): a ``note`` whose
-``corrects_event_id`` is that ``withdrawn``, so the status replays back (append-only, M3).
+``corrects_event_id`` is that ``withdrawn``, so the status replays back (append-only, M3). Only a
+``withdrawn`` this module wrote is undone (``_our_close``); a caller's look-alike payload is not.
 """
 from __future__ import annotations
 
@@ -47,7 +50,9 @@ def _log(user_id: str, application_id: int, name: str, result: str, **extra: Any
     })
 
 
-async def _why_not(db: JobDatabase, user_id: str, application_id: int, stored: dict[str, Any]) -> str:
+async def _why_not(
+    db: JobDatabase, user_id: str, application_id: int, stored: dict[str, Any], asked_before: bool,
+) -> str:
     """The guardrail that keeps this application open, or "" when the AI may close it."""
     if stored.get("reason") != "posting_closed" or stored.get("evidence") not in blocked.CLOSED_EVIDENCE:
         return "no_proof"
@@ -61,15 +66,38 @@ async def _why_not(db: JobDatabase, user_id: str, application_id: int, stored: d
         return "applied"
     if await kit.submit_unconfirmed(db, user_id, application_id):
         return "submit_started"
+    # The owner said Send on this job (a `submit_approved`, web or chat): it stays his to drop, as before.
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events WHERE user_id = ? AND application_id = ? "
+        "AND event_type = 'submit_approved' LIMIT 1",
+        (user_id, application_id),
+    )
+    if await cur.fetchone() is not None:
+        return "owner_approved"
+    if asked_before:
+        return "open_ask"
     return ""
+
+
+async def has_open_ask(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """An ask to the owner is open on this job. Read BEFORE the block opens its own ask: the one-ask-per-job
+    merge folds an older ask into the block's, so it cannot be told apart afterwards."""
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_asks WHERE user_id = ? AND application_id = ? AND answered_at IS NULL "
+        "AND withdrawn_at IS NULL LIMIT 1",
+        (user_id, application_id),
+    )
+    return await cur.fetchone() is not None
 
 
 async def close_if_proven(
     db: JobDatabase, user: CurrentUser, application_id: int, block_event_id: int, stored: dict[str, Any],
+    *, asked_before: bool,
 ) -> Optional[str]:
     """Inside ``blocked.record``'s transaction (the row is locked): close the application when every
-    guardrail passes. Returns the warning the assistant reads, or None when the user still decides."""
-    why = await _why_not(db, user.id, application_id, stored)
+    guardrail passes. ``asked_before``: an ask to the owner was open before this block (``has_open_ask``).
+    Returns the warning the assistant reads, or None when the user still decides."""
+    why = await _why_not(db, user.id, application_id, stored, asked_before)
     if why:
         _log(user.id, application_id, "posting_auto_close_skipped", why)
         return None
@@ -113,6 +141,30 @@ def _payload(raw: Any) -> dict[str, Any]:
     return p if isinstance(p, dict) else {}
 
 
+async def _our_close(db: JobDatabase, user_id: str, application_id: int, ev: dict[str, Any]) -> bool:
+    """``ev`` is a ``withdrawn`` this module wrote: ``closed_by`` alone is caller-writable text, so its
+    ``blocked_event_id`` must name a real ``blocked`` posting_closed WITH evidence on this application, and
+    the ``withdrawn`` must come right after that block (``close_if_proven`` writes it in the same transaction)."""
+    p = _payload(ev["payload"])
+    block_id = p.get("blocked_event_id")
+    if ev["event_type"] != "withdrawn" or p.get("closed_by") != CLOSED_BY or not isinstance(block_id, int):
+        return False
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE id = ? AND user_id = ? AND application_id = ? "
+        "AND event_type = 'blocked'",
+        (block_id, user_id, application_id),
+    )
+    row = await cur.fetchone()
+    block = _payload(row["payload"]) if row else {}
+    if block.get("reason") != "posting_closed" or block.get("evidence") not in blocked.CLOSED_EVIDENCE:
+        return False
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events WHERE user_id = ? AND application_id = ? AND id > ? AND id < ? LIMIT 1",
+        (user_id, application_id, block_id, int(ev["id"])),
+    )
+    return await cur.fetchone() is None
+
+
 async def undo(db: JobDatabase, user: CurrentUser, application_id: int) -> dict[str, Any]:
     """The user's web Undo: correct the newest surviving status event when it is Job360's own close.
     409 when it is not (the user, or a later event, moved the application since)."""
@@ -123,7 +175,7 @@ async def undo(db: JobDatabase, user: CurrentUser, application_id: int) -> dict[
         if await cur.fetchone() is None:
             raise SpineError(404, "application not found")
         ev = await _newest_status_event(db, user.id, application_id)
-        if ev is None or ev["event_type"] != "withdrawn" or _payload(ev["payload"]).get("closed_by") != CLOSED_BY:
+        if ev is None or not await _our_close(db, user.id, application_id, ev):
             _log(user.id, application_id, "auto_undo_refused", "nothing_to_undo")
             raise SpineError(409, NOTHING_TO_UNDO)
         result = await spine.append_event(

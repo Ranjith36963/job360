@@ -537,6 +537,12 @@ async def record(
         await db._db.execute(
             "SELECT id FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
         )
+        proven = event_type == "blocked" and bool(stored.get("evidence"))
+        if proven:
+            from src.services.applications import auto_close  # noqa: PLC0415 - auto_close records `unblocked` here
+
+            # Read before this block opens (or merges into) an ask: an older ask to the owner keeps the job his.
+            asked_before = await auto_close.has_open_ask(db, user.id, application_id)
         stored = await before_append(db, user, application_id, event_type, stored)
         result = await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=event_type,
@@ -547,10 +553,10 @@ async def record(
         await after_append(db, user, application_id, event_type, stored)
         if event_type == "blocked" and stored["reason"] == ALREADY_APPLIED:
             await _leave_queue(db, user, application_id)
-        if event_type == "blocked" and stored.get("evidence"):
-            from src.services.applications import auto_close  # noqa: PLC0415 - auto_close records `unblocked` here
-
-            closed = await auto_close.close_if_proven(db, user, application_id, int(result["event_id"]), stored)
+        if proven:
+            closed = await auto_close.close_if_proven(
+                db, user, application_id, int(result["event_id"]), stored, asked_before=asked_before,
+            )
             if closed is not None:
                 result = {**result, "status": "withdrawn", "warnings": [*result.get("warnings", []), closed]}
     return result
