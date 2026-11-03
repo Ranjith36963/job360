@@ -2735,7 +2735,8 @@ export interface paths {
         put?: never;
         /**
          * Release
-         * @description Give a claimed person back (409 unless this session holds the live claim).
+         * @description Give a claimed person back, or close a hunt or people task: ``done`` answers the count, any other reason
+         *     records it failed (409 unless this session holds the live claim).
          */
         post: operations["release_api_own_browser_release_post"];
         delete?: never;
@@ -7930,6 +7931,8 @@ export interface components {
         OwnBrowserTaskItemOut: {
             /** Application Id */
             application_id?: number | null;
+            /** Application Ids */
+            application_ids?: number[] | null;
             browser: components["schemas"]["TaskBrowserOut"];
             claim?: components["schemas"]["TaskClaimOut"] | null;
             /** Contact Id */
@@ -7948,9 +7951,11 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "linkedin_outreach" | "application";
+            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read";
             /** Linkedin State */
             linkedin_state?: string | null;
+            /** Max People */
+            max_people?: number | null;
             /** Message Id */
             message_id?: number | null;
             /**
@@ -9300,7 +9305,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other";
+            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done";
             /** Session */
             session: string;
             /** Task Id */
@@ -9308,10 +9313,18 @@ export interface components {
         };
         /** ReleaseOut */
         ReleaseOut: {
+            /** Count */
+            count?: number | null;
+            /** Failures In Row */
+            failures_in_row?: number | null;
+            /** Outcome */
+            outcome?: ("done" | "failed") | null;
             /** Reason */
             reason: string;
             /** Released */
             released: boolean;
+            /** Summary */
+            summary?: string | null;
             /** Task Id */
             task_id: string;
         };

@@ -10343,6 +10343,20 @@
             ],
             "title": "Application Id"
           },
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "browser": {
             "$ref": "#/components/schemas/TaskBrowserOut"
           },
@@ -10380,7 +10394,9 @@
           "kind": {
             "enum": [
               "linkedin_outreach",
-              "application"
+              "application",
+              "linkedin_search",
+              "profile_read"
             ],
             "title": "Kind",
             "type": "string"
@@ -10395,6 +10411,17 @@
               }
             ],
             "title": "Linkedin State"
+          },
+          "max_people": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max People"
           },
           "message_id": {
             "anyOf": [
@@ -13813,7 +13840,8 @@
               "draft_rewritten",
               "already_pending",
               "profile_not_found",
-              "other"
+              "other",
+              "done"
             ],
             "title": "Reason",
             "type": "string"
@@ -13839,6 +13867,43 @@
       },
       "ReleaseOut": {
         "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "failures_in_row": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failures In Row"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "done",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
           "reason": {
             "title": "Reason",
             "type": "string"
@@ -13846,6 +13911,17 @@
           "released": {
             "title": "Released",
             "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           },
           "task_id": {
             "title": "Task Id",
@@ -28454,7 +28530,7 @@
     },
     "/api/own-browser/release": {
       "post": {
-        "description": "Give a claimed person back (409 unless this session holds the live claim).",
+        "description": "Give a claimed person back, or close a hunt or people task: ``done`` answers the count, any other reason\nrecords it failed (409 unless this session holds the live claim).",
         "operationId": "release_api_own_browser_release_post",
         "parameters": [
           {
