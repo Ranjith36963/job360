@@ -74,7 +74,10 @@ describe("New connections", () => {
     const onReport = vi.fn();
     render(<JobCards open={[]} onChanged={async () => {}} onReport={onReport} />);
     const group = await screen.findByTestId("new-connections");
-    expect(group).toHaveTextContent("New connections");
+    expect(group).toHaveTextContent("Network");
+    expect(within(group).getByTestId("network-counts")).toHaveTextContent("1 drafted · 1 waiting on you"); // from the rows read
+    expect(group).not.toHaveTextContent(/sent today/i); // waits for a server read
+    expect(group).toHaveTextContent(/daily limit on LinkedIn sends/); // no limit passed here: no invented number
     expect(within(group).getByTestId("person-1")).toHaveTextContent("Hi from 1");
     expect(within(group).queryByTestId("person-2")).not.toBeInTheDocument();
     // Person 2 stays inside their job's card.

@@ -460,9 +460,10 @@ describe("JobCard", () => {
 
   it("shows the pace line at the top of Outreach", () => {
     const c = card([ask("Notice period?")], { people: [reach(4)] });
-    render(<JobCard card={c} onChanged={onChanged} />);
+    render(<JobCard card={c} onChanged={onChanged} linkedinPerDay={35} />);
     const pace = screen.getByTestId("outreach-pace-7");
-    expect(pace).toHaveTextContent("LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 10 LinkedIn sends a day.");
+    // The number is the user's own linkedin_sends_per_day, not a fixed 10.
+    expect(pace).toHaveTextContent("LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 35 LinkedIn sends a day.");
     expect(within(screen.getByTestId("section-outreach-7")).getByTestId("outreach-pace-7")).toBe(pace);
   });
 

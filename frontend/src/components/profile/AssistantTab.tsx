@@ -52,6 +52,7 @@ import { ALWAYS_ASKS, LINE_SWITCH_LABEL, quotaText, scoreLineText } from "@/lib/
 import { cn } from "@/lib/utils";
 import { PauseButton } from "@/components/layout/TopBar";
 import { SettingRequestCard } from "@/components/needs-you/SettingRequestCard";
+import { OutreachLimitRows } from "./OutreachLimitRows";
 import { BatchRuleRows, LABEL, NUMBOX, Row, applyModeText, modeOf } from "./BatchRuleRows";
 import { PauseUntil } from "./PauseUntil";
 
@@ -384,6 +385,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
         {perms && (
           <Section title="Limits">
             <BatchRuleRows part="limits" view={view} busy={busy} save={save} saveMany={saveMany} />
+            <OutreachLimitRows view={view} busy={busy} save={save} />
           </Section>
         )}
         {!perms && (
