@@ -1,4 +1,5 @@
 import type { ApplicationDetail, Ask, Contact } from "@/lib/api";
+import { openYouItems } from "@/lib/open-items";
 
 /**
  * Needs you, one card per job (owner decision 2026-10-24). Pure helpers that turn the open asks
@@ -8,7 +9,7 @@ import type { ApplicationDetail, Ask, Contact } from "@/lib/api";
 
 export type BlockerKind = "captcha" | "upload" | "login" | "safety";
 // "structured": an ask that lists its form questions (one row each, with where each answer came from).
-export type RowKind = BlockerKind | "outreach" | "yes_no" | "question" | "structured";
+export type RowKind = BlockerKind | "outreach" | "yes_no" | "question" | "structured" | "already_applied";
 const BLOCKER_KINDS: readonly string[] = ["captcha", "upload", "login", "safety"];
 
 const BLOCKER_RULES: [BlockerKind, RegExp][] = [
@@ -22,7 +23,12 @@ const YES_NO = /^(?:do|does|did|are|is|was|were|can|could|will|would|have|has|ha
 // "...? Yes or No?" / "Reply yes or no." at the end of a longer question.
 const ENDS_YES_NO = /\byes or no[?.]?\s*$/i;
 
+/** The question the server asks when the site says the user already applied (backend asks.py
+ *  ALREADY_APPLIED_QUESTION). It gets two buttons, never a text box. */
+export const ALREADY_APPLIED_QUESTION = "The site says you already applied. Mark it applied?";
+
 export function rowKind(ask: Ask): RowKind {
+  if (ask.question === ALREADY_APPLIED_QUESTION && !ask.questions?.length) return "already_applied";
   // The kind the assistant stored wins; only an older ask (kind "") is read from its words.
   if (BLOCKER_KINDS.includes(ask.kind ?? "")) return ask.kind as BlockerKind;
   if (ask.questions?.length) return "structured";
@@ -106,6 +112,8 @@ export type JobCardData = {
   ownBrowser: boolean;
   /** The employer's "we received your application" email while the job is not applied: the user says whether it went. */
   confirmSent?: { subject: string; receivedAt: string } | null;
+  /** Things only the user can still do on this job (Mark Applied warns with them). */
+  openItems?: string[];
 };
 
 /** Open asks grouped by job (one card each), the rest (no job) left over. A test job's asks never
@@ -152,6 +160,8 @@ export function buildCard(
     ownBrowserCount: sorted.filter(needsOwnBrowser).length,
     ownBrowser: sorted.some(needsOwnBrowser),
     confirmSent: confirmSentOf(detail),
+    // The "mark it applied" step is the very thing the row's button does: not listed as still open.
+    openItems: openYouItems(detail.blockers?.filter((b) => b.label !== "mark it applied")),
   };
 }
 
