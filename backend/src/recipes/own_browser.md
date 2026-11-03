@@ -14,9 +14,11 @@ Print this checklist and tick each step:
    false: tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session` (one person
    the user just clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`).
    `empty`, `wait`, `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead;
-   call check_submit right before Submit (record_application refuses without its `submit`); pass `browser`
-   "own_browser" on every form event, `submit_attempted`, `blocked` and `record_application`. `kind`
-   linkedin_search or profile_read: the **Hunt** or **People** part below instead.
+   pass `browser` "own_browser" on every form event, `submit_attempted`, `blocked` and `record_application`.
+   Job360 had marked it blocked and the page loaded clean here (no CAPTCHA, no sign-in wall): `record_event`
+   `unblocked` {resolution: "own_browser"}, then check_submit as usual right before Submit (record_application
+   refuses without its `submit`). A CAPTCHA or sign-in here: `hold_released` {reason: blocked}, `ask_user`, STOP.
+   `kind` linkedin_search or profile_read: the **Hunt** or **People** part below instead.
    Open the person's `linkedin_url` in the own browser. **Done when** you hold one person.
 2. **Read their state** on the page: a `1st` badge or a Message button with no Connect = `connected`; Pending =
    `pending`; Connect (also under More) = `not_connected`. Save it: `update_contact(contact_id, linkedin_state=...)`.
@@ -32,8 +34,7 @@ Print this checklist and tick each step:
    in one line (`too_soon`: wait, then ask again; `needs_claim`: take the person first). Release `other`, next.
 5. **Send exactly this text.** Not connected: Connect, Add a note, paste, Send. Connected: Message, paste, Send.
    Paste it as saved; never add, cut or change a word. LinkedIn's weekly invitation limit (or any limit page): do
-   not send; release `weekly_limit`, `ask_user` once, STOP the run. A CAPTCHA or sign-in wall
-   now: release as in step 2.
+   not send; release `weekly_limit`, `ask_user` once, STOP the run. A CAPTCHA or sign-in wall now: release as in step 2.
 6. **Record it at once:** `record_event` `outreach_sent` with contact_id and channel "linkedin" (no job: rules,
    Outreach). A note: then `update_contact(contact_id, linkedin_state="pending")`. **Done when** the mark is saved.
 7. **A human gap.** One person at a time, never two tabs. Wait one to three minutes (never under 120 seconds)
@@ -62,9 +63,8 @@ page, CAPTCHA or limit page: never solve it or type a password; release `login_w
 failure: release `other`. Never leave a task you took without a release.
 
 **Other assistants** (web research). Every detail below comes from search summaries and none is confirmed.
-ChatGPT Atlas was OpenAI's Mac-only browser; it was
-reported discontinued on 9 Aug 2026 and its agent moved to the ChatGPT desktop app, a Chrome extension and a cloud
-browser. Gemini in Chrome is built into Chrome; its auto browse can use your signed-in sites, and it hands over to you
-for payments, terms and account creation; it needs Google AI Pro or Ultra and is mainly US-only. Whether either can
-call Job360's MCP tools, and how either handles CAPTCHAs: not confirmed. Any assistant that can use this playbook and
-Job360's tools may take the queue.
+ChatGPT Atlas was OpenAI's Mac-only browser; it was reported discontinued on 9 Aug 2026 and its agent moved to the
+ChatGPT desktop app, a Chrome extension and a cloud browser. Gemini in Chrome is built into Chrome; its auto browse
+can use your signed-in sites, and it hands over to you for payments, terms and account creation; it needs Google AI
+Pro or Ultra and is mainly US-only. Whether either can call Job360's MCP tools, and how either handles CAPTCHAs:
+not confirmed. Any assistant that can use this playbook and Job360's tools may take the queue.
