@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from src.core import settings
+from src.services.applications import asks as asks_service
 from src.services.applications import inbox_items, outcome_suggestions, test_marker
 from src.services.profile import ask_once, setting_requests
 
@@ -95,6 +96,8 @@ async def _open_job_asks(db: JobDatabase, user_id: str, tests: set[int]) -> tupl
             continue
         closed = row["app_status"] in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
         if closed and not str(row["context"] or "").startswith("proof_missing:"):
+            continue
+        if asks_service.answered_by_applying(row, row["app_status"]):  # "I applied" answered it; the page closes it
             continue
         tied.append((int(row["id"]), int(row["application_id"])))
     return tied, general

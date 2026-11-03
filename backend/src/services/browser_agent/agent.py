@@ -64,8 +64,10 @@ from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blo
 from src.services.browser_agent.sites import (
     MIN_LABELLED_FIELDS,
     account_step,
+    already_applied_said,
     greenhouse_embed_url,
     is_honeypot,
+    job_ad_page,
     looks_like_application,
     outcome_for,
     site_for,
@@ -1047,7 +1049,18 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
         if blocker.from_text:
             out[STOP_KEY] = outcomes.TEXT_STOP
+    elif not s.submitted_on[1] and already_applied_said(text):
+        # The site says the user already applied (never after this browser's own submit: that is the
+        # confirmation path). The job leaves the queue and waits on the user's one question (blocked.py).
+        out.update(status="needs_you", reason=ALREADY_APPLIED, detail=ALREADY_APPLIED_DETAIL)
     return out
+
+
+ALREADY_APPLIED = "already_applied"
+ALREADY_APPLIED_DETAIL = (
+    "This site says you already applied for this job. Job360's browser stops here and never tries it again: "
+    "the user says whether to mark it applied."
+)
 
 
 CAPTCHA_DETAIL = (
@@ -1210,6 +1223,22 @@ def _opener_allowed(s: Optional[Session]) -> bool:
     return _page_key(url) not in s.typed_on and not _signed_in_for(s, url)
 
 
+def _known_ad(s: Optional[Session], facts: dict[str, Any]) -> bool:
+    """The page is a known applicant system's job ad (``sites.job_ad_page``: Oracle HCM's job page, BambooHR's
+    careers page), the server's own facts allow an opener (nothing put into a field of this page, no saved
+    sign-in for the site), and the page asks for nothing: no visible required field, no visible field holding a
+    value but a link to the same site. A chat widget's file box or a cookie banner's ticks do not count here
+    (2026-11-02: Oracle's job page carries a hidden chat file box and a hidden "Copy Link" box). A fact missing
+    reads as a form (the safe side)."""
+    if not _opener_allowed(s) or s is None:
+        return False
+    try:
+        url = str(_live_page(s).url or "")
+    except BrowserError:
+        return False
+    return job_ad_page(url) and facts.get("required_shown") is False and facts.get("shown_filled") is False
+
+
 async def _kind(loc: Any, s: Optional[Session] = None) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
     # Still the job ad. The server decides (_opener_allowed: nothing typed on this page, no saved sign-in for
@@ -1227,12 +1256,13 @@ async def _kind(loc: Any, s: Optional[Session] = None) -> str:
     # A saved sign-in may reach this site (or that is not known): every apply-verb button is the final submit,
     # so only check_submit's `submit` lets it through (owner decision on #1227).
     site_knows_user = _site_knows_user(s)
+    known_ad = _known_ad(s, facts)
 
     def kind_of(name: str) -> str:
         return control_kind(
             facts.get("tag", ""), facts.get("type", ""), name, facts.get("autocomplete", ""),
             bool(facts.get("in_form")), facts.get("role", ""), answers,
-            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad, site_knows_user,
+            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad, site_knows_user, known_ad,
         )
 
     kind = kind_of(str(facts.get("name") or ""))

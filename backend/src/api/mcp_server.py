@@ -1916,7 +1916,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
+        furthest stage wins (corrects_event_id moves back). A repeat `applied` + `source`
         is proof, not a 2nd.
         `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
@@ -1936,10 +1936,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
-        manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
-        retried|user_did_it|skipped, note?}.
+        manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail}, then stop;
+        unblocked {resolution: retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
-        process_log {} = your work log (hidden from the user's timeline); unqueued {reason?};
+        process_log {} = your hidden work log; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
