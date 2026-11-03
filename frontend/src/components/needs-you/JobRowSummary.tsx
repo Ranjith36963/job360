@@ -7,6 +7,7 @@ import { cameFrom, nextStep, oldestAt, type RowFacts } from "@/lib/job-row";
 import type { JobHeader } from "@/lib/needs-you-items";
 import { heldText } from "@/lib/ready-to-send";
 import { cn, relativeTime } from "@/lib/utils";
+import { useAppHref } from "@/lib/app-href";
 
 // A job's folded row on Needs you: one scannable status line (owner 2026-10-27). Every value is
 // untrusted text (an assistant or a job site wrote it): React text only, never HTML.
@@ -54,6 +55,7 @@ export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
   /** The title link's test id (the loading row keeps the old `title-link-<id>`). */
   linkTestid: string;
 }) {
+  const appLink = useAppHref();
   const company = card?.company || h.company;
   const role = card?.role || h.role;
   const step = nextStep(h);
@@ -61,7 +63,7 @@ export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
   const from = cameFrom(facts);
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", COLS)}>
-      <Link href={`/applications/${h.id}`} data-testid={linkTestid} className="min-w-0 truncate text-sm underline-offset-2 hover:underline">
+      <Link href={appLink(h.id)} data-testid={linkTestid} className="min-w-0 truncate text-sm underline-offset-2 hover:underline">
         <span className="font-semibold">{company || "Unknown company"}</span>{" "}
         <span className="text-muted-foreground">{role || "Untitled role"}</span>
       </Link>

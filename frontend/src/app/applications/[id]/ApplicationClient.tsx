@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { BackBar } from "@/components/applications/BackBar";
 import { toast } from "sonner";
 import {
   getApplication,
@@ -97,7 +96,7 @@ export function buildEyebrow(detail: ApplicationDetail): string {
 /** The application record: status, the durable job snapshot (spec R2 —
  * survives the catalog purging the live row), every artifact version, the
  * event timeline, receipts, and the fit verdict. */
-export function ApplicationClient({ applicationId }: { applicationId: number }) {
+export function ApplicationClient({ applicationId, from, show }: { applicationId: number; from?: string | string[]; show?: string | string[] }) {
   const [detail, setDetail] = useState<ApplicationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
@@ -249,12 +248,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
-      <Link
-        href="/applications"
-        className="flex items-center gap-1.5 self-start py-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> All applications
-      </Link>
+      <BackBar applicationId={detail.id} from={from} show={show} company={detail.job.job_company} title={detail.job.job_title} />
 
       {/* Full-width header (owner decision, 2026-09-25): back link, job title,
           company only — every action and status control moved into the
