@@ -1349,6 +1349,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         referred_by_contact_id: Optional[int] = None,
         recipient: str = "",
         gmail_message_id: str = "",
+        browser: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so, or an
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
@@ -1374,6 +1375,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Job360's browser uploaded one. A named id that is not the uploaded file gets a `*_mismatch` warning.
         `applied_at` is ISO-8601 with a timezone. `request_id` (your own id for this submit)
         makes a retry safe: the same one returns the first receipt (`already_existed` true).
+        `browser` job360|own_browser|manual.
         """
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         note, confirmation = _unfence_in(note), _unfence_in(confirmation)
@@ -1385,7 +1387,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
                 cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
                 request_id=request_id, referred_by_contact_id=referred_by_contact_id,
-                recipient=recipient, gmail_message_id=gmail_message_id,
+                recipient=recipient, gmail_message_id=gmail_message_id, browser=browser,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1931,9 +1933,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
-        is proof, not a 2nd.
+        is proof.
         `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
-        `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
         Outreach: `contact_id` + `channel` with outreach_sent (Sent id as `source`),
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
@@ -1955,7 +1956,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         unblocked {resolution: retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {} = hidden work log; unqueued {reason?};
-        answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
+        answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events.
+        Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
         if contact_id is not None:

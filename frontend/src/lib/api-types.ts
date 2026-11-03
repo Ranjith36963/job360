@@ -9093,6 +9093,8 @@ export interface components {
             answers?: components["schemas"]["ReceiptAnswer"][];
             /** Applied At */
             applied_at?: string | null;
+            /** Browser */
+            browser?: string | null;
             /**
              * Channel
              * @default
@@ -9143,6 +9145,11 @@ export interface components {
              * @default
              */
             answers_from: string;
+            /**
+             * Browser
+             * @default unknown
+             */
+            browser: string;
             /** Channel */
             channel: string;
             /**
@@ -10448,6 +10455,12 @@ export interface components {
             };
             /** Blocked Total */
             blocked_total: number;
+            /** By Browser */
+            by_browser?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
             /** Forms Filled */
             forms_filled: number;
             /** Host */

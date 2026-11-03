@@ -14,7 +14,8 @@ Print this checklist and tick each step:
    false: tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session` (one person
    the user just clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`).
    `empty`, `wait`, `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead;
-   call check_submit right before Submit (record_application refuses without its `submit`). `kind`
+   call check_submit right before Submit (record_application refuses without its `submit`); pass `browser`
+   "own_browser" on every form event, `submit_attempted`, `blocked` and `record_application`. `kind`
    linkedin_search or profile_read: the **Hunt** or **People** part below instead.
    Open the person's `linkedin_url` in the own browser. **Done when** you hold one person.
 2. **Read their state** on the page: a `1st` badge or a Message button with no Connect = `connected`; Pending =

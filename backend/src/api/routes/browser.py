@@ -40,6 +40,7 @@ from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, req
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.services.applications import spine as applications_spine
+from src.services.applications import which_browser
 from src.services.browser_agent import agent as browser_agent
 from src.services.browser_agent import outcome as browser_outcome
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -98,9 +99,12 @@ def _gate_and_files(
     async def _mark() -> None:
         try:
             async with _db() as db:
-                await applications_route.record_event(
-                    application_id, applications_route.RecordEventRequest(event_type="submit_attempted"), db, user
-                )
+                mark = applications_route.RecordEventRequest(event_type="submit_attempted")
+                said = which_browser.SERVER_SAYS.set(which_browser.JOB360)  # this click is Job360's browser's
+                try:
+                    await applications_route.record_event(application_id, mark, db, user)
+                finally:
+                    which_browser.SERVER_SAYS.reset(said)
         except HTTPException as exc:
             if exc.status_code != 409:
                 raise
@@ -500,7 +504,7 @@ async def _record_refill(
 ) -> None:
     """``form_filled`` {by: refill}: the newest fill's own record when every step held (the same answers, so the
     user's yes stays good), else that record without its answers (a form the user has not seen: the yes is stale)."""
-    payload = {**(last_fill or {}), "form_url": form_url, "by": by}
+    payload = {**(last_fill or {}), "form_url": form_url, "by": by, "browser": "job360"}  # Job360's own browser
     payload.setdefault("fields_count", int(done["steps_ok"]))
     if done["steps_failed"]:
         payload.pop("answers", None)

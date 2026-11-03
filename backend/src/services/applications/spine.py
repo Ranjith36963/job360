@@ -1756,6 +1756,22 @@ async def frozen_cv_id(
     return int(latest["id"]) if latest else None
 
 
+async def _submit_browser(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The ``browser`` named on the newest ``submit_attempted`` after the last ``applied`` (None: none named)."""
+    from src.services.applications import which_browser  # noqa: PLC0415 - which_browser imports spine
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+        "AND event_type = 'submit_attempted' AND id > COALESCE((SELECT MAX(id) FROM application_events "
+        "WHERE user_id = ? AND application_id = ? AND event_type = 'applied'), 0) ORDER BY id DESC LIMIT 1",
+        (user_id, application_id, user_id, application_id),
+    )
+    row = await cur.fetchone()
+    raw = dict(row)["payload"] if row is not None else None
+    found = which_browser.read(json.loads(raw) if isinstance(raw, str) else raw)
+    return None if found == which_browser.UNKNOWN else found
+
+
 async def record_receipt(
     db: JobDatabase,
     *,
@@ -1775,6 +1791,7 @@ async def record_receipt(
     recipient: str = "",
     gmail_message_id: str = "",
     open_at_submit: Optional[list[str]] = None,
+    browser: Optional[str] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1826,6 +1843,8 @@ async def record_receipt(
         idem_body["recipient"] = recipient
     if gmail_message_id:
         idem_body["gmail_message_id"] = gmail_message_id
+    if browser:
+        idem_body["browser"] = browser
     from src.services.applications import email_channel  # noqa: PLC0415 - email_channel imports spine
 
     recipient = email_channel.clean_recipient(recipient)
@@ -1861,6 +1880,8 @@ async def record_receipt(
     from src.services.applications import submit_clearance  # noqa: PLC0415 - submit_clearance imports spine
 
     clearance = await submit_clearance.required(db, user_id, application_id, recorded_by)
+    if browser is None:  # owner 2026-11-03: not said = the browser of the click since the last applied
+        browser = await _submit_browser(db, user_id, application_id)
 
     # The referrer must be the caller's own contact linked to THIS application. One message for
     # unknown, foreign and other-job contacts, so it is no existence oracle. (Not via contacts:
@@ -2049,6 +2070,7 @@ async def record_receipt(
                     "receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate,
                     # Owner rule 2026-10-31: the user's own Mark Applied with items open stamps them.
                     **({"open_at_submit": list(open_at_submit)} if open_at_submit else {}),
+                    **({"browser": browser} if browser else {}),
                 },
                 occurred_at=sent_at, recorded_by=recorded_by,
             )
@@ -2064,6 +2086,7 @@ async def record_receipt(
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
                 "possible_duplicate": possible_duplicate, "answers_from": answers_from, "files": files,
                 "recipient": recipient, "gmail_message_id": gmail_message_id,
+                "browser": browser or "unknown",
                 "already_existed": False,
                 "referred_by_contact_id": referred_by_contact_id,
             }

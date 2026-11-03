@@ -13219,6 +13219,18 @@
             ],
             "title": "Applied At"
           },
+          "browser": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser"
+          },
           "channel": {
             "default": "",
             "maxLength": 100,
@@ -13312,6 +13324,11 @@
           "answers_from": {
             "default": "",
             "title": "Answers From",
+            "type": "string"
+          },
+          "browser": {
+            "default": "unknown",
+            "title": "Browser",
             "type": "string"
           },
           "channel": {
@@ -17463,6 +17480,16 @@
           "blocked_total": {
             "title": "Blocked Total",
             "type": "integer"
+          },
+          "by_browser": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "title": "By Browser",
+            "type": "object"
           },
           "forms_filled": {
             "title": "Forms Filled",

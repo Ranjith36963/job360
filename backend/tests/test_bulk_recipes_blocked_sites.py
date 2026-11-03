@@ -166,6 +166,7 @@ async def test_sites_view_counts_per_host_and_nothing_else(authenticated_async_c
         assert sites["jobs.alpha.example"] == {
             "host": "jobs.alpha.example", "n": 2, "forms_filled": 2, "applied": 1,
             "blocked": {"captcha": 1}, "blocked_total": 1,
+            "by_browser": {"unknown": {"filled": 2, "blocked": 1, "submitted": 1}},  # none said which browser
         }
         # a blocked with no page_host falls back to the application's form host
         assert sites["careers.beta.example"]["blocked"] == {"site_limit_reached": 1}

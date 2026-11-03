@@ -65,6 +65,7 @@ from src.services.applications import (
     queue_preflight,
     spine,
     submit_clearance,
+    which_browser,
 )
 from src.services.applications import evidence as evidence_service
 from src.services.applications import inbox_items as inbox_items_service
@@ -352,6 +353,8 @@ class RecordApplicationReceiptRequest(BaseModel):
     # newest email_drafted when channel is email) and the sent message's Gmail id ('' = not given).
     recipient: str = Field("", max_length=320)
     gmail_message_id: str = Field("", max_length=300)
+    # Owner 2026-11-03: which browser sent it (which_browser.BROWSERS); None = the newest submit_attempted's.
+    browser: Optional[str] = Field(None, max_length=20)
 
     def clamp_fields_filled(self) -> dict[str, Any]:
         cap = settings.APPLICATION_RECEIPT_FIELDS_MAX_BYTES
@@ -1233,6 +1236,7 @@ class RecordApplicationReceiptResponse(BaseModel):
     # Slice 31 - an email application's recipient and Gmail message id ('' = not an email / not given).
     recipient: str = ""
     gmail_message_id: str = ""
+    browser: str = "unknown"  # which_browser.BROWSERS; "unknown" = not said and no submit_attempted named one
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
     referred_by_contact_id: Optional[int] = None
@@ -2178,6 +2182,8 @@ class StatsSiteOut(BaseModel):
     applied: int
     blocked: dict[str, int]
     blocked_total: int
+    # Owner 2026-11-03: {browser: {filled, blocked, submitted}} (which_browser.BROWSERS).
+    by_browser: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 class StatsSitesOut(BaseModel):
@@ -3980,6 +3986,8 @@ async def _record_event(
         payload = spine.validate_outcome_payload(body.event_type, payload)
         payload = spine.validate_auto_email_payload(body.event_type, payload)
         payload = interview_payloads.validate(body.event_type, payload)
+        # Owner 2026-11-03: which browser did it - checked here, so every event validator below never sees it.
+        payload, browser = which_browser.split(user.id, application_id, body.event_type, payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
@@ -4007,7 +4015,9 @@ async def _record_event(
             await _check_queue_event(db, user, application_id, body.event_type, payload, body.corrects_event_id)
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             # S3: closed payloads + who may write which (the MCP tool inherits this).
-            payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
+            payload = which_browser.stamp(
+                await kit_service.check_kit_event(db, user, application_id, body.event_type, payload), browser
+            )
         if body.event_type in outcome_suggestions.EVENT_TYPES:
             # Feature 9: a suggestion never moves status; checks + dedupe live in the service,
             # in the ROUTE function, so the MCP record_event tool inherits them (M5).
@@ -4022,6 +4032,7 @@ async def _record_event(
             if body.corrects_event_id is not None or source is not None:
                 raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
             stored = blocked_service.check_payload(user, body.event_type, payload, detail)
+            stored = which_browser.stamp(stored, browser)
             return await blocked_service.record(
                 db, user, application_id, body.event_type, stored,
                 occurred_at=occurred_at, follow_up_on=follow_up_on_arg,
@@ -4283,6 +4294,7 @@ async def record_application_receipt(
             applied_at=applied_at, request_id=body.request_id,
             referred_by_contact_id=body.referred_by_contact_id,
             recipient=body.recipient, gmail_message_id=body.gmail_message_id,
+            browser=which_browser.resolve(user.id, application_id, body.browser) if body.browser else None,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
