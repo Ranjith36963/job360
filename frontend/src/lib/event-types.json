@@ -67,7 +67,8 @@
     "process_log",
     "autonomy_shadow",
     "submit_cleared",
-    "submit_cleared_used"
+    "submit_cleared_used",
+    "answer_verified"
   ],
   "process": [
     "process_log",

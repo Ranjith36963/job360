@@ -219,7 +219,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     elif f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
-    if f.people_hunt:  # the network hunt: once a day while the people hunt is on
+    if f.people_hunt:  # the network hunt: every NETWORK_EVERY_HOURS (hourly) while the people hunt is on
         last = f.stamps.get("network")
         failed = f.failures.get("network", 0)
         every = backoff_hours(failed) if failed > 0 else settings.NETWORK_EVERY_HOURS
@@ -305,6 +305,13 @@ async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime)
             got.add(duty)
     await db._db.commit()
     return got
+
+
+async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
+    """True while a run holds any duty claim (taken less than ``DUTY_CLAIM_MINUTES`` ago, not yet freed by
+    ``mark``). A claim row is user + duty + time only: it never says WHICH caller holds it (rule #12)."""
+    window = timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+    return any(k.startswith(RUNNING) and now - at < window for k, at in (await load_stamps(db, user_id)).items())
 
 
 def reach_key(application_id: int) -> str:

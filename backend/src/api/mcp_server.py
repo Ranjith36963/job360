@@ -1929,7 +1929,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
-        cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
+        cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
+        chat adds user_words (reply verbatim), asked;
         submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         email_drafted {to, subject, attachments, gmail_draft_id};
@@ -1940,7 +1941,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
-        process_log {} = your work log (hidden from the user's timeline); unqueued {reason?};
+        process_log {} = hidden work log; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
@@ -2580,9 +2581,11 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         not_email_channel, no_email, email_bounced, no_linkedin_url, already_sent, replied, application_closed,
         linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long, invite_limit_reached,
         linkedin_daily_cap_reached, too_soon, claimed_by_other_session, needs_claim, daily_outreach_cap_reached,
-        company_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via, unlinked_contact,
-        unsupported_numbers (a number or years claim the profile lacks: fix or ask), needs_owner_click.
-        Send: auto_mode, owner_clicked. `sent_today` / `daily_max` = email sends today vs the cap."""
+        company_cap_reached, network_hourly_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via,
+        unlinked_contact, unsupported_numbers (a number or years claim the profile lacks: fix or ask),
+        needs_owner_click.
+        Send: auto_mode, owner_clicked. `sent_today` (all sends today) splits into `job_sent_today` (a contact
+        with an application) and `network_sent_today`; the user's limits are get_profile `settings`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.outreach_check(contact_id, message_id, session, db, _user())

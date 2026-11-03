@@ -165,9 +165,11 @@ async def test_approved_with_no_key_and_no_record_is_flagged(authenticated_async
 
 
 @pytest.mark.asyncio
-async def test_verify_saves_the_essay_for_this_company_only_and_the_gate_clears(
+async def test_verify_approves_the_essay_for_this_job_only_and_the_gate_clears(
     authenticated_async_context, fixture_user_id
 ):
+    # Owner decision 2026-11-02 "A": Verify approves for THIS job only; nothing is saved for reuse
+    # (reuse is the "remember" press). Before, Verify saved the essay to the profile for the company.
     from src.services.profile.storage import load_profile
 
     async with authenticated_async_context() as client:
@@ -180,10 +182,8 @@ async def test_verify_saves_the_essay_for_this_company_only_and_the_gate_clears(
         )
         assert resp.status_code == 200, resp.text
         assert "unapproved" not in _codes(resp.json())
-        saved = [r for r in load_profile(fixture_user_id).user_info.answers if r.get("approved") is True]
-        assert [(r["question"], r["answer"], r["company"], r["topic"]) for r in saved] == [
-            (Q, ESSAY, "Certa", "why_company")
-        ]
+        stored = load_profile(fixture_user_id)
+        assert stored is None or not [r for r in stored.user_info.answers if r.get("approved") is True]
         assert await _gate_says_unapproved(fixture_user_id, app_id) is False
         # a fill typing the same essay as an approved answer stays clear
         await _fill(client, app_id, [{**WRITTEN, "source": "approved"}])
