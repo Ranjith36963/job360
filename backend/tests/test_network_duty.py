@@ -43,15 +43,15 @@ def test_never_done_is_due_with_the_daily_cap():
     assert _network(schedule.due_now(_facts(people_hunt=True), NOW)) == [
         {"duty": "network", "recipe": "reach", "max_people": settings.NETWORK_MAX_PER_RUN, "reason": "never_done"}
     ]
-    assert settings.NETWORK_MAX_PER_RUN == 10 and settings.NETWORK_EVERY_HOURS == 24
+    assert settings.NETWORK_MAX_PER_RUN == 5 and settings.NETWORK_EVERY_HOURS == 1  # owner 2026-11-02: 5 an hour
 
 
-def test_once_a_day_elapsed_time_not_slots():
-    ran = NOW - timedelta(hours=2)
+def test_once_an_hour_elapsed_time_not_slots():
+    ran = NOW - timedelta(minutes=20)
     answer = schedule.due_now(_facts(people_hunt=True, stamps={"network": ran}), NOW)
     assert _network(answer) == []
-    assert answer["next_due_at"]["network"] == (ran + timedelta(hours=24)).isoformat(timespec="seconds")
-    late = schedule.due_now(_facts(people_hunt=True, stamps={"network": NOW - timedelta(hours=25)}), NOW)
+    assert answer["next_due_at"]["network"] == (ran + timedelta(hours=1)).isoformat(timespec="seconds")
+    late = schedule.due_now(_facts(people_hunt=True, stamps={"network": NOW - timedelta(minutes=70)}), NOW)
     assert [d["reason"] for d in _network(late)] == ["interval_elapsed"]
 
 

@@ -153,27 +153,24 @@ async def test_an_assistant_created_country_is_a_draft_until_the_user_confirms_i
 async def test_a_drafted_citizen_row_is_not_a_work_country_until_the_web_confirms_it(
     authenticated_async_context, fixture_user_id
 ):
-    """An assistant-drafted AE row (citizen, no sponsorship needed), even sent with remember: true, is a guess:
-    it stays out of the visa work countries, the visa badge and the search brief until the user confirms it."""
+    """An assistant-drafted AE row (citizen, no sponsorship needed) is a guess: it stays out of the visa work
+    countries, the visa badge and the search brief until the user confirms it."""
     from src.api import dependencies as api_deps
-    from src.api.main import app
     from src.services.applications import visa
+    from src.services.profile import edits as profile_edits
     from src.services.profile.search_brief import build_search_brief
     from src.services.profile.storage import load_profile
 
     ae = {"country": "AE", "work_authorization": "citizen", "needs_sponsorship": False, "remote_ok": True}
     async with authenticated_async_context() as client:
         await _patch(client, _rtw(GB))
-        token = (await client.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
         app_id = await _bring(client, "AE")
         put = await client.put(f"/api/applications/{app_id}/visa", json={"visa_signal": "no_sponsorship", "visa_country": "AE"})
         assert put.status_code == 200, put.text
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
-    ) as agent:
-        edit = {**_rtw(GB, ae), "remember": True}
-        resp = await agent.patch("/api/profile", json={"edits": [edit]})
-        assert resp.status_code == 200, resp.text
+    # A drafted row as stored (the server's mark): how it got there is the stamp tests' job.
+    drafted_rtw = {"countries": [GB, {**ae, "set_by": "assistant"}]}
+    profile_edits.record_edits(fixture_user_id, "token:claude-code", [("user_info.right_to_work", drafted_rtw)],
+                               consent_paths=["user_info.right_to_work"])
     assert _rows(fixture_user_id)["AE"]["set_by"] == "assistant"
     db = await api_deps.get_db()
     assert await visa.user_work_countries(db, fixture_user_id) == ["GB"]
@@ -189,6 +186,34 @@ async def test_a_drafted_citizen_row_is_not_a_work_country_until_the_web_confirm
         assert (await client.get(f"/api/applications/{app_id}")).json()["visa"]["needs_sponsorship"] is False
         confirmed = load_profile(fixture_user_id).user_info.right_to_work
         assert [r["country"] for r in build_search_brief(confirmed)["rows"]] == ["AE"]
+
+
+@pytest.mark.asyncio
+async def test_a_row_the_user_said_to_remember_is_theirs_not_a_draft(authenticated_async_context, fixture_user_id):
+    """The setup interview: the assistant saves the user's own places with remember: true. Those rows are the
+    user's (they count for the search brief); a drafted row sent back unchanged in the same write stays drafted."""
+    from src.api.main import app
+    from src.services.profile.search_brief import build_search_brief
+    from src.services.profile.storage import load_profile
+
+    async with authenticated_async_context() as client:
+        await _patch(client, _rtw(GB, ANY))
+        token = (await client.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
+    ae = {"country": "AE", "work_authorization": "needs_sponsorship", "needs_sponsorship": True}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        await _patch(agent, _rtw(GB, ANY, ae))  # no remember: a draft
+        drafted = _rows(fixture_user_id)["AE"]
+        assert drafted["set_by"] == "assistant"
+        fr = {"country": "FR", "work_authorization": "citizen", "needs_sponsorship": False, "onsite": "yes"}
+        out = await _patch(agent, {**_rtw(GB, ANY, drafted, fr), "remember": True})
+        assert out["not_saved"] == []
+    rows = _rows(fixture_user_id)
+    assert "set_by" not in rows["FR"] and "set_by" not in rows["GB"], "the user's own answer, remembered"
+    assert rows["AE"]["set_by"] == "assistant", "unchanged draft stays a draft"
+    brief = build_search_brief(load_profile(fixture_user_id).user_info.right_to_work)
+    assert "FR" in [r["country"] for r in brief["rows"]] and "AE" not in [r["country"] for r in brief["rows"]]
 
 
 @pytest.mark.asyncio

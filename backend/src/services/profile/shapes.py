@@ -199,6 +199,14 @@ SHAPES: dict[str, dict[str, Any]] = {
         "example": {"days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "18:00"},
         "note": "when the user's PC is on, in their timezone; null = any time. A from later than to runs overnight",
     },
+    **{
+        path: {
+            "example": _settings.OUTREACH_LIMITS[name][0],
+            "note": "the user's own outreach send limit, a whole number; null = the default. Raising it needs the "
+            "user's OK",
+        }
+        for path, name in _settings.OUTREACH_LIMIT_PATHS.items()
+    },
     _settings.HUNT_EVERY_PATH: {
         "example": 6, "note": "hunt every N hours, 1-168; null or 0 = off. Turning it on needs the user's OK",
     },

@@ -158,8 +158,8 @@ test.describe("Bring a job", () => {
     // The bring response never carried a score field the page could echo.
     expect(bringBody).not.toHaveProperty("match_score");
 
-    await expect(page.getByText(BROUGHT_JOB.title)).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText(BROUGHT_JOB.company)).toBeVisible();
+    await expect(page.getByText(BROUGHT_JOB.title, { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(BROUGHT_JOB.company, { exact: true })).toBeVisible();
 
     // The documents card lives on the application page now, and since
     // decision 28 (slice A) it points at the user's own agent — Job360

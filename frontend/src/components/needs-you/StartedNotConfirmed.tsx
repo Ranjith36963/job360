@@ -6,6 +6,7 @@ import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfi
 import { fetchWhatsNewPages } from "@/lib/home-fetch";
 import { submitUnconfirmed } from "@/lib/application-actions";
 import { relativeTime } from "@/lib/utils";
+import { useAppHref } from "@/lib/app-href";
 
 const DAYS = 30;
 const PAGES = 3;
@@ -47,6 +48,7 @@ export function startedNotConfirmed(
 
 /** "Started, not confirmed" on Needs you. Best effort: a failed read shows nothing. */
 export function StartedNotConfirmed() {
+  const appLink = useAppHref();
   const [rows, setRows] = useState<StartedRow[]>([]);
 
   const fetchRows = useCallback(async (): Promise<StartedRow[]> => {
@@ -90,7 +92,7 @@ export function StartedNotConfirmed() {
             data-testid={`started-${r.id}`}
             className="flex flex-col gap-1 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm"
           >
-            <Link href={`/applications/${r.id}`} className="font-medium underline-offset-2 hover:underline">
+            <Link href={appLink(r.id)} className="font-medium underline-offset-2 hover:underline">
               {[r.title, r.company].filter(Boolean).join(" · ")}
             </Link>
             <p className="text-muted-foreground">

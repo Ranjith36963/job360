@@ -55,19 +55,24 @@ def _facts(rec: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in rec.items() if k != "set_by"}
 
 
-def stamp(value: Any, stored: Any, *, by_web: bool, stored_users: bool) -> Any:
+def stamp(value: Any, stored: Any, *, by_web: bool, stored_users: bool, remembered: bool = False) -> Any:
     """``value`` (a validated right_to_work) with the draft marks the WRITER earns. Web: a row stays
     drafted only when sent back unchanged with its mark (an edit, or no mark, confirms it). Assistant: a
     new row, a changed row, a row still drafted, or every row when the stored value was not the user's
-    (``stored_users`` false) is marked; an unchanged row of the user's stays unmarked."""
+    (``stored_users`` false) is marked; an unchanged row of the user's stays unmarked. Assistant with the
+    user's remember OK (``remembered``): the rows it adds or changes are the user's answer (the setup
+    interview); a row sent back unchanged keeps the mark it had."""
     if not isinstance(value, dict) or not isinstance(value.get("countries"), list):
         return value
     old = rtw_rows(stored)
     out = []
     for rec in value["countries"]:
         prev = old.get(str(rec.get("country") or "").upper())
+        same = prev is not None and _facts(rec) == _facts(prev)
         if by_web:
-            mark = is_drafted(rec) and is_drafted(prev) and prev is not None and _facts(rec) == _facts(prev)
+            mark = is_drafted(rec) and is_drafted(prev) and same
+        elif remembered:
+            mark = same and (is_drafted(prev) or not stored_users)
         else:
             mark = not stored_users or prev is None or is_drafted(prev) or _facts(rec) != _facts(prev)
         out.append({**_facts(rec), **({"set_by": DRAFT_MARK} if mark else {})})

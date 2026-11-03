@@ -297,6 +297,11 @@ class AssistantSettingsView(BaseModel):
     hunt_every_hours: SettingFieldOut
     people_hunt: SettingFieldOut
     pc_on_hours: SettingFieldOut
+    # Owner 2026-11-02 - the user's own outreach send limits (effective = default filled, backstop applied).
+    outreach_per_company: SettingFieldOut
+    network_per_hour: SettingFieldOut
+    linkedin_sends_per_day: SettingFieldOut
+    email_sends_per_day: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""

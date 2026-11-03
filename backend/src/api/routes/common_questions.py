@@ -19,6 +19,8 @@ router = APIRouter(tags=["profile"])
 
 
 class CommonQuestionOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     group: Literal["you", "work", "pay", "form", "equality"]
     question: str
@@ -41,6 +43,9 @@ class CommonQuestionOut(BaseModel):
     set_at: Optional[str] = None
     guess_source: Optional[str] = None
     sensitive: bool = False
+    # Answer once (owner 2026-11-02): the text to show filled in ("" = no guess) and where it comes from.
+    value: str = ""
+    from_: str = Field("", alias="from")
 
 
 class CommonQuestionsSummary(BaseModel):
