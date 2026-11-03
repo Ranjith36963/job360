@@ -5445,6 +5445,11 @@ export interface components {
             /** Country */
             country?: string | null;
             /**
+             * From
+             * @default
+             */
+            from: string;
+            /**
              * Group
              * @enum {string}
              */
@@ -5493,6 +5498,11 @@ export interface components {
             state: "confirmed" | "relayed" | "inferred" | "sensitive" | "guessed" | "missing";
             /** Topic */
             topic?: string | null;
+            /**
+             * Value
+             * @default
+             */
+            value: string;
             /** Verified */
             verified: boolean;
         };
