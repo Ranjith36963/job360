@@ -43,6 +43,7 @@ LINKEDIN_MIN_GAP_SECONDS = 120
 EASY_APPLY_DAILY_MAX = settings.EASY_APPLY_DAILY_MAX  # 0 = no Job360 cap; LinkedIn's own limit decides
 RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
+    "done",  # only a hunt or people task (pc_duties): finished; every other reason closes one as failed
 )
 RUN_NOW_SLOT = "own_browser:run_now"
 DECISIONS = ("approve", "decline")
@@ -409,11 +410,15 @@ async def _application_tasks(
 async def queue_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str] = None
 ) -> list[dict[str, Any]]:
-    """The tasks that wait for the user's own browser: approved, unsent LinkedIn drafts (oldest approval first)
-    then applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
+    """The tasks that wait for the user's own browser: approved, unsent LinkedIn drafts (oldest approval first),
+    then the signed-in LinkedIn hunt and people search when due (``pc_duties``, owner 2026-11-03), then
+    applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
     batch-queued Easy Apply applications (an apply link on linkedin.com, no open block). With a
     ``session`` (an assistant's read) an application another session holds is left out; the website passes none."""
-    tasks = await _contact_tasks(db, user.id, now) + await _application_tasks(db, user, now, session)
+    from src.services.applications import pc_duties  # noqa: PLC0415
+
+    tasks = (await _contact_tasks(db, user.id, now) + await pc_duties.tasks(db, user.id, now)
+             + await _application_tasks(db, user, now, session))
     return tasks[:QUEUE_MAX]
 
 
@@ -517,6 +522,12 @@ def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:
 
 
 def _next_step(task: dict[str, Any]) -> str:
+    if task["kind"] in ("linkedin_search", "profile_read"):
+        what = ("bring_job each new job you judge fits" if task["kind"] == "linkedin_search"
+                else "add_contact each person you find")
+        return (f'get_recipe("own_browser") {task["kind"]}: signed in, in the user\'s own browser only, {what}; '
+                f'then own_browser_queue release (session, task_id="{task["task_id"]}", reason="done"), or reason '
+                "captcha | login_wall | other when you could not finish it")
     if task["kind"] == "application":
         return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
     return (
@@ -536,7 +547,7 @@ async def take(
     (another session is sending) | wait (``wait_seconds`` left) | daily_limit (LinkedIn sends, or Easy Apply at
     ``EASY_APPLY_DAILY_MAX``: :func:`easy_apply_today`). The same session asking again
     gets its live claim back. The user row is locked first, so two sessions never take one person."""
-    from src.services.applications import kit  # noqa: PLC0415
+    from src.services.applications import kit, pc_duties  # noqa: PLC0415
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
 
     label = kit.clean_session(session)
@@ -563,6 +574,13 @@ async def take(
         if mine is not None:
             _log("own_browser_take", user.id, "already_yours", contact_id=mine["contact_id"])
             return _answer("already_yours", task=mine, next=_next_step(mine))
+        duties = [t for t in tasks if t["kind"] in pc_duties.KINDS] if contact_id is None else []
+        held = next(
+            (t for t in duties if t["claim"] and (t["claim"]["session"], t["claim"]["actor"]) == (label, actor)), None
+        )
+        if held is not None:
+            _log("own_browser_take", user.id, "already_yours", kind=held["kind"])
+            return _answer("already_yours", task=held, next=_next_step(held))
         busy = any(t["claim"] is not None for t in contacts_)  # another session holds a person
         free = [t for t in contacts_ if t["claim"] is None]
         if contact_id is not None:
@@ -591,6 +609,14 @@ async def take(
                     break
         elif busy:
             refusal = _answer("busy", "another session is sending")
+        duty = next((t for t in duties if t["claim"] is None), None)
+        if chosen is None and duty is not None:  # a hunt or people task: one session at a time per kind
+            await pc_duties.claim(db, user.id, duty["kind"], {"session": label, "actor": actor}, now)
+            until = (now + timedelta(minutes=settings.DUTY_CLAIM_MINUTES)).isoformat()
+            chosen = {**duty, "claim": {"session": label, "until": until, "actor": actor}}
+    if chosen is not None and chosen["kind"] in pc_duties.KINDS:
+        _log("own_browser_take", user.id, "task", kind=chosen["kind"])
+        return _answer("task", task=chosen, next=_next_step(chosen))
     if chosen is not None:
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
@@ -613,15 +639,21 @@ async def take(
 async def release(
     db: JobDatabase, user: CurrentUser, session: str, task_id: str, reason: str, now: datetime
 ) -> dict[str, Any]:
-    """Give a claimed person back. 409 unless this session holds the live claim; 422 for an unknown reason
-    or task id."""
-    from src.services.applications import kit  # noqa: PLC0415
+    """Give a claimed person back, or close a hunt or people task (``pc_duties.close``: ``done``, else failed).
+    409 unless this session holds the live claim; 422 for an unknown reason or task id."""
+    from src.services.applications import kit, pc_duties  # noqa: PLC0415
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
 
     label = kit.clean_session(session)
     if reason not in RELEASE_REASONS:
         raise SpineError(422, "reason must be one of: " + ", ".join(RELEASE_REASONS))
     kind, _, raw = task_id.partition(":")
+    if kind + ":" == pc_duties.TASK_PREFIX:
+        closed = await pc_duties.close(db, user, label, raw, reason, now)
+        _log("own_browser_release", user.id, closed["outcome"], kind=raw, reason=reason)
+        return {"released": True, "task_id": task_id, "reason": reason, **closed}
+    if reason == "done":
+        raise SpineError(422, "a person is finished with record_event outreach_sent; release them with another reason")
     if kind != "contact" or not raw.isdigit():
         raise SpineError(409, "only a claimed person can be released; an application is released with release_hold")
     contact_id = int(raw)

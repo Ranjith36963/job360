@@ -115,6 +115,11 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
     if sensitive and state == "relayed":
         verified = False  # plan B1: a private answer is "From memory" only from the user's own save
     label = "not_known" if item is None else ("memory" if verified else "guessed")
+    guess_source = (
+        ("profile" if derived is not None else
+         "user_said" if state == "sensitive" and save_path(q) in relayed else _GUESS_SOURCE.get(state))
+        if label == "guessed" else None
+    )
     return {
         "id": q["id"] if country is None else f"{q['id']}.{country}",
         "group": q["group"], "question": text, "country": country,
@@ -138,15 +143,13 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
             ("user" if verified else _SET_BY.get(state, "assistant")) if item is not None else None),
         "set_at": (str(item["saved_at"]) if item.get("saved_at") else None) if item is not None else None,
         # How an assistant's draft got here (agent_inferred / user_said); None unless the row reads guessed.
-        "guess_source": (
-            ("profile" if derived is not None else
-             "user_said" if state == "sensitive" and save_path(q) in relayed else _GUESS_SOURCE.get(state))
-            if label == "guessed" else None
-        ),
+        "guess_source": guess_source,
         # Answer once (owner 2026-11-02): the text to show filled in ("" = nothing to guess) and, in plain
         # words, where it comes from. A derived guess names its source; an assistant's draft says so.
         "value": _shown(item["value"]) if item is not None else "",
-        "from": (derived[1] if derived is not None else answer_guesses.ASSISTANT_GUESS if label == "guessed"
+        "from": (derived[1] if derived is not None
+                 else answer_guesses.SAID_IN_CHAT if guess_source == "user_said"
+                 else answer_guesses.ASSISTANT_GUESS if label == "guessed"
                  else "your saved answer" if label == "memory" else ""),
     }
 

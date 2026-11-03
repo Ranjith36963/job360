@@ -108,13 +108,29 @@ async def _filled_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int
     return {int(r[0]) for r in await cur.fetchall()}
 
 
+async def _sent_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
+    """Applications whose NEWEST send decision is the owner's yes (``submit_approved``): they pressed Send."""
+    if not ids:
+        return set()
+    cur = await db._db.execute(
+        f"SELECT a.id FROM applications a WHERE a.user_id = ? AND a.id IN ({_marks(ids)}) "  # noqa: S608
+        "AND (SELECT e.event_type FROM application_events e WHERE e.user_id = a.user_id "
+        "AND e.application_id = a.id AND e.event_type IN ('submit_approved', 'submit_declined') "
+        "ORDER BY e.id DESC LIMIT 1) = 'submit_approved'",
+        [user_id, *ids],
+    )
+    return {int(r[0]) for r in await cur.fetchall()}
+
+
 async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tuple[list[int], set[int]]:
-    """The order the assistant works the queue (2026-10-30): rows not waiting on the owner first, unfilled
-    before already-filled, then rows with an OPEN ask to the owner last; first in first out inside each group
-    (a stable sort of ``fifo_ids``). Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
+    """The order the assistant works the queue (2026-10-30): jobs the owner pressed Send on FIRST (2026-11-02;
+    their yes is ready to submit), then rows not waiting on the owner, unfilled before already-filled, then rows
+    with an OPEN ask to the owner last; first in first out inside each group (a stable sort of ``fifo_ids``).
+    Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
     waiting = await _open_ask_apps(db, user_id, fifo_ids)
     filled = await _filled_apps(db, user_id, fifo_ids)
-    return sorted(fifo_ids, key=lambda i: (i in waiting, i in filled)), waiting
+    sent = await _sent_apps(db, user_id, fifo_ids)
+    return sorted(fifo_ids, key=lambda i: (i not in sent, i in waiting, i in filled)), waiting
 
 
 async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:

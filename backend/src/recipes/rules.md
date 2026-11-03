@@ -123,7 +123,7 @@ outside_hours, form_pages_incomplete, below_score_line or answer_guessed: do not
 record it with `record_application`, which refuses with 409 `submit_not_cleared` when no unused `submit`
 answer comes before it (one `submit` = one receipt; refused: the user presses Mark Applied themselves). A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
-no longer counts - ask again. A yes also lapses after SUBMIT_APPROVAL_TTL_MINUTES (120 by default) and, for a
+no longer counts - ask again. A yes also lapses after SUBMIT_APPROVAL_TTL_MINUTES (7 days by default) and, for a
 Send on the website, when a new cover letter, a re-fill with other answers, another form page or your own
 profile edit comes after it (`approval_stale`: expired, cover_letter, form_fill, form_page or profile). Typing
 the answers the user changed (`type_first`) never cancels it. A setting that says to apply is never a reason

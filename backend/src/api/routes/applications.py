@@ -1493,6 +1493,15 @@ class KitLastFillOut(BaseModel):
     redacted: bool = False
 
 
+class KitCountryInstructionsOut(BaseModel):
+    country: str
+    # Where the lines came from: the country's own row, its region (EUROPE...) or ANY.
+    from_: str = Field(alias="from")
+    lines: list[str]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class ApplicationKitOut(BaseModel):
     """Everything an assistant needs to fill ONE application form (S3). Binds to
     THIS application only: its latest CV and cover letter, never another job's."""
@@ -1519,6 +1528,8 @@ class ApplicationKitOut(BaseModel):
     # The newest form_filled's answers: retyped in one browser fill when the browser closed (2026-10-23).
     last_fill: list[KitLastFillOut] = []
     instructions: list[str]
+    # Country pages: the user's own instructions for the job's country ({country, from, lines}).
+    country_instructions: Optional[KitCountryInstructionsOut] = None
 
 
 class ControlsCvOut(BaseModel):
@@ -3519,12 +3530,13 @@ async def approve_send(
     """"Send this one" - the user says yes to sending this application with the
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
-    letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-    or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+    letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES (7 days by
+    default) passing or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
     event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
-    nothing is recorded (the yes must name what the user saw)."""
+    nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: Send also puts the job on the
+    batch queue; this route starts no run itself (the web page fires the Apply routine right after Send)."""
     await _refuse_if_already_applied(db, user, application_id)
     cv = await _latest_cv_or_409(db, user, application_id)
     if artifact_id is not None and int(cv["id"]) != artifact_id:
@@ -3544,6 +3556,11 @@ async def approve_send(
     await asks_service.withdraw_open_matching(
         db, user.id, application_id, "web", "answered by Send", blockers=False
     )
+    # A Sent job must be on the batch queue: the apply run reads only the queue, and a job that was never
+    # queued (production application 90, 30 Oct) stayed invisible to every run after the user's Send.
+    await spine.queue_if_open(db, user.id, application_id, recorded_by="web")
+    # The web page starts the batch run itself right after Send (frontend assistant-start.ts ->
+    # /api/assistant-trigger/fire), so no second start here: it would only hit the cool-down.
     return await _controls(db, user, application_id)
 
 

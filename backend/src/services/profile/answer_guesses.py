@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 Guess = Optional[tuple[str, str]]
 ASSISTANT_GUESS = "your assistant's guess"
+SAID_IN_CHAT = "you said it in chat"
 _ADULT_AFTER_DEGREE_YEARS = 3  # a degree finished this long ago means the owner is well over 18
 _SURE_AUTH = frozenset({"citizen", "permanent_resident"})  # right to work with no sponsorship
 
@@ -37,8 +38,16 @@ def _contact(profile: Any) -> dict[str, Any]:
 
 def _links(profile: Any) -> list[str]:
     cv = [_text(u) for u in getattr(getattr(profile, "cv_data", None), "links", None) or []]
-    saved = [_text(_contact(profile).get(k)) for k in ("website", "github_url", "linkedin_url")]
+    saved = [_text(_contact(profile).get("linkedin_url"))]
     return [u for u in [*cv, *saved] if u]
+
+
+def _github_from_username(profile: Any) -> str:
+    """``https://github.com/<name>`` from ``preferences.github_username``; "" unless it is a plain GitHub login
+    (ASCII letters, digits and hyphens, at most 39 characters)."""
+    name = _text(getattr(getattr(profile, "preferences", None), "github_username", "")).lstrip("@")
+    plain = name.isascii() and name.replace("-", "").isalnum()
+    return f"https://github.com/{name}" if plain and len(name) <= 39 else ""
 
 
 def website(profile: Any, _cc: Optional[str]) -> Guess:
@@ -48,6 +57,7 @@ def website(profile: Any, _cc: Optional[str]) -> Guess:
     for label, urls in (
         ("portfolio link", [u for u in links if u not in social]),
         ("GitHub link", [u for u in links if _on(u, "github.com")]),
+        ("GitHub username", [u for u in [_github_from_username(profile)] if u]),
         ("LinkedIn link", [u for u in links if _on(u, "linkedin.com")]),
     ):
         if urls:
@@ -66,9 +76,8 @@ def _birth_age(profile: Any, today: date) -> Optional[int]:
 def _saved_age(profile: Any) -> Optional[int]:
     for rec in getattr(getattr(profile, "user_info", None), "answers", None) or []:
         if isinstance(rec, dict) and str(rec.get("topic") or "").casefold() == "age":
-            for word in _text(rec.get("answer")).replace(",", " ").split():
-                if word.isdigit():
-                    return int(word)
+            answer = _text(rec.get("answer"))
+            return int(answer) if answer.isascii() and answer.isdigit() else None
     return None
 
 

@@ -365,16 +365,21 @@ async def mark(
         "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
         (user_id, TICK, stamp),
     )
-    # Each reach stamp counts its runs in `failures` (here: tries), so an application nobody more can be
-    # proven for stops after REACH_MAX_ATTEMPTS (owner 2026-11-03: up to 5 people per job).
-    for name in [] if failed else [reach_key(a) for a in (application_ids or [])]:
+    if not failed:
+        await stamp_tries(db, user_id, [reach_key(a) for a in (application_ids or [])], stamp)
+    await db._db.commit()
+
+
+async def stamp_tries(db: JobDatabase, user_id: str, keys: list[str], stamp: str) -> None:
+    """Each per-application people-hunt stamp counts its runs in `failures` (here: tries), so an application
+    nobody more can be proven for stops after REACH_MAX_ATTEMPTS (owner 2026-11-03: up to 5 people per job)."""
+    for name in keys:
         await db._db.execute(
             "INSERT INTO assistant_duty_runs (user_id, duty, done_at, failures) VALUES (?, ?, ?, 1) "
             "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, "
             "failures = assistant_duty_runs.failures + 1",
             (user_id, name, stamp),
         )
-    await db._db.commit()
 
 
 async def load_runs(db: JobDatabase, user_id: str) -> dict[str, dict[str, Any]]:
@@ -500,9 +505,12 @@ async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -
 REACH_SCAN_LIMIT = 200
 
 
-async def _reach_ids(db: JobDatabase, user_id: str, now: datetime, line: Optional[int] = None) -> list[int]:
+async def _reach_ids(
+    db: JobDatabase, user_id: str, now: datetime, line: Optional[int] = None, stamp: str = "reach:"
+) -> list[int]:
     """Open applications for the people hunt this run (see the module docstring), newest first.
-    ``line`` is the user's score line; applications scored below it are left out."""
+    ``line`` is the user's score line; applications scored below it are left out. ``stamp`` names whose tries
+    count: the scheduled run's (``reach:``) or the user's own browser's (``own_browser:reach:``)."""
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
 
     since = (now - timedelta(days=settings.REACH_WINDOW_DAYS)).astimezone(timezone.utc).isoformat()
@@ -516,9 +524,9 @@ async def _reach_ids(db: JobDatabase, user_id: str, now: datetime, line: Optiona
         "AND (SELECT COUNT(*) FROM application_contacts c WHERE c.application_id = a.id "
         "     AND c.user_id = a.user_id AND c.added_by <> 'web') < ? "
         "AND NOT EXISTS (SELECT 1 FROM assistant_duty_runs r WHERE r.user_id = a.user_id "
-        "     AND r.duty = 'reach:' || a.id AND (r.done_at > ? OR r.failures >= ?)) "
+        "     AND r.duty = CAST(? AS TEXT) || CAST(a.id AS TEXT) AND (r.done_at > ? OR r.failures >= ?)) "
         f"AND NOT {test_sql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
-        (user_id, since, since, settings.REACH_TARGET_PEOPLE, retry_after, settings.REACH_MAX_ATTEMPTS,
+        (user_id, since, since, settings.REACH_TARGET_PEOPLE, stamp, retry_after, settings.REACH_MAX_ATTEMPTS,
          *test_params, REACH_SCAN_LIMIT),
     )
     candidates = [

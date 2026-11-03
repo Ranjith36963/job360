@@ -904,12 +904,13 @@ export interface paths {
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
          *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
-         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-         *     or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES (7 days by
+         *     default) passing or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
          *     event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
-         *     nothing is recorded (the yes must name what the user saw).
+         *     nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: Send also puts the job on the
+         *     batch queue; this route starts no run itself (the web page fires the Apply routine right after Send).
          */
         post: operations["approve_send_api_applications__application_id__send_approve_post"];
         delete?: never;
@@ -2734,7 +2735,8 @@ export interface paths {
         put?: never;
         /**
          * Release
-         * @description Give a claimed person back (409 unless this session holds the live claim).
+         * @description Give a claimed person back, or close a hunt or people task: ``done`` answers the count, any other reason
+         *     records it failed (409 unless this session holds the live claim).
          */
         post: operations["release_api_own_browser_release_post"];
         delete?: never;
@@ -2946,6 +2948,28 @@ export interface paths {
         };
         /** List Common Questions */
         get: operations["list_common_questions_api_profile_common_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/countries/{place}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Page
+         * @description One country's (or region's) page: the user's instructions, right to work, salary, logistics and
+         *     that country's saved answers, each effective value labelled with where it came from. 404 when the
+         *     user has no profile; 422 when ``place`` is no country, region or ANY. Read-only, scoped by user (#12).
+         */
+        get: operations["get_country_page_api_profile_countries__place__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4364,6 +4388,7 @@ export interface components {
              * @enum {string}
              */
             autofill: "allow" | "deny" | "unset";
+            country_instructions?: components["schemas"]["KitCountryInstructionsOut"] | null;
             cover_letter?: components["schemas"]["KitDocumentOut"] | null;
             /** Cover Letter None Reason */
             cover_letter_none_reason?: string | null;
@@ -5720,6 +5745,49 @@ export interface components {
             sha256: string;
             /** Version */
             version: number;
+        };
+        /** CountryInstructionsOut */
+        CountryInstructionsOut: {
+            /** From */
+            from: string;
+            /** Lines */
+            lines: string[];
+        };
+        /**
+         * CountryPageOut
+         * @description Country pages (owner 2026-11-02): one place per country. Unset = absent (rule #29).
+         */
+        CountryPageOut: {
+            /** Answers */
+            answers?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Assistant Drafted */
+            assistant_drafted?: boolean | null;
+            /** Confirmed */
+            confirmed?: boolean | null;
+            /** Country */
+            country: string;
+            instructions?: components["schemas"]["CountryInstructionsOut"] | null;
+            logistics?: components["schemas"]["CountryPickOut"] | null;
+            /** Region Fallback */
+            region_fallback?: string | null;
+            right_to_work?: components["schemas"]["CountryPickOut"] | null;
+            salary?: components["schemas"]["CountryPickOut"] | null;
+            /** To Confirm */
+            to_confirm?: string[] | null;
+        };
+        /**
+         * CountryPickOut
+         * @description One effective value and where it came from: the country's own row, its region's, or ANY.
+         */
+        CountryPickOut: {
+            /** From */
+            from: string;
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
         };
         /** CreateAskOut */
         CreateAskOut: {
@@ -7103,6 +7171,15 @@ export interface components {
             /** Submit Override */
             submit_override?: string | null;
         };
+        /** KitCountryInstructionsOut */
+        KitCountryInstructionsOut: {
+            /** Country */
+            country: string;
+            /** From */
+            from: string;
+            /** Lines */
+            lines: string[];
+        };
         /** KitDocumentOut */
         KitDocumentOut: {
             approved?: components["schemas"]["KitSeenOut"] | null;
@@ -7929,6 +8006,8 @@ export interface components {
         OwnBrowserTaskItemOut: {
             /** Application Id */
             application_id?: number | null;
+            /** Application Ids */
+            application_ids?: number[] | null;
             browser: components["schemas"]["TaskBrowserOut"];
             claim?: components["schemas"]["TaskClaimOut"] | null;
             /** Contact Id */
@@ -7947,9 +8026,11 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "linkedin_outreach" | "application";
+            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read";
             /** Linkedin State */
             linkedin_state?: string | null;
+            /** Max People */
+            max_people?: number | null;
             /** Message Id */
             message_id?: number | null;
             /**
@@ -9306,7 +9387,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other";
+            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done";
             /** Session */
             session: string;
             /** Task Id */
@@ -9314,10 +9395,18 @@ export interface components {
         };
         /** ReleaseOut */
         ReleaseOut: {
+            /** Count */
+            count?: number | null;
+            /** Failures In Row */
+            failures_in_row?: number | null;
+            /** Outcome */
+            outcome?: ("done" | "failed") | null;
             /** Reason */
             reason: string;
             /** Released */
             released: boolean;
+            /** Summary */
+            summary?: string | null;
             /** Task Id */
             task_id: string;
         };
@@ -15934,6 +16023,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CommonQuestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_country_page_api_profile_countries__place__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                place: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryPageOut"];
                 };
             };
             /** @description Validation Error */
