@@ -118,7 +118,7 @@ function PersonRow({ p, others, onChanged }: { p: Person; others: Person[]; onCh
         <span className="font-medium">{p.name}</span>
         {p.role && <span className="text-muted-foreground">· {p.role}</span>}
       </div>
-      {p.found_via && (
+      {p.found_via && p.found_via !== "other" && (
         <p data-testid="person-found-via" className="mt-1 text-xs text-muted-foreground">
           Found via {closedSetLabel(p.found_via)}
         </p>

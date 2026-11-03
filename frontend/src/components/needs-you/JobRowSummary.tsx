@@ -1,5 +1,6 @@
 "use client";
 
+import { SEND_EXPIRED_LABEL, SEND_EXPIRED_NOTE } from "@/lib/blocker-words";
 import Link from "next/link";
 import type { JobCardData } from "@/lib/job-cards";
 import { hasFormHandoff, waitSummary } from "@/lib/job-cards";
@@ -72,6 +73,9 @@ export function JobRowSummary({ h, card, facts, nextText = "", linkTestid }: {
               {step}
             </span>}
           <span className="min-w-0 break-words" data-testid={`job-what-${h.id}`}>{nextText || whatWaits(h, card)}</span>
+          {nextText.includes(SEND_EXPIRED_LABEL) && (
+            <span className="basis-full text-[11px] text-faint" data-testid={`send-expired-note-${h.id}`}>{SEND_EXPIRED_NOTE}</span>
+          )}
         </span>
         {since && <span className={CELL} title="Waiting since"><span className="lg:hidden">since </span>{relativeTime(since)}</span>}
         <span className={CELL}>{facts.location}</span>

@@ -21,3 +21,9 @@ export function nextLine(next: Pick<Blocker, "actor" | "label"> | null | undefin
   if (!next) return "";
   return `${actorWord(next.actor)}: ${next.label}${more > 0 ? ` +${more} more` : ""}`;
 }
+
+/** The backend's label for a Send that lapsed (services/applications/blockers.py). */
+export const SEND_EXPIRED_LABEL = "Send again (your yes expired)";
+/** How long a Send lasts. ONE place to change it (PR #1466 made it 7 days). */
+export const SEND_LASTS = "7 days";
+export const SEND_EXPIRED_NOTE = `Your Send lasts ${SEND_LASTS}; your assistant didn't submit in time.`;

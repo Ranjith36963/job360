@@ -141,7 +141,7 @@ describe("New connections", () => {
     expect(calls.some((c) => c.url.includes("contact_id=1"))).toBe(false);
   });
 
-  it("Copy copies the note and Open profile links to the person's LinkedIn", async () => {
+  it("Copy copies the note and the name links to the person's LinkedIn", async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     people = [listed(1)];
@@ -149,7 +149,24 @@ describe("New connections", () => {
     render(<JobCards open={[]} onChanged={async () => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith("Hi from 1");
-    expect(screen.getByRole("link", { name: "Open profile ↗" })).toHaveAttribute("href", "https://www.linkedin.com/in/p1");
+    expect(screen.getByRole("link", { name: "Person 1" })).toHaveAttribute("href", "https://www.linkedin.com/in/p1");
+  });
+
+  it("leaves out a person whose note the assistant is rewriting, so the page matches the badge", async () => {
+    people = [listed(5), listed(6)];
+    records = { 5: full(5, null, { note_rewrite: { limit: 200, chars: 264 } }), 6: full(6, null) };
+    render(<JobCards open={[]} onChanged={async () => {}} />);
+    await screen.findByTestId("person-6");
+    expect(screen.queryByTestId("person-5")).toBeNull();
+  });
+
+  it("also drops a record whose own note_rewrite is set", async () => {
+    people = [listed(7)];
+    records = { 7: full(7, null, { note_rewrite: { limit: 200, chars: 300 } }) };
+    const onReport = vi.fn();
+    render(<JobCards open={[]} onChanged={async () => {}} onReport={onReport} />);
+    await waitFor(() => expect(onReport).toHaveBeenLastCalledWith(expect.objectContaining({ settled: true })));
+    expect(screen.queryByTestId("person-7")).toBeNull();
   });
 
   it("Send asks the user's own browser to send that one note", async () => {
