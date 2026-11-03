@@ -298,10 +298,10 @@ export interface paths {
         put?: never;
         /**
          * Confirm Answer
-         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is
-         *     saved as the user's own word in memory, so the assistant uses it next time.
-         *     Session only - an assistant can never vouch for its own answer. Returns the
-         *     card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
+         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18, narrowed 2026-11-02): the
+         *     user's word is approved for THIS application only (an ``answer_verified`` event); it is never saved
+         *     for other jobs - that is the "remember" press. Session only - an assistant can never vouch for its own
+         *     answer. Returns the card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
          */
         post: operations["confirm_answer_api_applications__application_id__answers__index__confirm_post"];
         delete?: never;
