@@ -109,7 +109,7 @@ async def test_a_yes_from_three_hours_ago_still_holds_and_one_over_seven_days_is
         _backdate(app_id, settings.SUBMIT_APPROVAL_TTL_MINUTES + 5)
         verdict = await _check(client, app_id, 2)
         assert (verdict["decision"], verdict["reason"]) == ("ask", "approval_stale"), verdict
-        assert "(expired:" in verdict["detail"] and "(7.0 days)" in verdict["detail"], verdict
+        assert "(expired:" in verdict["detail"] and "older than 7 days" in verdict["detail"], verdict
 
 
 @pytest.mark.asyncio
@@ -153,3 +153,49 @@ async def test_send_puts_a_job_that_was_never_queued_on_the_queue(authenticated_
         await _send(client, app_id, fill)
         resp = await client.get("/api/applications", params={"queued": True})
         assert [r["id"] for r in resp.json()["applications"]] == [app_id, other], "Send queues it, first"
+
+
+def test_the_unbound_chat_yes_default_is_two_hours():
+    assert settings.SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES == 120
+
+
+@pytest.mark.asyncio
+async def test_a_chat_yes_three_hours_old_does_not_cover_a_new_fill(authenticated_async_context, fixture_user_id):
+    """A chat ``submit_approved`` carries no fingerprint, so it is bound to the CV and the clock only: with the
+    7-day web clock it would have covered a changed fill for days (verifier, PR #1466). It lapses after 2 hours."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, fill = await _filled_app(client, 7)
+        await _send(client, app_id, fill)
+        detail = (await client.get(f"/api/applications/{app_id}")).json()
+        web = [e for e in detail["events"] if e["event_type"] == "submit_approved"][-1]["payload"]
+        chat_yes = {"artifact_id": web["artifact_id"], "sha256": web["sha256"], "where": "chat"}
+        resp = await client.post("/api/tokens", json={"name": "claude-code"})
+        assert resp.status_code == 201, resp.text
+        from httpx import ASGITransport
+
+        from src.api.main import app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+            headers={"Authorization": f"Bearer {resp.json()['token']}"},
+        ) as agent:
+            await _event(agent, app_id, "submit_approved", chat_yes)
+            assert (await _check(agent, app_id, 7))["reason"] == "user_approved", "fresh chat yes holds"
+            new = [{**NOTICE, "answer": "3 months"}]
+            await _event(agent, app_id, "form_filled", {"form_url": _form(7), "fields_count": 1, "answers": new})
+            await _event(agent, app_id, "form_swept", {"fields_checked": 1, "fixed": 0, "answers": new})
+            _backdate(app_id, 3 * 60)
+            verdict = await _check(agent, app_id, 7)
+        assert (verdict["decision"], verdict["reason"]) == ("ask", "approval_stale"), verdict
+        assert "older than 2 hours" in verdict["detail"], verdict
+
+
+@pytest.mark.asyncio
+async def test_a_web_yes_three_days_old_and_unchanged_still_holds(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, fill = await _filled_app(client, 8)
+        await _send(client, app_id, fill)
+        _backdate(app_id, 3 * 24 * 60)
+        assert (await _check(client, app_id, 8))["reason"] == "user_approved"

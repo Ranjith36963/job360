@@ -3502,8 +3502,8 @@ async def approve_send(
     event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
-    nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: the yes also starts the
-    user's Apply routine (``batch`` start link, like unblock), so the job is picked up at once."""
+    nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: Send also puts the job on the
+    batch queue; this route starts no run itself (the web page fires the Apply routine right after Send)."""
     await _refuse_if_already_applied(db, user, application_id)
     cv = await _latest_cv_or_409(db, user, application_id)
     if artifact_id is not None and int(cv["id"]) != artifact_id:

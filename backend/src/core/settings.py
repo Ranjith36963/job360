@@ -1075,6 +1075,9 @@ KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
 # Owner 2026-11-02: 7 days (was 2 hours). The yes is really bound to what it was given for (CV, letter,
 # fill, form page, profile edit, email recipient: the fingerprint); the clock is only a backstop.
 SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "10080"))
+# A yes WITHOUT a fingerprint (said in chat, or stored before slice 8) is bound to the CV and the clock only,
+# so it must not outlive a changed fill or letter for days: it lapses after this many minutes (2 hours).
+SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES", "120"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
