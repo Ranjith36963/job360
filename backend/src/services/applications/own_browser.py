@@ -24,6 +24,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from src.core import settings
 from src.services.applications.spine import SpineError
 from src.services.browser_agent import routing
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -74,6 +75,16 @@ def session_label(raw: str) -> str:
 def log_read(user_id: str, count: int) -> None:
     """One audit line for a queue read: who, how many (never the tasks)."""
     _log("own_browser_queue_read", user_id, "ok", count=count)
+
+
+def note_over_limit(channel: str, state: Optional[str], chars: int, premium: bool) -> Optional[int]:
+    """The connection-note limit a stored LinkedIn draft breaks, else ``None`` (fail closed, 2026-11-02): a
+    draft to anyone not known to be connected is a connection note, so an unsaved state counts as not
+    connected. ``connected`` (a message) and ``pending`` (nothing can be sent) are never judged here."""
+    if channel != "linkedin" or (state or "unknown") not in ("not_connected", "unknown"):
+        return None
+    limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    return limit if chars > limit else None
 
 
 def _when(raw: Any) -> Optional[datetime]:
@@ -285,6 +296,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         task = derive(await _rows(db, contact_id), now)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if await contacts.over_limit_notes(db, user_id, [contact_id]):
+            continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
         route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
