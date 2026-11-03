@@ -4684,6 +4684,11 @@
             "title": "Id",
             "type": "integer"
           },
+          "linkedin_follow_up_due": {
+            "default": false,
+            "title": "Linkedin Follow Up Due",
+            "type": "boolean"
+          },
           "linkedin_state": {
             "anyOf": [
               {
@@ -10945,6 +10950,11 @@
             },
             "title": "Jobs",
             "type": "array"
+          },
+          "linkedin_follow_up_due": {
+            "default": false,
+            "title": "Linkedin Follow Up Due",
+            "type": "boolean"
           },
           "linkedin_state": {
             "anyOf": [

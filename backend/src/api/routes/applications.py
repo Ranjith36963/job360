@@ -741,6 +741,8 @@ class ContactOut(BaseModel):
     own_browser_task: Optional[OwnBrowserTaskOut] = None
     # Null = nothing to rewrite. Set: the assistant's job ("rewrite needed"), not the user's; never sendable.
     note_rewrite: Optional[NoteRewriteOut] = None
+    # One LinkedIn follow-up is due (6 days after the only message, no reply, no newer draft): the assistant drafts it.
+    linkedin_follow_up_due: bool = False
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)

@@ -178,3 +178,76 @@ def test_the_follow_up_takes_the_same_guardrails_and_needs_the_click_without_an_
         "linkedin_daily_cap_reached"
     )
     assert gate(draft_only, follow_up=False, **approved) == "already_sent"
+
+
+@pytest.mark.asyncio
+async def test_a_person_with_no_job_shows_the_follow_up_on_their_card(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        body = {"name": "Ravi", "company": "Contoso", "linkedin_url": "https://www.linkedin.com/in/ravi"}
+        cid = int((await _post(client, "/api/contacts", body, 201))["contact"]["id"])
+        assert (await client.patch(f"/api/contacts/{cid}", json={"linkedin_state": "not_connected"})).status_code == 200
+        draft = {"entry": "message", "channel": "linkedin", "text": MESSAGE, "draft_kind": "after_connect"}
+        mid = int((await _post(client, f"/api/contacts/{cid}/outreach", draft, 201))["outreach"]["id"])
+        await _post(client, f"/api/contacts/{cid}/own-browser-send", {"message_id": mid, "decision": "approve"})
+        assert await _take(client, cid) == "task"
+        released = {"session": "desk", "task_id": f"contact:{cid}", "reason": "invited"}
+        await _post(client, "/api/own-browser/release", released)
+        assert (await client.patch(f"/api/contacts/{cid}", json={"linkedin_state": "connected"})).status_code == 200
+        _age(("send_claimed", "send_released"), 1)
+        assert await _take(client, cid) == "task"
+        assert await _check(client, cid, mid) == ("send", "auto_after_accept")
+        await _post(client, f"/api/contacts/{cid}/outreach", {"entry": "sent", "channel": "linkedin"}, 201)
+
+        async def due() -> bool:
+            return bool((await client.get(f"/api/people?contact_id={cid}")).json()["person"]["linkedin_follow_up_due"])
+
+        assert await due() is False
+        _age(("send_claimed", "send_released", "sent"), settings.LINKEDIN_FOLLOW_UP_DAYS)
+        assert await due() is True
+        follow = dict(draft, text=FOLLOW)
+        fid = int((await _post(client, f"/api/contacts/{cid}/outreach", follow, 201))["outreach"]["id"])
+        assert await due() is False
+        assert await _take(client, cid) == "task"
+        assert await _check(client, cid, fid) == ("send", "auto_follow_up")
+
+
+def test_the_users_send_carries_to_a_follow_up_only_after_that_exact_message_went():
+    from src.services.applications import own_browser as ob
+
+    def row(i: int, entry: str, text: str = "", channel: str = "linkedin") -> dict[str, Any]:
+        return {"id": i, "entry": entry, "text": text, "channel": channel, "recorded_at": NOW.isoformat()}
+
+    base = [row(1, "message"), row(2, ob.APPROVED, "1"), row(3, ob.CLAIMED, "desk"), row(4, ob.RELEASED, "invited")]
+    assert ob.owner_yes_carries(base, 1) is True
+    swapped = base + [row(5, "message")]
+    assert ob.owner_yes_carries(swapped, 5) is False  # a text the user never saw
+    went = base + [row(5, "sent"), row(6, "message")]
+    assert ob.owner_yes_carries(went, 6) is True  # the follow-up after the approved message went
+    other_went = swapped + [row(6, ob.APPROVED, "5"), row(7, "sent"), row(8, "message")]
+    assert ob.owner_yes_carries(other_went, 8) is False  # the approved message itself never went
+    auto_invite = [row(1, "message"), row(2, ob.CLAIMED, "desk"), row(3, ob.RELEASED, "invited"), row(4, "sent")]
+    assert ob.owner_yes_carries(auto_invite + [row(5, "message")], 5) is False
+
+
+def test_sensitive_words_read_every_token_and_the_phrases():
+    from src.services.applications import cv_checks
+
+    assert cv_checks.sensitive_words("Happy to talk visa-sponsorship.") == ["visa", "sponsorship"]
+    assert cv_checks.sensitive_words("What about salary/benefits?") == ["salary"]
+    assert cv_checks.sensitive_words("I hold a Work Permit.") == ["work permit", "permit"]
+    assert cv_checks.sensitive_words("I have the right to work in the UK.") == ["right to work"]
+    assert cv_checks.sensitive_words("A Skilled Worker route; relocation fine.") == ["skilled worker", "relocation"]
+    assert cv_checks.sensitive_words("I manage pipelines at a startup.") == []
+
+
+def test_the_fact_check_reads_bare_names_spelled_numbers_and_ignores_case():
+    from src.services.applications import cv_checks
+
+    profile = UserProfile(cv_data=CVData(raw_text="Python data engineer at Acme Data for 7 years."))
+    assert cv_checks.outreach_claims_unsupported("I WORKED AT Acme data on pipelines.", profile) is False
+    assert cv_checks.outreach_claims_unsupported("I led pipelines at Globex.", profile) is True
+    assert cv_checks.outreach_claims_unsupported("I like the role at Northwind.", profile, "Priya Northwind") is False
+    assert cv_checks.outreach_claims_unsupported("I have seven years of Python.", profile) is False
+    assert cv_checks.outreach_claims_unsupported("I have twelve years of Python.", profile) is True
+    assert cv_checks.outreach_claims_unsupported("I shipped forty pipelines.", profile) is True

@@ -123,14 +123,16 @@ def is_after_connect(rows: list[dict[str, Any]], message_id: int) -> bool:
     return any(r["entry"] == AFTER_CONNECT and str(r.get("text")) == str(message_id) for r in rows)
 
 
-def invite_facts(rows: list[dict[str, Any]]) -> Optional[bool]:
-    """``None`` when no request went to this person; else whether the user's newest decision before it was a yes
-    (``False``: it went under ``outreach_send`` auto)."""
+def invite_facts(rows: list[dict[str, Any]]) -> Optional[dict[str, Optional[int]]]:
+    """``None`` when no request went to this person; else ``{"approved_message": id}``: the message the user's
+    newest decision before the request said yes to (``None``: it went under ``outreach_send`` auto). The user's
+    Send binds to that exact text: a draft saved later is a new text the user has not seen."""
     sent = [int(r["id"]) for r in rows if r["entry"] == RELEASED and r.get("text") == INVITED]
     if not sent:
         return None
     before = [r for r in rows if r["entry"] in (APPROVED, DECLINED) and int(r["id"]) < sent[-1]]
-    return bool(before) and before[-1]["entry"] == APPROVED
+    yes = before[-1] if before and before[-1]["entry"] == APPROVED else None
+    return {"approved_message": int(yes["text"]) if yes is not None and str(yes["text"]).isdigit() else None}
 
 
 def follow_up_facts(rows: list[dict[str, Any]], mid: int, now: datetime) -> dict[str, Any]:
@@ -144,6 +146,18 @@ def follow_up_facts(rows: list[dict[str, Any]], mid: int, now: datetime) -> dict
     }
 
 
+def follow_up_due(rows: list[dict[str, Any]], now: datetime) -> bool:
+    """Pure: the assistant drafts this person's one follow-up now: ONE LinkedIn message went
+    ``LINKEDIN_FOLLOW_UP_DAYS`` or more ago, no reply, and nothing was drafted after it."""
+    sent = [r for r in rows if r["entry"] == "sent" and r["channel"] == "linkedin"]
+    if len(sent) != 1 or any(r["entry"] == "reply" for r in rows):
+        return False
+    if any(r["entry"] in ("message", "sent") and int(r["id"]) > int(sent[0]["id"]) for r in rows):
+        return False
+    at = _when(sent[0]["recorded_at"])
+    return at is not None and (now - at).days >= settings.LINKEDIN_FOLLOW_UP_DAYS
+
+
 def follow_up_held(rows: list[dict[str, Any]], mid: int, now: datetime) -> bool:
     """A follow-up draft the queue must not hand out: a second one, one not yet due, or one after a reply."""
     got = follow_up_facts(rows, mid, now)
@@ -154,12 +168,28 @@ def follow_up_held(rows: list[dict[str, Any]], mid: int, now: datetime) -> bool:
 
 
 def _carried(rows: list[dict[str, Any]], mid: int, auto: bool) -> bool:
-    """A yes without a click on this draft: the request they accepted was approved (the user's Send, or auto
-    now), or, before any request, an ``after_connect`` draft with ``outreach_send`` auto."""
-    invited = invite_facts(rows)
-    if invited is not None:
-        return invited or auto
+    """A yes without a click on this draft: ``outreach_send`` auto (after a request, or an ``after_connect`` draft
+    before one), or the user's Send on the request for THIS exact message."""
+    if invite_facts(rows) is not None:
+        return auto or owner_yes_carries(rows, mid)
     return auto and is_after_connect(rows, mid)
+
+
+def owner_yes_carries(rows: list[dict[str, Any]], mid: int) -> bool:
+    """The user's Send on the request covers draft ``mid``: it is that exact message, or the one follow-up drafted
+    after that exact message went (a LinkedIn ``sent`` mark whose newest earlier draft is it)."""
+    invited = invite_facts(rows)
+    approved = invited["approved_message"] if invited is not None else None
+    if approved is None:
+        return False
+    if mid == approved:
+        return True
+    for i, row in enumerate(rows):
+        if row["entry"] == "sent" and row["channel"] == "linkedin":
+            drafts = [int(r["id"]) for r in rows[:i] if r["entry"] == "message"]
+            if drafts and drafts[-1] == approved:
+                return mid > int(row["id"])
+    return False
 
 
 def derive(rows: list[dict[str, Any]], now: datetime, auto: bool = False) -> Optional[dict[str, Any]]:

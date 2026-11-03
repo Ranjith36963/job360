@@ -5640,6 +5640,11 @@ export interface components {
             found_via?: string | null;
             /** Id */
             id: number;
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */
@@ -8164,6 +8169,11 @@ export interface components {
             id: number;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */

@@ -356,7 +356,11 @@ async def test_a_sensitive_or_unsupported_message_after_acceptance_waits_for_the
         assert (await _release(client, f"contact:{cid}", "draft_rewritten")).status_code == 200
         rewritten = await _draft(client, app_id, cid, "Hi Priya, I worked at Globex for 9 years on pipelines.")
         _age_sends()
-        assert (await _take(client, cid))["status"] == "task"  # the approved request carries to the rewrite
+        # The user's Send was for the first text: a rewrite waits for a new Send (Needs you), never goes on its own.
+        assert (await _take(client, cid))["status"] == "empty"
+        assert await _check(client, cid, rewritten) == ("ask", "needs_owner_click")
+        await _auto(client)  # with autonomy on, the rewrite may go, but only past the fact check
+        assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, rewritten) == ("ask", "unsupported_claims")
         assert (await _release(client, f"contact:{cid}", "draft_rewritten")).status_code == 200
         _age_sends()
@@ -364,6 +368,58 @@ async def test_a_sensitive_or_unsupported_message_after_acceptance_waits_for_the
         assert await _check(client, cid, fine) == ("stop", "needs_claim")
         assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, fine) == ("send", "auto_after_accept")
+
+
+@pytest.mark.asyncio
+async def test_the_users_send_binds_to_the_text_the_user_saw_never_a_swapped_draft(
+    authenticated_async_context, fixture_user_id
+):
+    """M1 approved, the request went; the assistant swaps in M2 and saves connected: M2 never goes without a Send."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, cid = await _person(client)
+        m1 = await _draft(client, app_id, cid)
+        await _click(client, cid, m1)
+        await _invite(client, cid, m1)
+        m2 = await _draft(client, app_id, cid, "Hi Priya, a different text the user never saw.")
+        await _state(client, cid, "connected")
+        assert all(t.get("contact_id") != cid for t in await _tasks(client))
+        assert (await _take(client, cid))["status"] == "empty"
+        assert await _check(client, cid, m2) == ("ask", "needs_owner_click")
+        assert await _check(client, cid, m1) == ("stop", "not_latest_draft")
+        await _click(client, cid, m2)  # the user's own Send on M2: it goes as theirs
+        assert (await _take(client, cid))["status"] == "task"
+        assert await _check(client, cid, m2) == ("send", "owner_clicked")
+
+
+@pytest.mark.asyncio
+async def test_a_request_counts_toward_the_company_and_network_caps(authenticated_async_context, fixture_user_id):
+    from src.api import dependencies as api_deps
+
+    async with authenticated_async_context() as client:
+        app_id, cid = await _person(client)
+        mid = await _draft(client, app_id, cid)
+        await _click(client, cid, mid)
+        await _invite(client, cid, mid)
+        db = await api_deps.get_db()
+        now = datetime.now(timezone.utc)
+        job = await rules.load_outreach_counts(db, fixture_user_id, now, "northwind")
+        assert (job.sent_today, job.job_sent_today, job.company_sent_in_window) == (1, 1, 1)
+        cold = await client.post(
+            "/api/contacts", json={"name": "Ravi", "company": "Contoso", "linkedin_url": "https://www.linkedin.com/in/ravi"}
+        )
+        assert cold.status_code == 201, cold.text
+        other = int(cold.json()["contact"]["id"])
+        await _state(client, other, "not_connected")
+        note = await client.post(
+            f"/api/contacts/{other}/outreach",
+            json={"entry": "message", "channel": "linkedin", "text": MESSAGE, "draft_kind": "after_connect"},
+        )
+        assert note.status_code == 201, note.text
+        await _click(client, other, int(note.json()["outreach"]["id"]))
+        await _invite(client, other, int(note.json()["outreach"]["id"]))
+        net = await rules.load_outreach_counts(db, fixture_user_id, datetime.now(timezone.utc))
+        assert (net.sent_today, net.job_sent_today, net.network_sent_today, net.network_sent_last_hour) == (2, 1, 1, 1)
 
 
 @pytest.mark.asyncio

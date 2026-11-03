@@ -742,7 +742,9 @@ LINKEDIN_INVITES_PER_WEEK_MAX = int(os.getenv("LINKEDIN_INVITES_PER_WEEK_MAX", "
 # A LinkedIn message that names one of these never goes without the user's Send (check_outreach: sensitive_topic).
 OUTREACH_SENSITIVE_WORDS = (
     "visa", "visas", "sponsor", "sponsorship", "sponsored", "salary", "salaries", "compensation", "pay", "age",
-    "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness",
+    "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness", "immigration",
+    "citizenship", "nationality", "relocation", "permit", "sponsoring", "sponsors", "maternity", "religion",
+    "work permit", "right to work", "skilled worker",
 )
 # One LinkedIn follow-up per person, this many days after the message with no reply (owner 2026-11-03).
 LINKEDIN_FOLLOW_UP_DAYS = int(os.getenv("LINKEDIN_FOLLOW_UP_DAYS", "6"))

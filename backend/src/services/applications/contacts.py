@@ -2050,12 +2050,13 @@ async def outreach_gate_facts(
     _apply_current_fields(current, (await _latest_edits_for_user(db, user_id)).get(contact_id, {}))
     application_id = contact.get("application_id")
     closed = False
-    job_company = ""
+    job_company = job_title = ""
     if application_id is not None:
         app_row = await get_owned_application(db, user_id, int(application_id))
         if app_row is not None:
             closed = str(app_row.get("status") or "") in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
             job_company = str(app_row.get("job_company") or "")
+            job_title = str(app_row.get("job_title") or "")
     company = contact_company_key({"company": current.get("company"), "job_company": job_company})
     email = (current.get("email") or "").strip().lower()
     bounced = False
@@ -2065,8 +2066,9 @@ async def outreach_gate_facts(
             (user_id, email),
         )
         bounced = await cur.fetchone() is not None
+    context = " ".join(str(v or "") for v in (current.get("name"), current.get("company"), job_company, job_title))
     linkedin = await _linkedin_gate_facts(
-        db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc)
+        db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc), context
     )
     return settings_rules.OutreachFacts(
         **linkedin,
@@ -2087,7 +2089,7 @@ async def outreach_gate_facts(
 
 async def _linkedin_gate_facts(
     db: JobDatabase, user_id: str, contact_id: int, rows: list[dict[str, Any]], target: dict[str, Any],
-    current: dict[str, Any], session: str, actor: str, now: datetime,
+    current: dict[str, Any], session: str, actor: str, now: datetime, context: str = "",
 ) -> dict[str, Any]:
     """The LinkedIn facts of :class:`OutreachFacts` (``{}`` for any other channel: nothing is read). The click
     and the claim come from ``own_browser.derive`` (the one place that reads those rows); the pace from the
@@ -2112,9 +2114,9 @@ async def _linkedin_gate_facts(
     return {
         "after_connect": own_browser.is_after_connect(rows, int(target["id"])),
         "invited": invite is not None,
-        "invite_owner_approved": bool(invite),
+        "invite_owner_approved": own_browser.owner_yes_carries(rows, int(target["id"])),
         "invites_this_week": await own_browser.invites_since(db, user_id, now - timedelta(days=7)),
-        "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile),
+        "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile, context),
         "sensitive": bool(cv_checks.sensitive_words(text)),
         **own_browser.follow_up_facts(rows, int(target["id"]), now),
         "has_linkedin_url": bool((current.get("linkedin_url") or "").strip()),
@@ -2139,7 +2141,8 @@ async def count_company_sends(db: JobDatabase, user_id: str, key: str, since: st
         "SELECT ac.id AS contact_id, ac.company, a.job_company FROM contact_outreach co "
         "JOIN application_contacts ac ON ac.id = co.contact_id "
         "JOIN applications a ON a.id = ac.application_id "
-        "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ?",
+        "WHERE co.user_id = ? AND ac.user_id = ? AND co.recorded_at >= ? "
+        "AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited'))",
         (user_id, user_id, since),
     )
     rows = [dict(r) for r in await cur.fetchall()]
@@ -2244,6 +2247,8 @@ async def _full_contact_view(
     view["outreach"] = _outreach_view(rows, include_text=include_text)
     view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
     view["own_browser_task"] = own_browser.public_task(own_browser.derive(rows, datetime.now(timezone.utc)))
+    # One LinkedIn follow-up is due (any person, with a job or not): the assistant drafts it.
+    view["linkedin_follow_up_due"] = own_browser.follow_up_due(rows, datetime.now(timezone.utc))
     # A newest draft over the note limit that nobody has sent or skipped: the assistant's job, not the user's.
     last_msg = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
     closed = any(r["entry"] in ("sent", "reply", "skipped") and int(r["id"]) > last_msg for r in rows)
