@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { getPerson, markOutreachSent, markOutreachSkipped } from "@/lib/api";
 import type { ListPeopleResult } from "@/lib/api";
-import { PACE_TEXT } from "@/lib/browser-labels";
+import { paceText } from "@/lib/browser-labels";
 import { personToReach } from "@/lib/job-cards";
 import type { PersonToReach } from "@/lib/job-cards";
+import { countsText } from "@/lib/outreach-kinds";
 import { toast } from "@/lib/toast";
 import { PersonRow } from "./PersonRow";
 
@@ -34,8 +35,10 @@ export function NewConnections({
   people,
   onDone,
   onChanged,
+  linkedinPerDay,
 }: {
   people: PersonToReach[];
+  linkedinPerDay?: number | null;
   onDone: (contactId: number) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -73,11 +76,15 @@ export function NewConnections({
       data-testid="new-connections"
       className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-card"
     >
-      <h2 id="new-connections" className="font-heading text-base">New connections</h2>
+      <h2 id="new-connections" className="font-heading text-base">Network</h2>
       <p className="text-xs text-muted-foreground">
         People your assistant added who are not linked to a job. Their notes are not sent yet.
+        {/* Drafted / waiting counts come from the rows the server returned. Sent today per kind waits for a server read. */}
       </p>
-      <p className="text-xs text-muted-foreground">{PACE_TEXT}</p>
+      <p className="text-xs text-muted-foreground" data-testid="network-counts">
+        {countsText({ drafted: people.length, waiting: people.length })}
+      </p>
+      <p className="text-xs text-muted-foreground">{paceText(linkedinPerDay)}</p>
       {people.map((p) => (
         <PersonRow
           key={p.contact.id}

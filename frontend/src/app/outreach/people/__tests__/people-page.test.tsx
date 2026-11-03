@@ -82,6 +82,21 @@ async function rows() {
 }
 
 describe("/people", () => {
+  it("splits Job outreach (under its job) from Network, each with counts from the rows", async () => {
+    render(<PeopleClient />);
+    await rows();
+    const job = screen.getByTestId("job-outreach");
+    const net = screen.getByTestId("network");
+    expect(within(job).getByText("Staff Engineer · Northwind", { selector: "p" })).toBeInTheDocument();
+    expect(within(job).getByText("Priya Raman")).toBeInTheDocument();
+    expect(within(job).queryByText("Sam Okafor")).toBeNull();
+    expect(within(net).getByText("Sam Okafor")).toBeInTheDocument();
+    expect(within(net).queryByText("Priya Raman")).toBeNull();
+    expect(screen.getByTestId("job-outreach-counts")).toHaveTextContent("1 drafted · 0 waiting on you"); // P1 was sent
+    expect(screen.getByTestId("network-counts")).toHaveTextContent("1 drafted · 1 waiting on you");
+    expect(screen.queryByText(/sent today/i)).toBeNull();
+  });
+
   it("renders one row per person with role, found via, linked applications and outreach marks", async () => {
     render(<PeopleClient />);
     const r = await rows();

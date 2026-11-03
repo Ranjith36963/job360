@@ -294,13 +294,16 @@ function AnsweredRow({ ask, onChanged }: { ask: Ask; onChanged: () => Promise<vo
 
 /** The requests waiting for the user's OK. Best-effort: a failed read just
  *  shows none, it never blocks the questions. */
-async function waitingRequests(): Promise<WaitingRequest[]> {
+async function waitingRequests(): Promise<{ reqs: WaitingRequest[]; perDay: number | null }> {
   try {
     const view = await getAssistantSettings();
     const line = settingScore(view.apply_min_score);
-    return view.waiting.map((r) => ({ ...r, current_score_line: line, grant_queue: view.auto_grant_scope?.queue ?? null }));
+    return {
+      reqs: view.waiting.map((r) => ({ ...r, current_score_line: line, grant_queue: view.auto_grant_scope?.queue ?? null })),
+      perDay: settingScore(view.linkedin_sends_per_day), // the user's own LinkedIn limit, for the pace line
+    };
   } catch {
-    return [];
+    return { reqs: [], perDay: null };
   }
 }
 
@@ -323,6 +326,7 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
   const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false, readyTotal: null });
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
+  const [linkedinPerDay, setLinkedinPerDay] = useState<number | null>(null);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
   // Answered is folded until the user opens it (owner plan 3b).
@@ -342,10 +346,11 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
   const fold = useFoldSet();
 
   const apply = useCallback(
-    (o: Ask[], a: Awaited<ReturnType<typeof listAsks>>, w: WaitingRequest[]) => {
+    (o: Ask[], a: Awaited<ReturnType<typeof listAsks>>, w: Awaited<ReturnType<typeof waitingRequests>>) => {
       setOpen(o);
       setAnswered(a.asks);
-      setWaiting(w);
+      setWaiting(w.reqs);
+      setLinkedinPerDay(w.perDay);
       setMoreAnswered(a.asks.length >= PAGE);
       setError(null);
     },
@@ -502,7 +507,7 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
         {(active === "all" || active === "answers") && (count === null || count.answerOnce) && (
           <Questionnaire onChanged={() => setCountTick((t) => t + 1)} />
         )}
-        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} focusJob={focusJob} />
+        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} linkedinPerDay={linkedinPerDay} focusJob={focusJob} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>
       <OtherList
