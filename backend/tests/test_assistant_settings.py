@@ -51,6 +51,9 @@ SIX = (
     "assistant_settings.people_hunt",
     # 2026-10-25 pc_on_hours (tests/test_pc_on_hours.py).
     "assistant_settings.pc_on_hours",
+    # 2026-11-02 the user's own outreach send limits (tests/test_two_outreach_sends.py).
+    "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
+    "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
 )
 PROGRESS = "assistant_settings.setup_progress"
 

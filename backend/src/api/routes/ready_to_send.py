@@ -207,10 +207,10 @@ async def confirm_answer(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
 ) -> ReadyCard:
-    """Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is
-    saved as the user's own word in memory, so the assistant uses it next time.
-    Session only - an assistant can never vouch for its own answer. Returns the
-    card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only."""
+    """Verify or Edit one answer on a ready card (owner decision 2026-10-18, narrowed 2026-11-02): the
+    user's word is approved for THIS application only (an ``answer_verified`` event); it is never saved
+    for other jobs - that is the "remember" press. Session only - an assistant can never vouch for its own
+    answer. Returns the card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise HTTPException(status_code=404, detail="application not found")
     try:

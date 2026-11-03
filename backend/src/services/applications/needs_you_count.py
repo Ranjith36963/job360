@@ -101,15 +101,22 @@ async def _open_job_asks(db: JobDatabase, user_id: str, tests: set[int]) -> tupl
 
 
 async def _unsent_contacts(db: JobDatabase, user_id: str) -> tuple[set[int], int]:
-    """(job ids with a person to reach, people with no job to reach): one query, no per-contact read."""
+    """(job ids with a person to reach, people with no job to reach): one query, no per-contact read. A cold
+    person whose LinkedIn note is over the limit is the assistant's to rewrite, so it is not counted."""
+    from src.services.applications import contacts  # noqa: PLC0415 - contacts imports the spine package
+
     cur = await db._db.execute(_UNSENT_SQL, (user_id, user_id, settings.LIST_PEOPLE_MAX))
     jobs: set[int] = set()
     cold = 0
-    for r in await cur.fetchall():
+    found = [dict(r) for r in await cur.fetchall()]
+    too_long = await contacts.over_limit_notes(
+        db, user_id, [int(r["id"]) for r in found if r["application_id"] is None and str(r["text"] or "").strip()]
+    )
+    for r in found:
         if not str(r["text"] or "").strip():
             continue
         if r["application_id"] is None:
-            cold += 1
+            cold += int(int(r["id"]) not in too_long)
         else:
             jobs.add(int(r["application_id"]))
     return jobs, min(cold, NEW_CONNECTIONS_MAX)

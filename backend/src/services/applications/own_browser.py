@@ -14,7 +14,8 @@ Stored as ``contact_outreach`` entries Job360 writes itself and never accepts fr
 (text = the message row id), ``send_claimed`` (text = the session label), ``send_released`` (text = reason).
 Append-only: the state is derived from the newest rows, nothing is updated. Run now is one slot in
 ``assistant_duty_runs`` named ``own_browser:run_now`` (it is not a scheduled duty). Pace: LinkedIn sends are
-at least ``LINKEDIN_MIN_GAP_SECONDS`` apart and at most ``LINKEDIN_DAILY_MAX`` a day, enforced in :func:`take`.
+at least ``LINKEDIN_MIN_GAP_SECONDS`` apart and at most the user's own ``assistant_settings.linkedin_sends_per_day``
+(``rules.linkedin_daily_max``: default 20, operator backstop 100) a day, enforced in :func:`take`.
 Assistant-neutral on purpose. Logs ids and closed values only, never message text.
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from src.core import settings
 from src.services.applications.spine import SpineError
 from src.services.browser_agent import routing
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -38,7 +40,6 @@ RUN_NOW_MINUTES = 60
 QUEUE_MAX = 50
 ROWS_PER_CONTACT_MAX = 200
 LINKEDIN_MIN_GAP_SECONDS = 120
-LINKEDIN_DAILY_MAX = 10
 EASY_APPLY_DAILY_MAX = 10
 RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
@@ -75,6 +76,16 @@ def session_label(raw: str) -> str:
 def log_read(user_id: str, count: int) -> None:
     """One audit line for a queue read: who, how many (never the tasks)."""
     _log("own_browser_queue_read", user_id, "ok", count=count)
+
+
+def note_over_limit(channel: str, state: Optional[str], chars: int, premium: bool) -> Optional[int]:
+    """The connection-note limit a stored LinkedIn draft breaks, else ``None`` (fail closed, 2026-11-02): a
+    draft to anyone not known to be connected is a connection note, so an unsaved state counts as not
+    connected. ``connected`` (a message) and ``pending`` (nothing can be sent) are never judged here."""
+    if channel != "linkedin" or (state or "unknown") not in ("not_connected", "unknown"):
+        return None
+    limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    return limit if chars > limit else None
 
 
 def _when(raw: Any) -> Optional[datetime]:
@@ -286,6 +297,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         task = derive(await _rows(db, contact_id), now)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if await contacts.over_limit_notes(db, user_id, [contact_id]):
+            continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
         route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
@@ -484,13 +497,19 @@ async def easy_apply_today(db: JobDatabase, user_id: str, now: datetime) -> int:
 
 async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[str, int]]:
     """``("wait", seconds_left)`` when the last LinkedIn send was under the minimum gap ago;
-    ``("daily_limit", 0)`` at the day's maximum (the user's own day); else ``None``."""
+    ``("daily_limit", 0)`` at the day's maximum (the user's own day and own ``linkedin_sends_per_day``); else
+    ``None``."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
     last, today = await pace_facts(db, user_id, now)
     if last is not None:
         left = LINKEDIN_MIN_GAP_SECONDS - (now - last).total_seconds()
         if left > 0:
             return "wait", int(math.ceil(left))
-    return ("daily_limit", 0) if today >= LINKEDIN_DAILY_MAX else None
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    return ("daily_limit", 0) if today >= rules.linkedin_daily_max(cfg) else None
 
 
 def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:

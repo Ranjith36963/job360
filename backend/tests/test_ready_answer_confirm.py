@@ -1,7 +1,7 @@
-"""Verify / Edit one answer on a Ready-to-send card (owner decision 2026-10-18).
+"""Verify / Edit one answer on a Ready-to-send card (owner decision 2026-10-18; job-only since 2026-11-02).
 
-Real HTTP doors, real rows, VALUE asserts (rule #21): the user's word lands in
-memory, the card reads it back, and an edited answer holds the Send.
+Real HTTP doors, real rows, VALUE asserts (rule #21): the user's word is approved for THIS job, the
+card reads it back, and an edited answer holds the Send. Reuse is tests/test_verify_job_only.py.
 """
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ async def test_verify_a_guess_saves_it_as_the_users_answer_and_the_next_fill_rea
         after = resp.json()
         assert after["answers"][0]["verified"] is True and after["answers"][0]["changed_to"] is None
         assert _codes(after) == [], "a verified guess is no longer a guess"
-        assert [(r["question"], r["answer"]) for r in _approved(fixture_user_id)] == [(GUESS["question"], "Yes")]
+        assert _approved(fixture_user_id) == [], "Verify is for this job only: nothing is saved for reuse (2026-11-02)"
         await _fill(client, app_id, [GUESS])  # the assistant fills again: still the user's word
         assert (await _card(client, app_id))["answers"][0]["verified"] is True
 
@@ -162,7 +162,7 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         card = resp.json()
         assert (card["answers"][0]["changed_to"], card["answers"][0]["verified"]) == (word, True)
         assert _codes(card) == ["changed"], "held from Send all, never from the user's own Send"
-        assert [r["answer"] for r in _approved(fixture_user_id)] == [word]
+        assert _approved(fixture_user_id) == [], "an Edit is for this job only (2026-11-02)"
         # The user's Send is the yes: no refill needed first.
         approve = await client.post(f"/api/applications/{app_id}/send/approve", params={"form_filled_event_id": fill})
         assert approve.status_code == 201, approve.text
@@ -255,18 +255,19 @@ async def test_sensitive_memory_goes_to_its_field_never_the_approved_list(authen
         await _fill(client, app_id, [GENDER])
         card = await _card(client, app_id)
         assert _codes(card) == ["sensitive", "not_in_memory"]
-        # Owner 2026-10-26 (G023 retired): the typed value is kept, so Verify sees it and saves it to its field.
+        # Owner 2026-10-26 (G023 retired): the typed value is kept, so Verify sees it. Owner 2026-11-02: it is
+        # approved for this job only, so its memory field is NOT written.
         assert (card["answers"][0]["redacted"], card["answers"][0]["answer"]) == (False, "Female")
         resp = await _confirm(client, app_id, 0, card["form_filled_event_id"])
         assert resp.status_code == 200, resp.text
         assert resp.json()["answers"][0]["verified"] is True and _codes(resp.json()) == []
         profile = load_profile(fixture_user_id)
-        assert profile is not None and profile.user_info.equality["gender"] == "Female"
+        assert profile is None or not profile.user_info.equality.get("gender"), "memory field untouched"
         assert _approved(fixture_user_id) == [], "a sensitive answer never rides in the approved list"
         resp = await _confirm(client, app_id, 0, card["form_filled_event_id"], "Prefer not to say")
         assert resp.json()["answers"][0]["changed_to"] == "Prefer not to say"
         profile = load_profile(fixture_user_id)
-        assert profile is not None and profile.user_info.equality["gender"] == "Prefer not to say"
+        assert profile is None or not profile.user_info.equality.get("gender"), "memory field untouched"
 
 
 @pytest.mark.asyncio
@@ -293,12 +294,13 @@ async def test_verify_memory_an_assistant_saved_makes_it_the_users_own(authentic
         card = await _card(client, app_id)
         assert [a["verified"] for a in card["answers"]] == [False, False]
         visa = (await _confirm(client, app_id, 0, fill)).json()["answers"][0]
-        assert (visa["verified"], visa["saved_by"]) == (True, "web")
+        assert visa["verified"] is True
+        assert visa["saved_by"] == "token:claude-code", "the memory row itself is not re-saved by the user (2026-11-02)"
         assert _approved(fixture_user_id) == [], "visa status stays in memory only"
-        # Name was typed from the wrong field: verifying it saves the exact wording the user stands behind.
+        # Name was typed from the wrong field: the user stands behind it for THIS job only.
         name = (await _confirm(client, app_id, 1, fill)).json()["answers"][1]
         assert name["verified"] is True
-        assert [(r["question"], r["answer"]) for r in _approved(fixture_user_id)] == [("Name", "Ada Lovelace")]
+        assert _approved(fixture_user_id) == []
 
 
 @pytest.mark.asyncio
