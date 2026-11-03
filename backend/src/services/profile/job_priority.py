@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from src.services.profile.country_pages import is_drafted
 from src.services.profile.regions import REGIONS, is_region, record_code_for
 from src.services.profile.user_info import ANY_COUNTRY, PRIORITY_LEVELS
 
@@ -34,7 +35,8 @@ FILTER_VALUES = (*PRIORITY_LEVELS, NOT_SET)
 
 def _records(right_to_work: Any) -> list[dict[str, Any]]:
     recs = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
-    return [r for r in (recs or []) if isinstance(r, dict) and isinstance(r.get("country"), str)]
+    # A drafted row (country_pages) is an assistant's guess: its priority is not the user's choice.
+    return [r for r in (recs or []) if isinstance(r, dict) and isinstance(r.get("country"), str) and not is_drafted(r)]
 
 
 def level_of(record: dict[str, Any], kind: str) -> Optional[str]:

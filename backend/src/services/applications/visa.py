@@ -22,6 +22,7 @@ from typing import Any, Optional
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications.spine import SpineError, get_owned_application
+from src.services.profile.country_pages import is_drafted
 from src.services.profile.regions import REGIONS, is_region
 
 _ALPHA2 = re.compile(r"^[A-Za-z]{2}$")
@@ -125,11 +126,14 @@ async def user_work_countries(db: JobDatabase, user_id: str) -> list[str]:
 def _country_records(right_to_work: Any) -> list[tuple[str, dict[str, Any]]]:
     """``(code, record)`` per place: each country's own record, then each region record
     once per member country WITHOUT its own record (owner decision 2026-10-26: a region
-    line answers for its countries; a country's own line wins). ``ANY`` passes as it is."""
+    line answers for its countries; a country's own line wins). ``ANY`` passes as it is. A row an assistant
+    drafted (``country_pages.is_drafted``) is a guess, not the user's word: it is skipped, so it neither
+    counts as a work country nor shadows the user's region line."""
     records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
     recs = [
         (rec["country"].strip().upper(), rec) for rec in (records if isinstance(records, list) else [])
         if isinstance(rec, dict) and isinstance(rec.get("country"), str) and rec["country"].strip()
+        and not is_drafted(rec)
     ]
     own = {code for code, _ in recs if not is_region(code)}
     out = [(code, rec) for code, rec in recs if not is_region(code)]

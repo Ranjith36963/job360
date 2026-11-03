@@ -150,6 +150,48 @@ async def test_an_assistant_created_country_is_a_draft_until_the_user_confirms_i
 
 
 @pytest.mark.asyncio
+async def test_a_drafted_citizen_row_is_not_a_work_country_until_the_web_confirms_it(
+    authenticated_async_context, fixture_user_id
+):
+    """An assistant-drafted AE row (citizen, no sponsorship needed), even sent with remember: true, is a guess:
+    it stays out of the visa work countries, the visa badge and the search brief until the user confirms it."""
+    from src.api import dependencies as api_deps
+    from src.api.main import app
+    from src.services.applications import visa
+    from src.services.profile.search_brief import build_search_brief
+    from src.services.profile.storage import load_profile
+
+    ae = {"country": "AE", "work_authorization": "citizen", "needs_sponsorship": False, "remote_ok": True}
+    async with authenticated_async_context() as client:
+        await _patch(client, _rtw(GB))
+        token = (await client.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
+        app_id = await _bring(client, "AE")
+        put = await client.put(f"/api/applications/{app_id}/visa", json={"visa_signal": "no_sponsorship", "visa_country": "AE"})
+        assert put.status_code == 200, put.text
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        edit = {**_rtw(GB, ae), "remember": True}
+        resp = await agent.patch("/api/profile", json={"edits": [edit]})
+        assert resp.status_code == 200, resp.text
+    assert _rows(fixture_user_id)["AE"]["set_by"] == "assistant"
+    db = await api_deps.get_db()
+    assert await visa.user_work_countries(db, fixture_user_id) == ["GB"]
+    rtw = load_profile(fixture_user_id).user_info.right_to_work
+    assert build_search_brief(rtw)["work_from"] == ["GB"] and [r["country"] for r in build_search_brief(rtw)["rows"]] == []
+    async with authenticated_async_context() as client:
+        badge = (await client.get(f"/api/applications/{app_id}")).json()["visa"]
+        assert badge["needs_sponsorship"] is True, "AE is not a country the user said they can work in"
+        drafted = _rows(fixture_user_id)["AE"]
+        await _patch(client, _rtw(GB, {**drafted, "set_by": None}))
+        assert "set_by" not in _rows(fixture_user_id)["AE"]
+        assert await visa.user_work_countries(db, fixture_user_id) == ["GB", "AE"]
+        assert (await client.get(f"/api/applications/{app_id}")).json()["visa"]["needs_sponsorship"] is False
+        confirmed = load_profile(fixture_user_id).user_info.right_to_work
+        assert [r["country"] for r in build_search_brief(confirmed)["rows"]] == ["AE"]
+
+
+@pytest.mark.asyncio
 async def test_no_row_means_nothing_is_shown(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         await _patch(client, _rtw(GB))
