@@ -125,6 +125,8 @@ export const EVENT_LABEL: Record<string, string> = {
   process_log: "Assistant's work log",
   // Autonomy slice 3 (2026-11-02): watch-only check of what autonomy would clear (work log, by type).
   autonomy_shadow: "Autonomy check (watch-only)",
+  // Owner decision 2026-11-02: Verify / Edit on the Ready card approves an answer for this job only.
+  answer_verified: "Answer approved for this job",
 };
 
 function relayedWords(payload: unknown): boolean {
