@@ -100,14 +100,15 @@ describe("JobCard", () => {
 
   it("shows the full drafted message and records I sent it through the outreach door", async () => {
     const person = {
-      contact: { id: 4, name: "Ada Lovelace", role: "CTO", found_via: "company_team_page" },
+      contact: { id: 4, name: "Ada Lovelace", role: "CTO", found_via: "company_team_page", linkedin_url: "https://www.linkedin.com/in/ada" },
       message: "Hi Ada,\nI applied on 14 October.",
       linkedinUrl: "https://www.linkedin.com/in/ada",
     } as unknown as JobCardData["people"][number];
     render(<JobCard card={card([], { people: [person] })} onChanged={onChanged} />);
     expect(screen.getByText(/I applied on 14 October/)).toBeInTheDocument();
     expect(screen.getByText("Found via Company team page")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open profile ↗" })).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(screen.getByRole("link", { name: "Ada Lovelace" })).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(screen.queryByText(/Open profile/)).toBeNull();
     fireEvent.click(screen.getByTestId("sent-4"));
     await waitFor(() => expect(markOutreachSent).toHaveBeenCalledWith(4, "linkedin"));
   });
@@ -388,7 +389,7 @@ describe("JobCard", () => {
     expect(within(job).getByTestId(`blocker-${blocker.id}`)).toBeInTheDocument();
     expect(within(job).getByTestId(`question-${q.id}`)).toBeInTheDocument();
     expect(within(job).getByTestId("cv-to-check")).toBeInTheDocument();
-    expect(within(job).getByText("Form filled. Next: you")).toBeInTheDocument();
+    expect(within(job).getByText("Form filled on the site. Waiting for your Send")).toBeInTheDocument();
     expect(within(job).getByTestId("section-form-link-7")).toHaveAttribute("href", "https://jobs.example.com/7");
     expect(within(job).queryByTestId(`reminder-${rem.id}`)).toBeNull();
     expect(within(out).getByTestId(`reminder-${rem.id}`)).toBeInTheDocument();

@@ -79,9 +79,9 @@ async def test_a_connection_note_over_200_is_refused_and_300_with_premium(authen
         assert ok.status_code == 201, ok.text
         long = await _save(client, app_id, cid, channel="linkedin", text="x" * 201, draft_kind="connection_note")
         assert long.status_code == 422 and "at most 200 characters" in long.text and "201" in long.text
-        # Without a draft_kind the old behaviour stays: saved, with a warning.
+        # Fail closed (2026-11-02): without a draft_kind a LinkedIn draft is a note unless they are connected.
         plain = await _save(client, app_id, cid, channel="linkedin", text="x" * 201)
-        assert plain.status_code == 201, plain.text
+        assert plain.status_code == 422 and "this one is 201" in plain.text
 
         _seed_profile(fixture_user_id)
         patched = await client.patch(
@@ -102,7 +102,9 @@ async def test_inmail_cap_and_kind_channel_rules(authenticated_async_context):
         assert ok.status_code == 201, ok.text
         over = await _save(client, app_id, cid, channel="linkedin", text="x" * 1901, draft_kind="inmail")
         assert over.status_code == 422 and "1900" in over.text
-        msg = await _save(client, app_id, cid, channel="linkedin", text="x" * 1000, draft_kind="message")
+        patched = await client.patch(f"/api/contacts/{cid}", json={"linkedin_state": "connected"})
+        assert patched.status_code == 200, patched.text
+        msg = await _save(client, app_id, cid, channel="linkedin", text="x" * 400, draft_kind="message")
         assert msg.status_code == 201, msg.text
         wrong = await _save(client, app_id, cid, channel="linkedin", text="Hi", draft_kind="email")
         assert wrong.status_code == 422 and "channel email" in wrong.text

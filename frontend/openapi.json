@@ -2780,6 +2780,9 @@
           "daily_cap": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "email_sends_per_day": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "hunt_every_hours": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2788,7 +2791,13 @@
             "title": "Inbox Mode",
             "type": "string"
           },
+          "linkedin_sends_per_day": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "min_gap_minutes": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "network_per_hour": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "notes": {
@@ -2798,6 +2807,9 @@
             },
             "title": "Notes",
             "type": "array"
+          },
+          "outreach_per_company": {
+            "$ref": "#/components/schemas/SettingFieldOut"
           },
           "outreach_send": {
             "$ref": "#/components/schemas/SettingFieldOut"
@@ -2876,6 +2888,10 @@
           "hunt_every_hours",
           "people_hunt",
           "pc_on_hours",
+          "outreach_per_company",
+          "network_per_hour",
+          "linkedin_sends_per_day",
+          "email_sends_per_day",
           "paused",
           "practice_run"
         ],
@@ -4683,6 +4699,16 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note_rewrite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteRewriteOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notes": {
             "title": "Notes",
@@ -10021,6 +10047,25 @@
         "title": "NormalizedOut",
         "type": "object"
       },
+      "NoteRewriteOut": {
+        "description": "The newest LinkedIn draft is over the connection-note ``limit`` (it has ``chars``) and the person is not\nknown to be connected: the ASSISTANT rewrites it (never the user); it is not ready to send.",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "chars"
+        ],
+        "title": "NoteRewriteOut",
+        "type": "object"
+      },
       "OAuthGrantOut": {
         "properties": {
           "client_name": {
@@ -10155,7 +10200,7 @@
         "type": "object"
       },
       "OutreachCheckResponse": {
-        "description": "The answer to \"may I press Send on this outreach email?\" - one gate\n(``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then\nrecord ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:\ndo not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap.",
+        "description": "The answer to \"may I press Send on this outreach email?\" - one gate\n(``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then\nrecord ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:\ndo not send. ``sent_today`` / ``daily_max``: recorded sends today (every channel) vs the operator ceiling;\n``job_sent_today`` / ``network_sent_today`` split them (owner 2026-11-02: a contact with an application is\njob outreach, one without is network). The user's own limits are in get_profile ``settings``.",
         "properties": {
           "daily_max": {
             "title": "Daily Max",
@@ -10173,6 +10218,16 @@
           "detail": {
             "title": "Detail",
             "type": "string"
+          },
+          "job_sent_today": {
+            "default": 0,
+            "title": "Job Sent Today",
+            "type": "integer"
+          },
+          "network_sent_today": {
+            "default": 0,
+            "title": "Network Sent Today",
+            "type": "integer"
           },
           "reason": {
             "title": "Reason",
@@ -10676,6 +10731,16 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note_rewrite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteRewriteOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notes": {
             "title": "Notes",
@@ -20089,7 +20154,7 @@
     },
     "/api/applications/{application_id}/answers/{index}/confirm": {
       "post": {
-        "description": "Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is\nsaved as the user's own word in memory, so the assistant uses it next time.\nSession only - an assistant can never vouch for its own answer. Returns the\ncard again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.",
+        "description": "Verify or Edit one answer on a ready card (owner decision 2026-10-18, narrowed 2026-11-02): the\nuser's word is approved for THIS application only (an ``answer_verified`` event); it is never saved\nfor other jobs - that is the \"remember\" press. Session only - an assistant can never vouch for its own\nanswer. Returns the card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.",
         "operationId": "confirm_answer_api_applications__application_id__answers__index__confirm_post",
         "parameters": [
           {
