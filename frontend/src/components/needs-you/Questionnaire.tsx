@@ -14,9 +14,17 @@ const btn = "rounded-md border border-border px-2.5 py-1 text-xs font-medium hov
 const mainBtn =
   "rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50";
 
+/** Where the box text came from, in plain words. Empty box = no guess yet. */
+const fromLine = (q: QuestionnaireRow) => {
+  if (!(q.value || q.answer || "").trim()) return "Your assistant hasn't guessed this yet";
+  const f = (q.from ?? "").trim();
+  return f ? f[0].toUpperCase() + f.slice(1) : "Your assistant's guess";
+};
+
 const rowKey = (cc: string, q: QuestionnaireRow) => `${cc}:${q.topic}`;
 
-/** The one-time questionnaire on Needs you. Nothing is saved for later jobs until the owner presses
+/** The one-time questionnaire on Needs you. Every box starts with the guess; the owner edits it in place.
+ *  Nothing is saved (no blur, change or autosave) until the owner presses
  *  "OK" on a row or "OK all and remember"; a right-to-work or salary answer counts for that country only. Silent when empty. */
 export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
   const [data, setData] = useState<Data | null>(null);
@@ -39,7 +47,7 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
   const countries = (data?.countries ?? []).filter((c) => c.questions.length > 0);
   if (countries.length === 0) return null;
 
-  const valueOf = (cc: string, q: QuestionnaireRow) => values[rowKey(cc, q)] ?? q.answer ?? "";
+  const valueOf = (cc: string, q: QuestionnaireRow) => values[rowKey(cc, q)] ?? (q.value || q.answer || "");
 
   async function remember(cc: string, rows: QuestionnaireRow[]) {
     const items = rows
@@ -71,13 +79,11 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
           <h3 className={label}>{country}</h3>
           {questions.map((q) => (
             <div key={q.topic} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`qn-${country}-${q.topic}`}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="text-sm font-medium">{q.question}</p>
-                <span className="text-xs text-muted-foreground">{q.label === "guessed" ? "Your assistant's guess" : "Not known"}</span>
-              </div>
+              <p className="text-sm font-medium">{q.question}</p>
               <Textarea aria-label={q.question} value={valueOf(country, q)} disabled={busy} placeholder="Type your answer"
                 data-testid={`qn-input-${country}-${q.topic}`}
                 onChange={(e) => setValues((prev) => ({ ...prev, [rowKey(country, q)]: e.target.value }))} />
+              <p className="text-xs text-muted-foreground" data-testid={`qn-from-${country}-${q.topic}`}>{fromLine(q)}</p>
               <div>
                 <button type="button" className={btn} disabled={busy || !valueOf(country, q).trim()}
                   data-testid={`qn-ok-${country}-${q.topic}`} onClick={() => void remember(country, [q])}>

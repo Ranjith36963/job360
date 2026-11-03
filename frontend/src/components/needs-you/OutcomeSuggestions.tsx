@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { listOutcomeSuggestions, recordApplicationEvent, type OutcomeSuggestion } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { onChanges } from "@/lib/live-changes";
+import { useAppHref } from "@/lib/app-href";
 
 /** Outcome suggestions for the Other list on Needs you (feature 9). The assistant read an email and
  *  was not sure what it means; nothing changes until the user accepts. Accept records exactly the
@@ -81,9 +82,10 @@ export function OutcomeSuggestionCard({ s, busy, onAct }: {
   busy: boolean;
   onAct: (s: OutcomeSuggestion, kind: "accept" | "ignore") => void;
 }) {
+  const appLink = useAppHref();
   return (
     <div data-testid={`outcome-suggestion-${s.event_id}`} className="flex flex-col gap-1 text-sm">
-      <Link href={`/applications/${s.application_id}`} className="font-medium underline-offset-2 hover:underline">
+      <Link href={appLink(s.application_id)} className="font-medium underline-offset-2 hover:underline">
         {[s.job_title, s.job_company].filter(Boolean).join(" · ")}
       </Link>
       <p data-testid="outcome-suggestion-type" className="font-medium">

@@ -298,10 +298,10 @@ export interface paths {
         put?: never;
         /**
          * Confirm Answer
-         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is
-         *     saved as the user's own word in memory, so the assistant uses it next time.
-         *     Session only - an assistant can never vouch for its own answer. Returns the
-         *     card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
+         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18, narrowed 2026-11-02): the
+         *     user's word is approved for THIS application only (an ``answer_verified`` event); it is never saved
+         *     for other jobs - that is the "remember" press. Session only - an assistant can never vouch for its own
+         *     answer. Returns the card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
          */
         post: operations["confirm_answer_api_applications__application_id__answers__index__confirm_post"];
         delete?: never;
@@ -4873,18 +4873,22 @@ export interface components {
             company_cap: components["schemas"]["SettingFieldOut"];
             company_cap_days: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
+            email_sends_per_day: components["schemas"]["SettingFieldOut"];
             hunt_every_hours: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
              * @default
              */
             inbox_mode: string;
+            linkedin_sends_per_day: components["schemas"]["SettingFieldOut"];
             min_gap_minutes: components["schemas"]["SettingFieldOut"];
+            network_per_hour: components["schemas"]["SettingFieldOut"];
             /**
              * Notes
              * @default []
              */
             notes: string[];
+            outreach_per_company: components["schemas"]["SettingFieldOut"];
             outreach_send: components["schemas"]["SettingFieldOut"];
             pause_reason: components["schemas"]["SettingFieldOut"];
             /** Paused */
@@ -5617,6 +5621,7 @@ export interface components {
             links?: string[];
             /** Name */
             name: string;
+            note_rewrite?: components["schemas"]["NoteRewriteOut"] | null;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
@@ -7788,6 +7793,17 @@ export interface components {
             /** Rule */
             rule: string;
         };
+        /**
+         * NoteRewriteOut
+         * @description The newest LinkedIn draft is over the connection-note ``limit`` (it has ``chars``) and the person is not
+         *     known to be connected: the ASSISTANT rewrites it (never the user); it is not ready to send.
+         */
+        NoteRewriteOut: {
+            /** Chars */
+            chars: number;
+            /** Limit */
+            limit: number;
+        };
         /** OAuthGrantOut */
         OAuthGrantOut: {
             /** Client Name */
@@ -7841,7 +7857,9 @@ export interface components {
          * @description The answer to "may I press Send on this outreach email?" - one gate
          *     (``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then
          *     record ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:
-         *     do not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap.
+         *     do not send. ``sent_today`` / ``daily_max``: recorded sends today (every channel) vs the operator ceiling;
+         *     ``job_sent_today`` / ``network_sent_today`` split them (owner 2026-11-02: a contact with an application is
+         *     job outreach, one without is network). The user's own limits are in get_profile ``settings``.
          */
         OutreachCheckResponse: {
             /** Daily Max */
@@ -7853,6 +7871,16 @@ export interface components {
             decision: "send" | "ask" | "stop";
             /** Detail */
             detail: string;
+            /**
+             * Job Sent Today
+             * @default 0
+             */
+            job_sent_today: number;
+            /**
+             * Network Sent Today
+             * @default 0
+             */
+            network_sent_today: number;
             /** Reason */
             reason: string;
             /** Sent Today */
@@ -8054,6 +8082,7 @@ export interface components {
             links?: string[];
             /** Name */
             name: string;
+            note_rewrite?: components["schemas"]["NoteRewriteOut"] | null;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];

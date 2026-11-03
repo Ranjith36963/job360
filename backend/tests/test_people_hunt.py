@@ -190,14 +190,20 @@ async def test_an_application_below_the_users_line_is_not_listed(authenticated_a
         assert await _reach(client) == [unscored, above]
 
 
+# Owner 2026-11-03: up to 5 people per job. Fewer than REACH_TARGET_PEOPLE keeps it listed; 5 take it off.
 @pytest.mark.asyncio
-async def test_a_person_the_assistant_added_takes_the_application_off(authenticated_async_context, fixture_user_id):
+async def test_five_people_the_assistant_added_take_the_application_off(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         await _patch(client, PEOPLE, True)
         app_id = await _bring(client, _ad(1))
+        names = ["Priya Shah", "Tom Reyes", "Ana Silva", "Kenji Mori", "Lea Novak"]
         async with await _agent(client) as agent:
-            assert (await _add_person(agent, app_id, "Priya Shah")).status_code in (200, 201)
+            for name in names[: settings.REACH_TARGET_PEOPLE - 1]:
+                assert (await _add_person(agent, app_id, name)).status_code in (200, 201)
+            assert await _reach(client) == [app_id]  # 4 people: still short of 5
+            assert (await _add_person(agent, app_id, names[-1])).status_code in (200, 201)
+        assert settings.REACH_TARGET_PEOPLE == 5
         assert await _reach(client) == []
 
 

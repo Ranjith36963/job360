@@ -243,9 +243,10 @@ async def test_known_people_payload_is_capped(authenticated_async_context, monke
 
 
 @pytest.mark.asyncio
-async def test_gate_company_cap_uses_the_key_and_counts_cold_contacts(
+async def test_gate_company_cap_uses_the_key_and_skips_network_contacts(
     authenticated_async_context, fixture_user_id, monkeypatch
 ):
+    """Owner 2026-11-02: a send to a cold (network) contact never counts against a company's job-outreach cap."""
     from tests.test_outreach_gate import _auto_ready, _check, _contact, _sent
     from tests.test_outreach_gate import _bring as gate_bring
 
@@ -268,6 +269,10 @@ async def test_gate_company_cap_uses_the_key_and_counts_cold_contacts(
         )
         assert cy.status_code == 201, cy.text
         await _sent(client, int(cy.json()["contact"]["id"]))
+        verdict = await _check(client, cid, mid)
+        assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+        third = await _contact(client, app2, email="tia@northwind.example", name="Tia Third")
+        await _sent(client, third)
         verdict = await _check(client, cid, mid)
         assert (verdict["decision"], verdict["reason"]) == ("stop", "company_cap_reached")
 
