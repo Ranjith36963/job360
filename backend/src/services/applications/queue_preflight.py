@@ -147,7 +147,8 @@ async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
 async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     """Queued rows still missing their tailored CV (owner 2026-11-01), oldest queued first. Writing a CV needs
     neither the owner nor a browser, so an open ask, a site block or the owner's own browser does not excuse
-    it; only another session's live hold and a closed posting do. Scoped by ``user_id``; read-only.
+    it; only another session's live hold, a closed posting and a site saying the user already applied do.
+    Scoped by ``user_id``; read-only.
     ``[{"id", "company"}]``."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
@@ -159,7 +160,7 @@ async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     skip = await _with_kind(db, user_id, ids, "cv")
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    skip |= {i for i, p in blocks.items() if p.get("reason") == "posting_closed"}
+    skip |= {i for i, p in blocks.items() if p.get("reason") in ("posting_closed", blocked_service.ALREADY_APPLIED)}
     todo = [i for i in ids if i not in skip]
     if not todo:
         return []

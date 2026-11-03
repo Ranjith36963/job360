@@ -1911,18 +1911,16 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         channel: Optional[str] = None,
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Append an event.
-
-        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
+        """`source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
         Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
         is proof, not a 2nd.
-        `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
+        `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`),
+        Outreach: `contact_id` + `channel` with outreach_sent (Sent id as `source`),
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
         outreach_bounced; no application_id if cold.
 
@@ -1938,8 +1936,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
-        manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
-        retried|user_did_it|skipped, note?}.
+        manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail}, then stop;
+        unblocked {resolution: retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {} = hidden work log; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""

@@ -693,8 +693,9 @@ STUCK (the blocked record): when you get stuck on a form, record_event
 move on to the next. `reason` is one of captcha, bot_check, login_needed,
 site_error, upload_failed, unknown_question, safety_block,
 quick_apply_warning, posting_closed, account_creation, otp_needed,
-id_or_payment_asked, assessment_required, manual_only, site_limit_reached, other
-(`posting_closed` = the page says it is filled or closed; `account_creation` = a sign-up wall; `otp_needed` = a
+id_or_payment_asked, assessment_required, manual_only, site_limit_reached, already_applied_on_site, other
+(`already_applied_on_site` = the site says you already applied: the job leaves the queue, is never retried,
+and the user is asked "Mark it applied?"; `posting_closed` = the page says it is filled or closed; `account_creation` = a sign-up wall; `otp_needed` = a
 one-time code; `id_or_payment_asked` = selfie, ID, card or SSN: never entered, never retried; `assessment_required`
 = timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
 limit message: stop this site for the run); `step` is plain text up to 120 characters;
