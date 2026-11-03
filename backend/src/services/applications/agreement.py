@@ -110,6 +110,53 @@ def _aliases(essay_key: str, answers: list[Any]) -> set[str]:
     return out
 
 
+def _rtw_sig(payload: dict[str, Any]) -> Optional[tuple[str, ...]]:
+    """The normalised answers of a fill's right-to-work rows; None when it has none."""
+    rows = [
+        normalize_question(a.get("answer")) for a in payload.get("answers") or []
+        if isinstance(a, dict) and a.get("answer")
+        and evidence._is_rtw(str(a.get("question") or ""), str(a.get("key") or ""))
+    ]
+    return tuple(sorted(rows)) or None
+
+
+def _rtw_edits(
+    newest: dict[Any, Any], decisions: dict[int, list[dict[str, Any]]], fills: dict[int, dict[int, dict[str, Any]]],
+    group_of: dict[int, dict[int, dict[str, Any]]],
+) -> tuple[dict[tuple[int, int], list[dict[str, Any]]], dict[tuple[int, int], int]]:
+    """A right-to-work edit made on fill F counts against every shadow on the application whose fill is F or
+    older and whose right-to-work answer is the one F carries (F with no such row: every older one); never
+    against a newer fill. Returns (edits per shadow, wrong facts per shadow): each edit is ONE wrong fact,
+    charged to the newest such shadow that would have cleared."""
+    shadows = {k: v[2] for k, v in newest.items() if k[1] is not None and v[1].get("rtw_present") is True
+               and "rtw_ok" in v[1] and v[2] is not None}
+    clears = {k: v[1].get("rtw_ok") is True for k, v in newest.items() if k in shadows}
+    quals: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    wrong: dict[tuple[int, int], int] = {}
+    for app_id, evs in decisions.items():
+        starts = sorted({g["start"]: g for g in group_of[app_id].values()}.items())
+        for e in evs:
+            if not (e["edit"] and evidence._is_rtw(e["question"], e["key"])):
+                continue
+            if e["fill"] is not None:
+                at = group_of[app_id].get(e["fill"])
+            else:  # an answer_corrected sits after the newest fill before it
+                before = [g for st, g in starts if st < e["id"]]
+                at = before[-1] if before else None
+            if at is None:
+                continue
+            sig = _rtw_sig(fills[app_id][at["start"]])
+            hit = [k for k, g in shadows.items() if k[0] == app_id and g["start"] <= at["start"]
+                   and (sig is None or _rtw_sig(fills[app_id][g["start"]]) == sig)]
+            for k in hit:
+                quals.setdefault((k[0], k[1]), []).append(e)
+            cleared = [k for k in hit if clears[k]]
+            if cleared:
+                top = max(cleared, key=lambda k: k[1] or 0)
+                wrong[(top[0], top[1])] = wrong.get((top[0], top[1]), 0) + 1
+    return quals, wrong
+
+
 async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
     test_sql, test_params = TEST_ID_SQL("e.application_id", "e.user_id")
     cur = await db._db.execute(
@@ -182,12 +229,14 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
             examples.append({"application_id": app_id, "kind": kind, "question_key": qkey,
                              "would_clear": would, "owner": "approved" if state == APPROVED else "disagreed"})
 
+    rtw_quals, rtw_wrong = _rtw_edits(newest, decisions, fills, group_of)
     cvs: dict[tuple[int, Optional[int]], dict[str, Any]] = {}
     for (app_id, _start), (seq, sh, grp) in sorted(newest.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
         evs = decisions[app_id]
         mine = [e for e in evs if _paired(e, grp)]
         # a refill replaced this fill before the owner decided: nothing is waiting on it any more
         superseded = grp is not None and grp["next"] != _NO_NEXT and not mine
+        rtw_edits = rtw_quals.get((app_id, grp["start"]), []) if grp else []
         sends = [e for e in mine if e["type"] in ("submit_approved", "submit_declined")]
         verified = [e for e in mine if e["type"] == "answer_verified" and not e["edit"]]
         neg = [e for e in sends if e["type"] == "submit_declined"]
@@ -199,11 +248,8 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
             slot["declined"] = slot["declined"] or bool(neg)
             if seq > slot["seq"]:
                 slot["seq"], slot["sh"] = seq, sh
-        if superseded:
-            continue
-
         essays = [e for e in sh.get("essays") or [] if isinstance(e, dict) and e.get("question_key")]
-        if essays:
+        if essays and not superseded:
             answers = (fills[app_id].get(grp["start"]) or {}).get("answers") if grp else None
             per_essay = {str(e["question_key"]): _aliases(str(e["question_key"]), answers or []) for e in essays}
             allnames = set().union(*per_essay.values())
@@ -215,17 +261,18 @@ async def report(db: JobDatabase, user_id: str) -> dict[str, Any]:
             )
             # without a Send, a Verify approves the case only when it covers every essay in it
             yes = send_yes + ([e for e in hits if not e["edit"]] if every_verified else [])
-            would = all(e.get("would_clear") is True for e in essays)
+            cleared = set().union(*(per_essay[str(e["question_key"])] for e in essays if e.get("would_clear") is True))
+            bad = [e for e in hits if e["edit"] and _matches(e, cleared)]  # an edit of an essay it would have cleared
+            would = all(e.get("would_clear") is True for e in essays) or bool(bad)
             first = next((str(e["question_key"]) for e in essays if e.get("would_clear") is not True),
                          str(essays[0]["question_key"]))
-            case(app_id, "essay", first, would, _verdict(yes, neg, edited), int(would and edited))
+            case(app_id, "essay", first, would, _verdict(yes, neg, edited), len(bad))
 
-        if sh.get("rtw_present") is True and "rtw_ok" in sh:
+        if sh.get("rtw_present") is True and "rtw_ok" in sh and (not superseded or rtw_edits):
             would = sh.get("rtw_ok") is True
-            rtw_edits = [e for e in mine if e["edit"] and evidence._is_rtw(e["question"], e["key"])]
             yes = send_yes + [e for e in verified if evidence._is_rtw(e["question"], e["key"])]
             case(app_id, "fixed", "right_to_work", would, _verdict(yes, neg, bool(rtw_edits)),
-                 len(rtw_edits) if would else 0)
+                 rtw_wrong.get((app_id, grp["start"]), 0) if grp else 0)
 
     for (app_id, cv_id), slot in sorted(cvs.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
         approved = cv_id is not None and any(

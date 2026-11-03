@@ -47,13 +47,15 @@ async def _add(user_id: str, app_id: int, event_type: str, payload: dict[str, An
 _FILLS = itertools.count(1)
 
 
-async def _fill(user_id: str, app_id: int, *, rtw: bool = False, answer: Optional[str] = None) -> int:
+async def _fill(
+    user_id: str, app_id: int, *, rtw: bool = False, answer: Optional[str] = None, rtw_answer: Optional[str] = None,
+) -> int:
     """A form_filled event. Each call types different answers (a new fill) unless ``answer`` repeats one."""
     text = answer or f"{SECRET}-{next(_FILLS)}"
     answers = [{"question": ESSAY_Q, "answer": text, "source": "written", "key": "why_role"},
                {"question": "Second question", "answer": text, "source": "written", "key": "q2"}]
     if rtw:
-        answers.append({"question": RTW_Q, "answer": text, "source": "memory", "key": RTW_KEY})
+        answers.append({"question": RTW_Q, "answer": rtw_answer or text, "source": "memory", "key": RTW_KEY})
     return await _add(user_id, app_id, "form_filled", {"form_url": "https://x.example/apply", "answers": answers})
 
 
@@ -219,6 +221,70 @@ def test_the_shadow_event_records_what_it_judged():
 
 @pytest.mark.asyncio
 async def test_a_right_to_work_wrong_fact_survives_a_later_fill(authenticated_async_context, fixture_user_id):
+    """C1: the edit is on the later fill; the shadow was on the earlier one. Still a wrong fact."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        first = await _fill(fixture_user_id, app_id, rtw=True)
+        await _shadow(fixture_user_id, app_id, first, rtw=True, cv=None)
+        second = await _fill(fixture_user_id, app_id, rtw=False)  # the newest fill has no right-to-work row
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": second})
+        body = await _report(client)
+    assert _kind(body, "fixed") == (1, 0, 0.0, 1, False)
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_rtw_answer_sent_then_corrected_on_a_reworded_refill_is_a_wrong_fact(
+    authenticated_async_context, fixture_user_id
+):
+    """C1a: the shadow cleared the right-to-work answer, the owner sent it, then corrected it on the refill."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        first = await _fill(fixture_user_id, app_id, rtw=True, answer="first essay", rtw_answer="No")
+        await _shadow(fixture_user_id, app_id, first, essay=None, cv=None, rtw=True)
+        await _send(fixture_user_id, app_id)
+        second = await _fill(fixture_user_id, app_id, rtw=True, answer="a reworded essay", rtw_answer="No")
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": RTW_Q, "answer": SECRET, "edited": True, "key": RTW_KEY, "form_filled_event_id": second})
+        body = await _report(client)
+    assert _kind(body, "fixed") == (1, 0, 0.0, 1, False)
+
+
+@pytest.mark.asyncio
+async def test_a_web_correction_after_a_reworded_refill_is_a_wrong_fact_too(authenticated_async_context, fixture_user_id):
+    """C1c: the same, with a web answer_corrected."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        first = await _fill(fixture_user_id, app_id, rtw=True, answer="first essay", rtw_answer="No")
+        await _shadow(fixture_user_id, app_id, first, essay=None, cv=None, rtw=True)
+        await _send(fixture_user_id, app_id)
+        await _fill(fixture_user_id, app_id, rtw=True, answer="a reworded essay", rtw_answer="No")
+        await _add(fixture_user_id, app_id, "answer_corrected", {"question": RTW_Q, "was_source": "guessed"})
+        body = await _report(client)
+    assert _kind(body, "fixed") == (1, 0, 0.0, 1, False)
+
+
+@pytest.mark.asyncio
+async def test_an_edit_of_a_cleared_essay_is_a_wrong_fact_beside_an_uncleared_one(
+    authenticated_async_context, fixture_user_id
+):
+    """E1: q1 was not cleared, q2 was; the owner edits q2: the case disagrees and counts one wrong fact."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        fill = await _fill(fixture_user_id, app_id)
+        mixed = [{"question_key": "why_role", "would_clear": False, "reasons": ["unsupported"]},
+                 {"question_key": "q2", "would_clear": True, "reasons": []}]
+        await _add(fixture_user_id, app_id, "autonomy_shadow", {
+            "form_filled_event_id": fill, "essays": mixed, "decision": "needs_you"})
+        await _send(fixture_user_id, app_id)
+        await _add(fixture_user_id, app_id, "answer_verified", {
+            "question": "Second question", "answer": SECRET, "edited": True, "key": "q2", "form_filled_event_id": fill})
+        body = await _report(client)
+    assert _kind(body, "essay") == (1, 0, 0.0, 1, False)
+
+
+@pytest.mark.asyncio
+async def test_a_right_to_work_wrong_fact_on_the_judged_fill_survives_a_later_fill(authenticated_async_context, fixture_user_id):
     """C1: the edit is on the fill the shadow judged; a later fill with no right-to-work row does not hide it."""
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 1)
