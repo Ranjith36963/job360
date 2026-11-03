@@ -1138,6 +1138,11 @@ KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
 KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
+# Autonomy bar (owner plan 2026-11-02): "Approve CV" / "Send" leave Needs you for one kind (essay, fixed, cv)
+# only once at least this many watch-only cases agree with the owner's own decisions at least this often,
+# with no wrong fact. Read by services/applications/agreement.py (GET /api/autonomy/agreement).
+AUTONOMY_BAR_MIN_CASES = 20
+AUTONOMY_BAR_MIN_AGREE_PCT = 95
 
 # ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
 PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))

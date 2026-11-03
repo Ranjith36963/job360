@@ -490,6 +490,39 @@
         "title": "AgentEditOut",
         "type": "object"
       },
+      "AgreementOut": {
+        "properties": {
+          "bar": {
+            "$ref": "#/components/schemas/Bar"
+          },
+          "examples": {
+            "items": {
+              "$ref": "#/components/schemas/Disagreement"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "kinds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KindAgreement"
+            },
+            "title": "Kinds",
+            "type": "object"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kinds",
+          "pending",
+          "examples",
+          "bar"
+        ],
+        "title": "AgreementOut",
+        "type": "object"
+      },
       "AlignmentOut": {
         "description": "``GET \u2026/alignment`` (2026-09-20) \u2014 the fit picture: the agent's stored\nverdict beside which of the candidate's own skills occur in the stored\nad text. Two stored facts drawn together; nothing computed about the\ncandidate (VISION rule 4).",
         "properties": {
@@ -3008,6 +3041,24 @@
           "mode"
         ],
         "title": "AutofillRequest",
+        "type": "object"
+      },
+      "Bar": {
+        "properties": {
+          "min_agree_pct": {
+            "title": "Min Agree Pct",
+            "type": "integer"
+          },
+          "min_cases": {
+            "title": "Min Cases",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_cases",
+          "min_agree_pct"
+        ],
+        "title": "Bar",
         "type": "object"
       },
       "BatchContactRowOut": {
@@ -5604,6 +5655,39 @@
           "cv"
         ],
         "title": "CvToApproveRow",
+        "type": "object"
+      },
+      "Disagreement": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "question_key": {
+            "title": "Question Key",
+            "type": "string"
+          },
+          "would_clear": {
+            "title": "Would Clear",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "application_id",
+          "kind",
+          "question_key",
+          "would_clear",
+          "owner"
+        ],
+        "title": "Disagreement",
         "type": "object"
       },
       "DismissIn": {
@@ -8285,6 +8369,45 @@
           "resume"
         ],
         "title": "JsonResumeResponse",
+        "type": "object"
+      },
+      "KindAgreement": {
+        "properties": {
+          "agree": {
+            "title": "Agree",
+            "type": "integer"
+          },
+          "agreement_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Pct"
+          },
+          "bar_met": {
+            "title": "Bar Met",
+            "type": "boolean"
+          },
+          "cases": {
+            "title": "Cases",
+            "type": "integer"
+          },
+          "wrong_facts": {
+            "title": "Wrong Facts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cases",
+          "agree",
+          "wrong_facts",
+          "bar_met"
+        ],
+        "title": "KindAgreement",
         "type": "object"
       },
       "KitAccountSiteOut": {
@@ -25862,6 +25985,72 @@
         "summary": "Verify Email Request",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/autonomy/agreement": {
+      "get": {
+        "description": "Per kind (essay, fixed, cv): cases, agree, agreement_pct, wrong_facts, bar_met; ``pending`` = cases with\nno owner decision yet; ``examples`` = up to 5 recent disagreements (ids and codes only).",
+        "operationId": "autonomy_agreement_api_autonomy_agreement_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Autonomy Agreement",
+        "tags": [
+          "autonomy"
         ]
       }
     },
