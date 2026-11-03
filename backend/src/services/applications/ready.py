@@ -304,14 +304,16 @@ def _approved_record(
         topic_key,
     )
 
-    records = [
+    records: list[dict[str, Any]] = [
         rec for rec in kit._records(profile.user_info.answers)
         if rec.get("approved") is True and kit._present(rec.get("answer"))
     ]
     want_q, want_topic = normalize_question(question), topic_key(topic) if topic else ""
-    for job in reversed([r for r in records if r.get("job_only")]):  # the newest Verify wins
+    job_only: list[dict[str, Any]] = [r for r in records if r.get("job_only")]
+    for job in reversed(job_only):  # the newest Verify wins
         if (want_topic and topic_key(job.get("topic")) == want_topic) or normalize_question(job["question"]) == want_q:
-            return job
+            hit: dict[str, Any] = job
+            return hit
     records = [r for r in records if not r.get("job_only")]
     rec, note = resolve_answer(records, topic=topic or None, question=question, company_key=company_key,
                                country=country)
