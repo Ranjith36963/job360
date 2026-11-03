@@ -605,14 +605,13 @@ export async function downloadTailored(
   URL.revokeObjectURL(url);
 }
 
-/** Download ONE stored CV / cover-letter version as Word or PDF. POST like
- * `downloadTailored` (Origin-checked); same blob + anchor pattern. */
-export async function downloadApplicationArtifact(
+/** The rendered file of ONE stored CV / cover-letter version: the same bytes the download gives
+ * (the in-page preview reads it). POST like `downloadTailored` (Origin-checked). */
+export async function fetchApplicationArtifactFile(
   applicationId: number,
   artifactId: number,
-  fmt: TailorFormat,
-  filenameStem = "document"
-): Promise<void> {
+  fmt: TailorFormat
+): Promise<Blob> {
   const res = await fetch(
     `${API}/api/applications/${applicationId}/artifacts/${artifactId}/download?fmt=${fmt}`,
     { method: "POST", credentials: "include" }
@@ -627,7 +626,17 @@ export async function downloadApplicationArtifact(
     }
     throw new ApiError(res.status, detail);
   }
-  const blob = await res.blob();
+  return res.blob();
+}
+
+/** Download ONE stored CV / cover-letter version as Word or PDF; same blob + anchor pattern. */
+export async function downloadApplicationArtifact(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat,
+  filenameStem = "document"
+): Promise<void> {
+  const blob = await fetchApplicationArtifactFile(applicationId, artifactId, fmt);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

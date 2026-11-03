@@ -5,6 +5,7 @@ import { downloadApplicationArtifact, getApplicationArtifact, getArtifactDiff, s
 import type { TailorFormat } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { CopyButton } from "@/components/applications/CopyButton";
+import { CvPreview } from "@/components/applications/CvPreview";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
 import { formatDate } from "@/lib/format-date";
@@ -103,6 +104,7 @@ export function ArtifactVersions({
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<ApplicationArtifact | null>(null);
 
   const appliedIds = new Set<number>();
   for (const receipt of receipts) {
@@ -311,6 +313,14 @@ export function ArtifactVersions({
                           onChanged={onControls}
                         />
                       )}
+                      <button
+                        type="button"
+                        data-testid="artifact-view"
+                        onClick={() => setViewing(artifact)}
+                        className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        View
+                      </button>
                       {downloadingId === artifact.id ? (
                         <span data-testid="artifact-downloading" className="text-xs text-muted-foreground">
                           Downloading…
@@ -371,6 +381,15 @@ export function ArtifactVersions({
           </div>
         </div>
       ))}
+      {viewing && (
+        <CvPreview
+          applicationId={applicationId}
+          artifactId={viewing.id}
+          title={`${viewing.kind === "cv" ? "CV" : "Cover letter"} version ${viewing.version_no}`}
+          open
+          onOpenChange={(o) => !o && setViewing(null)}
+        />
+      )}
     </div>
   );
 }
