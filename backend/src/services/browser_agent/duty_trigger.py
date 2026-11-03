@@ -33,6 +33,7 @@ CAUSES: dict[str, str] = {
     "cv_approved": "the user approved a CV",
     "ask_answered": "the user answered a question",
     "send": "the user pressed Send",
+    "send_yes": "the user said yes to sending a job, so it is ready to submit",
     "job_queued": "a new job was queued",
     "job_unblocked": "the user cleared what stopped a job, so it is back on the queue",
     "hunt_done": "a job hunt finished",

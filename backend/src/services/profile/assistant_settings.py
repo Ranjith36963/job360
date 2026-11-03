@@ -915,7 +915,7 @@ class SubmitFacts:
     answer_placeholder: tuple[str, ...] = ()
     # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
     # part named here changed since the user said yes - ``expired`` (older than
-    # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
+    # SUBMIT_APPROVAL_TTL_MINUTES, 7 days by default), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
     # ``approved`` is then False; the ask the gate would give is answered as ``approval_stale``.
     approval_stale: Optional[str] = None
     # Owner rule 2026-10-31: the kinds (ASK_KINDS; "" counts as ``question``) of this application's OPEN asks
@@ -997,7 +997,7 @@ def present_verdict(verdict: SubmitDecision, *, has_cv: bool) -> dict[str, Any]:
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
 APPROVAL_STALE_WORDS: dict[str, str] = {
-    "expired": "the yes is older than {ttl} minutes",
+    "expired": "the yes is older than {ttl} minutes ({days} days)",
     "cover_letter": "the cover letter changed",
     "form_fill": "the form was filled again with different answers",
     "form_page": "the form is on another page",
@@ -1437,7 +1437,7 @@ def may_submit(
         )
     if application.approval_stale:
         why = APPROVAL_STALE_WORDS.get(application.approval_stale, application.approval_stale).format(
-            ttl=settings.SUBMIT_APPROVAL_TTL_MINUTES
+            ttl=settings.SUBMIT_APPROVAL_TTL_MINUTES, days=round(settings.SUBMIT_APPROVAL_TTL_MINUTES / 1440, 1)
         )
         return SubmitDecision(
             "ask", "approval_stale",

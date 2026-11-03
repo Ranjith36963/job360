@@ -3497,12 +3497,13 @@ async def approve_send(
     """"Send this one" - the user says yes to sending this application with the
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
-    letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-    or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+    letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES (7 days by
+    default) passing or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
     event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
-    nothing is recorded (the yes must name what the user saw)."""
+    nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: the yes also starts the
+    user's Apply routine (``batch`` start link, like unblock), so the job is picked up at once."""
     await _refuse_if_already_applied(db, user, application_id)
     cv = await _latest_cv_or_409(db, user, application_id)
     if artifact_id is not None and int(cv["id"]) != artifact_id:
@@ -3522,6 +3523,9 @@ async def approve_send(
     await asks_service.withdraw_open_matching(
         db, user.id, application_id, "web", "answered by Send", blockers=False
     )
+    from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+    await duty_trigger.ignite(user.id, ("batch",), "send_yes", [application_id], db=db)
     return await _controls(db, user, application_id)
 
 

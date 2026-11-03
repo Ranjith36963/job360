@@ -487,7 +487,7 @@ async def approval_stale(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
 ) -> Optional[str]:
     """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
-    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``, 7 days by default),
     ``cover_letter``, ``form_fill``, ``form_page``, ``profile`` or (slice 31) ``email``: the newest
     ``email_drafted`` has another recipient or
     attachment than the draft the yes was given on. A yes without a ``fingerprint``

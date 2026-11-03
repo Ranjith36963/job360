@@ -227,7 +227,7 @@ async def test_the_yes_expires_and_so_does_a_legacy_yes_without_a_fingerprint(
              (old, app_id))
 
     ttl = settings.SUBMIT_APPROVAL_TTL_MINUTES
-    assert ttl == 120
+    assert ttl == 10080  # 7 days (owner 2026-11-02)
     async with authenticated_async_context() as client:
         app_id, _ = await _approved_app(client, fixture_user_id)
         backdate(app_id, ttl - 5)
