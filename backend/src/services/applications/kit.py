@@ -2178,9 +2178,7 @@ def compute_answers(
     # Review of #1261: an assistant can save an answer with approved: true itself. A private question is
     # filled without the user's click only when the USER wrote the answers list last (web), never the
     # assistant - approved_text items carry ``by_user`` for that check.
-    answers_by_user = not any(
-        str(r["path"]) == "user_info.answers" and is_assistant_actor(str(r.get("set_by") or "")) for r in overlay
-    )
+    answers_by_user = country_pages.answers_by_user(overlay)
     current = [""]
 
     def when(path: str) -> Optional[str]:
@@ -2232,7 +2230,8 @@ def compute_answers(
         cc = str(rec.get("country") or "").upper()
         drafted = country_pages.is_drafted(rec)
         current[0] = "" if marked and not drafted else "user_info.right_to_work"
-        done = country_pages.remembered_answers(info.answers, cc) if drafted else {}
+        # Only the user's own approved answer replaces a guess: an assistant's approved: true is still a guess.
+        done = country_pages.remembered_answers(info.answers, cc) if drafted and answers_by_user else {}
         for k, v in rec.items():
             key = f"right_to_work.{cc}.{k}"
             if k in country_pages.ROW_META or not _present(v) or not cc:

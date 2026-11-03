@@ -1084,8 +1084,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         cq_rows = common_questions.common_questions(profile, overlay_rows)
         from src.services.profile import country_pages  # noqa: PLC0415
 
-        rtw_users = country_pages.path_confirmed(overlay_rows)
-        pages = {cc: country_pages.country_page(profile, cc, rtw_users) for cc in country_pages.page_codes(profile)}
+        rtw_users, ans_users = country_pages.path_confirmed(overlay_rows), country_pages.answers_by_user(overlay_rows)
+        pages = {cc: country_pages.country_page(profile, cc, rtw_users, ans_users)
+                 for cc in country_pages.page_codes(profile)}
         open_qs = common_questions.open_questions(profile, cq_rows)
         cq = common_questions.summary(cq_rows)
         notes = [n for n in (profile.preferences.assistant_notes or []) if isinstance(n, str)]

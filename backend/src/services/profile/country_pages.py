@@ -175,9 +175,12 @@ def remembered_answers(answers: Any, code: str) -> dict[str, dict[str, Any]]:
     }
 
 
-def country_page(profile: Any, place: str, path_confirmed: bool = True) -> Optional[dict[str, Any]]:
+def country_page(
+    profile: Any, place: str, path_confirmed: bool = True, answers_by_user: bool = True
+) -> Optional[dict[str, Any]]:
     """The page for one ISO country or region; ``None`` when ``place`` is unreadable. Only what is set
-    is shown (rule #29). ``path_confirmed`` = the right_to_work path's newest write is the user's."""
+    is shown (rule #29). ``path_confirmed`` = the right_to_work path's newest write is the user's;
+    ``answers_by_user`` = so is the answers list's (an assistant's approved answer confirms no fact)."""
     code = place_code(place)
     if code is None:
         return None
@@ -203,7 +206,7 @@ def country_page(profile: Any, place: str, path_confirmed: bool = True) -> Optio
         page["assistant_drafted"] = drafted
         page["confirmed"] = not drafted and (path_confirmed or row_mode(rtw))
         if drafted:
-            done = remembered_answers(info.answers, code)
+            done = remembered_answers(info.answers, code) if answers_by_user else {}
             page["to_confirm"] = [
                 f"right_to_work.{code}.{k}" for k in ASKED_FACTS
                 if k in own and f"right_to_work.{code}.{k}" not in done
@@ -217,6 +220,15 @@ def page_codes(profile: Any) -> list[str]:
     codes = [*rtw_rows(info.right_to_work), *_rows(prefs.salary_by_country),
              *_rows((info.logistics or {}).get("countries"))]
     return list(dict.fromkeys(codes))
+
+
+def answers_by_user(overlay: list[dict[str, Any]]) -> bool:
+    """No live assistant write of the answers list: its approved answers are the user's own (#1261)."""
+    from src.services.profile.edits import is_assistant_actor  # noqa: PLC0415
+
+    return not any(
+        r.get("path") == "user_info.answers" and is_assistant_actor(str(r.get("set_by") or "")) for r in overlay
+    )
 
 
 def path_confirmed(overlay: list[dict[str, Any]]) -> bool:
