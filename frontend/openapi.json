@@ -4220,6 +4220,11 @@
             ],
             "title": "Country"
           },
+          "from": {
+            "default": "",
+            "title": "From",
+            "type": "string"
+          },
           "group": {
             "enum": [
               "you",
@@ -4352,6 +4357,11 @@
               }
             ],
             "title": "Topic"
+          },
+          "value": {
+            "default": "",
+            "title": "Value",
+            "type": "string"
           },
           "verified": {
             "title": "Verified",
