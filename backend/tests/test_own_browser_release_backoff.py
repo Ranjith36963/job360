@@ -129,30 +129,9 @@ async def test_weekly_limit_parks_every_linkedin_send_for_seven_days(authenticat
             assert took["status"] == "task"
             await _release(agent, took["task"]["contact_id"], "weekly_limit")
             parked = await _take(agent)
-            assert parked["status"] == "wait" and parked["why"] == "weekly_limit", parked
-            assert 6 * 86400 < parked["wait_seconds"] <= 7 * 86400  # neither person, until the week is over
+            assert parked["status"] == "empty", parked  # neither person (no invites) until the week is over (#1486)
             for contact_id in (first, second):
                 _age_rows(contact_id, 7 * 24 * 60 + 1)
             back = await _take(agent)
             assert back["status"] == "task" and back["task"]["contact_id"] in (first, second)
 
-
-@pytest.mark.asyncio
-async def test_weekly_limit_still_hands_out_a_connected_persons_message(authenticated_async_context):
-    """The limit is on invitations: a message to someone already connected still goes (review on #1489)."""
-    async with authenticated_async_context() as client:
-        await _person(client, 6)
-        connected, _ = await _person(client, 7)
-        patched = await client.patch(f"/api/contacts/{connected}", json={"linkedin_state": "connected"})
-        assert patched.status_code == 200, patched.text
-        async with await _agent(client) as agent:
-            took = await _take(agent)
-            assert took["status"] == "task"
-            if took["task"]["contact_id"] == connected:  # take the invitee first, so it is the one released
-                await _release(agent, connected, "other")
-                _age_rows(connected, 61)
-                took = await _take(agent)
-            assert took["task"]["contact_id"] != connected
-            await _release(agent, took["task"]["contact_id"], "weekly_limit")
-            got = await _take(agent)
-            assert got["status"] == "task" and got["task"]["contact_id"] == connected, got

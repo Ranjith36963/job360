@@ -544,6 +544,30 @@ async def test_the_weekly_invitation_limit_blocks_notes_and_not_messages_from_ei
 
 
 @pytest.mark.asyncio
+async def test_take_skips_invites_while_the_weekly_limit_is_live_and_still_hands_out_messages(
+    authenticated_async_context
+):
+    # pc-1424, 2026-11-03: after release(weekly_limit) take handed the next not-connected person straight back.
+    async with authenticated_async_context() as client:
+        _a, first, m1 = await _person(client, 0, state="not_connected")
+        _b, invite, m2 = await _person(client, 1, state="not_connected")
+        _c, message, m3 = await _person(client, 2)
+        for cid, mid in ((first, m1), (invite, m2), (message, m3)):
+            await _click(client, cid, mid)
+        assert (await _take(client, first))["status"] == "task"
+        await _release(client, first, "weekly_limit")
+        assert (await _take(client, invite))["status"] == "empty"  # an invite would fail again
+        got = await _take(client, None)
+        assert got["status"] == "task" and got["task"]["contact_id"] == message, got
+        await _release(client, message, "other")
+        _sql(
+            "UPDATE contact_outreach SET recorded_at = ? WHERE entry = 'send_released' AND text = 'weekly_limit'",
+            ((datetime.now(timezone.utc) - timedelta(days=8)).isoformat(),),
+        )
+        assert (await _take(client, invite))["status"] == "task"  # seven days on, invites go again
+
+
+@pytest.mark.asyncio
 async def test_the_chip_is_the_own_browser_from_the_click_through_every_release(
     authenticated_async_context, monkeypatch
 ):

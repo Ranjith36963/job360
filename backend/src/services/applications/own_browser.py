@@ -561,7 +561,7 @@ async def take(
     With ``contact_id`` only that person is claimed (the one the user clicked Send on);
     ``empty`` when they are not waiting for a send. The same locks, pace, pause and window apply.
     ``status``: task | already_yours | empty | closed (outside the PC-on hours, no Run now) | paused | busy
-    (another session is sending) | wait (``wait_seconds`` left; ``why`` weekly_limit or released_recently:
+    (another session is sending) | wait (``wait_seconds`` left; ``why`` released_recently:
     :data:`RELEASE_BACKOFF_MINUTES`) | daily_limit (LinkedIn sends, or Easy Apply at
     ``EASY_APPLY_DAILY_MAX``: :func:`easy_apply_today`). The same session asking again
     gets its live claim back. The user row is locked first, so two sessions never take one person."""
@@ -604,13 +604,12 @@ async def take(
         if contact_id is not None:
             free = [t for t in free if t["contact_id"] == contact_id]
             tasks = [t for t in contacts_ if t["contact_id"] == contact_id]
+        if free and await weekly_limit_until(db, user.id, now) is not None:
+            # LinkedIn's invitation limit is live: an invite would fail again, so only people already
+            # connected (a plain message, no invite) are handed out until it is over.
+            free = [t for t in free if t.get("linkedin_state") == "connected"]
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
-        parked = await weekly_limit_until(db, user.id, now) if free else None
-        if parked is not None:  # LinkedIn's weekly INVITATION limit: a connected person's message still goes
-            free = [t for t in free if t.get("linkedin_state") == "connected"]
-            if not free:
-                refusal = _answer("wait", "weekly_limit", wait_seconds=int(math.ceil((parked - now).total_seconds())))
         backed: list[datetime] = []
         if free and not busy:
             pace = await _pace(db, user.id, now)
