@@ -1,6 +1,6 @@
 """2026-11-03 live run: own_browser_queue release(contact:57, weekly_limit) answered released:true and the very next
 take handed contact:57 straight back, so a run that takes until empty looped. Now any release keeps that person out
-of take for own_browser.RELEASE_BACKOFF_MINUTES, and weekly_limit parks EVERY LinkedIn send until
+of take for own_browser.RELEASE_BACKOFF_MINUTES, and weekly_limit parks every LinkedIn invite until
 own_browser.weekly_limit_until (seven days). Real rows through the real routes; helpers copied.
 """
 from __future__ import annotations
@@ -135,3 +135,24 @@ async def test_weekly_limit_parks_every_linkedin_send_for_seven_days(authenticat
                 _age_rows(contact_id, 7 * 24 * 60 + 1)
             back = await _take(agent)
             assert back["status"] == "task" and back["task"]["contact_id"] in (first, second)
+
+
+@pytest.mark.asyncio
+async def test_weekly_limit_still_hands_out_a_connected_persons_message(authenticated_async_context):
+    """The limit is on invitations: a message to someone already connected still goes (review on #1489)."""
+    async with authenticated_async_context() as client:
+        await _person(client, 6)
+        connected, _ = await _person(client, 7)
+        patched = await client.patch(f"/api/contacts/{connected}", json={"linkedin_state": "connected"})
+        assert patched.status_code == 200, patched.text
+        async with await _agent(client) as agent:
+            took = await _take(agent)
+            assert took["status"] == "task"
+            if took["task"]["contact_id"] == connected:  # take the invitee first, so it is the one released
+                await _release(agent, connected, "other")
+                _age_rows(connected, 61)
+                took = await _take(agent)
+            assert took["task"]["contact_id"] != connected
+            await _release(agent, took["task"]["contact_id"], "weekly_limit")
+            got = await _take(agent)
+            assert got["status"] == "task" and got["task"]["contact_id"] == connected, got

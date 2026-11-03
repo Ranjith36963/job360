@@ -545,8 +545,15 @@ async def test_the_weekly_invitation_limit_blocks_notes_and_not_messages_from_ei
 
 @pytest.mark.asyncio
 async def test_the_chip_is_the_own_browser_from_the_click_through_every_release(
-    authenticated_async_context
+    authenticated_async_context, monkeypatch
 ):
+    # This test is about the browser chip, not the release backoff or the weekly park (both: own_browser).
+    monkeypatch.setattr(own_browser, "RELEASE_BACKOFF_MINUTES", 0)
+
+    async def no_park(*_a: Any) -> None:
+        return None
+
+    monkeypatch.setattr(own_browser, "weekly_limit_until", no_park)
     async with authenticated_async_context() as client:
         app_id, cid, mid = await _person(client)
         await _click(client, cid, mid)
@@ -573,7 +580,8 @@ async def test_the_chip_is_the_own_browser_from_the_click_through_every_release(
 
 
 @pytest.mark.asyncio
-async def test_a_person_another_session_holds_stops_and_the_holder_goes(authenticated_async_context):
+async def test_a_person_another_session_holds_stops_and_the_holder_goes(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(own_browser, "RELEASE_BACKOFF_MINUTES", 0)  # this test is about the claim, not the backoff
     async with authenticated_async_context() as client:
         _a, cid, mid = await _person(client)
         await _click(client, cid, mid)

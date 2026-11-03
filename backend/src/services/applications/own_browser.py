@@ -48,7 +48,7 @@ RELEASE_REASONS = (
 # A released person is not handed out again for RELEASE_BACKOFF_MINUTES, whatever the reason (2026-11-03: a run
 # that takes until empty got the person it had just released straight back and looped). An hour, the same pace the
 # hunt and people tasks keep after a failure (pc_duties). A newer approval (the user's click on a rewritten draft)
-# ends it. ``weekly_limit`` also parks EVERY LinkedIn send (:func:`weekly_limit_until`, seven days from that
+# ends it. ``weekly_limit`` also parks every LinkedIn INVITE (:func:`weekly_limit_until`, seven days from that
 # release: LinkedIn's invitation limit is weekly).
 RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
@@ -607,9 +607,10 @@ async def take(
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
         parked = await weekly_limit_until(db, user.id, now) if free else None
-        if parked is not None:  # LinkedIn's weekly limit: no person is handed out until it can reset
-            refusal = _answer("wait", "weekly_limit", wait_seconds=int(math.ceil((parked - now).total_seconds())))
-            free = []
+        if parked is not None:  # LinkedIn's weekly INVITATION limit: a connected person's message still goes
+            free = [t for t in free if t.get("linkedin_state") == "connected"]
+            if not free:
+                refusal = _answer("wait", "weekly_limit", wait_seconds=int(math.ceil((parked - now).total_seconds())))
         backed: list[datetime] = []
         if free and not busy:
             pace = await _pace(db, user.id, now)
