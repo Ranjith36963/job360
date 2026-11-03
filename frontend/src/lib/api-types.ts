@@ -5442,6 +5442,8 @@ export interface components {
         CommonQuestionOut: {
             /** Answer */
             answer?: string | null;
+            /** Conflict */
+            conflict?: string[];
             /** Country */
             country?: string | null;
             /**
