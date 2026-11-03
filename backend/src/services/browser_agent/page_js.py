@@ -443,6 +443,22 @@ ELEMENT_FACTS_JS = r"""
     required_shown: deepAll(el.ownerDocument, 'input, select, textarea', 0)
       .some((f) => (f.required || f.getAttribute('aria-required') === 'true') && isField(f) && seen(f)),
     file_box: deepAll(el.ownerDocument, 'input[type=file]', 0).length > 0,
+    // A visible box, list or file field holding a value (ticks and pressed choices left out: they carry no
+    // name, email or CV). A link to this same site is the ad's own share box (Oracle "Copy Link", BambooHR
+    // "Link to This Job"), not an answer. Only narrows the gate's "a known job ad?" read (agent._known_ad).
+    shown_filled: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable]', 0)
+      .some((f) => {
+        if (f.tagName === 'INPUT' && ['checkbox', 'radio'].includes((f.type || '').toLowerCase())) return false;
+        if (!seen(f) || !answered(f)) return false;
+        if (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA') {
+          try {
+            const u = new URL((f.value || '').trim());
+            const here = (el.ownerDocument.defaultView || window).location.hostname;
+            if ((u.protocol === 'https:' || u.protocol === 'http:') && u.hostname === here) return false;
+          } catch (e) { return true; }
+        }
+        return true;
+      }),
   };
 }
 """

@@ -62,7 +62,10 @@ def _event_rows(app_id: int) -> list[tuple[Any, ...]]:
 
 def test_the_process_types_are_the_owners_list():
     # autonomy_shadow (slice 3, 2026-11-02): a server-written watch-only verdict, never the user's timeline.
-    assert settings.APPLICATION_PROCESS_EVENT_TYPES == ("process_log", "kit_read", "ask_withdrawn", "autonomy_shadow")
+    # submit_cleared / submit_cleared_used (A8, 2026-11-02): the server's single-use submit clearance.
+    assert settings.APPLICATION_PROCESS_EVENT_TYPES == (
+        "process_log", "kit_read", "ask_withdrawn", "autonomy_shadow", "submit_cleared", "submit_cleared_used",
+    )
     assert "process_log" in settings.APPLICATION_NOTE_EVENT_TYPES
     assert "process_log" not in settings.APPLICATION_STATUS_EVENT_TYPES
 

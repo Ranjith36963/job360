@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.services.applications import asks
 from src.services.profile.models import CVData, UserPreferences, UserProfile
+from tests._clearance import clear
 
 FORM = "https://careers.northwind.example/apply/7"
 
@@ -128,6 +129,7 @@ async def test_agent_refused_for_an_unapproved_cv_then_allowed_once_approved(
             sha = hashlib.sha256(text.encode()).hexdigest()
             ok = await _event(web, app_id, "submit_approved", {"artifact_id": cv_id, "sha256": sha, "where": "web"})
             assert ok.status_code == 201, ok.text
+            await clear(fixture_user_id, app_id)
             r = await _record(agent, app_id)
             assert r.status_code == 201, r.text
         assert "open_at_submit" not in await _applied_payload(web, app_id)
@@ -159,6 +161,7 @@ async def test_agent_allowed_when_nothing_open_and_a_pending_outreach_note_does_
             json={"entry": "message", "channel": "email", "text": "Hi Grace, I applied to the role."},
         )
         assert note.status_code in (200, 201), note.text
+        await clear(fixture_user_id, app_id)
         async with await _agent(web) as agent:
             r = await _record(agent, app_id)
         assert r.status_code == 201, r.text
@@ -240,6 +243,7 @@ async def test_a_seen_cv_counts_even_when_an_approval_is_stale_and_an_older_cv_i
             assert r.status_code == 409 and "cv_not_approved" in r.text, r.text
             r = await _record(agent, app_id)  # none named = the newest, unseen
             assert r.status_code == 409 and "cv_not_approved" in r.text, r.text
+            await clear(fixture_user_id, app_id)
             r = await agent.post(f"/api/applications/{app_id}/receipt", json={"cv_artifact_id": old})
             assert r.status_code == 201, r.text
 
@@ -297,6 +301,7 @@ async def test_the_cv_checked_is_the_uploaded_one_not_the_newest(authenticated_a
             data=b"uploaded cv", fmt="pdf", renderer_version="t", host="careers.northwind.example",
             recorded_by="claude-code",
         )
+        await clear(fixture_user_id, app_id)
         async with await _agent(web) as agent:
             # The receipt freezes the CV the browser uploaded (seen), not the newest (unseen): allowed.
             r = await _record(agent, app_id)

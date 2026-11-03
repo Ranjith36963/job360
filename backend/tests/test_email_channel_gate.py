@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from src.services.profile import assistant_settings as rules
+from tests._clearance import clear
 from tests.test_application_kit import (
     NOW,
     _bearer_client,
@@ -405,6 +406,7 @@ async def test_a_given_recipient_that_differs_warns_and_mcp_takes_the_new_params
         bad = await client.post(f"/api/applications/{app_id}/receipt",
                                 json={"channel": "email", "recipient": "two@a.example, three@b.example"})
         assert bad.status_code == 422 and "ONE email address" in bad.text
+    await clear(fixture_user_id, app_id)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             reply = _payload(await mcp.call_tool("record_application", {

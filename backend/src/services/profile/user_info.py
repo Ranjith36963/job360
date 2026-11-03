@@ -29,7 +29,7 @@ from typing import Any, cast
 
 from src.core import settings
 from src.services.profile import forgiving
-from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN
+from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN, topic_key
 from src.services.profile.countries import is_plain_code, to_iso2
 from src.services.profile.edits import ProfileEditError, _strip_control
 from src.services.profile.models import VALID_LANGUAGE_LEVELS, VALID_WORK_AUTH_STATUSES
@@ -695,17 +695,27 @@ def _company_key(rec: dict[str, Any]) -> str:
     return " ".join(str(rec.get("company") or "").lower().split()) + "|" + str(rec.get("country") or "").upper()
 
 
+def _twin_scope(rec: dict[str, Any]) -> str:
+    """Company + country for twin matching: a record without a ``country`` field is bound to the country its
+    topic names (``sponsorship.GB.yes_no``), so a web save bound to GB replaces the unbound GB twin."""
+    country = str(rec.get("country") or "").upper()
+    if not country:
+        codes = [p for p in topic_key(rec.get("topic")).split(".")[1:] if len(p) == 2 and p.isalpha()]
+        country = codes[0].upper() if len(codes) == 1 else ""
+    return " ".join(str(rec.get("company") or "").lower().split()) + "|" + country
+
+
 def answer_upsert_index(records: list[Any], new: Any) -> int | None:
     """Where an ``upsert`` edit puts ``new`` in the saved answers (gap 4): the record with the
     same ``topic`` and company (:func:`_one_per_topic`'s rule), else the one with the same
     question (case/space-insensitive) and company. ``None`` = no match, append it."""
     if not isinstance(new, dict):
         return None
-    company = _company_key(new)
-    same = [i for i, rec in enumerate(records) if isinstance(rec, dict) and _company_key(rec) == company]
+    company = _twin_scope(new)
+    same = [i for i, rec in enumerate(records) if isinstance(rec, dict) and _twin_scope(rec) == company]
     topic = new.get("topic")
     for i in same if isinstance(topic, str) and topic else ():
-        if records[i].get("topic") == topic:
+        if topic_key(records[i].get("topic")) == topic_key(topic):
             return i
     question = new.get("question")
     wanted = " ".join(_strip_control(question).lower().split()) if isinstance(question, str) else ""
@@ -713,6 +723,24 @@ def answer_upsert_index(records: list[Any], new: Any) -> int | None:
         if " ".join(str(records[i].get("question") or "").lower().split()) == wanted:
             return i
     return None
+
+
+def upsert_answer(records: list[Any], new: Any) -> list[Any]:
+    """``records`` with ``new`` saved: it takes the place of the first record answering the same topic
+    (case-insensitive) and company, and every other twin of that topic is dropped, so a saved choice
+    replaces BOTH sides of a contradiction. No match = appended."""
+    at = answer_upsert_index(records, new)
+    if at is None:
+        return [*records, new]
+    topic = new.get("topic") if isinstance(new, dict) else None
+    twin = topic_key(topic) if isinstance(topic, str) and topic else None
+    company = _twin_scope(new)
+    drop = {
+        i for i, rec in enumerate(records)
+        if i != at and twin and isinstance(rec, dict) and _twin_scope(rec) == company
+        and topic_key(rec.get("topic")) == twin
+    }
+    return [new if i == at else rec for i, rec in enumerate(records) if i not in drop]
 
 
 def validate_country_list(path: str, value: Any) -> list[str]:
