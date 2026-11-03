@@ -16,8 +16,8 @@ from src.core import settings
 from src.services.applications import hiding, kit, spine
 from src.services.applications.kit import _json
 from src.services.applications.test_marker import TEST_APP_SQL
+from src.services.profile import country_pages, user_info
 from src.services.profile import edits as profile_edits
-from src.services.profile import user_info
 from src.services.profile.edits import is_assistant_actor
 from src.services.profile.regions import region_of
 
@@ -436,7 +436,10 @@ def _user_check(
     key = str(a.get("key") or "")
     path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
     by, at = saved.get(path, (None, None)) if a["source"] == "memory" and path and key in have else (None, None)
-    if not by or is_assistant_actor(str(by)):
+    # Country pages: a drafted country row is a guess, whoever saved the block last; an unmarked row in a
+    # block that carries draft marks is the user's own (country_pages.key_is_users).
+    owned = country_pages.key_is_users(profile.user_info.right_to_work, key) if by else None
+    if owned is False or (owned is None and (not by or is_assistant_actor(str(by)))):
         return False, None, None
     text = _memory_text(profile, key)
     if text is not None and not _typed_is(a, text):
@@ -950,7 +953,8 @@ def answer_edits(
         path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
         value = _path_value(profile, path) if path else None
         if kit._present(value):
-            out.append((path, value))  # the same value, now saved by the user
+            # The same value, now saved by the user; verifying a drafted country's fact confirms that row.
+            out.append((path, country_pages.confirm_row(value, key) if path == country_pages.RTW_PATH else value))
     if not sensitive or not out:
         # A written answer is for this employer only: a why-this-company essay is never reused elsewhere.
         scoped = company if answer["source"] == "written" else ""

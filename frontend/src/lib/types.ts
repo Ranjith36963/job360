@@ -18,6 +18,7 @@ export type BringJobResponse = Schemas["BringJobResponse"];
 export type CVDetail = Schemas["CVDetail"];
 export type HealthResponse = Schemas["HealthResponse"];
 export type JsonResumeResponse = Schemas["JsonResumeResponse"];
+export type CountryPage = Schemas["CountryPageOut"];
 export type ProfileResponse = Schemas["ProfileResponse"];
 export type ProfileSummary = Schemas["ProfileSummary"];
 export type ProfileVersionsListResponse = Schemas["ProfileVersionsListResponse"];

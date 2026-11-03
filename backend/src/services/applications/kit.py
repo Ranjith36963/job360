@@ -44,6 +44,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application, classify_host
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
+from src.services.profile import country_pages
 from src.services.profile.answer_match import (
     AMBIGUOUS,
     conflicting_topics,
@@ -2177,9 +2178,7 @@ def compute_answers(
     # Review of #1261: an assistant can save an answer with approved: true itself. A private question is
     # filled without the user's click only when the USER wrote the answers list last (web), never the
     # assistant - approved_text items carry ``by_user`` for that check.
-    answers_by_user = not any(
-        str(r["path"]) == "user_info.answers" and is_assistant_actor(str(r.get("set_by") or "")) for r in overlay
-    )
+    answers_by_user = country_pages.answers_by_user(overlay)
     current = [""]
 
     def when(path: str) -> Optional[str]:
@@ -2224,11 +2223,25 @@ def compute_answers(
 
     at = when("user_info.right_to_work")
     rtw = info.right_to_work or {}
+    # Country pages: a drafted row (an assistant created or changed it) is a guess; with draft marks in
+    # the value an unmarked row is the user's own. A fact the user remembered for that country wins.
+    marked = country_pages.row_mode(rtw)
     for rec in _records(rtw.get("countries")):
         cc = str(rec.get("country") or "").upper()
+        drafted = country_pages.is_drafted(rec)
+        current[0] = "" if marked and not drafted else "user_info.right_to_work"
+        # Only the user's own approved answer replaces a guess: an assistant's approved: true is still a guess.
+        done = country_pages.remembered_answers(info.answers, cc) if drafted and answers_by_user else {}
         for k, v in rec.items():
-            if k != "country" and _present(v) and cc:
-                out["right_to_work"].append(_mk(f"right_to_work.{cc}.{k}", v, "memory", at))
+            key = f"right_to_work.{cc}.{k}"
+            if k in country_pages.ROW_META or not _present(v) or not cc:
+                continue
+            if key in done:  # the user's own answer for this country replaces the guess
+                out["right_to_work"].append(_mk(key, done[key]["answer"], "approved_text",
+                                                done[key].get("recorded_at"), by_user=answers_by_user))
+            else:
+                out["right_to_work"].append(_mk(key, v, "memory", at, **({"confirmed": False} if drafted else {})))
+    current[0] = "user_info.right_to_work"
     for k in ("citizenship", "sanctions_country_citizen"):
         if _present(rtw.get(k)):
             out["right_to_work"].append(_mk(f"right_to_work.{k}", rtw[k], "memory", at))
@@ -2815,6 +2828,14 @@ async def build_kit(
         "last_fill": await last_fill(db, user.id, application_id),
         "instructions": list(KIT_INSTRUCTIONS),
     }
+    # Country pages (owner 2026-11-02): the user's own instructions for this job's country (else its
+    # region's, else ANY's) - follow them on this application. Absent when none (rule #29).
+    told = country_pages.instructions_for(profile.user_info.right_to_work, country)
+    if told:
+        out["country_instructions"] = {"country": country, **told}
+        out["instructions"].append(
+            f"country_instructions: the user's own rules for jobs in {country}; follow them on this application."
+        )
     if answers_omitted:
         out["answers_omitted"] = answers_omitted
         out["instructions"].append(

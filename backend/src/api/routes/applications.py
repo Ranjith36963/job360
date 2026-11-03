@@ -1489,6 +1489,15 @@ class KitLastFillOut(BaseModel):
     redacted: bool = False
 
 
+class KitCountryInstructionsOut(BaseModel):
+    country: str
+    # Where the lines came from: the country's own row, its region (EUROPE...) or ANY.
+    from_: str = Field(alias="from")
+    lines: list[str]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class ApplicationKitOut(BaseModel):
     """Everything an assistant needs to fill ONE application form (S3). Binds to
     THIS application only: its latest CV and cover letter, never another job's."""
@@ -1515,6 +1524,8 @@ class ApplicationKitOut(BaseModel):
     # The newest form_filled's answers: retyped in one browser fill when the browser closed (2026-10-23).
     last_fill: list[KitLastFillOut] = []
     instructions: list[str]
+    # Country pages: the user's own instructions for the job's country ({country, from, lines}).
+    country_instructions: Optional[KitCountryInstructionsOut] = None
 
 
 class ControlsCvOut(BaseModel):
