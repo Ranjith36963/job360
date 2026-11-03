@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from migrations import runner
 from src.repositories import pg
 from src.repositories.database import JobDatabase
+from tests._clearance import clear
 
 STEM = "0072_contact_interactions_referrals"
 STEM73 = "0073_receipt_referred_by"
@@ -322,7 +323,7 @@ async def _user_approves_cv(client, app_id: int, text: str = "Ada Lovelace. Pyth
     return cv
 
 @pytest.mark.asyncio
-async def test_record_application_stores_the_referrer_on_the_receipt(authenticated_async_context):
+async def test_record_application_stores_the_referrer_on_the_receipt(authenticated_async_context, fixture_user_id):
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:
@@ -364,6 +365,7 @@ async def test_record_application_stores_the_referrer_on_the_receipt(authenticat
         token = await _mint_token(client)
         await _user_approves_cv(client, app_b2)
 
+    await clear(fixture_user_id, app_b2)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             reply = _mcp_payload(

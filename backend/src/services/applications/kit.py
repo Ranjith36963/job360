@@ -998,6 +998,8 @@ async def _already_applied(db: JobDatabase, user_id: str, application_id: int) -
     return await cur.fetchone() is not None
 
 
+already_applied = _already_applied  # public name for the record_event route (submit_clearance, A8)
+
 CONFIRMATION_NOTE_PREFIX = "submission confirmed"
 
 

@@ -12,6 +12,7 @@ design — see tests/test_receipts.py::test_receipts_are_append_only.
 """
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,6 +23,7 @@ from src.api.dependencies import get_request_db
 from src.api.routes.applications import ProofOut, ReceiptAnswerOut, ReceiptFileOut
 from src.repositories.database import JobDatabase
 from src.services.applications import kit as kit_service
+from src.services.applications import submit_clearance
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -211,6 +213,8 @@ async def create_receipt(
     # Owner rule 2026-10-31: an assistant is refused (409) while an item is open; the user's click is stamped.
     try:
         open_at_submit = await kit_service.enforce_applied_rule(db, user.id, int(application["id"]), actor_for(user))
+        # Autonomy A8: an assistant needs one unused check_submit `submit` (the user's click: none).
+        clearance = await submit_clearance.required(db, user.id, int(application["id"]), actor_for(user))
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     # The ad "as it read" is the caller's own snapshot, never the catalog row.
@@ -227,28 +231,41 @@ async def create_receipt(
     cv_text, cv_origin = await _document_sent(db, user.id, application, job_id, "cv")
     cl_text, cl_origin = await _document_sent(db, user.id, application, job_id, "cover_letter")
 
-    receipt = await db.insert_receipt(
-        user_id=user.id,
-        job=job,
-        cv_text=cv_text,
-        cv_origin=cv_origin,
-        cover_letter_text=cl_text,
-        cover_letter_origin=cl_origin,
-        profile_version=current_profile_version_id(user.id),
-        channel=channel,
-        note=body.note.strip(),
-        application_id=application["id"] if application else None,
+    # A8: the receipt and the spent clearance commit together; a receipt racing for the same one is 409.
+    spend: contextlib.AbstractAsyncContextManager[Any] = (
+        db._db.transaction() if clearance is not None else contextlib.nullcontext()
     )
+    try:
+        async with spend:
+            receipt = await db.insert_receipt(
+                user_id=user.id,
+                job=job,
+                cv_text=cv_text,
+                cv_origin=cv_origin,
+                cover_letter_text=cl_text,
+                cover_letter_origin=cl_origin,
+                profile_version=current_profile_version_id(user.id),
+                channel=channel,
+                note=body.note.strip(),
+                application_id=application["id"] if application else None,
+            )
+            if clearance is not None:
+                await submit_clearance.use(
+                    db, user.id, int(application["id"]), actor_for(user), clearance,
+                    {"receipt_id": int(receipt["id"])},
+                )
 
-    # R8 — write-through to the spine: append the `applied` event. The
-    # route's OWN shape and behaviour are unchanged for the caller
-    # (constraint 4).
-    if application is not None:
-        await applications_spine.write_through_legacy_receipt(
-            db, user_id=user.id, application_id=application["id"],
-            receipt_id=receipt["id"], sent_at=receipt["sent_at"], note=body.note.strip(),
-            recorded_by=actor_for(user), open_at_submit=open_at_submit,
-        )
+            # R8 — write-through to the spine: append the `applied` event. The
+            # route's OWN shape and behaviour are unchanged for the caller
+            # (constraint 4).
+            if application is not None:
+                await applications_spine.write_through_legacy_receipt(
+                    db, user_id=user.id, application_id=application["id"],
+                    receipt_id=receipt["id"], sent_at=receipt["sent_at"], note=body.note.strip(),
+                    recorded_by=actor_for(user), open_at_submit=open_at_submit,
+                )
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
     get_audit_logger().info(
         "receipt_create",
