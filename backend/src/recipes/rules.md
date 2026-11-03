@@ -703,7 +703,10 @@ one-time code; `id_or_payment_asked` = selfie, ID, card or SSN: never entered, n
 = timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
 limit message: stop this site for the run); `step` is plain text up to 120 characters;
 `page_host` is the host only (jobs.example.com), never a full URL; `detail`
-is up to 300 plain characters. Any other key is 422; never put a password, a
+is up to 300 plain characters. `posting_closed` read on the ad's own page adds `evidence`:
+page_says_closed | http_404 | http_410 (what the page itself showed; never an email). Then Job360
+closes the job itself (`withdrawn` "posting closed"; the user can Undo it on the website); without
+it, or on another site, the user decides. Any other key is 422; never put a password, a
 token or page text in it. Job360 fills in who you are and opens one Needs-you
 ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
 login page means the user signs in themselves. Until `unblocked`

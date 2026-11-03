@@ -1952,7 +1952,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
-        manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail}, then stop;
+        manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail, evidence?}, stop;
         unblocked {resolution: retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {} = hidden work log; unqueued {reason?};

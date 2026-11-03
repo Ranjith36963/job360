@@ -3661,6 +3661,27 @@ async def resolve_blocked(
     return await _controls(db, user, application_id)
 
 
+@router.post(
+    "/applications/{application_id}/auto/undo", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def undo_auto(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Undo" - the user reopens an application the AI closed by itself (posting closed, auto_close.py):
+    a ``note`` correcting that ``withdrawn``. 409 when the newest status event is not Job360's own close.
+    Session only; no MCP twin."""
+    from src.services.applications import auto_close  # noqa: PLC0415
+
+    try:
+        await auto_close.undo(db, user, application_id)
+    except SpineError as exc:
+        _raise(exc)
+    return await _controls(db, user, application_id)
+
+
 def _submitted_refused(user: CurrentUser, application_id: int, status: int, reason: str) -> HTTPException:
     get_audit_logger().warning(
         "blocked_submitted_refused",
