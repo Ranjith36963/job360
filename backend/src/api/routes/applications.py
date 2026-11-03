@@ -3913,6 +3913,8 @@ async def _record_event(
         spine.validate_event_type(body.event_type)
         if body.event_type in proof_service.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
+        if body.event_type == ready_service.JOB_APPROVAL_EVENT:
+            raise SpineError(422, f"{body.event_type} is written by Job360 itself (the web Verify), not by a caller")
         if body.event_type == evidence_service.EVENT_TYPE:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (check_submit), not by a caller")
         if body.event_type in uploads_service.SERVER_ONLY_EVENTS:

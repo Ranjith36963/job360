@@ -65,7 +65,8 @@
     "outcome_suggested",
     "outcome_dismissed",
     "process_log",
-    "autonomy_shadow"
+    "autonomy_shadow",
+    "answer_verified"
   ],
   "process": [
     "process_log",

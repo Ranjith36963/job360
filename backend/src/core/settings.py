@@ -406,6 +406,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # Autonomy slice 3 (2026-11-02, watch-only): what autonomy WOULD clear, one per check_submit. SERVER-WRITTEN
     # (record_event refuses it), verdict codes only, never answer text (services/applications/evidence.py).
     "autonomy_shadow",
+    # Owner decision 2026-11-02 "A": Verify / Edit of one answer on the Ready card approves it for THAT job
+    # only. SERVER-WRITTEN (record_event refuses it): {question, answer, edited, form_filled_event_id, key?}.
+    # Read by ready.job_approvals; never part of the profile, so no other job reuses it.
+    "answer_verified",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
