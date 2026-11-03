@@ -96,6 +96,7 @@ export function ArtifactVersions({
   onChanged?: () => void | Promise<void>;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<ApplicationArtifact | null>(null);
   const [texts, setTexts] = useState<Record<number, string>>({});
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [compareId, setCompareId] = useState<number | null>(null);
@@ -104,7 +105,6 @@ export function ArtifactVersions({
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
-  const [viewing, setViewing] = useState<ApplicationArtifact | null>(null);
 
   const appliedIds = new Set<number>();
   for (const receipt of receipts) {
@@ -114,6 +114,11 @@ export function ArtifactVersions({
 
   const open = useCallback(
     async (artifact: ApplicationArtifact) => {
+      // A CV or cover letter opens as the real PDF, every page (owner, 2026-11-03); other kinds show text.
+      if (artifact.kind === "cv" || artifact.kind === "cover_letter") {
+        setViewing(artifact);
+        return;
+      }
       if (openId === artifact.id) {
         setOpenId(null);
         return;
@@ -261,7 +266,7 @@ export function ArtifactVersions({
               return (
                 <div key={artifact.id} data-testid="artifact-version" className="border-t border-border py-2.5 first:border-t-0">
                   <div className="flex w-full items-center justify-between gap-3 text-sm">
-                    <button type="button" onClick={() => void open(artifact)} className="min-w-0 flex-1 text-left">
+                    <button type="button" data-testid="artifact-open" onClick={() => void open(artifact)} className="min-w-0 flex-1 text-left">
                       <span data-testid="artifact-version-label" className="font-mono tabular-nums">
                         v{artifact.version_no}
                       </span>
