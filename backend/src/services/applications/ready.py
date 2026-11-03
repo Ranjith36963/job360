@@ -284,34 +284,27 @@ def _approved_record(
     country: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """The user's approved answer RECORD to ``question`` (or one of its other wordings), for this
-    company or any company; the last one in the list wins. None when there is none.
-    ``topic`` (the key the fill named) wins over the wording, as check_form matches it: a
-    "Current location" saved on an India form is not the answer on a UK form that typed the
-    international topic (application 107, 2026-10-20). ``country`` = the job's: an answer bound to
-    another country (``answer_match.fits_country``) is not this job's (ask once, owner 2026-11-02)."""
-    from src.services.profile.answer_match import fits_country, topic_key  # noqa: PLC0415
+    company or any company, resolved exactly as the kit and check_form resolve it
+    (:func:`answer_match.resolve_answer`): ``topic`` (the key the fill named) before the wording, as
+    check_form matches it - a "Current location" saved on an India form is not the answer on a UK form
+    that typed the international topic (application 107, 2026-10-20); this company's own answer before
+    the general one, and one bound to the job's ``country`` before one bound to none (ask once, owner
+    2026-11-02); an answer bound to another country (``answer_match.fits_country``) is not this job's.
+    None when there is none, when the matches disagree, or when the matched record's topic has saved
+    answers that disagree (``answer_match.conflicting_topics``) however it was worded (2026-11-03)."""
+    from src.services.profile.answer_match import conflicting_topics, resolve_answer, topic_key  # noqa: PLC0415
 
-    q = _norm(question)
-    by_topic: Optional[dict[str, Any]] = None
-    topic_hits: set[str] = set()
-    hit: Optional[dict[str, Any]] = None
-    for rec in kit._records(profile.user_info.answers):
-        if rec.get("approved") is not True or not kit._present(rec.get("answer")):
-            continue
-        scoped = str(rec.get("company") or "").strip()
-        if scoped and kit.normalized_company_key(scoped) != company_key:
-            continue
-        if not fits_country(rec, country):
-            continue
-        if topic and topic_key(rec.get("topic")) == topic_key(topic):
-            by_topic = rec
-            topic_hits.add(_norm(str(rec.get("answer"))))
-        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
-        if q in {_norm(w) for w in wordings if isinstance(w, str)}:
-            hit = rec
-    if len(topic_hits) > 1:
-        return None  # two saved answers for one topic disagree: never pick one (the user is asked)
-    return by_topic if by_topic is not None else hit
+    records = [
+        rec for rec in kit._records(profile.user_info.answers)
+        if rec.get("approved") is True and kit._present(rec.get("answer"))
+    ]
+    rec, note = resolve_answer(records, topic=topic or None, question=question, company_key=company_key,
+                               country=country)
+    if rec is None or note:
+        return None  # nothing saved, or two saved answers disagree: never pick one (the user is asked)
+    if topic_key(rec.get("topic")) in conflicting_topics(records, country=country, company_key=company_key):
+        return None
+    return rec
 
 
 def _approved_for(
