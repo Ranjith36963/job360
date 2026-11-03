@@ -744,8 +744,6 @@ OUTREACH_SENSITIVE_WORDS = (
     "visa", "visas", "sponsor", "sponsorship", "sponsored", "salary", "salaries", "compensation", "pay", "age",
     "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness",
 )
-# How often the user's own browser checks My Network for accepted invites while anyone is pending.
-LINKEDIN_PENDING_CHECK_HOURS = int(os.getenv("LINKEDIN_PENDING_CHECK_HOURS", "4"))
 OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))
 # Every channel together, per user per day (the email gate checks it first).
 OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "300"))

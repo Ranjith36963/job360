@@ -10574,20 +10574,6 @@
             ],
             "title": "Contact Id"
           },
-          "contact_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Contact Ids"
-          },
           "draft_chars": {
             "default": 0,
             "title": "Draft Chars",
@@ -10603,8 +10589,7 @@
               "linkedin_outreach",
               "application",
               "linkedin_search",
-              "profile_read",
-              "linkedin_check_pending"
+              "profile_read"
             ],
             "title": "Kind",
             "type": "string"

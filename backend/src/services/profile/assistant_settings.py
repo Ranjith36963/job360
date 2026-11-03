@@ -2494,18 +2494,21 @@ async def load_outreach_counts(
     db: JobDatabase, user_id: str, now: datetime, company: Optional[str] = None
 ) -> OutreachCounts:
     """Count what :func:`may_send_outreach` needs: this user's recorded ``sent``
-    marks today (the user's own day, same boundary as :func:`load_submit_counts`), split into job outreach
+    marks today, and LinkedIn requests (a ``send_released`` ``invited`` row, 2026-11-03), on the user's own day
+    (same boundary as :func:`load_submit_counts`), split into job outreach
     (the contact has an application) and network (it has none), email sends today, network sends in the last
     hour and, when ``company`` is given, JOB-outreach ``sent`` marks to that company key (contacts.company_key,
     rule #1; network contacts never count) within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
     sent_today = await count_on_user_today(
         db, user_id, now,
-        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND recorded_at >= ?",
+        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND (entry = 'sent' "
+        "OR (entry = 'send_released' AND text = 'invited')) AND recorded_at >= ?",
         (user_id,),
     )
     sends = (
         "SELECT co.recorded_at FROM contact_outreach co JOIN application_contacts ac ON ac.id = co.contact_id "
-        "WHERE co.user_id = ? AND co.entry = 'sent' AND "
+        "WHERE co.user_id = ? AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited')) "
+        "AND "
     )
     job_today = await count_on_user_today(
         db, user_id, now, sends + "ac.application_id IS NOT NULL AND co.recorded_at >= ?", (user_id,)
@@ -2521,7 +2524,9 @@ async def load_outreach_counts(
     )
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM contact_outreach co JOIN application_contacts ac ON ac.id = co.contact_id "
-        "WHERE co.user_id = ? AND co.entry = 'sent' AND ac.application_id IS NULL AND co.recorded_at >= ?",
+        "WHERE co.user_id = ? AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited')) "
+        "AND ac.application_id IS NULL "
+        "AND co.recorded_at >= ?",
         (user_id, (now - timedelta(hours=1)).isoformat()),
     )
     got = await cur.fetchone()

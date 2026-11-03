@@ -123,22 +123,24 @@ def is_after_connect(rows: list[dict[str, Any]], message_id: int) -> bool:
     return any(r["entry"] == AFTER_CONNECT and str(r.get("text")) == str(message_id) for r in rows)
 
 
-def invite_facts(rows: list[dict[str, Any]]) -> Optional[bool]:
-    """``None`` when no request went to this person; else whether the user's newest decision before it was a yes
-    (``False``: it went under ``outreach_send`` auto)."""
+def invite_facts(rows: list[dict[str, Any]]) -> Optional[dict[str, Optional[int]]]:
+    """``None`` when no request went to this person; else ``{"approved_message": id}``: the message the user's
+    newest decision before the request said yes to (``None``: it went under ``outreach_send`` auto). The user's
+    Send binds to that exact text: a draft saved later is a new text the user has not seen."""
     sent = [int(r["id"]) for r in rows if r["entry"] == RELEASED and r.get("text") == INVITED]
     if not sent:
         return None
     before = [r for r in rows if r["entry"] in (APPROVED, DECLINED) and int(r["id"]) < sent[-1]]
-    return bool(before) and before[-1]["entry"] == APPROVED
+    yes = before[-1] if before and before[-1]["entry"] == APPROVED else None
+    return {"approved_message": int(yes["text"]) if yes is not None and str(yes["text"]).isdigit() else None}
 
 
 def _carried(rows: list[dict[str, Any]], mid: int, auto: bool) -> bool:
-    """A yes without a click on this draft: the request they accepted was approved (the user's Send, or auto
-    now), or, before any request, an ``after_connect`` draft with ``outreach_send`` auto."""
+    """A yes without a click on this draft: ``outreach_send`` auto (after a request, or an ``after_connect`` draft
+    before one), or the user's Send on the request for THIS exact message."""
     invited = invite_facts(rows)
     if invited is not None:
-        return invited or auto
+        return auto or invited["approved_message"] == mid
     return auto and is_after_connect(rows, mid)
 
 
@@ -618,10 +620,9 @@ def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:
 
 
 def _next_step(task: dict[str, Any]) -> str:
-    if task["kind"] in ("linkedin_search", "profile_read", "linkedin_check_pending"):
-        what = {"linkedin_search": "bring_job each new job you judge fits",
-                "linkedin_check_pending": "update_contact linkedin_state for each of its contact_ids",
-                }.get(task["kind"], "add_contact each person you find")
+    if task["kind"] in ("linkedin_search", "profile_read"):
+        what = ("bring_job each new job you judge fits" if task["kind"] == "linkedin_search"
+                else "add_contact each person you find")
         return (f'get_recipe("own_browser") {task["kind"]}: signed in, in the user\'s own browser only, {what}; '
                 f'then own_browser_queue release (session, task_id="{task["task_id"]}", reason="done"), or reason '
                 "captcha | login_wall | other when you could not finish it")

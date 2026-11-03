@@ -2112,7 +2112,7 @@ async def _linkedin_gate_facts(
     return {
         "after_connect": own_browser.is_after_connect(rows, int(target["id"])),
         "invited": invite is not None,
-        "invite_owner_approved": bool(invite),
+        "invite_owner_approved": invite is not None and invite["approved_message"] == int(target["id"]),
         "invites_this_week": await own_browser.invites_since(db, user_id, now - timedelta(days=7)),
         "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile),
         "sensitive": bool(cv_checks.sensitive_words(text)),
@@ -2138,7 +2138,8 @@ async def count_company_sends(db: JobDatabase, user_id: str, key: str, since: st
         "SELECT ac.id AS contact_id, ac.company, a.job_company FROM contact_outreach co "
         "JOIN application_contacts ac ON ac.id = co.contact_id "
         "JOIN applications a ON a.id = ac.application_id "
-        "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ?",
+        "WHERE co.user_id = ? AND ac.user_id = ? AND co.recorded_at >= ? "
+        "AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited'))",
         (user_id, user_id, since),
     )
     rows = [dict(r) for r in await cur.fetchall()]

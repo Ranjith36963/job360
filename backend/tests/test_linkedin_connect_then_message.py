@@ -187,7 +187,7 @@ async def test_the_users_send_on_a_no_note_request_passes_the_gate_and_leaves_th
         assert person["linkedin_state"] == "pending"
         # Pending: never messaged, never handed out.
         assert await _check(client, cid, mid) == ("stop", "linkedin_pending")
-        assert [t["kind"] for t in await _tasks(client)] == ["linkedin_check_pending"]
+        assert await _tasks(client) == []
         _age_sends()
         assert (await _take(client, cid))["status"] == "empty"
         # Nobody gets a second request: they read not_connected again later.
@@ -356,7 +356,11 @@ async def test_a_sensitive_or_unsupported_message_after_acceptance_waits_for_the
         assert (await _release(client, f"contact:{cid}", "draft_rewritten")).status_code == 200
         rewritten = await _draft(client, app_id, cid, "Hi Priya, I worked at Globex for 9 years on pipelines.")
         _age_sends()
-        assert (await _take(client, cid))["status"] == "task"  # the approved request carries to the rewrite
+        # The user's Send was for the first text: a rewrite waits for a new Send (Needs you), never goes on its own.
+        assert (await _take(client, cid))["status"] == "empty"
+        assert await _check(client, cid, rewritten) == ("ask", "needs_owner_click")
+        await _auto(client)  # with autonomy on, the rewrite may go, but only past the fact check
+        assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, rewritten) == ("ask", "unsupported_claims")
         assert (await _release(client, f"contact:{cid}", "draft_rewritten")).status_code == 200
         _age_sends()
@@ -364,6 +368,58 @@ async def test_a_sensitive_or_unsupported_message_after_acceptance_waits_for_the
         assert await _check(client, cid, fine) == ("stop", "needs_claim")
         assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, fine) == ("send", "auto_after_accept")
+
+
+@pytest.mark.asyncio
+async def test_the_users_send_binds_to_the_text_the_user_saw_never_a_swapped_draft(
+    authenticated_async_context, fixture_user_id
+):
+    """M1 approved, the request went; the assistant swaps in M2 and saves connected: M2 never goes without a Send."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id, cid = await _person(client)
+        m1 = await _draft(client, app_id, cid)
+        await _click(client, cid, m1)
+        await _invite(client, cid, m1)
+        m2 = await _draft(client, app_id, cid, "Hi Priya, a different text the user never saw.")
+        await _state(client, cid, "connected")
+        assert all(t.get("contact_id") != cid for t in await _tasks(client))
+        assert (await _take(client, cid))["status"] == "empty"
+        assert await _check(client, cid, m2) == ("ask", "needs_owner_click")
+        assert await _check(client, cid, m1) == ("stop", "not_latest_draft")
+        await _click(client, cid, m2)  # the user's own Send on M2: it goes as theirs
+        assert (await _take(client, cid))["status"] == "task"
+        assert await _check(client, cid, m2) == ("send", "owner_clicked")
+
+
+@pytest.mark.asyncio
+async def test_a_request_counts_toward_the_company_and_network_caps(authenticated_async_context, fixture_user_id):
+    from src.api import dependencies as api_deps
+
+    async with authenticated_async_context() as client:
+        app_id, cid = await _person(client)
+        mid = await _draft(client, app_id, cid)
+        await _click(client, cid, mid)
+        await _invite(client, cid, mid)
+        db = await api_deps.get_db()
+        now = datetime.now(timezone.utc)
+        job = await rules.load_outreach_counts(db, fixture_user_id, now, "northwind")
+        assert (job.sent_today, job.job_sent_today, job.company_sent_in_window) == (1, 1, 1)
+        cold = await client.post(
+            "/api/contacts", json={"name": "Ravi", "company": "Contoso", "linkedin_url": "https://www.linkedin.com/in/ravi"}
+        )
+        assert cold.status_code == 201, cold.text
+        other = int(cold.json()["contact"]["id"])
+        await _state(client, other, "not_connected")
+        note = await client.post(
+            f"/api/contacts/{other}/outreach",
+            json={"entry": "message", "channel": "linkedin", "text": MESSAGE, "draft_kind": "after_connect"},
+        )
+        assert note.status_code == 201, note.text
+        await _click(client, other, int(note.json()["outreach"]["id"]))
+        await _invite(client, other, int(note.json()["outreach"]["id"]))
+        net = await rules.load_outreach_counts(db, fixture_user_id, datetime.now(timezone.utc))
+        assert (net.sent_today, net.job_sent_today, net.network_sent_today, net.network_sent_last_hour) == (2, 1, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -383,33 +439,6 @@ async def test_with_auto_the_request_and_the_message_both_land_in_sent_on_its_ow
         log = (await client.get("/api/sent-on-its-own")).json()["items"]
         assert sorted(i["kind"] for i in log) == ["linkedin_message", "linkedin_request"]
         assert {i["question"] for i in log} == {"LinkedIn message to Priya 0", "LinkedIn request without a note to Priya 0"}
-
-
-# ── the pending check in the user's own browser ─────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_the_pending_check_is_due_while_anyone_is_pending_and_counts_what_it_saved(authenticated_async_context):
-    async with authenticated_async_context() as client:
-        assert all(t["kind"] != "linkedin_check_pending" for t in await _tasks(client))
-        app_id, cid = await _person(client)
-        _a2, still = await _person(client, 1, state="pending")
-        mid = await _draft(client, app_id, cid)
-        await _click(client, cid, mid)
-        await _invite(client, cid, mid)
-        [check] = [t for t in await _tasks(client) if t["kind"] == "linkedin_check_pending"]
-        assert check["task_id"] == "duty:linkedin_check_pending" and check["contact_ids"] == [cid, still]
-        assert check["browser"]["kind"] == "own_browser"
-        took = await _take(client)
-        assert took["status"] == "task" and took["task"]["kind"] == "linkedin_check_pending"
-        assert "update_contact linkedin_state" in took["next"]
-        await _state(client, cid, "connected")
-        await _state(client, still, "pending")
-        done = (await _release(client, "duty:linkedin_check_pending", "done")).json()
-        assert (done["outcome"], done["count"], done["summary"]) == ("done", 2, "done, 2 people checked")
-        # Not due again for LINKEDIN_PENDING_CHECK_HOURS; the accepted person's message is queued instead.
-        kinds = [(t["kind"], t.get("contact_id")) for t in await _tasks(client)]
-        assert kinds == [("linkedin_outreach", cid)]
 
 
 # ── the checks themselves ────────────────────────────────────────────────────
