@@ -41,6 +41,9 @@ class CommonQuestionOut(BaseModel):
     set_at: Optional[str] = None
     guess_source: Optional[str] = None
     sensitive: bool = False
+    # Two saved answers to this topic disagree (e.g. Yes and No for GB sponsorship): both values, so the
+    # user is asked which is right. Empty = no conflict.
+    conflict: list[str] = Field(default_factory=list)
 
 
 class CommonQuestionsSummary(BaseModel):

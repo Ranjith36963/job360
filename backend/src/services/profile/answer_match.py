@@ -32,6 +32,12 @@ COUNTRY_BOUND_TOPIC_PREFIXES = ("sponsorship.", "right_to_work.")
 _EVERY_COUNTRY = frozenset({"remote", "any"})
 
 
+def topic_key(topic: Any) -> str:
+    """The key topics are MATCHED by: casefolded, so ``sponsorship.GB.yes_no`` and ``sponsorship.gb.yes_no``
+    are one topic. Only for comparing: a saved topic is never rewritten."""
+    return str(topic or "").strip().casefold()
+
+
 def normalize_question(text: Any) -> str:
     """NFKC, casefold, collapse every non-alphanumeric run to one space, strip."""
     return _NON_ALNUM.sub(" ", unicodedata.normalize("NFKC", str(text or "")).casefold()).strip()
@@ -96,7 +102,8 @@ def _candidates(
     want = normalize_question(question)
     stages: list[Callable[[dict[str, Any]], bool]] = []
     if topic:
-        stages.append(lambda r: r.get("topic") == topic)
+        want_topic = topic_key(topic)
+        stages.append(lambda r: topic_key(r.get("topic")) == want_topic)
     if want:
         stages.append(lambda r: want in _wordings(r))
     for test in stages:
@@ -130,3 +137,27 @@ def find_answer(
 ) -> Optional[dict[str, Any]]:
     """The approved answer record from :func:`resolve_answer`, else ``None``. Never a guess."""
     return resolve_answer(answers, topic=topic, question=question, company_key=company_key, country=country)[0]
+
+
+def conflicts(answers: Any, *, country: Optional[str] = None) -> list[dict[str, Any]]:
+    """Saved topics whose approved, general (no company) answers disagree for ``country``: the same
+    canonical topic (case-insensitive) resolving to two different answers. ``[{topic, question, values}]``
+    in saved order, ``values`` the distinct answers as saved. Read-only: nothing is rewritten, and
+    :func:`resolve_answer` already returns no answer for these."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rec in answers if isinstance(answers, list) else []:
+        topic = topic_key(rec.get("topic")) if isinstance(rec, dict) else ""
+        if not topic or topic in seen:
+            continue
+        seen.add(topic)
+        cands = _candidates(answers, topic=topic, question=None, company_key=None, country=country)
+        if _pick(cands)[1]:
+            values: list[str] = []
+            for c in cands:
+                if str(c.get("answer")) not in values:
+                    values.append(str(c.get("answer")))
+            first = cands[0]
+            out.append({"topic": str(first.get("topic")), "question": str(first.get("question") or ""),
+                        "values": values})
+    return out

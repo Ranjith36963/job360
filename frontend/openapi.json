@@ -4202,6 +4202,13 @@
             ],
             "title": "Answer"
           },
+          "conflict": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflict",
+            "type": "array"
+          },
           "country": {
             "anyOf": [
               {
