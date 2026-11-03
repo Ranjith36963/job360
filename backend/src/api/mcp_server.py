@@ -1954,10 +1954,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail}, then stop;
-        unblocked {resolution: retried|user_did_it|skipped, note?}.
+        unblocked {resolution: retried|user_did_it|skipped|own_browser, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {} = hidden work log; unqueued {reason?};
-        answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events.
+        answer_corrected {key|question, was_source}. Payloads, 403/409: rules recipe, Events.
         Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)

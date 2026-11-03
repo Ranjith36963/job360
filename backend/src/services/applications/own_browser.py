@@ -54,7 +54,16 @@ RELEASE_REASONS = (
     INVITED,  # a request without a note went out: Job360 saves linkedin_state pending
     "done",  # only a hunt or people task (pc_duties): finished; every other reason closes one as failed
 )
+# A released person is not handed out again for RELEASE_BACKOFF_MINUTES, whatever the reason (2026-11-03: a run
+# that takes until empty got the person it had just released straight back and looped). An hour, the same pace the
+# hunt and people tasks keep after a failure (pc_duties). A newer approval (the user's click on a rewritten draft)
+# ends it. ``weekly_limit`` also parks every LinkedIn INVITE (:func:`weekly_limit_until`, seven days from that
+# release: LinkedIn's invitation limit is weekly).
+RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
+# An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
+# returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
+APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
 DECISIONS = ("approve", "decline")
 WHY_WORDS = {
     "job360_login_required": "Job360's browser hit a sign-in page.",
@@ -187,6 +196,18 @@ def derive(rows: list[dict[str, Any]], now: datetime, auto: bool = False) -> Opt
                 "claimed_by": after[-1]["text"], "claimed_actor": after[-1].get("recorded_by") or "",
             }
     return {**base, "state": "queued"}
+
+
+def backoff_until(rows: list[dict[str, Any]], now: datetime) -> Optional[datetime]:
+    """When a released person may be taken again: the newest claim / release after the newest approval (or the
+    newest draft: a person with no click, 2026-11-03) is a release, under :data:`RELEASE_BACKOFF_MINUTES` ago. Else
+    ``None``. A release with reason ``invited`` is a request that went, not a give-up: no wait."""
+    anchors = [int(r["id"]) for r in rows if r["entry"] in (APPROVED, "message")]
+    after = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and anchors and int(r["id"]) > max(anchors)]
+    if not after or after[-1]["entry"] != RELEASED or after[-1].get("text") == INVITED:
+        return None
+    until = (_when(after[-1]["recorded_at"]) or now) + timedelta(minutes=RELEASE_BACKOFF_MINUTES)
+    return until if until > now else None
 
 
 def public_task(task: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -644,7 +665,8 @@ async def take(
     With ``contact_id`` only that person is claimed (the one the user clicked Send on);
     ``empty`` when they are not waiting for a send. The same locks, pace, pause and window apply.
     ``status``: task | already_yours | empty | closed (outside the PC-on hours, no Run now) | paused | busy
-    (another session is sending) | wait (``wait_seconds`` left) | daily_limit (LinkedIn sends, or Easy Apply at
+    (another session is sending) | wait (``wait_seconds`` left; ``why`` released_recently:
+    :data:`RELEASE_BACKOFF_MINUTES`) | daily_limit (LinkedIn sends, or Easy Apply at
     ``EASY_APPLY_DAILY_MAX``: :func:`easy_apply_today`). The same session asking again
     gets its live claim back. The user row is locked first, so two sessions never take one person."""
     from src.services.applications import kit, pc_duties  # noqa: PLC0415
@@ -694,6 +716,7 @@ async def take(
             free = [t for t in free if t.get("linkedin_state") == "connected"]
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
+        backed: list[datetime] = []
         if free and not busy:
             pace = await _pace(db, user.id, now)
             if pace is not None:
@@ -704,8 +727,13 @@ async def take(
                         "SELECT id FROM application_contacts WHERE id = ? AND user_id = ? FOR UPDATE",
                         (candidate["contact_id"], user.id),
                     )
-                    state = derive(await _rows(db, candidate["contact_id"]), now, not candidate["owner_yes"])
+                    rows = await _rows(db, candidate["contact_id"])
+                    state = derive(rows, now, not candidate["owner_yes"])
                     if state is None or state["state"] != "queued":
+                        continue
+                    later = backoff_until(rows, now)
+                    if later is not None:  # released a moment ago: never the same person straight back
+                        backed.append(later)
                         continue
                     try:
                         await _insert(db, user, candidate["contact_id"], CLAIMED, label, now)
@@ -713,6 +741,9 @@ async def take(
                         continue
                     chosen = candidate
                     break
+            if chosen is None and refusal is None and backed:
+                left = int(math.ceil((min(backed) - now).total_seconds()))
+                refusal = _answer("wait", "released_recently", wait_seconds=left)
         elif busy:
             refusal = _answer("busy", "another session is sending")
         duty = next((t for t in duties if t["claim"] is None), None)
@@ -727,6 +758,9 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
+    if apps:
+        released = await _recently_released(db, user.id, [int(t["application_id"]) for t in apps], now)
+        apps = [t for t in apps if int(t["application_id"]) not in released]
     if EASY_APPLY_DAILY_MAX > 0 and any(routing.names_linkedin(t["url"]) for t in apps) and (
         await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
     ):  # Easy Apply's own day cap; any other application is still handed out
@@ -740,6 +774,18 @@ async def take(
         return refusal
     _log("own_browser_take", user.id, "empty")
     return _answer("empty", "nothing is waiting for your own browser")
+
+
+async def _recently_released(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> set[int]:
+    """Applications with a ``hold_released`` inside ``APPLICATION_RELEASE_COOLDOWN_MINUTES``."""
+    cutoff = (now - timedelta(minutes=APPLICATION_RELEASE_COOLDOWN_MINUTES)).isoformat()
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT DISTINCT application_id FROM application_events WHERE user_id = ? "  # noqa: S608 - placeholders
+        f"AND event_type = 'hold_released' AND recorded_at >= ? AND application_id IN ({marks})",
+        (user_id, cutoff, *app_ids),
+    )
+    return {int(dict(r)["application_id"]) for r in await cur.fetchall()}
 
 
 async def release(
