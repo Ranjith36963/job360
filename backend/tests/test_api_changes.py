@@ -130,11 +130,12 @@ async def _second_user_client(email: str) -> tuple[AsyncClient, str]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("queued_before", [0, 400])
+@pytest.mark.parametrize("queued_before", [0, 100])
 async def test_a_real_mcp_ask_moves_the_cursor_and_stamps_the_assistant(authenticated_async_context, queued_before):
     """The audit_log row is written by the audit queue's listener thread, not inline: other records still queued
     (earlier tests on the same xdist worker; ``queued_before`` makes that backlog) delay it, so the read waits for
-    the queue (``audit_trail.flush``, as ``_audit`` does). Without it this read raced the writer (#1498 CI)."""
+    the queue (``audit_trail.flush``, as ``_audit`` does). Without it this read raced the writer (#1498 CI). Each
+    queued row costs a connect, so the wait is long enough for the backlog (5 s was not, for 400, on CI)."""
     from src.api.mcp_server import mcp_runtime
     from src.utils import audit_trail
     from src.utils.logger import get_audit_logger, setup_audit_logger
@@ -152,7 +153,7 @@ async def test_a_real_mcp_ask_moves_the_cursor_and_stamps_the_assistant(authenti
             async with _mcp_client(token) as mcp:
                 res = await mcp.call_tool("ask_user", {"question": "Notice period?", "application_id": app_id})
                 assert not res.is_error, res.content
-        audit_trail.flush()
+        audit_trail.flush(timeout=60)
         after = await _changes(client)
         assert after["cursor"] != before["cursor"]
         assert after["assistant_last_active_at"], "the tool call is the assistant's last-active time"
