@@ -53,5 +53,4 @@ Confirm everything works and nothing is broken.
 - Run the full suite with the canonical command in root `CLAUDE.md` — the flags on it
   are load-bearing, not decoration
 - If any test fails, fix the implementation (not the test)
-- Update affected MD files if facts changed (test count, features, architecture)
 - **Output**: Test results and summary of what was implemented

@@ -1,0 +1,132 @@
+"""Verify / Edit on the Ready card approves ONE answer for THIS job only (owner decision 2026-11-02, "A").
+
+Reuse across jobs happens only through the "remember" press (services/profile/ask_once.py). Real HTTP
+doors, real rows, VALUE asserts (rule #21).
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from httpx import AsyncClient
+
+VISA = {"key": "needs_visa", "question": "Will you need visa sponsorship to work in this role?"}  # one country
+FORM = "https://careers.example/apply/1"
+
+
+def _ad(company: str, country: str) -> dict[str, Any]:
+    return {"title": "Data Engineer", "company": company, "location": "", "country": country,
+            "apply_url": f"https://{company.lower()}.example/careers/1", "description": "Build the pipelines."}
+
+
+async def _bring(client: AsyncClient, company: str, country: str = "GB") -> int:
+    resp = await client.post("/api/jobs/bring", json=_ad(company, country))
+    assert resp.status_code == 200, resp.text
+    return int(resp.json()["application_id"])
+
+
+async def _fill_guess(client: AsyncClient, app_id: int, answer: str = "No") -> None:
+    payload = {"form_url": FORM, "fields_count": 1,
+               "answers": [{"question": VISA["question"], "answer": answer, "source": "guessed", "key": VISA["key"]}]}
+    resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_filled", "payload": payload})
+    assert resp.status_code == 201, resp.text
+
+
+async def _card(client: AsyncClient, app_id: int) -> dict[str, Any]:
+    resp = await client.get("/api/ready-to-send", params={"application_id": app_id})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["items"][0]
+
+
+def _codes(card: dict[str, Any]) -> list[str]:
+    return [f["code"] for f in card["flags"] if f["code"] != "missing"]
+
+
+async def _verify(client: AsyncClient, app_id: int, answer: str | None = None) -> dict[str, Any]:
+    fill = (await _card(client, app_id))["form_filled_event_id"]
+    body: dict[str, Any] = {"form_filled_event_id": fill, **({} if answer is None else {"answer": answer})}
+    resp = await client.post(f"/api/applications/{app_id}/answers/0/confirm", json=body)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _gate_guessed(user_id: str, app_id: int) -> bool:
+    from src.api import dependencies as api_deps
+    from src.services.applications import kit, spine
+
+    db = await api_deps.get_db()
+    row = await spine.get_owned_application(db, user_id, app_id)
+    return (await kit.gate_facts(db, user_id, row, email_verified=True)).guessed_unverified
+
+
+async def _missing(client: AsyncClient, app_id: int) -> list[str]:
+    resp = await client.post(f"/api/applications/{app_id}/kit/form-check",
+                             json={"questions": [{"question": VISA["question"]}]})
+    assert resp.status_code == 200, resp.text
+    return [m["question"] for m in resp.json()["missing"]]
+
+
+def _approved(user_id: str) -> list[dict[str, Any]]:
+    from src.services.profile.storage import load_profile
+
+    profile = load_profile(user_id)
+    return [] if profile is None else [r for r in profile.user_info.answers or [] if r.get("approved") is True]
+
+
+@pytest.mark.asyncio
+async def test_verify_clears_this_jobs_guess_but_the_same_question_on_another_job_is_still_a_guess(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        job_a, job_b = await _bring(client, "Acme"), await _bring(client, "Initech")
+        await _fill_guess(client, job_a)
+        assert await _gate_guessed(fixture_user_id, job_a) is True and "guessed" in _codes(await _card(client, job_a))
+
+        after = await _verify(client, job_a)
+        assert after["answers"][0]["verified"] is True and "guessed" not in _codes(after)
+        assert await _gate_guessed(fixture_user_id, job_a) is False, "Verify clears A's answer_guessed"
+        await _fill_guess(client, job_a)  # the assistant fills A again: still this job's approved word
+        assert await _gate_guessed(fixture_user_id, job_a) is False
+        assert _approved(fixture_user_id) == [], "nothing is saved for reuse"
+
+        # Job B: same question, same country - the Verify on A is not B's.
+        await _fill_guess(client, job_b)
+        card_b = await _card(client, job_b)
+        assert card_b["answers"][0]["verified"] is False and "guessed" in _codes(card_b)
+        assert await _gate_guessed(fixture_user_id, job_b) is True
+        assert await _missing(client, job_b) == [VISA["question"]], "kit / answer_match do not fill B from A's Verify"
+
+
+@pytest.mark.asyncio
+async def test_edit_is_this_jobs_word_only(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        job_a, job_b = await _bring(client, "Acme"), await _bring(client, "Initech")
+        await _fill_guess(client, job_a)
+        edited = await _verify(client, job_a, "Yes - I hold a work visa")
+        assert (edited["answers"][0]["changed_to"], edited["answers"][0]["verified"]) == ("Yes - I hold a work visa", True)
+        assert await _gate_guessed(fixture_user_id, job_a) is False
+        await _fill_guess(client, job_b)
+        card_b = await _card(client, job_b)
+        assert card_b["answers"][0]["changed_to"] is None and "guessed" in _codes(card_b)
+        assert _approved(fixture_user_id) == []
+
+
+@pytest.mark.asyncio
+async def test_remember_is_still_what_makes_the_next_job_fill_itself(authenticated_async_context, fixture_user_id):
+    """Regression: the "remember" press (ask_once.remember) still saves the answer, bound to the country."""
+    async with authenticated_async_context() as client:
+        job_a, job_b = await _bring(client, "Acme"), await _bring(client, "Initech")
+        qs = [{**VISA, "answer": "No", "source": "guess"}]
+        resp = await client.post("/api/asks", json={"application_id": job_a, "question": "Please check these",
+                                                    "kind": "question", "questions": qs})
+        assert resp.status_code == 201, resp.text
+        await _fill_guess(client, job_a)
+        await _verify(client, job_a)
+        assert await _missing(client, job_b) == [VISA["question"]], "Verify alone reuses nothing"
+        resp = await client.post(f"/api/asks/{resp.json()['id']}/answers/remember", json={"answers": {VISA["key"]: "No"}})
+        assert resp.status_code == 200 and resp.json()["saved"] == [VISA["key"]], resp.text
+        assert [(r["topic"], r["answer"], r.get("country")) for r in _approved(fixture_user_id)] == [
+            (VISA["key"], "No", "GB")]
+        assert await _missing(client, job_b) == [], "B is filled without asking after the remember press"
+        await _fill_guess(client, job_b)
+        assert await _gate_guessed(fixture_user_id, job_b) is False

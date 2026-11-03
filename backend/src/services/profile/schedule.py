@@ -307,6 +307,13 @@ async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime)
     return got
 
 
+async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
+    """True while a run holds any duty claim (taken less than ``DUTY_CLAIM_MINUTES`` ago, not yet freed by
+    ``mark``). A claim row is user + duty + time only: it never says WHICH caller holds it (rule #12)."""
+    window = timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+    return any(k.startswith(RUNNING) and now - at < window for k, at in (await load_stamps(db, user_id)).items())
+
+
 def reach_key(application_id: int) -> str:
     """The stamp slot for one application the people hunt has worked."""
     return f"reach:{application_id}"
