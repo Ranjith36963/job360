@@ -87,7 +87,8 @@ def _b(kind: str, actor: Actor, label: str, since: Any, ref: Optional[dict[str, 
 
 
 def _sort_key(b: Blocker) -> tuple[int, int, datetime]:
-    rank = _RANK[b["kind"]] + (1 if b["kind"] == "outreach_send" and b["actor"] == "your_pc" else 0)
+    # outreach_send: on the user first, then on the user's PC, then a rewrite that is the assistant's.
+    rank = _RANK[b["kind"]] + ({"your_pc": 1, "assistant": 2}.get(b["actor"], 0) if b["kind"] == "outreach_send" else 0)
     sub = 1 if b["kind"] == "answers" and b["label"].startswith("OK") else 0  # "answer N" before "OK N"
     return rank, sub, _when(b["since"])
 
@@ -250,7 +251,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 "job_country": a.get("job_country"), "job_company": a.get("job_company"),
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
             }
-    flags = await ready.answer_flags_for(user_id, fills)
+    flags = await ready.answer_flags_for(db, user_id, fills)
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
@@ -327,7 +328,9 @@ def settings_line_side(score: Optional[int], line: Optional[int]) -> str:
 
 async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> dict[int, list[Blocker]]:
     """The unsent notes of these applications as blockers: on the user (Send, or an email) or, once approved,
-    on the user's PC. A declined note waits on nobody."""
+    on the user's PC. A declined note waits on nobody. A LinkedIn note over the connection-note limit to
+    someone not known to be connected is the ASSISTANT's (label "rewrite ...", ``ref.reason`` note_too_long):
+    the machine's mistake is never the user's job (2026-11-02)."""
     people = [p for p in await needs_you_count.unsent_for_apps(db, user_id, app_ids) if str(p["text"] or "").strip()]
     if not people:
         return {}
@@ -339,17 +342,25 @@ async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: date
     rows: dict[int, list[dict[str, Any]]] = {}
     for r in await cur.fetchall():
         rows.setdefault(int(r["contact_id"]), []).append(dict(r))
+    from src.services.applications import contacts  # noqa: PLC0415 - contacts imports the spine package
+
+    too_long = await contacts.over_limit_notes(db, user_id, [int(p["id"]) for p in people])
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
     for p in people:
         task = own_browser.derive(rows.get(int(p["id"]), []), now)
         if task is not None and task["state"] == "declined":
             continue
         actor = "your_pc" if task is not None and task["state"] in ("queued", "in_progress") else "you"
+        if int(p["id"]) in too_long:
+            actor = "assistant"
         grouped.setdefault((int(p["application_id"]), actor), []).append(p)
     out: dict[int, list[Blocker]] = {}
     for (app_id, actor), group in grouped.items():
         n, since = len(group), min((g["occurred_at"] for g in group), key=_when)
         label = _plural(n, "LinkedIn note", "LinkedIn notes") if actor == "your_pc" else f"send {_plural(n, 'note', 'notes')}"  # noqa: E501
-        ref = {"contact_ids": [int(g["id"]) for g in group]}
+        ref: dict[str, Any] = {"contact_ids": [int(g["id"]) for g in group]}
+        if actor == "assistant":
+            label = f"rewrite {_plural(n, 'LinkedIn note', 'LinkedIn notes')} (over the limit)"
+            ref["reason"] = "note_too_long"
         out.setdefault(app_id, []).append(_b("outreach_send", actor, label, since, ref))
     return out

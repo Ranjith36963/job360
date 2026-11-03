@@ -496,7 +496,7 @@ export function Contacts({
                   <span className="text-muted-foreground">· {contact.role}</span>
                 )}
               </div>
-              {contact.found_via && (
+              {contact.found_via && contact.found_via !== "other" && (
                 <p data-testid="contact-found-via" className="mt-1 font-mono text-[11px] text-faint">
                   Found via {closedSetLabel(contact.found_via)}
                 </p>

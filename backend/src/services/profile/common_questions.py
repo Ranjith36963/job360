@@ -8,7 +8,8 @@ kit already keeps it - a structured Memory field (``kit_key``, one row per saved
 ``{cc}``) or the user's approved answer with that ``topic`` (``user_info.answers``) - through
 :func:`kit.compute_answers`, so Memory and the form filler can never disagree. ``verified`` = the kit
 reads it ``confirmed`` (the user stood behind it); the assistant fills a verified answer without asking.
-Nothing is guessed: no saved answer = ``answer`` None. Read-only.
+A row with no saved answer is guessed from the profile where it holds the facts (``answer_guesses``); a
+guess reads "guessed", never verified. Otherwise ``answer`` is None. Read-only.
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
+
+from src.services.profile import answer_guesses
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "common_form_questions.json"
 # Owner 2026-10-26: "from memory" (the user's own), "guessed" (an assistant's draft), and "not known" when
@@ -95,9 +98,13 @@ _GUESS_SOURCE = {"relayed": "user_said", "inferred": "agent_inferred", "sensitiv
 
 
 def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[str],
-         relayed: frozenset[str] = frozenset()) -> dict[str, Any]:
+         relayed: frozenset[str] = frozenset(), derived: Optional[tuple[str, str]] = None) -> dict[str, Any]:
     """``relayed`` = the save paths whose newest row an assistant wrote as the user's chat word: the kit
-    folds an unconfirmed private answer into ``sensitive``, so this tells how that guess got here."""
+    folds an unconfirmed private answer into ``sensitive``, so this tells how that guess got here.
+    ``derived`` = ``(value, reason)`` read off the profile for a row with no answer (``answer_guesses``):
+    shown as a guess, never verified."""
+    if item is None and derived is not None:
+        item = {"value": derived[0], "source": "derived", "state": "guessed"}
     text = q["question"].replace("{country}", country or "")
     sensitive = _is_sensitive(q)
     state = str(item.get("state") or "") if item is not None else ""
@@ -127,13 +134,20 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
         "save_to": save_path({"kit_key": q.get("kit_key")}),
         "sensitive": sensitive,
         # Who stands behind this answer ("user" / "assistant") and when its block was last saved.
-        "set_by": ("user" if verified else _SET_BY.get(state, "assistant")) if item is not None else None,
+        "set_by": None if derived is not None else (
+            ("user" if verified else _SET_BY.get(state, "assistant")) if item is not None else None),
         "set_at": (str(item["saved_at"]) if item.get("saved_at") else None) if item is not None else None,
         # How an assistant's draft got here (agent_inferred / user_said); None unless the row reads guessed.
         "guess_source": (
-            ("user_said" if state == "sensitive" and save_path(q) in relayed else _GUESS_SOURCE.get(state))
+            ("profile" if derived is not None else
+             "user_said" if state == "sensitive" and save_path(q) in relayed else _GUESS_SOURCE.get(state))
             if label == "guessed" else None
         ),
+        # Answer once (owner 2026-11-02): the text to show filled in ("" = nothing to guess) and, in plain
+        # words, where it comes from. A derived guess names its source; an assistant's draft says so.
+        "value": _shown(item["value"]) if item is not None else "",
+        "from": (derived[1] if derived is not None else answer_guesses.ASSISTANT_GUESS if label == "guessed"
+                 else "your saved answer" if label == "memory" else ""),
     }
 
 
@@ -170,12 +184,18 @@ def common_questions(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[s
     for q in catalog():
         key = q.get("kit_key")
         if key and "{cc}" in key:
-            rows += [_row(q, items(by_country[cc]).get(key.replace("{cc}", cc)), cc, relayed) for cc in countries]
-        elif key:
-            rows.append(_row(q, items(plain).get(key), None, relayed))
+            for cc in countries:
+                item = items(by_country[cc]).get(key.replace("{cc}", cc))
+                rows.append(_row(q, item, cc, relayed, _guess(q, item, profile, cc)))
         else:
-            rows.append(_row(q, by_topic(plain).get(q["topic"]), None, relayed))
+            item = items(plain).get(key) if key else by_topic(plain).get(q["topic"])
+            rows.append(_row(q, item, None, relayed, _guess(q, item, profile, None)))
     return rows
+
+
+def _guess(q: dict[str, Any], item: Optional[dict[str, Any]], profile: Any, country: Optional[str]) -> Any:
+    """A derived ``(value, reason)`` for a row nobody answered or drafted; a per-job row is never guessed."""
+    return None if item is not None or q.get("per_job") else answer_guesses.guess(q["id"], profile, country)
 
 
 def summary(rows: list[dict[str, Any]]) -> dict[str, int]:

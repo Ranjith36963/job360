@@ -25,3 +25,11 @@ export function safeHref(value: string | null | undefined): string | null {
     return null;
   }
 }
+
+/** A LinkedIn profile address: http(s) AND a linkedin.com host only (anything else is plain text). */
+export function linkedinProfileHref(value: string | null | undefined): string | null {
+  const href = safeHref(value);
+  if (!href) return null;
+  const host = new URL(href).hostname.toLowerCase();
+  return host === "linkedin.com" || host.endsWith(".linkedin.com") ? href : null;
+}
