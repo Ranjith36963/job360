@@ -904,12 +904,13 @@ export interface paths {
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
          *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
-         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-         *     or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES (7 days by
+         *     default) passing or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
          *     event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
-         *     nothing is recorded (the yes must name what the user saw).
+         *     nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: Send also puts the job on the
+         *     batch queue; this route starts no run itself (the web page fires the Apply routine right after Send).
          */
         post: operations["approve_send_api_applications__application_id__send_approve_post"];
         delete?: never;

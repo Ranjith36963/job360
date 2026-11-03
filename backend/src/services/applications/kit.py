@@ -484,28 +484,34 @@ async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: in
     }
 
 
-def _approval_age_over(recorded_at: Any, now: datetime) -> bool:
+def _approval_age_over(recorded_at: Any, now: datetime, payload: Any = None) -> bool:
+    """True once the yes is older than its clock: ``SUBMIT_APPROVAL_TTL_MINUTES`` for a yes with a
+    ``fingerprint`` (or when ``payload`` is not given), ``SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES`` for one without."""
     at = recorded_at if isinstance(recorded_at, datetime) else datetime.fromisoformat(str(recorded_at))
     at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-    return now - at > timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES)
+    unbound = isinstance(payload, dict) and not isinstance(payload.get("fingerprint"), dict)
+    minutes = settings.SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES if unbound else settings.SUBMIT_APPROVAL_TTL_MINUTES
+    return now - at > timedelta(minutes=minutes)
 
 
 async def approval_stale(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
 ) -> Optional[str]:
     """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
-    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    part that no longer does: ``expired`` (a yes with a fingerprint older than ``SUBMIT_APPROVAL_TTL_MINUTES``,
+    7 days by default), ``expired_chat`` (a yes without one, older than
+    ``SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES``, 2 hours),
     ``cover_letter``, ``form_fill``, ``form_page``, ``profile`` or (slice 31) ``email``: the newest
     ``email_drafted`` has another recipient or
     attachment than the draft the yes was given on. A yes without a ``fingerprint``
-    (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
+    (a chat yes, or one from before slice 8) is bound to the CV and the time only, so it lapses sooner. A part that was
     unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
     only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
-    if _approval_age_over(event["recorded_at"], now):
-        return "expired"
     stamp = event["payload"].get("fingerprint")
     if not isinstance(stamp, dict):
-        return None
+        return "expired_chat" if _approval_age_over(event["recorded_at"], now, event["payload"]) else None
+    if _approval_age_over(event["recorded_at"], now, event["payload"]):
+        return "expired"
     application_id = int(app_row["id"])
     now_fp = await approval_fingerprint(db, user_id, application_id)
     for key in ("cover_letter_id", "cover_letter_sha256"):
