@@ -32,6 +32,11 @@ GROUPS = """<!doctype html><html><head><title>Questions</title></head><body>
 <div class="field"><label class="label">How did you hear about us?</label>
 <div class="options"><label><input type="checkbox" name="h" value="a"> Friend</label>
 <label><input type="checkbox" name="h" value="b"> Ad</label></div></div>
+<fieldset><legend>About you</legend>
+<label><input type="radio" name="vet" value="y" required> Veteran yes</label>
+<label><input type="radio" name="vet" value="n" required> Veteran no</label>
+<label><input type="radio" name="dis" value="y"> Disability yes</label>
+<label><input type="radio" name="dis" value="n"> Disability no</label></fieldset>
 <label><input type="checkbox" name="consent" required> I agree to the privacy policy</label>
 </body></html>"""
 
@@ -102,6 +107,11 @@ async def test_choice_groups_name_their_question_and_are_required_once(pool):
         assert by[name]["required"] is False and by[name]["group_required"] is True
     for name in ("Friend", "Ad"):
         assert by[name]["group"].startswith("How did you hear about us")
+        assert by[name]["required"] is False and "group_required" not in by[name]
+    # One box, two questions: each name group is required on its own (the reviewer's case, #1488).
+    for name in ("Veteran yes", "Veteran no"):
+        assert by[name]["required"] is False and by[name]["group_required"] is True
+    for name in ("Disability yes", "Disability no"):
         assert by[name]["required"] is False and "group_required" not in by[name]
     consent = next(e for e in page["elements"] if e["name"].startswith("I agree"))
     assert consent["required"] is True and "group_required" not in consent

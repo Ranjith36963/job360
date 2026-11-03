@@ -224,8 +224,12 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
   const choiceBox = (el) => el.closest('fieldset, [role=radiogroup], [role=group]');
   const choiceMembers = (el) => {
     const box = choiceBox(el);
+    // A named option belongs to its own name group, even when one box holds two questions; the box's
+    // other one-of-a-kind boxes are its group only when they belong to no other name group.
+    const byName = Array.from(groupOf(el).members);
+    if (el.name && byName.length > 1) return byName;
     const inBox = box ? Array.from(box.querySelectorAll('input[type=radio], input[type=checkbox]')) : [];
-    return inBox.length > 1 ? inBox : Array.from(groupOf(el).members);
+    return inBox.length > 1 ? inBox.filter((i) => i === el || groupOf(i).members.size <= 1) : byName;
   };
   const groupRequired = (el) => {
     for (const m of choiceMembers(el)) if (m.required || m.getAttribute('aria-required') === 'true') return true;
