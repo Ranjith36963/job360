@@ -67,22 +67,6 @@ def _form_check_cutoff_off(request, monkeypatch):
     monkeypatch.setattr(_kit, "FORM_CHECK_REQUIRED_FROM", datetime(2999, 1, 1, tzinfo=timezone.utc))
 
 
-@pytest.fixture
-def submit_clearance_gate():
-    """Opt-in marker: a test that requests this keeps the ``submit_not_cleared`` gate ON."""
-
-
-@pytest.fixture(autouse=True)
-def _submit_clearance_off(request, monkeypatch):
-    """Autonomy A8: an assistant's receipt needs check_submit's ``submit`` first. Tests about other rules
-    record receipts without it, so the gate is off by default; ``submit_clearance_gate`` keeps it on."""
-    if "submit_clearance_gate" in request.fixturenames:
-        return
-    from src.services.applications import submit_clearance as _sc
-
-    monkeypatch.setattr(_sc, "REQUIRED", False)
-
-
 @pytest.fixture(autouse=True)
 def _reset_auth_rate_limit():
     """Clear the auth rate-limiter's module-global buckets around every test.

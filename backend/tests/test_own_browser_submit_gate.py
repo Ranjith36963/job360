@@ -15,8 +15,6 @@ from httpx import ASGITransport, AsyncClient
 from src.core import settings
 from src.services.profile.models import AssistantSettings, CVData, UserPreferences, UserProfile
 
-pytestmark = pytest.mark.usefixtures("submit_clearance_gate")
-
 CV_TEXT = "Ada Lovelace\nSenior data engineer\nPython, dbt, Snowflake."
 FORM = "https://careers.northwind.example/apply/7"
 NOTICE = {"question": "Preferred start date", "answer": "1 month", "source": "profile"}

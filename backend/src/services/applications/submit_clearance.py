@@ -32,8 +32,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 EVENT_TYPE = "submit_cleared"
 USED_EVENT_TYPE = "submit_cleared_used"
 SERVER_ONLY_EVENTS = frozenset({EVENT_TYPE, USED_EVENT_TYPE})
-# The suite's other tests never call check_submit before a receipt; tests/conftest.py turns this off
-# unless a test asks for ``submit_clearance_gate``. Production: always on.
+# Always on: tests that record an assistant receipt get a real clearance (tests/_clearance.py).
 REQUIRED = True
 MESSAGE = (
     "submit_not_cleared: call check_submit right before the final Submit; it must say submit. "
