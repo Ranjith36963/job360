@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from src.services.profile import job_priority
 from src.services.profile.answer_match import resolve_answer
+from src.services.profile.country_pages import is_drafted
 from src.services.profile.regions import is_region, place_name
 from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES, USER_INFO_ANSWERS_PATH
 
@@ -119,7 +120,10 @@ def build_search_brief(
     a place; a record with one of the two gets the other asked.
     """
     records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
-    records = [r for r in (records or []) if isinstance(r, dict) and isinstance(r.get("country"), str)]
+    # A row an assistant drafted is a guess (country_pages): never a place to search or a work_from country.
+    records = [
+        r for r in (records or []) if isinstance(r, dict) and isinstance(r.get("country"), str) and not is_drafted(r)
+    ]
     # Countries first, then regions, then ANY: the more specific line is read first.
     records.sort(key=lambda r: (r["country"] == ANY_COUNTRY, is_region(r["country"])))
     work_from = [

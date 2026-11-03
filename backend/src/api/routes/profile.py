@@ -596,11 +596,12 @@ def _remember_split(
 
 
 def _stamp_country_drafts(
-    user_id: str, actor: str, pairs: list[tuple[str, Any]]
+    user_id: str, actor: str, pairs: list[tuple[str, Any]], remembered: set[str]
 ) -> tuple[list[tuple[str, Any]], dict[str, bool]]:
     """Country pages: the draft marks on a ``user_info.right_to_work`` write, set from the WRITER
-    (``country_pages.stamp``). Returns the pairs and ``{path: stored consent carried}`` for an
-    assistant's drafts-only write (``country_pages.drafts_only``); ``{}`` otherwise."""
+    (``country_pages.stamp``; an assistant edit sent with ``remember: true`` is the user's answer).
+    Returns the pairs and ``{path: stored consent carried}`` for an assistant's drafts-only write
+    (``country_pages.drafts_only``); ``{}`` otherwise."""
     from src.services.profile import country_pages  # noqa: PLC0415
 
     if not any(p == country_pages.RTW_PATH and v is not None for p, v in pairs):
@@ -616,7 +617,8 @@ def _stamp_country_drafts(
     for path, value in pairs:
         if path == country_pages.RTW_PATH and value is not None:
             value = country_pages.stamp(
-                profile_edits.validate_edit(path, value), stored, by_web=web, stored_users=users)
+                profile_edits.validate_edit(path, value), stored, by_web=web, stored_users=users,
+                remembered=path in remembered)
             if not web and country_pages.drafts_only(value, stored):
                 drafts[path] = newest is None or not profile_edits.is_assistant_actor(by) or bool(
                     newest.get("remember_consent_at"))
@@ -1058,7 +1060,7 @@ def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> Updat
     # S2 — a RISKIER setting change from an assistant is held, not written. The
     # hourly budget for held requests is checked HERE, before any write of the
     # call, so a 429 changes nothing.
-    pairs, drafts = _stamp_country_drafts(user.id, actor, pairs)
+    pairs, drafts = _stamp_country_drafts(user.id, actor, pairs, {e.path for e in body.edits if e.remember})
     write_now, hold, risk = _split_gated(user.id, actor, pairs)
     write_now, hold = _hold_notes(user.id, actor, write_now, hold)
     _refuse_avoid_list_removal(user.id, actor, pairs)
