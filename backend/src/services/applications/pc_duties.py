@@ -4,8 +4,10 @@ Two more kinds in the ONE own-browser queue (``own_browser.queue_tasks``), the L
 user's sign-in (``routing.QUEUE_KINDS``): ``linkedin_search`` (read the user's job alerts, notifications and
 saved searches, and bring each new job with ``bring_job``) and ``profile_read`` (find people for the user's
 open applications, up to ``REACH_TARGET_PEOPLE`` each, and up to ``NETWORK_MAX_PER_RUN`` for their network,
-and store them with ``add_contact``). Job360 only says the task is due; the assistant reads and judges (VISION
-rule 4: nothing here ranks or recommends a job).
+and store them with ``add_contact``), and, owner 2026-11-03, ``linkedin_check_pending`` (open My Network's sent
+invitations and save each pending person's ``linkedin_state``, due at most every
+``LINKEDIN_PENDING_CHECK_HOURS`` while anyone is pending). Job360 only says the task is due; the assistant reads
+and judges (VISION rule 4: nothing here ranks or recommends a job).
 
 A kind is due at most once an hour, and only while its duty is due by the user's own settings: not paused,
 the hunt on (``hunt_every_hours``, its interval, not held by a full queue) or the people hunt on
@@ -31,16 +33,21 @@ if TYPE_CHECKING:
     from src.api.auth_deps import CurrentUser
     from src.repositories.database import JobDatabase
 
-HUNT, PEOPLE = "linkedin_search", "profile_read"
-KINDS = (HUNT, PEOPLE)
+HUNT, PEOPLE, PENDING = "linkedin_search", "profile_read", "linkedin_check_pending"
+KINDS = (HUNT, PEOPLE, PENDING)
+PENDING_MAX = 50
 TASK_PREFIX = "duty:"
 SLOT, CLAIM, REACH_STAMP = "own_browser:", "own_browser:claim:", "own_browser:reach:"
 # A release reason (own_browser.RELEASE_REASONS) other than "done" closes the task as failed, for this reason.
 FAILED_REASONS = {"captcha": "needs_user", "login_wall": "sign_in_needed", "weekly_limit": "rate_limited"}
-URLS = {HUNT: "https://www.linkedin.com/jobs/", PEOPLE: "https://www.linkedin.com/search/results/people/"}
+URLS = {
+    HUNT: "https://www.linkedin.com/jobs/", PEOPLE: "https://www.linkedin.com/search/results/people/",
+    PENDING: "https://www.linkedin.com/mynetwork/invitation-manager/sent/",
+}
 WHAT = {
     HUNT: "Read your LinkedIn job alerts, notifications and saved searches, and bring each new job",
     PEOPLE: "Find people on LinkedIn for your applications and your network, and add them",
+    PENDING: "See which of your LinkedIn requests were accepted, and save each person's state",
 }
 
 
@@ -126,7 +133,23 @@ async def tasks(db: JobDatabase, user_id: str, now: datetime) -> list[dict[str, 
         if claim or is_due(slots, PEOPLE, settings.NETWORK_EVERY_HOURS, now):
             ids = await schedule._reach_ids(db, user_id, now, cfg.apply_min_score, stamp=REACH_STAMP)
             out.append(_task(PEOPLE, claim, application_ids=ids, max_people=settings.NETWORK_MAX_PER_RUN))
+    claim = live_claim(slots, PENDING, now)
+    if claim or is_due(slots, PENDING, settings.LINKEDIN_PENDING_CHECK_HOURS, now):
+        pending = await pending_ids(db, user_id)
+        if pending:
+            out.append(_task(PENDING, claim, contact_ids=pending))
     return out
+
+
+async def pending_ids(db: JobDatabase, user_id: str) -> list[int]:
+    """The user's people whose saved LinkedIn state is ``pending`` (a request is out), oldest first."""
+    cur = await db._db.execute(
+        "SELECT e.contact_id FROM contact_edits e WHERE e.user_id = ? AND e.field = 'linkedin_state' "
+        "AND e.value = 'pending' AND e.id = (SELECT MAX(x.id) FROM contact_edits x "
+        "WHERE x.contact_id = e.contact_id AND x.field = 'linkedin_state') ORDER BY e.contact_id LIMIT ?",
+        (user_id, PENDING_MAX),
+    )
+    return [int(dict(r)["contact_id"]) for r in await cur.fetchall()]
 
 
 async def claim(db: JobDatabase, user_id: str, kind: str, who: dict[str, str], now: datetime) -> None:
@@ -141,6 +164,9 @@ async def claim(db: JobDatabase, user_id: str, kind: str, who: dict[str, str], n
 async def _count(db: JobDatabase, user_id: str, kind: str, actor: str, since: datetime) -> int:
     if kind == HUNT:
         sql = ("SELECT COUNT(*) FROM application_events WHERE user_id = ? AND event_type = 'brought' "
+               "AND recorded_by = ? AND recorded_at >= ?")
+    elif kind == PENDING:
+        sql = ("SELECT COUNT(*) FROM contact_edits WHERE user_id = ? AND field = 'linkedin_state' "
                "AND recorded_by = ? AND recorded_at >= ?")
     else:
         sql = "SELECT COUNT(*) FROM application_contacts WHERE user_id = ? AND added_by = ? AND created_at >= ?"
@@ -162,7 +188,7 @@ async def close(
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     if kind not in KINDS:
-        raise SpineError(422, "task_id must be duty:linkedin_search or duty:profile_read")
+        raise SpineError(422, "task_id must be duty:" + " or duty:".join(KINDS))
     actor = actor_for(user)
     count: Optional[int] = None
     async with db._db.transaction():
@@ -192,6 +218,6 @@ async def close(
             "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user.id, CLAIM + kind)
         )
     one, many = ("job", "jobs") if kind == HUNT else ("person", "people")
-    noun = f"{one if count == 1 else many} {'brought' if kind == HUNT else 'added'}"
+    noun = f"{one if count == 1 else many} {({HUNT: 'brought', PENDING: 'checked'}).get(kind, 'added')}"
     summary = f"done, {count} {noun}" if outcome == "done" else f"failed ({why}): it comes back after a wait"
     return {"outcome": outcome, "count": count, "summary": summary, "failures_in_row": failures}

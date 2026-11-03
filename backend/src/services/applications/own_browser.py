@@ -135,13 +135,61 @@ def invite_facts(rows: list[dict[str, Any]]) -> Optional[dict[str, Optional[int]
     return {"approved_message": int(yes["text"]) if yes is not None and str(yes["text"]).isdigit() else None}
 
 
+def follow_up_facts(rows: list[dict[str, Any]], mid: int, now: datetime) -> dict[str, Any]:
+    """``{follow_up, linkedin_sent_to_person, days_since_sent}`` for draft ``mid`` (the gate's facts): a follow-up is
+    a draft saved after the newest LinkedIn message went."""
+    sent = [r for r in rows if r["entry"] == "sent" and r["channel"] == "linkedin"]
+    last = _when(sent[-1]["recorded_at"]) if sent else None
+    return {
+        "follow_up": bool(sent) and mid > int(sent[-1]["id"]), "linkedin_sent_to_person": len(sent),
+        "days_since_sent": (now - last).days if last is not None else 0,
+    }
+
+
+def follow_up_due(rows: list[dict[str, Any]], now: datetime) -> bool:
+    """Pure: the assistant drafts this person's one follow-up now: ONE LinkedIn message went
+    ``LINKEDIN_FOLLOW_UP_DAYS`` or more ago, no reply, and nothing was drafted after it."""
+    sent = [r for r in rows if r["entry"] == "sent" and r["channel"] == "linkedin"]
+    if len(sent) != 1 or any(r["entry"] == "reply" for r in rows):
+        return False
+    if any(r["entry"] in ("message", "sent") and int(r["id"]) > int(sent[0]["id"]) for r in rows):
+        return False
+    at = _when(sent[0]["recorded_at"])
+    return at is not None and (now - at).days >= settings.LINKEDIN_FOLLOW_UP_DAYS
+
+
+def follow_up_held(rows: list[dict[str, Any]], mid: int, now: datetime) -> bool:
+    """A follow-up draft the queue must not hand out: a second one, one not yet due, or one after a reply."""
+    got = follow_up_facts(rows, mid, now)
+    if not got["linkedin_sent_to_person"]:
+        return False
+    return (got["linkedin_sent_to_person"] >= 2 or got["days_since_sent"] < settings.LINKEDIN_FOLLOW_UP_DAYS
+            or any(r["entry"] == "reply" for r in rows))
+
+
 def _carried(rows: list[dict[str, Any]], mid: int, auto: bool) -> bool:
     """A yes without a click on this draft: ``outreach_send`` auto (after a request, or an ``after_connect`` draft
     before one), or the user's Send on the request for THIS exact message."""
-    invited = invite_facts(rows)
-    if invited is not None:
-        return auto or invited["approved_message"] == mid
+    if invite_facts(rows) is not None:
+        return auto or owner_yes_carries(rows, mid)
     return auto and is_after_connect(rows, mid)
+
+
+def owner_yes_carries(rows: list[dict[str, Any]], mid: int) -> bool:
+    """The user's Send on the request covers draft ``mid``: it is that exact message, or the one follow-up drafted
+    after that exact message went (a LinkedIn ``sent`` mark whose newest earlier draft is it)."""
+    invited = invite_facts(rows)
+    approved = invited["approved_message"] if invited is not None else None
+    if approved is None:
+        return False
+    if mid == approved:
+        return True
+    for i, row in enumerate(rows):
+        if row["entry"] == "sent" and row["channel"] == "linkedin":
+            drafts = [int(r["id"]) for r in rows[:i] if r["entry"] == "message"]
+            if drafts and drafts[-1] == approved:
+                return mid > int(row["id"])
+    return False
 
 
 def derive(rows: list[dict[str, Any]], now: datetime, auto: bool = False) -> Optional[dict[str, Any]]:
@@ -379,6 +427,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         task = derive(rows, now, auto)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if follow_up_held(rows, task["message_id"], now):
+            continue  # one follow-up, only once due, never after a reply
         if await contacts.over_limit_notes(db, user_id, [contact_id]):
             continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)
@@ -620,9 +670,10 @@ def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:
 
 
 def _next_step(task: dict[str, Any]) -> str:
-    if task["kind"] in ("linkedin_search", "profile_read"):
-        what = ("bring_job each new job you judge fits" if task["kind"] == "linkedin_search"
-                else "add_contact each person you find")
+    if task["kind"] in ("linkedin_search", "profile_read", "linkedin_check_pending"):
+        what = {"linkedin_search": "bring_job each new job you judge fits",
+                "linkedin_check_pending": "update_contact linkedin_state for each of its contact_ids",
+                }.get(task["kind"], "add_contact each person you find")
         return (f'get_recipe("own_browser") {task["kind"]}: signed in, in the user\'s own browser only, {what}; '
                 f'then own_browser_queue release (session, task_id="{task["task_id"]}", reason="done"), or reason '
                 "captcha | login_wall | other when you could not finish it")

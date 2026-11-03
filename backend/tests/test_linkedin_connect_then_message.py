@@ -187,7 +187,7 @@ async def test_the_users_send_on_a_no_note_request_passes_the_gate_and_leaves_th
         assert person["linkedin_state"] == "pending"
         # Pending: never messaged, never handed out.
         assert await _check(client, cid, mid) == ("stop", "linkedin_pending")
-        assert await _tasks(client) == []
+        assert [t["kind"] for t in await _tasks(client)] == ["linkedin_check_pending"]
         _age_sends()
         assert (await _take(client, cid))["status"] == "empty"
         # Nobody gets a second request: they read not_connected again later.
@@ -439,6 +439,33 @@ async def test_with_auto_the_request_and_the_message_both_land_in_sent_on_its_ow
         log = (await client.get("/api/sent-on-its-own")).json()["items"]
         assert sorted(i["kind"] for i in log) == ["linkedin_message", "linkedin_request"]
         assert {i["question"] for i in log} == {"LinkedIn message to Priya 0", "LinkedIn request without a note to Priya 0"}
+
+
+# ── the pending check in the user's own browser ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_pending_check_is_due_while_anyone_is_pending_and_counts_what_it_saved(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        assert all(t["kind"] != "linkedin_check_pending" for t in await _tasks(client))
+        app_id, cid = await _person(client)
+        _a2, still = await _person(client, 1, state="pending")
+        mid = await _draft(client, app_id, cid)
+        await _click(client, cid, mid)
+        await _invite(client, cid, mid)
+        [check] = [t for t in await _tasks(client) if t["kind"] == "linkedin_check_pending"]
+        assert check["task_id"] == "duty:linkedin_check_pending" and check["contact_ids"] == [cid, still]
+        assert check["browser"]["kind"] == "own_browser"
+        took = await _take(client)
+        assert took["status"] == "task" and took["task"]["kind"] == "linkedin_check_pending"
+        assert "update_contact linkedin_state" in took["next"]
+        await _state(client, cid, "connected")
+        await _state(client, still, "pending")
+        done = (await _release(client, "duty:linkedin_check_pending", "done")).json()
+        assert (done["outcome"], done["count"], done["summary"]) == ("done", 2, "done, 2 people checked")
+        # Not due again for LINKEDIN_PENDING_CHECK_HOURS; the accepted person's message is queued instead.
+        kinds = [(t["kind"], t.get("contact_id")) for t in await _tasks(client)]
+        assert kinds == [("linkedin_outreach", cid)]
 
 
 # ── the checks themselves ────────────────────────────────────────────────────

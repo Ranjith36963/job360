@@ -4735,6 +4735,11 @@
             "title": "Id",
             "type": "integer"
           },
+          "linkedin_follow_up_due": {
+            "default": false,
+            "title": "Linkedin Follow Up Due",
+            "type": "boolean"
+          },
           "linkedin_state": {
             "anyOf": [
               {
@@ -10697,6 +10702,20 @@
             ],
             "title": "Contact Id"
           },
+          "contact_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Ids"
+          },
           "draft_chars": {
             "default": 0,
             "title": "Draft Chars",
@@ -10712,7 +10731,8 @@
               "linkedin_outreach",
               "application",
               "linkedin_search",
-              "profile_read"
+              "profile_read",
+              "linkedin_check_pending"
             ],
             "title": "Kind",
             "type": "string"
@@ -11053,6 +11073,11 @@
             },
             "title": "Jobs",
             "type": "array"
+          },
+          "linkedin_follow_up_due": {
+            "default": false,
+            "title": "Linkedin Follow Up Due",
+            "type": "boolean"
           },
           "linkedin_state": {
             "anyOf": [

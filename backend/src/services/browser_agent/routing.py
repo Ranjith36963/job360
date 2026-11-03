@@ -42,7 +42,7 @@ SITE_KINDS = ("linkedin", "job_board", "ats", "company")
 UNNAMED = "unnamed"
 LEARN_TASKS = ("read", "fill")
 # The signed-in LinkedIn tasks: notes and messages, Easy Apply and form fill, search, profile reads.
-QUEUE_KINDS = ("linkedin_outreach", "application", "linkedin_search", "profile_read")
+QUEUE_KINDS = ("linkedin_outreach", "application", "linkedin_search", "profile_read", "linkedin_check_pending")
 
 # Job boards by explicit domain (a host matches when it IS one or ends with "." + one; never a substring).
 JOB_BOARDS: dict[str, tuple[str, ...]] = {

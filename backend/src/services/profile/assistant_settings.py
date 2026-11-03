@@ -1866,7 +1866,9 @@ class OutreachFacts:
     accept, so the request goes WITHOUT a note; ``invited`` - a no-note request already went to this person;
     ``invite_owner_approved`` - the user pressed Send for that request; ``invites_this_week`` - the user's requests
     in the last 7 days; ``unsupported_claims`` - the text names a number, years or a name the profile lacks;
-    ``sensitive`` - the text names visa, salary, age, health and the like.
+    ``sensitive`` - the text names visa, salary, age, health and the like. ``follow_up`` - this draft was saved
+    after a LinkedIn message went; ``linkedin_sent_to_person`` - LinkedIn messages already sent to them;
+    ``days_since_sent`` - whole days since the newest one.
     """
 
     message_found: bool
@@ -1897,6 +1899,9 @@ class OutreachFacts:
     invites_this_week: int = 0
     unsupported_claims: bool = False
     sensitive: bool = False
+    follow_up: bool = False
+    linkedin_sent_to_person: int = 0
+    days_since_sent: int = 0
 
 
 @dataclass(frozen=True)
@@ -1921,7 +1926,8 @@ OUTREACH_REASONS: tuple[str, ...] = (
 )
 # The same for a LinkedIn version (:func:`_may_send_linkedin`). All stop except the last two: ask, then send.
 LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
-    "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "replied",
+    "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "follow_up_used",
+    "follow_up_not_due", "replied",
     "application_closed", "note_too_long", "linkedin_state_unknown", "linkedin_pending", "message_too_long",
     "invite_limit_reached", "weekly_invite_cap_reached", "already_invited", "company_cap_reached",
     "network_hourly_cap_reached", "linkedin_daily_cap_reached", "too_soon", "claimed_by_other_session",
@@ -1930,7 +1936,7 @@ LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
 # The other LinkedIn yes (owner 2026-11-03), in place of owner_clicked: connect_no_note (the user's Send on an
 # after_connect draft: the request goes without a note), auto_connect (the same request with outreach_send auto),
 # auto_after_accept (they accepted a request the user, or outreach_send auto, approved: the message goes).
-LINKEDIN_AUTO_SEND_REASONS: tuple[str, ...] = ("connect_no_note", "auto_connect", "auto_after_accept")
+LINKEDIN_AUTO_SEND_REASONS: tuple[str, ...] = ("connect_no_note", "auto_connect", "auto_after_accept", "auto_follow_up")
 # Said on every LinkedIn answer: its counts are every channel's, not LinkedIn's own day limit.
 _LINKEDIN_COUNTS_NOTE = " (sent_today and daily_max count every channel; LinkedIn's is linkedin_sends_per_day.)"
 
@@ -1978,8 +1984,14 @@ def _linkedin_verdict(
 
     if not facts.has_linkedin_url:
         return stop("no_linkedin_url", "This person has no LinkedIn link saved. Do not send.")
-    if facts.already_sent:
+    # One follow-up (owner 2026-11-03): a draft saved after the only LinkedIn message, once it is due.
+    if facts.already_sent and not facts.follow_up:
         return stop("already_sent", "A message to this person is already recorded as sent.")
+    if facts.already_sent and facts.linkedin_sent_to_person >= 2:
+        return stop("follow_up_used", "This person already got their one follow-up. Never send another.")
+    days = settings.LINKEDIN_FOLLOW_UP_DAYS
+    if facts.already_sent and facts.days_since_sent < days:
+        return stop("follow_up_not_due", f"A follow-up goes {days} days after the message with no reply. Not yet.")
     if facts.replied:
         return stop("replied", "This person already replied. Do not send; tell the user instead.")
     if facts.application_closed:
@@ -2074,6 +2086,11 @@ def _linkedin_verdict(
         )
     no_note = ("Connect, then Send without a note (never paste the draft as a note); then own_browser_queue "
                "release reason invited. The draft is sent once they accept.")
+    if after_accept and facts.already_sent:
+        return OutreachDecision(
+            "send", "auto_follow_up",
+            f"No reply in {days} days: paste this one follow-up on LinkedIn exactly, send, then record outreach_sent.",
+        )
     if after_accept:
         return OutreachDecision(
             "send", "auto_after_accept",
@@ -2116,7 +2133,8 @@ def may_send_outreach(
     application_closed, linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long,
     invite_limit_reached, company_cap_reached, network_hourly_cap_reached, linkedin_daily_cap_reached,
     too_soon, claimed_by_other_session, needs_claim (the click is there but the caller holds no live claim),
-    already_invited, weekly_invite_cap_reached; ask unsupported_claims, sensitive_topic, needs_owner_click; SEND
+    already_invited, weekly_invite_cap_reached, follow_up_used, follow_up_not_due; ask unsupported_claims,
+    sensitive_topic, needs_owner_click; SEND
     owner_clicked or one of ``LINKEDIN_AUTO_SEND_REASONS``.
     """
     if is_paused(cfg.paused_until, now):

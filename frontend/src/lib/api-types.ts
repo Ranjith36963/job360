@@ -5703,6 +5703,11 @@ export interface components {
             found_via?: string | null;
             /** Id */
             id: number;
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */
@@ -8101,6 +8106,8 @@ export interface components {
             claim?: components["schemas"]["TaskClaimOut"] | null;
             /** Contact Id */
             contact_id?: number | null;
+            /** Contact Ids */
+            contact_ids?: number[] | null;
             /**
              * Draft Chars
              * @default 0
@@ -8115,7 +8122,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read";
+            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read" | "linkedin_check_pending";
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Max People */
@@ -8251,6 +8258,11 @@ export interface components {
             id: number;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */

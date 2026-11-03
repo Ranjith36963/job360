@@ -43,7 +43,7 @@ class TaskBrowserOut(BaseModel):
 
 class OwnBrowserTaskItemOut(BaseModel):
     task_id: str
-    kind: Literal["linkedin_outreach", "application", "linkedin_search", "profile_read"]
+    kind: Literal["linkedin_outreach", "application", "linkedin_search", "profile_read", "linkedin_check_pending"]
     what: str
     url: str = ""
     contact_id: Optional[int] = None
@@ -62,8 +62,10 @@ class OwnBrowserTaskItemOut(BaseModel):
     # many new people for the user's network.
     application_ids: Optional[list[int]] = None
     max_people: Optional[int] = None
-    # Owner 2026-11-03: a person whose request goes WITHOUT a note (Connect, Send without a note, release invited).
+    # Owner 2026-11-03: a person whose request goes WITHOUT a note (Connect, Send without a note, release invited);
+    # on `linkedin_check_pending`, the people whose request is still pending.
     no_note: bool = False
+    contact_ids: Optional[list[int]] = None
 
 
 class QueueOut(BaseModel):
