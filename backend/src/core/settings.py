@@ -728,6 +728,9 @@ OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 —
 OUTREACH_PER_COMPANY_DEFAULT = 5  # job-outreach sends per company within OUTREACH_COMPANY_WINDOW_DAYS
 NETWORK_PER_HOUR_DEFAULT = 5  # network sends per rolling hour
 LINKEDIN_SENDS_PER_DAY_DEFAULT = 20
+# Easy Apply submits a day through the own-browser queue. 0 = no Job360 cap (owner, 2026-11-03): LinkedIn's own
+# Easy Apply limit decides, and the user's browser stops when LinkedIn shows it.
+EASY_APPLY_DAILY_MAX = int(os.getenv("EASY_APPLY_DAILY_MAX", "0"))
 EMAIL_SENDS_PER_DAY_DEFAULT = 40
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "10"))
 OUTREACH_NETWORK_MAX_PER_HOUR = int(os.getenv("OUTREACH_NETWORK_MAX_PER_HOUR", "20"))
