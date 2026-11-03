@@ -927,7 +927,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     _BRIEF_TOPICS = 80
     _FULL_VIEW_POINTER = (
         'view="full" adds fields (every editable path\'s value), shapes (a valid example per path), '
-        "editable_paths, agent_edits, skills, common_questions_open, all lessons and all saved answers."
+        "editable_paths, agent_edits, skills, common_questions_open, country_pages (one per basics.countries), "
+        "all lessons and all saved answers."
     )
 
     def _settings_once(settings_view: Any) -> Any:
@@ -958,6 +959,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         )
         out = {k: full[k] for k in keep if k in full}
         out["basics"] = {p: fields[p] for p in _BRIEF_PATHS if fields.get(p) not in (None, "", [], {})}
+        if full.get("country_pages"):  # country pages: the places with a page (full view has each page)
+            out["basics"]["countries"] = list(full["country_pages"])
         out["answers"] = _answers_summary(fields.get("user_info.answers"))
         if full.get("common_questions_open"):  # the list itself (question + save_to each) is in full
             out["answers"]["open_common_questions"] = len(full["common_questions_open"])
@@ -1077,7 +1080,12 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         tpl = await _outreach_templates()
         # B3: one rows pass feeds both `memory_check` and `common_questions_open` (no second profile load).
         # The live assistant edits are the overlay the kit judges each answer by (relayed / inferred).
-        cq_rows = common_questions.common_questions(profile, [r.model_dump() for r in resp.agent_edits])
+        overlay_rows = [r.model_dump() for r in resp.agent_edits]
+        cq_rows = common_questions.common_questions(profile, overlay_rows)
+        from src.services.profile import country_pages  # noqa: PLC0415
+
+        rtw_users = country_pages.path_confirmed(overlay_rows)
+        pages = {cc: country_pages.country_page(profile, cc, rtw_users) for cc in country_pages.page_codes(profile)}
         open_qs = common_questions.open_questions(profile, cq_rows)
         cq = common_questions.summary(cq_rows)
         notes = [n for n in (profile.preferences.assistant_notes or []) if isinstance(n, str)]
@@ -1129,6 +1137,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             # Owner 2026-10-26 - the common form questions with NO answer yet: draft each as a guess from the
             # profile and save it (rules: "Common form questions"). Absent when none (rule #29).
             **({"common_questions_open": open_qs} if open_qs else {}),
+            # Owner 2026-11-02 - one page per saved country / region: instructions, right to work, salary,
+            # logistics and answers, each value with where it came from. Absent when none (rule #29).
+            **({"country_pages": pages} if pages else {}),
             # Owner decision 2026-10-08 (S2) - the assistant settings with the
             # safe defaults filled in, the practice-run state and the riskier
             # changes still waiting for the user's click. Read before ANY apply.

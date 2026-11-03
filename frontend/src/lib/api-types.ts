@@ -2954,6 +2954,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/countries/{place}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Page
+         * @description One country's (or region's) page: the user's instructions, right to work, salary, logistics and
+         *     that country's saved answers, each effective value labelled with where it came from. 404 when the
+         *     user has no profile; 422 when ``place`` is no country, region or ANY. Read-only, scoped by user (#12).
+         */
+        get: operations["get_country_page_api_profile_countries__place__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/cv": {
         parameters: {
             query?: never;
@@ -4364,6 +4386,7 @@ export interface components {
              * @enum {string}
              */
             autofill: "allow" | "deny" | "unset";
+            country_instructions?: components["schemas"]["KitCountryInstructionsOut"] | null;
             cover_letter?: components["schemas"]["KitDocumentOut"] | null;
             /** Cover Letter None Reason */
             cover_letter_none_reason?: string | null;
@@ -5703,6 +5726,49 @@ export interface components {
             sha256: string;
             /** Version */
             version: number;
+        };
+        /** CountryInstructionsOut */
+        CountryInstructionsOut: {
+            /** From */
+            from: string;
+            /** Lines */
+            lines: string[];
+        };
+        /**
+         * CountryPageOut
+         * @description Country pages (owner 2026-11-02): one place per country. Unset = absent (rule #29).
+         */
+        CountryPageOut: {
+            /** Answers */
+            answers?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Assistant Drafted */
+            assistant_drafted?: boolean | null;
+            /** Confirmed */
+            confirmed?: boolean | null;
+            /** Country */
+            country: string;
+            instructions?: components["schemas"]["CountryInstructionsOut"] | null;
+            logistics?: components["schemas"]["CountryPickOut"] | null;
+            /** Region Fallback */
+            region_fallback?: string | null;
+            right_to_work?: components["schemas"]["CountryPickOut"] | null;
+            salary?: components["schemas"]["CountryPickOut"] | null;
+            /** To Confirm */
+            to_confirm?: string[] | null;
+        };
+        /**
+         * CountryPickOut
+         * @description One effective value and where it came from: the country's own row, its region's, or ANY.
+         */
+        CountryPickOut: {
+            /** From */
+            from: string;
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
         };
         /** CreateAskOut */
         CreateAskOut: {
@@ -7085,6 +7151,15 @@ export interface components {
             status: string;
             /** Submit Override */
             submit_override?: string | null;
+        };
+        /** KitCountryInstructionsOut */
+        KitCountryInstructionsOut: {
+            /** Country */
+            country: string;
+            /** From */
+            from: string;
+            /** Lines */
+            lines: string[];
         };
         /** KitDocumentOut */
         KitDocumentOut: {
@@ -15880,6 +15955,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CommonQuestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_country_page_api_profile_countries__place__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                place: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryPageOut"];
                 };
             };
             /** @description Validation Error */

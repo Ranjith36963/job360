@@ -77,7 +77,9 @@ SHAPES: dict[str, dict[str, Any]] = {
             "visa_type and note = one short line. work_authorization citizen / permanent_resident cannot go with "
             "needs_sponsorship true, and needs_sponsorship cannot go with needs_sponsorship false. "
             "remote_priority / onsite_priority / contract_priority = the user's own job priority for that place "
-            "(off = never search it); set only what the user chose"
+            "(off = never search it); set only what the user chose. instructions = up to 5 short lines in the "
+            "user's own words for that place (a country without its own uses its region's, then ANY's). "
+            "set_by is Job360's: a row you add or change is a draft (guesses) until the user confirms it"
         ),
     },
     "user_info.logistics": {

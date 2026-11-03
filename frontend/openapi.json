@@ -1461,6 +1461,16 @@
             "title": "Autofill",
             "type": "string"
           },
+          "country_instructions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitCountryInstructionsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cover_letter": {
             "anyOf": [
               {
@@ -5000,6 +5010,163 @@
         "title": "ControlsCvOut",
         "type": "object"
       },
+      "CountryInstructionsOut": {
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "lines"
+        ],
+        "title": "CountryInstructionsOut",
+        "type": "object"
+      },
+      "CountryPageOut": {
+        "description": "Country pages (owner 2026-11-02): one place per country. Unset = absent (rule #29).",
+        "properties": {
+          "answers": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers"
+          },
+          "assistant_drafted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Drafted"
+          },
+          "confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CountryInstructionsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logistics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CountryPickOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "region_fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Fallback"
+          },
+          "right_to_work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CountryPickOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "salary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CountryPickOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_confirm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Confirm"
+          }
+        },
+        "required": [
+          "country"
+        ],
+        "title": "CountryPageOut",
+        "type": "object"
+      },
+      "CountryPickOut": {
+        "description": "One effective value and where it came from: the country's own row, its region's, or ANY.",
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "value": {
+            "additionalProperties": true,
+            "title": "Value",
+            "type": "object"
+          }
+        },
+        "required": [
+          "from",
+          "value"
+        ],
+        "title": "CountryPickOut",
+        "type": "object"
+      },
       "CreateAskOut": {
         "properties": {
           "already_existed": {
@@ -8344,6 +8511,32 @@
           "status"
         ],
         "title": "KitApplicationOut",
+        "type": "object"
+      },
+      "KitCountryInstructionsOut": {
+        "properties": {
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "country",
+          "from",
+          "lines"
+        ],
+        "title": "KitCountryInstructionsOut",
         "type": "object"
       },
       "KitDocumentOut": {
@@ -29117,6 +29310,82 @@
           }
         },
         "summary": "List Common Questions",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/countries/{place}": {
+      "get": {
+        "description": "One country's (or region's) page: the user's instructions, right to work, salary, logistics and\nthat country's saved answers, each effective value labelled with where it came from. 404 when the\nuser has no profile; 422 when ``place`` is no country, region or ANY. Read-only, scoped by user (#12).",
+        "operationId": "get_country_page_api_profile_countries__place__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "place",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "title": "Place",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountryPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Country Page",
         "tags": [
           "profile"
         ]

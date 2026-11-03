@@ -71,8 +71,15 @@ _RTW_COUNTRY: dict[str, str] = {
     # Owner decision 2026-10-26 - the priority of contract roles in that place, chosen
     # right next to the Contract tick (like remote and on-site).
     "contract_priority": "priority",
+    # Owner 2026-11-02 (country pages) - the user's own instructions for this place, a few lines in his
+    # words ("hold the visa question until they ask"). Empty = none (rule #29).
+    "instructions": "instructions",
+    # Country pages: a row an assistant CREATED or changed (``country_pages.DRAFT_MARK``). Stamped by the
+    # server from the writer (``country_pages.stamp``), never trusted from the caller; not the user's.
+    "set_by": "draft_mark",
 }
 ANY_COUNTRY = "ANY"
+COUNTRY_INSTRUCTIONS_MAX_LINES = 5
 ONSITE_VALUES = ("yes", "only_if_sponsored", "no")
 PRIORITY_LEVELS = ("highest", "high", "medium", "low", "off")
 LICENCE_TYPES = ("full", "provisional", "none")
@@ -297,6 +304,12 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
         return raw
     if kind == "current_salary":
         return _current_salary(at, raw)
+    if kind == "instructions":
+        return _instructions(at, raw)
+    if kind == "draft_mark":
+        if raw != "assistant":
+            raise _fail(f"{at} is set by Job360 only (\"assistant\" or absent)")
+        return raw
     if kind == "rtw_countries":
         return _countries(at, raw, _RTW_COUNTRY, contradictions=True)
     if kind == "logistics_countries":
@@ -345,6 +358,19 @@ def _current_salary(at: str, raw: Any) -> dict[str, Any] | None:
     ):
         raise _fail(f"{at} needs amount (a number > 0), currency (ISO 4217, 3 letters) and period (year or month)")
     return {"amount": amount, "currency": _strip_control(currency).upper(), "period": period.strip().lower()}
+
+
+def _instructions(at: str, raw: Any) -> list[str] | None:
+    """At most ``COUNTRY_INSTRUCTIONS_MAX_LINES`` one-line instructions, each <= ``PROFILE_NOTE_MAX_CHARS``,
+    control characters stripped; a lone string is one line; blanks dropped; ``[]`` = none (rule #29)."""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raise _type_error(at, "a list of strings", raw)
+    lines = [t for i, item in enumerate(raw) if (t := _line(f"{at}[{i}]", item, settings.PROFILE_NOTE_MAX_CHARS))]
+    if len(lines) > COUNTRY_INSTRUCTIONS_MAX_LINES:
+        raise _fail(f"{at} exceeds the {COUNTRY_INSTRUCTIONS_MAX_LINES}-line limit")
+    return lines or None
 
 
 def _unknown_key(where: str, key: Any, allowed: str) -> ProfileEditError:
