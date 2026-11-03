@@ -2,12 +2,13 @@
 
 Real Postgres through the real doors: an assistant (bearer token) records over HTTP or MCP, the user reads
 ``/api/needs-you-count`` and undoes on the web. Pinned, one test per guardrail:
-* an email tied to ONE application that has a started submit (or a filled form) makes it ``applied``
-  (recorded by ``system``, the email stays the proof note) and the Confirm sent item goes; no clearance is spent,
-  and an assistant's own ``applied`` is still refused without one (#1469 not weakened);
+* an email tied to ONE application whose submit was CLEARED (check_submit said submit) and started (or its
+  form filled) makes it ``applied`` (recorded by ``system``, the email stays the proof note) and the Confirm
+  sent item goes; an assistant's own ``applied`` is still refused (#1469 not weakened);
+* no clearance (B1), an email older than the fill, or a tie by the company name alone: the user is asked;
 * an email that matches two applications changes nothing: the user is asked, as before;
 * a rejection email never marks applied; nor does an email on a job with no submit or fill, or one the user
-  declined or said was not sent;
+  said was not sent;
 * a started submit with no email asks the user only after CONFIRM_SENT_WAIT_DAYS;
 * the user's web Undo reverses it (and says "not sent"); an assistant cannot.
 """
@@ -22,11 +23,15 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core import settings
 from src.repositories import pgsync
+from tests._clearance import clear
+
+ATS_SENDER = "Northwind via Greenhouse <no-reply@greenhouse-mail.io>"  # the ATS's own sender domain
 
 
-def _email(n: int = 1, subject: str = "Thank you for applying to Northwind") -> dict[str, Any]:
-    return {"kind": "email", "message_id": f"<confirm-{n}@mailer.example>", "sender": "Talent <talent@mailer.example>",
-            "subject": subject, "received_at": "2026-11-02T09:30:00+00:00"}
+def _email(n: int = 1, subject: str = "Thank you for applying to Northwind", sender: str = ATS_SENDER,
+           received_at: str | None = None) -> dict[str, Any]:
+    return {"kind": "email", "message_id": f"<confirm-{n}@mailer.example>", "sender": sender, "subject": subject,
+            "received_at": received_at or datetime.now(timezone.utc).isoformat()}
 
 
 async def _agent(web: AsyncClient) -> AsyncClient:
@@ -38,9 +43,10 @@ async def _agent(web: AsyncClient) -> AsyncClient:
                        headers={"Authorization": f"Bearer {resp.json()['token']}"})
 
 
-async def _bring(web: AsyncClient, n: int, company: str = "Northwind") -> int:
+async def _bring(web: AsyncClient, n: int, company: str = "Northwind", ats: bool = True) -> int:
+    url = f"https://boards.greenhouse.io/northwind/jobs/{n}" if ats else f"https://careers.example/jobs/{n}"
     ad = {"title": f"Data Engineer {n}", "company": company, "location": "London", "country": "GB", "remote": False,
-          "apply_url": f"https://careers.example/jobs/{n}", "description": "Build the pipelines."}
+          "apply_url": url, "description": "Build the pipelines."}
     resp = await web.post("/api/jobs/bring", json=ad)
     assert resp.status_code == 200, resp.text
     return int(resp.json()["application_id"])
@@ -52,7 +58,7 @@ async def _post(c: AsyncClient, app_id: int, event_type: str, payload: dict[str,
 
 
 async def _start(c: AsyncClient, app_id: int, how: str = "submit_attempted") -> None:
-    payload = {"form_url": "https://careers.example/apply", "fields_count": 3} if how == "form_filled" else {}
+    payload = {"form_url": "https://boards.greenhouse.io/apply", "fields_count": 3} if how == "form_filled" else {}
     resp = await _post(c, app_id, how, payload)
     assert resp.status_code == 201, resp.text
 
@@ -80,8 +86,9 @@ async def _confirm_sent_ids(web: AsyncClient) -> list[int]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("how", ["submit_attempted", "form_filled"])
-async def test_an_email_matched_to_one_started_application_marks_it_applied(authenticated_async_context, how):
+async def test_an_email_matched_to_one_cleared_application_marks_it_applied(authenticated_async_context, how):
     async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
         app_id = await _bring(web, 1)
         async with await _agent(web) as agent:
             await _start(agent, app_id, how)
@@ -89,6 +96,7 @@ async def test_an_email_matched_to_one_started_application_marks_it_applied(auth
             # #1469 and the applied rule still refuse an assistant's own `applied` (no CV yes, no clearance).
             assert refused.status_code == 409 and refused.json()["detail"].split(":")[0] in (
                 "submit_rule_open", "submit_not_cleared")
+            clearance = await clear(uid, app_id)  # what check_submit writes when it says `submit`
             resp = await _confirmation(agent, app_id)
         assert resp.status_code == 201, resp.text
         assert resp.json()["status"] == "applied" and resp.json()["event_type"] == "note"
@@ -99,18 +107,63 @@ async def test_an_email_matched_to_one_started_application_marks_it_applied(auth
         assert applied["recorded_by"] == "system" and applied["payload"]["confirmed_by"] == "email"
         assert applied["payload"]["note_event_id"] == resp.json()["event_id"]
         assert "cv_not_approved" in applied["payload"]["open_at_submit"]  # stamped like the user's own click
+        [start] = _events(detail, how)
+        assert applied["occurred_at"] >= start["recorded_at"]  # never before the fill
         [note] = _events(detail, "note")
         assert note["detail"] == "Submission confirmed: Thank you for applying to Northwind"
-        assert _events(detail, "submit_cleared") == [] and _events(detail, "submit_cleared_used") == []
+        assert [e["id"] for e in _events(detail, "submit_cleared")] == [clearance]
         assert await _confirm_sent_ids(web) == []
+
+
+@pytest.mark.asyncio
+async def test_b1_no_clearance_means_no_auto_apply(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, 10)
+        async with await _agent(web) as agent:
+            await _post(agent, app_id, "form_filled", {"form_url": "https://boards.greenhouse.io/apply", "fields_count": 3})
+            resp = await _confirmation(agent, app_id)  # every email field is the caller's own text
+        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        assert _events(await _detail(web, app_id), "applied") == []
+        assert await _confirm_sent_ids(web) == [app_id]  # the owner is asked "did it go out?", as before
+
+
+@pytest.mark.asyncio
+async def test_an_email_older_than_the_fill_means_no_auto_apply(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
+        app_id = await _bring(web, 11)
+        async with await _agent(web) as agent:
+            await _start(agent, app_id)
+            await clear(uid, app_id)
+            old = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+            resp = await _confirmation(agent, app_id, received_at=old)
+        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        assert _events(await _detail(web, app_id), "applied") == []
+        assert await _confirm_sent_ids(web) == [app_id]
+
+
+@pytest.mark.asyncio
+async def test_the_company_name_in_the_subject_alone_is_no_tie(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
+        app_id = await _bring(web, 12, ats=False)  # a company site: no known sender domain
+        async with await _agent(web) as agent:
+            await _start(agent, app_id)
+            await clear(uid, app_id)
+            resp = await _confirmation(agent, app_id, sender="Talent <talent@mailer.example>")
+        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        assert _events(await _detail(web, app_id), "applied") == []
+        assert await _confirm_sent_ids(web) == [app_id]
 
 
 @pytest.mark.asyncio
 async def test_an_email_matching_two_applications_changes_nothing(authenticated_async_context):
     async with authenticated_async_context() as web:
-        first, second = await _bring(web, 2), await _bring(web, 3)  # both Northwind: the subject names both
+        uid = authenticated_async_context.fixture_user_id
+        first, second = await _bring(web, 2), await _bring(web, 3)  # both on the same ATS: the sender fits both
         async with await _agent(web) as agent:
             await _start(agent, first)
+            await clear(uid, first)
             resp = await _confirmation(agent, first)
         assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
         assert [_events(await _detail(web, i), "applied") for i in (first, second)] == [[], []]
@@ -120,9 +173,11 @@ async def test_an_email_matching_two_applications_changes_nothing(authenticated_
 @pytest.mark.asyncio
 async def test_a_rejection_email_does_not_mark_applied(authenticated_async_context):
     async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
         app_id = await _bring(web, 4)
         async with await _agent(web) as agent:
             await _start(agent, app_id)
+            await clear(uid, app_id)
             rejected = await _post(agent, app_id, "rejected", detail="Not moving forward", source=_email(1))
             assert rejected.status_code == 201, rejected.text
             same = await _confirmation(agent, app_id, 1)  # the same email again, now called a confirmation
@@ -136,7 +191,7 @@ async def test_a_rejection_email_does_not_mark_applied(authenticated_async_conte
 @pytest.mark.asyncio
 async def test_no_submit_no_fill_or_a_not_sent_means_the_user_is_asked(authenticated_async_context):
     async with authenticated_async_context() as web:
-        bare, said_no = await _bring(web, 5, "Acme"), await _bring(web, 6, "Globex")
+        bare, said_no = await _bring(web, 5, "Acme", ats=False), await _bring(web, 6, "Globex", ats=False)
         async with await _agent(web) as agent:
             await _start(agent, said_no)
         resolved = await web.post(f"/api/applications/{said_no}/submit/resolve")  # "It was not sent"
@@ -170,9 +225,11 @@ async def test_no_email_after_the_wait_asks_the_user(authenticated_async_context
 @pytest.mark.asyncio
 async def test_the_users_web_undo_reverses_it_and_an_assistant_cannot(authenticated_async_context):
     async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
         app_id = await _bring(web, 8)
         async with await _agent(web) as agent:
             await _start(agent, app_id)
+            await clear(uid, app_id)
             assert (await _confirmation(agent, app_id)).json()["status"] == "applied"
             assert (await agent.post(f"/api/applications/{app_id}/auto/undo")).status_code == 403
         undo = await web.post(f"/api/applications/{app_id}/auto/undo")
@@ -197,9 +254,11 @@ async def test_the_mcp_record_event_door_marks_it_applied_too(authenticated_asyn
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
         app_id = await _bring(web, 9)
         async with await _agent(web) as agent:
             await _start(agent, app_id)
+        await clear(uid, app_id)
         token = (await web.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
         http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test",
                                   headers={"Authorization": f"Bearer {token}"})

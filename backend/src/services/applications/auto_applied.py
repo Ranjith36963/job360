@@ -10,13 +10,17 @@ note_event_id}``, occurred at the email's time) if ALL of these hold:
   applied job stays a note: it is proof, never a second ``applied``);
 * a ``submit_attempted`` or a ``form_filled`` was recorded on it, no ``submit_declined`` follows the newest
   fill, and no "It was not sent" (``submit_resolved``) follows the newest submit mark;
+* the submit itself was cleared on this application: a ``submit_cleared`` / ``submit_cleared_used``
+  (check_submit said ``submit``) or the owner's own web ``submit_approved``, none corrected;
+* the email has a ``received_at`` no earlier than the job was brought, filled or its submit started;
 * the email is not already stored on another application or as another event here (a rejection recorded
   from it, for one), and Job360's own stored facts (``match_email``: thread, contact, sender domain,
-  company in subject) tie it to exactly this one application.
+  company in subject) tie it to exactly this one application, by more than the company name in the subject.
 
-#1469's submit clearance is untouched: it gates an ASSISTANT saying it submitted (``record_application``,
-``record_event`` applied). This ``applied`` is Job360's own record of the employer's proof that the user's
-submit happened, recorded by ``system``, like the automatic ``ghosted``; it never spends or needs a clearance.
+Why the clearance (review of #1496): every field of the email is the caller's own text, so the email alone
+proves nothing. It may only CONFIRM a submit that #1469's gate (or the owner) already let happen; it never
+replaces that gate. #1469 itself is untouched: an assistant's own ``applied`` / ``record_application`` still
+needs a clearance. This ``applied`` is recorded by ``system``, like the automatic ``ghosted``.
 
 Otherwise nothing changes and the user is asked, as before. A started submit with no confirmation, no
 ``applied`` and no "It was not sent" asks the user only after ``CONFIRM_SENT_WAIT_DAYS``
@@ -84,12 +88,54 @@ async def _only_here(db: JobDatabase, user_id: str, application_id: int, note_id
         return False
     found = await match_email(db, user_id, sender=source.get("sender") or "",
                               thread_id=source.get("thread_id") or "", subject=source.get("subject") or "")
-    ids = set()
+    ids: set[int] = set()
+    mine: set[str] = set()
     for c in found["candidates"]:
-        own_thread_only = c["reasons"] == ["same_thread"] and set(c["thread_event_ids"]) <= {note_id}
-        if not own_thread_only:  # the note just stored is not a fact that links the email
+        # The note just stored is not a fact that links the email: a thread holding only it does not count.
+        own_thread = set(c["thread_event_ids"]) <= {note_id}
+        reasons = {r for r in c["reasons"] if not (r == "same_thread" and own_thread)}
+        if reasons:
             ids.add(int(c["application_id"]))
-    return ids == {application_id} and not found["truncated"]
+            mine = reasons if int(c["application_id"]) == application_id else mine
+    # A company named in the subject alone is no tie (review of #1496): any sender can write that.
+    return ids == {application_id} and bool(mine - {"company_in_subject"}) and not found["truncated"]
+
+
+def _when(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        at = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+async def _not_proven(db: JobDatabase, user_id: str, application_id: int, source: dict[str, Any]) -> str:
+    """Review of #1496: every field of the email is the caller's, so the email may only CONFIRM a submit Job360
+    already let happen. "" when the submit was cleared here (an unspent or spent ``submit_cleared``, or the
+    owner's own web ``submit_approved``) and the email came after the job was brought and after the newest fill
+    and started submit; else the reason the owner is asked instead."""
+    received = _when(source.get("received_at"))
+    if received is None:
+        return "no_received_at"
+    cur = await db._db.execute(
+        "SELECT recorded_at FROM application_events WHERE user_id = ? AND application_id = ? "
+        "AND event_type IN ('brought', 'form_filled', 'submit_attempted')",
+        (user_id, application_id),
+    )
+    starts = [w for w in (_when(r["recorded_at"]) for r in await cur.fetchall()) if w is not None]
+    if starts and received < max(starts):
+        return "email_before_submit"
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events e WHERE e.user_id = ? AND e.application_id = ? "
+        "AND (e.event_type IN ('submit_cleared', 'submit_cleared_used') "
+        "OR (e.event_type = 'submit_approved' AND e.recorded_by = 'web')) "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id "
+        "AND c.user_id = e.user_id) LIMIT 1",
+        (user_id, application_id),
+    )
+    return "" if await cur.fetchone() is not None else "not_cleared"
 
 
 async def apply_if_proven(
@@ -110,7 +156,8 @@ async def apply_if_proven(
         elif await kit.already_applied(db, user.id, application_id):
             why = "applied"
         else:
-            why = await _submit_state(db, user.id, application_id)
+            why = await _submit_state(db, user.id, application_id) or await _not_proven(
+                db, user.id, application_id, source)
         if not why and not await _only_here(db, user.id, application_id, note_id, source):
             why = "not_one_application"
         if why:
@@ -122,7 +169,7 @@ async def apply_if_proven(
             db, user_id=user.id, application_id=application_id, event_type="applied", detail=APPLIED_DETAIL,
             payload={"confirmed_by": CONFIRMED_BY, "note_event_id": int(note_id),
                      **({"open_at_submit": open_at_submit} if open_at_submit else {})},
-            occurred_at=source.get("received_at") or datetime.now(timezone.utc).isoformat(), recorded_by=SYSTEM_ACTOR,
+            occurred_at=source["received_at"], recorded_by=SYSTEM_ACTOR,  # never before the fill (_not_proven)
         )
     _log(user.id, application_id, "auto_applied", "ok")
     return ("Job360 recorded this application as applied: the employer's confirmation email matches only this "
