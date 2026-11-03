@@ -251,7 +251,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 "job_country": a.get("job_country"), "job_company": a.get("job_company"),
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
             }
-    flags = await ready.answer_flags_for(user_id, fills)
+    flags = await ready.answer_flags_for(db, user_id, fills)
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
