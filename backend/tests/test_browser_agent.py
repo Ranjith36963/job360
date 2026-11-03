@@ -259,7 +259,10 @@ def _to_site(port: int, tls_port: int = 0):
 # only while the build is under 10 weeks old (net/http/transport_security_state.cc IsBuildTimely), so
 # plain http to these hosts passed on an old Chromium and failed with ERR_SSL_PROTOCOL_ERROR on a fresh
 # one. These hosts are therefore opened over https, as the real sites are, from a throwaway certificate.
-ATS_HOSTS = ("jobs.lever.co", "jobs.ashbyhq.com", "acme.wd3.myworkdayjobs.com", "careers-acme.icims.com")
+ATS_HOSTS = (
+    "jobs.lever.co", "jobs.ashbyhq.com", "acme.wd3.myworkdayjobs.com", "careers-acme.icims.com",
+    "acme.bamboohr.com", "acme.fa.ocs.oraclecloud.com",  # tests/test_apply_button_and_already_applied.py
+)
 _TLS: list[tuple] = []
 
 

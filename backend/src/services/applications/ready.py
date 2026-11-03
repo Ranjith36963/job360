@@ -311,7 +311,11 @@ def _approved_record(
     want_q, want_topic = normalize_question(question), topic_key(topic) if topic else ""
     job_only: list[dict[str, Any]] = [r for r in records if r.get("job_only")]
     for job in reversed(job_only):  # the newest Verify wins
-        if (want_topic and topic_key(job.get("topic")) == want_topic) or normalize_question(job["question"]) == want_q:
+        by_topic = bool(want_topic) and topic_key(job.get("topic")) == want_topic
+        # "???" has no wording: then only the exact same text is the same question ("!!!" is not).
+        same_text = str(job["question"]).strip() == str(question or "").strip()
+        by_words = normalize_question(job["question"]) == want_q if want_q else same_text
+        if by_topic or by_words:
             hit: dict[str, Any] = job
             return hit
     records = [r for r in records if not r.get("job_only")]

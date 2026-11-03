@@ -169,3 +169,27 @@ async def test_this_jobs_verify_wins_over_a_saved_answer_that_says_otherwise(
         after = await _verify(client, app_id)
         assert after["answers"][0]["verified"] is True and "guessed" not in _codes(after)
         assert await _gate_guessed(fixture_user_id, app_id) is False
+
+
+@pytest.mark.asyncio
+async def test_a_verify_of_a_wordless_question_never_covers_another_wordless_one(
+    authenticated_async_context, fixture_user_id
+):
+    """A punctuation-only question ("???", an unlabelled box) has no wording to match by: Verify of one never
+    verifies a different wordless row the user never saw (independent check, #1470 c3)."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, "Acme")
+
+        async def fill(question: str, answer: str) -> None:
+            payload = {"form_url": FORM, "fields_count": 1,
+                       "answers": [{"question": question, "answer": answer, "source": "guessed"}]}
+            resp = await client.post(f"/api/applications/{app_id}/events",
+                                     json={"event_type": "form_filled", "payload": payload})
+            assert resp.status_code == 201, resp.text
+
+        await fill("???", "Yes")
+        assert (await _verify(client, app_id))["answers"][0]["verified"] is True
+        await fill("!!!", "No")
+        card = await _card(client, app_id)
+        assert card["answers"][0]["verified"] is False and "guessed" in _codes(card)
+        assert await _gate_guessed(fixture_user_id, app_id) is True

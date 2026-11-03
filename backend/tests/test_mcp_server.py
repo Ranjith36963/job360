@@ -15,6 +15,8 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from tests._clearance import clear
+
 pytest.importorskip("mcp")
 
 EXPECTED_TOOLS = {
@@ -342,6 +344,7 @@ async def test_bring_then_read_then_record_then_list_round_trip(authenticated_as
             assert job["url"].endswith(f"/applications/{application_id}")
 
             await _user_approves_cv(authenticated_async_context)
+            await clear(fixture_user_id, application_id)
 
             # C1 (application-spine review) — record_application is rewired onto
             # the rich `POST /applications/{id}/receipt` route; its response is
@@ -388,14 +391,16 @@ async def test_route_errors_become_tool_errors_with_status_and_detail(authentica
 
 
 @pytest.mark.asyncio
-async def test_another_users_receipt_is_unreachable(authenticated_async_context):
+async def test_another_users_receipt_is_unreachable(authenticated_async_context, fixture_user_id):
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
-            job_id = _payload(await mcp.call_tool("bring_job", JOB))["job_id"]
+            brought = _payload(await mcp.call_tool("bring_job", JOB))
+            job_id = brought["job_id"]
             await _user_approves_cv(authenticated_async_context)
+            await clear(fixture_user_id, brought["application_id"])
             receipt_id = _payload(await mcp.call_tool("record_application", {"job_id": job_id}))["receipt_id"]
 
     # A second account, with its own token.
@@ -432,7 +437,7 @@ async def test_another_users_receipt_is_unreachable(authenticated_async_context)
 
 
 @pytest.mark.asyncio
-async def test_record_application_writes_a_rich_receipt_through_the_new_route(authenticated_async_context):
+async def test_record_application_writes_a_rich_receipt_through_the_new_route(authenticated_async_context, fixture_user_id):
     """C1 (application-spine review) — `record_application` must go through
     `applications.record_application_receipt` (the rich receipt), not the
     legacy `receipts.create_receipt`: a NAMED artifact version and
@@ -469,6 +474,7 @@ async def test_record_application_writes_a_rich_receipt_through_the_new_route(au
         )
         assert approved.status_code == 201, approved.text
 
+    await clear(fixture_user_id, application_id)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             receipt = _payload(

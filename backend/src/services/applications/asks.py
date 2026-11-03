@@ -296,6 +296,17 @@ async def supersede(
 
 
 TIDY_ACTOR = "system"
+# blocked.py's one question for a site saying the user already applied (reason already_applied_on_site). Once the
+# job is no longer `considering` (the user's "I applied"), the page closes it on load (tidy_open_asks).
+ALREADY_APPLIED_QUESTION = "The site says you already applied. Mark it applied?"
+ALREADY_APPLIED_CLOSED = "you marked it applied"
+
+
+def answered_by_applying(ask: dict[str, Any], app_status: Any) -> bool:
+    """The "already applied?" ask on a job that is no longer ``considering``: the user's "I applied" answered it."""
+    return str(ask.get("question") or "") == ALREADY_APPLIED_QUESTION and app_status not in (None, "considering")
+
+
 SUPERSEDED_DETAIL = "Replaced by a newer question."
 # A row that asks the user to paste the form's own question: the assistant reads the form itself (owner 2026-10-25).
 _PASTE_RE = re.compile(r"\bpaste\b", re.IGNORECASE)
@@ -324,6 +335,7 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
         return 0
     groups: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
     closed_job: list[dict[str, Any]] = []
+    applied_job: list[dict[str, Any]] = []
     for r in rows:
         ask = await _get_ask(db, user_id, int(r["id"]))
         if ask is None:
@@ -331,13 +343,16 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
         if r["app_status"] in APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
             closed_job.append(ask)
             continue
+        if answered_by_applying(ask, r["app_status"]):
+            applied_job.append(ask)
+            continue
         family = "question" if ask["kind"] in QUESTION_FAMILY else "blocker"
         side = "web" if ask["asked_by"] == "web" else "assistant"
         groups.setdefault((int(ask["application_id"]), family, side), []).append(ask)
     dupes = {k: v for k, v in groups.items() if len(v) > 1}
     pasted = [a for (_app, fam, _side), v in groups.items() if fam == "question"
               for a in v[-1:] if any(_PASTE_RE.search(str(q["question"])) for q in _rows_of_all(v))]
-    if not dupes and not closed_job and not pasted:
+    if not dupes and not closed_job and not pasted and not applied_job:
         return 0
     now = datetime.now(timezone.utc).isoformat()
     closed = 0
@@ -364,6 +379,12 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
                 (now, int(ask["id"]), user_id),
             )
             closed += 1
+    for ask in applied_job:
+        try:
+            await withdraw_ask(db, user_id, int(ask["id"]), TIDY_ACTOR, ALREADY_APPLIED_CLOSED)
+            closed += 1
+        except SpineError:  # answered or withdrawn in between
+            continue
     get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed})
     return closed
 

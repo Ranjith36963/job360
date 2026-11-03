@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
+from tests._clearance import clear
 from tests.test_mcp_server import _mcp_client, _mint_token, _payload
 
 _AD = {
@@ -113,7 +114,7 @@ async def test_named_cv_gets_no_cv_warning(authenticated_async_context):
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_matches_the_route(authenticated_async_context):
+async def test_mcp_tool_matches_the_route(authenticated_async_context, fixture_user_id):
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:
@@ -123,7 +124,9 @@ async def test_mcp_tool_matches_the_route(authenticated_async_context):
     token = await _mint_token(authenticated_async_context)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
+            await clear(fixture_user_id, app_id)
             bare = _payload(await mcp.call_tool("record_application", {"application_id": app_id}))
+            await clear(fixture_user_id, app_id)  # one submit answer covers one receipt
             named = _payload(
                 await mcp.call_tool(
                     "record_application",
