@@ -302,7 +302,7 @@ export function JobCard({
         <h2 className="font-heading text-base">Job</h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid={`apply-status-${card.applicationId}`}>
-            {card.formFilled ? "Form filled. Next: you" : "You: finish this"}
+            {card.formFilled ? "Form filled on the site. Waiting for your Send" : "You: finish this"}
           </span>
           {card.formUrl && (
             <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn} data-testid={`section-form-link-${card.applicationId}`}>
