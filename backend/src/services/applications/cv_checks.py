@@ -768,6 +768,63 @@ def linkedin_note_too_long(text: str, *, premium: bool) -> Optional[dict[str, st
     )
 
 
+# ── (d) a message sent on its own (owner 2026-11-03) ─────────────────────────
+
+# "worked at Acme", "studied at Leeds", "graduated from MIT", "experience with Kafka": the grammar words before
+# a name the profile must contain. Grammar only, never a skill list (hard rule #28): the profile is the vocabulary.
+_NAME_LEADS = {
+    "worked": ("at", "for"), "work": ("at", "for"), "working": ("at", "for"), "interned": ("at",),
+    "joined": (), "studied": ("at",), "graduated": ("from",), "degree": ("from",), "experience": ("with", "in"),
+}
+
+
+def unsupported_names(text: str, source: str) -> Optional[dict[str, str]]:
+    """Capitalised names after ``_NAME_LEADS`` ("worked at Acme Corp") that the profile never mentions. Word by
+    word, no regex on the caller's text (CodeQL: no backtracking)."""
+    words = [w.strip(_OUTER_PUNCT) for w in _scrub(text).split()]
+    hay = _norm(source)
+    bad: list[str] = []
+    for i, word in enumerate(words):
+        follow = _NAME_LEADS.get(word.casefold())
+        if follow is None:
+            continue
+        start = i + 1
+        if follow and (start >= len(words) or words[start].casefold() not in follow):
+            continue
+        start += 1 if follow else 0
+        name: list[str] = []
+        for w in words[start:start + 4]:
+            if not w[:1].isupper():
+                break
+            name.append(w)
+        shown = " ".join(name)
+        if shown and _norm(shown) not in hay and shown not in bad:
+            bad.append(shown)
+    if not bad:
+        return None
+    return _issue("unsupported_names", "warn", f"Not found anywhere in the profile: {_listed(bad)}.")
+
+
+def sensitive_words(text: str) -> list[str]:
+    """Words from ``settings.OUTREACH_SENSITIVE_WORDS`` (visa, salary, age, health ...) in ``text``, in order.
+    A message that names one never goes on its own."""
+    found: list[str] = []
+    for raw in _scrub(text).split():
+        w = raw.strip(_OUTER_PUNCT).casefold()
+        if w in settings.OUTREACH_SENSITIVE_WORDS and w not in found:
+            found.append(w)
+    return found
+
+
+def outreach_claims_unsupported(text: str, profile: Any) -> bool:
+    """A number, a years claim or a name in this outreach text that the profile lacks. No profile text = True
+    (nothing vouches for the message: it is not sent on its own)."""
+    source = profile_source_text(profile) if profile is not None else ""
+    if not source.strip():
+        return True
+    return any(check(text, source) for check in (unsupported_numbers, unsupported_year_claims, unsupported_names))
+
+
 # ── entry points ────────────────────────────────────────────────────────────
 
 

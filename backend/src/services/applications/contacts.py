@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -1619,8 +1619,9 @@ async def over_limit_notes(db: JobDatabase, user_id: str, contact_ids: list[int]
         "SELECT o.contact_id, o.channel, o.text FROM contact_outreach o "  # noqa: S608 - only "?" is formatted in
         f"WHERE o.user_id = ? AND o.entry = 'message' AND o.contact_id IN ({marks}) "
         "AND o.id = (SELECT MAX(x.id) FROM contact_outreach x WHERE x.contact_id = o.contact_id "
-        "AND x.entry = 'message')",
-        (user_id, *contact_ids),
+        "AND x.entry = 'message') AND NOT EXISTS (SELECT 1 FROM contact_outreach k WHERE k.contact_id = o.contact_id "
+        "AND k.entry = ? AND k.text = CAST(o.id AS TEXT))",
+        (user_id, *contact_ids, own_browser.AFTER_CONNECT),
     )
     long = {
         int(r["contact_id"]): len(str(r["text"] or ""))
@@ -1671,6 +1672,12 @@ async def _check_draft_kind(
                 422, f"a LinkedIn message is at most {settings_rules.LINKEDIN_MESSAGE_MAX_CHARS} characters; "
                 f"this one is {len(text)}. Shorten it.",
             )
+    message_max = settings_rules.LINKEDIN_MESSAGE_MAX_CHARS
+    if draft_kind == "after_connect" and (channel != "linkedin" or len(text) > message_max):
+        raise SpineError(
+            422, f"an after_connect draft is a LinkedIn message of at most {settings_rules.LINKEDIN_MESSAGE_MAX_CHARS} "
+            f"characters (sent once they accept a request without a note); this one is {len(text)} on {channel}.",
+        )
     if draft_kind == "inmail" and len(text) > settings.LINKEDIN_INMAIL_BODY_MAX_CHARS:
         raise SpineError(
             422, f"an InMail body is at most {settings.LINKEDIN_INMAIL_BODY_MAX_CHARS} characters; "
@@ -1903,6 +1910,14 @@ async def record_outreach(
                             source_message_id or "", clean_label,
                         ),
                     )
+                    if draft_kind == "after_connect":  # Job360's own marker row: the request goes without a note
+                        await db._db.execute(
+                            "INSERT INTO contact_outreach (user_id, contact_id, entry, channel, text, version_no, "
+                            "occurred_at, recorded_at, recorded_by, source_message_id, label) "
+                            "VALUES (?, ?, ?, 'linkedin', ?, NULL, ?, ?, ?, '', '')",
+                            (user_id, contact_id, own_browser.AFTER_CONNECT, str(int(ins.lastrowid or 0)), occurred,
+                             now, actor),
+                        )
             except pg.IntegrityError:
                 continue
             outreach_id = int(ins.lastrowid or 0)
@@ -2082,19 +2097,31 @@ async def _linkedin_gate_facts(
     from src.services.applications import kit  # noqa: PLC0415
 
     label = kit.clean_session(session)
-    task = own_browser.derive(rows, now)
+    task = own_browser.derive(rows, now, auto=True)  # a claim on a draft with no click counts; the gate weighs it
     mine = task is not None and int(task["message_id"]) == int(target["id"])
     holder = (
         (task["claimed_by"], task["claimed_actor"])
         if task is not None and mine and task["state"] == "in_progress" else None
     )
     last, today = await own_browser.pace_facts(db, user_id, now, exclude_contact_id=contact_id)
+    text = str(target.get("text") or "")
+    invite = own_browser.invite_facts(rows)
+    profile = await _load_profile_or_none(user_id)
+    from src.services.applications import cv_checks  # noqa: PLC0415
+
     return {
+        "after_connect": own_browser.is_after_connect(rows, int(target["id"])),
+        "invited": invite is not None,
+        "invite_owner_approved": bool(invite),
+        "invites_this_week": await own_browser.invites_since(db, user_id, now - timedelta(days=7)),
+        "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile),
+        "sensitive": bool(cv_checks.sensitive_words(text)),
         "has_linkedin_url": bool((current.get("linkedin_url") or "").strip()),
         "linkedin_state": current.get("linkedin_state") or None,
         "text_chars": len(str(target.get("text") or "")),
         "premium": await _linkedin_premium_by_user(user_id, contact_id),
-        "owner_approved": mine and task is not None and task["state"] in ("queued", "in_progress"),
+        "owner_approved": mine and task is not None and task["state"] in ("queued", "in_progress")
+        and not task.get("auto"),
         "claimed_by_other": holder is not None and holder != (label, actor),
         "claimed_by_caller": holder is not None and holder == (label, actor),
         "invite_limit_until": await own_browser.weekly_limit_until(db, user_id, now),

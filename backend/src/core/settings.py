@@ -704,7 +704,9 @@ LINKEDIN_NOTE_MAX_CHARS = 200
 LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 # What an outreach draft is (save_artifact `draft_kind`, optional, not stored): a connection_note must
 # fit the note limit above and an inmail body LinkedIn's hard limit, else the save is refused.
-OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email")
+# after_connect (owner 2026-11-03): the message sent once they accept; the connection request itself goes
+# WITHOUT a note (a free account gets about one note a month). Fits a message to a connection (400).
+OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email", "after_connect")
 LINKEDIN_INMAIL_BODY_MAX_CHARS = 1900
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 # Outreach pack #13 — the caller's own variant label on a message version / a template
@@ -735,6 +737,15 @@ EMAIL_SENDS_PER_DAY_DEFAULT = 40
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "10"))
 OUTREACH_NETWORK_MAX_PER_HOUR = int(os.getenv("OUTREACH_NETWORK_MAX_PER_HOUR", "20"))
 OUTREACH_LINKEDIN_MAX_PER_DAY = int(os.getenv("OUTREACH_LINKEDIN_MAX_PER_DAY", "100"))
+# Connection requests in any 7 days (LinkedIn allows a free account about 100 a week): a backstop no setting passes.
+LINKEDIN_INVITES_PER_WEEK_MAX = int(os.getenv("LINKEDIN_INVITES_PER_WEEK_MAX", "100"))
+# A LinkedIn message that names one of these never goes without the user's Send (check_outreach: sensitive_topic).
+OUTREACH_SENSITIVE_WORDS = (
+    "visa", "visas", "sponsor", "sponsorship", "sponsored", "salary", "salaries", "compensation", "pay", "age",
+    "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness",
+)
+# How often the user's own browser checks My Network for accepted invites while anyone is pending.
+LINKEDIN_PENDING_CHECK_HOURS = int(os.getenv("LINKEDIN_PENDING_CHECK_HOURS", "4"))
 OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))
 # Every channel together, per user per day (the email gate checks it first).
 OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "300"))

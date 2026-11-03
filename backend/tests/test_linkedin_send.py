@@ -66,12 +66,17 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "linkedin_pending", {"linkedin_state": "pending"}),
     ("stop", "message_too_long", {"linkedin_state": "connected", "text_chars": 401}),
     ("stop", "invite_limit_reached", {"linkedin_state": "not_connected", "invite_limit_until": NOW + timedelta(days=1)}),
+    ("stop", "weekly_invite_cap_reached", {"linkedin_state": "not_connected", "invites_this_week": 100}),
+    ("stop", "already_invited", {"linkedin_state": "not_connected", "invited": True}),
     # Owner 2026-11-02: a job contact's company cap and a network contact's hourly cap hold on LinkedIn too.
     ("stop", "company_cap_reached", {"linked": True, "company": "northwind", "counts": {"company_sent_in_window": 5}}),
     ("stop", "network_hourly_cap_reached", {"counts": {"network_sent_last_hour": 5}}),
     ("stop", "linkedin_daily_cap_reached", {"linkedin_sent_today": settings.LINKEDIN_SENDS_PER_DAY_DEFAULT}),
     ("stop", "too_soon", {"last_linkedin_sent_at": _RECENT}),
     ("stop", "claimed_by_other_session", {"claimed_by_other": True}),
+    # Owner 2026-11-03: the message after an accepted request goes without a click only past these two checks.
+    ("ask", "unsupported_claims", {"invited": True, "invite_owner_approved": True, "unsupported_claims": True}),
+    ("ask", "sensitive_topic", {"invited": True, "invite_owner_approved": True, "sensitive": True}),
     ("ask", "needs_owner_click", {"owner_approved": False}),
     ("stop", "needs_claim", {"claimed_by_caller": False}),
     ("send", "owner_clicked", {}),

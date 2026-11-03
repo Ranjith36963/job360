@@ -3600,7 +3600,7 @@ export interface paths {
         /**
          * Sent On Its Own Route
          * @description Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
-         *     sources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything.
+         *     sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed.
          */
         get: operations["sent_on_its_own_route_api_sent_on_its_own_get"];
         put?: never;
@@ -8012,6 +8012,8 @@ export interface components {
             claim?: components["schemas"]["TaskClaimOut"] | null;
             /** Contact Id */
             contact_id?: number | null;
+            /** Contact Ids */
+            contact_ids?: number[] | null;
             /**
              * Draft Chars
              * @default 0
@@ -8026,7 +8028,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read";
+            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read" | "linkedin_check_pending";
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Max People */
@@ -8038,6 +8040,11 @@ export interface components {
              * @default
              */
             name: string;
+            /**
+             * No Note
+             * @default false
+             */
+            no_note: boolean;
             /**
              * Owner Yes
              * @default false
@@ -9387,7 +9394,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done";
+            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done" | "invited";
             /** Session */
             session: string;
             /** Task Id */
@@ -9669,7 +9676,7 @@ export interface components {
             /** Answer */
             answer: string;
             /** Application Id */
-            application_id: number;
+            application_id?: number | null;
             /** Id */
             id: number;
             /** Job Company */
