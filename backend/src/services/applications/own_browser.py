@@ -45,6 +45,12 @@ RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
     "done",  # only a hunt or people task (pc_duties): finished; every other reason closes one as failed
 )
+# A released person is not handed out again for RELEASE_BACKOFF_MINUTES, whatever the reason (2026-11-03: a run
+# that takes until empty got the person it had just released straight back and looped). An hour, the same pace the
+# hunt and people tasks keep after a failure (pc_duties). A newer approval (the user's click on a rewritten draft)
+# ends it. ``weekly_limit`` also parks EVERY LinkedIn send (:func:`weekly_limit_until`, seven days from that
+# release: LinkedIn's invitation limit is weekly).
+RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
 DECISIONS = ("approve", "decline")
 WHY_WORDS = {
@@ -130,6 +136,17 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
                 "claimed_by": after[-1]["text"], "claimed_actor": after[-1].get("recorded_by") or "",
             }
     return {**base, "state": "queued"}
+
+
+def backoff_until(rows: list[dict[str, Any]], now: datetime) -> Optional[datetime]:
+    """When a released person may be taken again: the newest claim / release after the newest approval is a
+    release, under :data:`RELEASE_BACKOFF_MINUTES` ago. Else ``None``."""
+    approvals = [int(r["id"]) for r in rows if r["entry"] == APPROVED]
+    after = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and approvals and int(r["id"]) > approvals[-1]]
+    if not after or after[-1]["entry"] != RELEASED:
+        return None
+    until = (_when(after[-1]["recorded_at"]) or now) + timedelta(minutes=RELEASE_BACKOFF_MINUTES)
+    return until if until > now else None
 
 
 def public_task(task: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -544,7 +561,8 @@ async def take(
     With ``contact_id`` only that person is claimed (the one the user clicked Send on);
     ``empty`` when they are not waiting for a send. The same locks, pace, pause and window apply.
     ``status``: task | already_yours | empty | closed (outside the PC-on hours, no Run now) | paused | busy
-    (another session is sending) | wait (``wait_seconds`` left) | daily_limit (LinkedIn sends, or Easy Apply at
+    (another session is sending) | wait (``wait_seconds`` left; ``why`` weekly_limit or released_recently:
+    :data:`RELEASE_BACKOFF_MINUTES`) | daily_limit (LinkedIn sends, or Easy Apply at
     ``EASY_APPLY_DAILY_MAX``: :func:`easy_apply_today`). The same session asking again
     gets its live claim back. The user row is locked first, so two sessions never take one person."""
     from src.services.applications import kit, pc_duties  # noqa: PLC0415
@@ -588,6 +606,11 @@ async def take(
             tasks = [t for t in contacts_ if t["contact_id"] == contact_id]
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
+        parked = await weekly_limit_until(db, user.id, now) if free else None
+        if parked is not None:  # LinkedIn's weekly limit: no person is handed out until it can reset
+            refusal = _answer("wait", "weekly_limit", wait_seconds=int(math.ceil((parked - now).total_seconds())))
+            free = []
+        backed: list[datetime] = []
         if free and not busy:
             pace = await _pace(db, user.id, now)
             if pace is not None:
@@ -598,8 +621,13 @@ async def take(
                         "SELECT id FROM application_contacts WHERE id = ? AND user_id = ? FOR UPDATE",
                         (candidate["contact_id"], user.id),
                     )
-                    state = derive(await _rows(db, candidate["contact_id"]), now)
+                    rows = await _rows(db, candidate["contact_id"])
+                    state = derive(rows, now)
                     if state is None or state["state"] != "queued":
+                        continue
+                    later = backoff_until(rows, now)
+                    if later is not None:  # released a moment ago: never the same person straight back
+                        backed.append(later)
                         continue
                     try:
                         await _insert(db, user, candidate["contact_id"], CLAIMED, label, now)
@@ -607,6 +635,9 @@ async def take(
                         continue
                     chosen = candidate
                     break
+            if chosen is None and refusal is None and backed:
+                left = int(math.ceil((min(backed) - now).total_seconds()))
+                refusal = _answer("wait", "released_recently", wait_seconds=left)
         elif busy:
             refusal = _answer("busy", "another session is sending")
         duty = next((t for t in duties if t["claim"] is None), None)
