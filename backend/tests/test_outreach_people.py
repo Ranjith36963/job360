@@ -1114,21 +1114,17 @@ def _codes(body: dict) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_linked_linkedin_note_over_200_warns_and_still_saves(authenticated_async_context):
+async def test_linked_linkedin_note_over_200_is_refused_and_not_stored(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id, cid = await _linked_contact(client)
         text = _li(201)
         resp = await _save_linked(client, app_id, cid, "linkedin", text)
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        assert body["chars"] == 201
-        hits = [c for c in body["checks"] if c["code"] == "linkedin_note_too_long"]
-        assert len(hits) == 1
-        assert "201 characters" in hits[0]["detail"]
+        assert resp.status_code == 422, resp.text
+        assert "this one is 201" in resp.text
 
         people = await client.get(f"/api/people?contact_id={cid}")
         assert people.status_code == 200, people.text
-        assert text in people.text
+        assert text not in people.text
 
         email = await _save_linked(client, app_id, cid, "email", _li(400))
         assert email.status_code == 201, email.text
@@ -1149,10 +1145,8 @@ async def test_linkedin_premium_raises_the_limit_to_300(authenticated_async_cont
         assert ok.status_code == 201, ok.text
         assert "linkedin_note_too_long" not in _codes(ok.json())
         long = await _save_linked(client, app_id, cid, "linkedin", _li(301))
-        assert long.status_code == 201, long.text
-        hits = [c for c in long.json()["checks"] if c["code"] == "linkedin_note_too_long"]
-        assert len(hits) == 1
-        assert "allows 300" in hits[0]["detail"]
+        assert long.status_code == 422, long.text
+        assert "at most 300 characters" in long.text
 
 
 @pytest.mark.asyncio
@@ -1197,7 +1191,7 @@ async def test_linkedin_premium_survives_web_save_and_preferences_clear(
 
 
 @pytest.mark.asyncio
-async def test_mcp_save_artifact_linkedin_note_warns_on_cold_and_linked(authenticated_async_context):
+async def test_mcp_save_artifact_linkedin_note_is_refused_on_cold_and_linked(authenticated_async_context):
     pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
@@ -1213,7 +1207,7 @@ async def test_mcp_save_artifact_linkedin_note_warns_on_cold_and_linked(authenti
                 "save_artifact",
                 {"kind": "outreach", "contact_id": cold_id, "channel": "linkedin", "text": _li(201)},
             )
-            assert "linkedin_note_too_long" in _codes(_mcp_payload(result))
+            assert "this one is 201" in _mcp_error_text(result)
             result = await mcp.call_tool(
                 "save_artifact",
                 {
@@ -1221,4 +1215,4 @@ async def test_mcp_save_artifact_linkedin_note_warns_on_cold_and_linked(authenti
                     "channel": "linkedin", "text": _li(201),
                 },
             )
-            assert "linkedin_note_too_long" in _codes(_mcp_payload(result))
+            assert "this one is 201" in _mcp_error_text(result)

@@ -14,6 +14,7 @@ from httpx import AsyncClient
 from src.services.applications import kit as kit_service
 from src.services.applications.next_step import kit_flags, next_step
 from src.services.applications.proof import proof_label
+from tests._clearance import clear
 
 _AD = {
     "title": "AI Engineer", "company": "QuantCo", "location": "London",
@@ -251,6 +252,7 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
             job_id = job.get("job_id")
             async with authenticated_async_context() as web:
                 await _user_approves_cv(web, job["application_id"])
+            await clear(fixture_user_id, job["application_id"])
             rec = json.loads((await session.call_tool(
                 "record_application", {"job_id": job_id, "channel": "company_site"})).content[0].text)
             assert rec["hint"] == DAILY_CHECK_HINT
@@ -261,6 +263,7 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
                 "remote": False})).content[0].text)
             async with authenticated_async_context() as web:
                 await _user_approves_cv(web, job2["application_id"])
+            await clear(fixture_user_id, job2["application_id"])
             rec2 = json.loads((await session.call_tool(
                 "record_application", {"job_id": job2["job_id"], "channel": "company_site"})).content[0].text)
             assert "hint" not in rec2

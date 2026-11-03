@@ -37,3 +37,15 @@ describe("safeHref", () => {
     expect(safeHref(value)).toBeNull();
   });
 });
+
+import { linkedinProfileHref } from "./safe-link";
+describe("linkedinProfileHref", () => {
+  it("accepts only linkedin.com over http(s)", () => {
+    expect(linkedinProfileHref("https://www.linkedin.com/in/a")).toBe("https://www.linkedin.com/in/a");
+    expect(linkedinProfileHref("linkedin.com/in/a")).toBe("https://linkedin.com/in/a");
+    expect(linkedinProfileHref("https://evil.example/linkedin.com/")).toBeNull();
+    expect(linkedinProfileHref("https://notlinkedin.com/in/a")).toBeNull();
+    expect(linkedinProfileHref("javascript:alert(1)")).toBeNull();
+    expect(linkedinProfileHref("")).toBeNull();
+  });
+});

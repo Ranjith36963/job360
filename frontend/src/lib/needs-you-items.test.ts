@@ -59,7 +59,7 @@ describe("sort options", () => {
   });
 
   it("uses the owner's group names and never the old ones", () => {
-    expect(GROUP_NAMES).toEqual(["Form open now", "Send", "On you", "Quick checks", "New connections"]);
+    expect(GROUP_NAMES).toEqual(["Form open now", "Send", "On you", "Quick checks", "Network"]);
     const copy = JSON.stringify([SORTS, GROUP_NAMES]);
     expect(copy).not.toMatch(/Stuck on you|People only|Claude/i);
   });

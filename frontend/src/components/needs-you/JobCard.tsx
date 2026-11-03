@@ -7,7 +7,7 @@ import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, recordApplicationReceipt, rememberAskAnswers, resolveSubmit, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
-import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
+import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, paceText } from "@/lib/browser-labels";
 import { BLOCKER_TITLE, hasFormHandoff, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -20,6 +20,7 @@ import { AskText } from "./AskText";
 import { BrowserReason } from "./BrowserReason";
 import { PersonRow } from "./PersonRow";
 import type { RowState } from "./AskQuestions";
+import { useAppHref } from "@/lib/app-href";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
 // assistant or a job site: untrusted, rendered only as React text, never as HTML.
@@ -62,13 +63,17 @@ export function JobCard({
   showHeader = true,
   ready,
   bare = false,
+  linkedinPerDay,
 }: {
   card: JobCardData;
   onChanged: () => Promise<void>;
   showHeader?: boolean;
   ready?: ReactNode;
   bare?: boolean;
+  /** The user's own `linkedin_sends_per_day.effective`, for the pace line. */
+  linkedinPerDay?: number | null;
 }) {
+  const appLink = useAppHref();
   const Root = bare ? "div" : "li";
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
@@ -244,7 +249,7 @@ export function JobCard({
         Open the form ↗
       </a>
     ) : (
-      <Link href={`/applications/${card.applicationId}`} className={btn} data-testid={`row-link-${id}`}>
+      <Link href={appLink(card.applicationId)} className={btn} data-testid={`row-link-${id}`}>
         Open the application
       </Link>
     );
@@ -284,11 +289,11 @@ export function JobCard({
       className={bare ? "flex flex-col gap-4 p-4 sm:p-5" : "flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card"}>
       {showHeader && (
       <div className="flex flex-col gap-0.5">
-        <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
+        <Link href={appLink(card.applicationId)} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
           {card.company || "Unknown company"}
         </Link>
         <p className="text-sm">
-          <Link href={`/applications/${card.applicationId}`} data-testid={`title-link-${card.applicationId}`}
+          <Link href={appLink(card.applicationId)} data-testid={`title-link-${card.applicationId}`}
             className="underline-offset-2 hover:underline">
             {card.role || "Untitled role"}
           </Link>
@@ -304,7 +309,7 @@ export function JobCard({
         <h2 className="font-heading text-base">Job</h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid={`apply-status-${card.applicationId}`}>
-            {card.formFilled ? "Form filled. Next: you" : "You: finish this"}
+            {card.formFilled ? "Form filled on the site. Waiting for your Send" : "You: finish this"}
           </span>
           {card.formUrl && (
             <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn} data-testid={`section-form-link-${card.applicationId}`}>
@@ -392,7 +397,7 @@ export function JobCard({
             <p className="text-sm">CV version {card.cv.version}, not approved yet</p>
           </div>
           <div className="flex gap-2">
-            <Link href={`/applications/${card.applicationId}`} className={btn}>
+            <Link href={appLink(card.applicationId)} className={btn}>
               View CV
             </Link>
             <button type="button" className={btn} onClick={() => void downloadCv(card, card.cv!)}>
@@ -411,7 +416,7 @@ export function JobCard({
       {(people.length > 0 || reminders.length > 0) && (
         <section className="flex flex-col gap-2" data-testid={`section-outreach-${card.applicationId}`}>
           <h2 className="font-heading text-base">Outreach</h2>
-          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{PACE_TEXT}</p>
+          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{paceText(linkedinPerDay)}</p>
           <div className="flex flex-col gap-2" data-testid="people-to-reach">
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy} onChanged={onChanged}

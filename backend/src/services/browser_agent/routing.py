@@ -33,7 +33,7 @@ ROUTE_REASONS = (
     "default", "job360_login_required", "job360_bot_check", "job360_safety_stop", "password", "mfa", "only_you",
     "linkedin_own_browser",
     "learned_blocked", "learned_login", "probe", "at_cap", "linkedin_paused", "account_step", "linkedin_guest_blocked",
-    "linkedin_guest_read", "link_unclear",
+    "linkedin_guest_read", "link_unclear", "learned_bot_check",
 )
 
 # "unnamed" is never stored by the route learner (its CHECK allows only the four named kinds): a link whose host
@@ -98,6 +98,7 @@ ROUTE_LABELS: dict[str, str] = {
     "account_step": "This site wants a new account: your own browser, or sign in once in Job360's browser",
     "linkedin_guest_blocked": "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
     "link_unclear": "This link looks broken or disguised: your own browser checks it",
+    "learned_bot_check": "Job360's browser was blocked twice on {site}: your own browser runs it",
     "waiting": "Waiting for your PC",
 }
 # Shown for a route Job360's server reads itself (reason "linkedin_guest_read").

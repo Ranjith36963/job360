@@ -100,14 +100,15 @@ describe("JobCard", () => {
 
   it("shows the full drafted message and records I sent it through the outreach door", async () => {
     const person = {
-      contact: { id: 4, name: "Ada Lovelace", role: "CTO", found_via: "company_team_page" },
+      contact: { id: 4, name: "Ada Lovelace", role: "CTO", found_via: "company_team_page", linkedin_url: "https://www.linkedin.com/in/ada" },
       message: "Hi Ada,\nI applied on 14 October.",
       linkedinUrl: "https://www.linkedin.com/in/ada",
     } as unknown as JobCardData["people"][number];
     render(<JobCard card={card([], { people: [person] })} onChanged={onChanged} />);
     expect(screen.getByText(/I applied on 14 October/)).toBeInTheDocument();
     expect(screen.getByText("Found via Company team page")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open profile ↗" })).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(screen.getByRole("link", { name: "Ada Lovelace" })).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(screen.queryByText(/Open profile/)).toBeNull();
     fireEvent.click(screen.getByTestId("sent-4"));
     await waitFor(() => expect(markOutreachSent).toHaveBeenCalledWith(4, "linkedin"));
   });
@@ -388,7 +389,7 @@ describe("JobCard", () => {
     expect(within(job).getByTestId(`blocker-${blocker.id}`)).toBeInTheDocument();
     expect(within(job).getByTestId(`question-${q.id}`)).toBeInTheDocument();
     expect(within(job).getByTestId("cv-to-check")).toBeInTheDocument();
-    expect(within(job).getByText("Form filled. Next: you")).toBeInTheDocument();
+    expect(within(job).getByText("Form filled on the site. Waiting for your Send")).toBeInTheDocument();
     expect(within(job).getByTestId("section-form-link-7")).toHaveAttribute("href", "https://jobs.example.com/7");
     expect(within(job).queryByTestId(`reminder-${rem.id}`)).toBeNull();
     expect(within(out).getByTestId(`reminder-${rem.id}`)).toBeInTheDocument();
@@ -460,9 +461,10 @@ describe("JobCard", () => {
 
   it("shows the pace line at the top of Outreach", () => {
     const c = card([ask("Notice period?")], { people: [reach(4)] });
-    render(<JobCard card={c} onChanged={onChanged} />);
+    render(<JobCard card={c} onChanged={onChanged} linkedinPerDay={35} />);
     const pace = screen.getByTestId("outreach-pace-7");
-    expect(pace).toHaveTextContent("LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 10 LinkedIn sends a day.");
+    // The number is the user's own linkedin_sends_per_day, not a fixed 10.
+    expect(pace).toHaveTextContent("LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 35 LinkedIn sends a day.");
     expect(within(screen.getByTestId("section-outreach-7")).getByTestId("outreach-pace-7")).toBe(pace);
   });
 

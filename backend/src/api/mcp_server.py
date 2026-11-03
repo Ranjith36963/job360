@@ -1346,7 +1346,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         else the newest, with a warning), the
         named cover letter and any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere.
-        Refused (409) while a CAPTCHA, question, unapproved CV or answer is open. `channel` is where they
+        Refused (409) while a CAPTCHA, question, unapproved CV or answer is open, and `submit_not_cleared`
+        unless an unused check_submit `submit` came first (one per receipt). `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
         "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
@@ -1714,10 +1715,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         For a cv or cover_letter, the reply's `checks` lists claims not found in the profile and PDF problems
         (each `{code, severity, detail}`); fix them and save a new version, or tell
         the user. They warn only - the save always succeeds.
-        Outreach `draft_kind`: connection_note|message|inmail|email. A note over 200 chars (300 with
-        preferences.linkedin_premium) or an InMail over 1,900 is refused.
+        `draft_kind`: connection_note|message|inmail|email. LinkedIn over 200 chars (300 with
+        preferences.linkedin_premium) is refused, kind or not, unless connected (400) or inmail (1,900).
 
-        Give `contact_id` (a person from add_contact/list_people) to draft a
+        Give `contact_id` (from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and
         `channel` ("linkedin" | "email" | "other") is required. Works for a
         cold contact (no job) too: leave `application_id` out. Recording the
@@ -1730,7 +1731,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         kind "outreach_template" + `label`, no application_id or contact_id: a reusable template; each save
         is a new version, get_profile `outreach_templates` returns the newest.
         Give outreach messages a `label` for stats by variant.
-        `client_key` (optional): a retry with the same key returns the first reply."""
+        `client_key`: a retry with the same key returns the first reply."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         text, ats_notes = _unfence_in(text), _unfence_in(ats_notes)
         if kind in settings.USER_TEMPLATE_KINDS:
@@ -1910,25 +1911,24 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         channel: Optional[str] = None,
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Append an event.
-
-        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
+        """`source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op.
         Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (corrects_event_id moves back). A repeat `applied` + `source`
+        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
         is proof, not a 2nd.
-        `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
+        `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`),
+        Outreach: `contact_id` + `channel` with outreach_sent (Sent id as `source`),
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
         outreach_bounced; no application_id if cold.
 
         Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
-        cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
+        cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
+        chat adds user_words (reply verbatim), asked;
         submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         email_drafted {to, subject, attachments, gmail_draft_id};
@@ -1939,7 +1939,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail}, then stop;
         unblocked {resolution: retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {};
-        process_log {} = your hidden work log; unqueued {reason?};
+        process_log {} = hidden work log; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
@@ -2503,7 +2503,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         held_by_other_session: tell the user.
         Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
         changed on the web - type each in, then form_swept with `answers`.
-        Read-only; after a real submit, call `record_application`."""
+        Its `submit` is spent by record_application (one each)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.submit_check(
@@ -2579,9 +2579,11 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         not_email_channel, no_email, email_bounced, no_linkedin_url, already_sent, replied, application_closed,
         linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long, invite_limit_reached,
         linkedin_daily_cap_reached, too_soon, claimed_by_other_session, needs_claim, daily_outreach_cap_reached,
-        company_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via, unlinked_contact,
-        unsupported_numbers (a number or years claim the profile lacks: fix or ask), needs_owner_click.
-        Send: auto_mode, owner_clicked. `sent_today` / `daily_max` = email sends today vs the cap."""
+        company_cap_reached, network_hourly_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via,
+        unlinked_contact, unsupported_numbers (a number or years claim the profile lacks: fix or ask),
+        needs_owner_click.
+        Send: auto_mode, owner_clicked. `sent_today` (all sends today) splits into `job_sent_today` (a contact
+        with an application) and `network_sent_today`; the user's limits are get_profile `settings`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.outreach_check(contact_id, message_id, session, db, _user())

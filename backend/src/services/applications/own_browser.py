@@ -7,14 +7,15 @@ other application only after Job360's browser failed on it (an open ``blocked`` 
 ``routing.ask_route`` sends to ``own_browser``). The user's per-card Send click on one LinkedIn person is their
 yes for THAT message and never expires until it is sent or cancelled; a rewritten draft (a new message id)
 needs a new click. A send happens only while the session holds a live claim (:func:`take`, optionally for one
-``contact_id``). Easy Apply is at most ``EASY_APPLY_DAILY_MAX`` a day, enforced in :func:`take`.
+``contact_id``). Easy Apply has no Job360 day cap unless ``EASY_APPLY_DAILY_MAX`` > 0 (then enforced in :func:`take`).
 
 Stored as ``contact_outreach`` entries Job360 writes itself and never accepts from a caller (they are not in
 ``settings.OUTREACH_ENTRIES``, so ``record_outreach`` refuses them): ``send_approved`` / ``send_declined``
 (text = the message row id), ``send_claimed`` (text = the session label), ``send_released`` (text = reason).
 Append-only: the state is derived from the newest rows, nothing is updated. Run now is one slot in
 ``assistant_duty_runs`` named ``own_browser:run_now`` (it is not a scheduled duty). Pace: LinkedIn sends are
-at least ``LINKEDIN_MIN_GAP_SECONDS`` apart and at most ``LINKEDIN_DAILY_MAX`` a day, enforced in :func:`take`.
+at least ``LINKEDIN_MIN_GAP_SECONDS`` apart and at most the user's own ``assistant_settings.linkedin_sends_per_day``
+(``rules.linkedin_daily_max``: default 20, operator backstop 100) a day, enforced in :func:`take`.
 Assistant-neutral on purpose. Logs ids and closed values only, never message text.
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from src.core import settings
 from src.services.applications.spine import SpineError
 from src.services.browser_agent import routing
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -38,8 +40,7 @@ RUN_NOW_MINUTES = 60
 QUEUE_MAX = 50
 ROWS_PER_CONTACT_MAX = 200
 LINKEDIN_MIN_GAP_SECONDS = 120
-LINKEDIN_DAILY_MAX = 10
-EASY_APPLY_DAILY_MAX = 10
+EASY_APPLY_DAILY_MAX = settings.EASY_APPLY_DAILY_MAX  # 0 = no Job360 cap; LinkedIn's own limit decides
 RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
 )
@@ -52,6 +53,7 @@ WHY_WORDS = {
     "default": "You pressed Send for this message.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
     "link_unclear": "This link looks broken or disguised: your own browser checks it.",
+    "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
 }
 
 
@@ -74,6 +76,16 @@ def session_label(raw: str) -> str:
 def log_read(user_id: str, count: int) -> None:
     """One audit line for a queue read: who, how many (never the tasks)."""
     _log("own_browser_queue_read", user_id, "ok", count=count)
+
+
+def note_over_limit(channel: str, state: Optional[str], chars: int, premium: bool) -> Optional[int]:
+    """The connection-note limit a stored LinkedIn draft breaks, else ``None`` (fail closed, 2026-11-02): a
+    draft to anyone not known to be connected is a connection note, so an unsaved state counts as not
+    connected. ``connected`` (a message) and ``pending`` (nothing can be sent) are never judged here."""
+    if channel != "linkedin" or (state or "unknown") not in ("not_connected", "unknown"):
+        return None
+    limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    return limit if chars > limit else None
 
 
 def _when(raw: Any) -> Optional[datetime]:
@@ -285,6 +297,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         task = derive(await _rows(db, contact_id), now)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if await contacts.over_limit_notes(db, user_id, [contact_id]):
+            continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
         route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
@@ -335,6 +349,7 @@ async def _application_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str]
 ) -> list[dict[str, Any]]:
     from src.services.applications import blocked, kit, spine  # noqa: PLC0415
+    from src.services.browser_agent import learned  # noqa: PLC0415
 
     cur = await db._db.execute(
         "SELECT id, job_title, job_company, job_url FROM applications WHERE user_id = ? AND status = 'considering' "
@@ -362,6 +377,17 @@ async def _application_tasks(
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
         routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application")))
+    # Owner 2026-11-02: a site where Job360's browser was blocked twice (CAPTCHA / bot check) for THIS user:
+    # the next queued job there starts here, before Job360's browser meets the wall again.
+    hosts = await learned.blocked_hosts(db, user.id, now)
+    rest = [i for i, a in apps.items() if i not in blocks and i not in queued
+            and learned.route_for(str(a.get("job_url") or ""), hosts) is not None]
+    later = await spine.queued_at_by_app(db, user.id, rest)
+    for app_id in sorted(later, key=lambda i: (later[i], i)):
+        route = routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application",
+                                    route=learned.LEARNED_ROUTE)
+        if route.kind == "own_browser":
+            routes.append((app_id, route))
     out: list[dict[str, Any]] = []
     for app_id, route in routes:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
@@ -373,7 +399,7 @@ async def _application_tasks(
             "url": a.get("job_url") or "", "contact_id": None, "application_id": app_id, "name": "",
             "message_id": None, "draft_text": "", "draft_chars": 0, "linkedin_state": None,
             "why_own_browser": WHY_WORDS.get(route.reason, ""), "owner_yes": False, "claim": None,
-            "browser": routing.label(route),
+            "browser": routing.label(route, site=routing.site_of(str(a.get("job_url") or ""))[1]),
         })
         if len(out) >= QUEUE_MAX:
             break
@@ -471,13 +497,19 @@ async def easy_apply_today(db: JobDatabase, user_id: str, now: datetime) -> int:
 
 async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[str, int]]:
     """``("wait", seconds_left)`` when the last LinkedIn send was under the minimum gap ago;
-    ``("daily_limit", 0)`` at the day's maximum (the user's own day); else ``None``."""
+    ``("daily_limit", 0)`` at the day's maximum (the user's own day and own ``linkedin_sends_per_day``); else
+    ``None``."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
     last, today = await pace_facts(db, user_id, now)
     if last is not None:
         left = LINKEDIN_MIN_GAP_SECONDS - (now - last).total_seconds()
         if left > 0:
             return "wait", int(math.ceil(left))
-    return ("daily_limit", 0) if today >= LINKEDIN_DAILY_MAX else None
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    return ("daily_limit", 0) if today >= rules.linkedin_daily_max(cfg) else None
 
 
 def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:
@@ -563,7 +595,7 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
-    if any(routing.names_linkedin(t["url"]) for t in apps) and (
+    if EASY_APPLY_DAILY_MAX > 0 and any(routing.names_linkedin(t["url"]) for t in apps) and (
         await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
     ):  # Easy Apply's own day cap; any other application is still handed out
         apps = [t for t in apps if not routing.names_linkedin(t["url"])]

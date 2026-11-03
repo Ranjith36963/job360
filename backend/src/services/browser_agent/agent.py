@@ -1236,7 +1236,11 @@ def _known_ad(s: Optional[Session], facts: dict[str, Any]) -> bool:
         url = str(_live_page(s).url or "")
     except BrowserError:
         return False
-    return job_ad_page(url) and facts.get("required_shown") is False and facts.get("shown_filled") is False
+    fields_shown = facts.get("fields_shown")
+    return (
+        job_ad_page(url) and facts.get("required_shown") is False and facts.get("shown_filled") is False
+        and isinstance(fields_shown, int) and fields_shown < MIN_LABELLED_FIELDS
+    )
 
 
 async def _kind(loc: Any, s: Optional[Session] = None) -> str:

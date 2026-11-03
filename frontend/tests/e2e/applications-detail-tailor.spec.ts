@@ -90,8 +90,8 @@ test.describe("Application detail — the documents card lives here (R9)", () =>
 
     await page.goto(`/applications/${APPLICATION_ID}`);
 
-    await expect(page.getByText("Platform Engineer")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Northwind")).toBeVisible();
+    await expect(page.getByText("Platform Engineer", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Northwind", { exact: true })).toBeVisible();
 
     // The "Ask your assistant" card — the recipe, the connect link, and no
     // LLM of our own anywhere on the page (decision 28, slice A).

@@ -285,6 +285,22 @@ async def test_a_filled_page_at_a_job_ad_address_keeps_every_submit_gated(pool):
         assert (await run(pool, "u1", "look"))["title"] == "BambooHR"
 
 
+@pytest.mark.parametrize(("fields_shown", "is_ad"), [(1, True), (2, True), (3, False), (7, False)])
+def test_an_opened_form_at_the_ads_address_is_not_a_known_ad(monkeypatch, fields_shown, is_ad):
+    """The opened form lives at the same /careers/<id>: MIN_LABELLED_FIELDS or more visible fields, nothing
+    required or typed. ``_known_ad`` reads it as a form (as ``page_is_ad`` does), so the opener rule never
+    applies to it; the share box of the real ad (one field) still reads as the ad."""
+    from types import SimpleNamespace
+
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(agent, "_opener_allowed", lambda s: True)
+    monkeypatch.setattr(agent, "_live_page", lambda s: SimpleNamespace(url=f"https://{BAMBOO_HOST}/careers/196"))
+    facts = {"required_shown": False, "shown_filled": False, "fields_shown": fields_shown}
+    assert agent._known_ad(SimpleNamespace(), facts) is is_ad
+    assert agent._known_ad(SimpleNamespace(), {k: v for k, v in facts.items() if k != "fields_shown"}) is False
+
+
 # ── 2. "the site says you already applied" ───────────────────────────────────
 
 

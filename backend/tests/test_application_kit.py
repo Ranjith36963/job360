@@ -894,13 +894,13 @@ async def test_event_rules_who_may_write_cv_seen(authenticated_async_context, fi
         cv = await _save(client, app_id, "cv", CV_TEXT)
         token = await _mint_token(client)
         good_web = {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "web"}
-        assert (await _event(client, app_id, "cv_seen", {**good_web, "where": "chat"})).status_code == 403
+        assert (await _event(client, app_id, "cv_seen", {**good_web, "where": "chat", "user_words": "yes", "asked": "OK?"})).status_code == 403
         assert (await _event(client, app_id, "cv_seen", {**good_web, "where": "moon"})).status_code == 422
         assert (await _event(client, app_id, "cv_seen", {**good_web, "x": 1})).status_code == 422
         assert (await _event(client, app_id, "cv_seen", good_web)).status_code == 201
     async with _bearer_client(token) as agent:
-        chat = {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "chat"}
-        refused = await _event(agent, app_id, "cv_seen", {**chat, "where": "web"})
+        chat = {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "chat", "user_words": "yes", "asked": "OK?"}
+        refused = await _event(agent, app_id, "cv_seen", {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "web"})
         assert refused.status_code == 403 and "website" in refused.json()["detail"]
         stale = await _event(agent, app_id, "cv_seen", {**chat, "sha256": sha("something else")})
         assert stale.status_code == 409 and "this CV changed" in stale.json()["detail"]
@@ -1006,12 +1006,13 @@ async def test_chat_decline_and_chat_approval_rules(authenticated_async_context,
         app_id = await _bring(client)
         cv = await _save(client, app_id, "cv", CV_TEXT)
         token = await _mint_token(client)
-    chat = {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "chat"}
+    chat = {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "chat", "user_words": "yes", "asked": "OK?"}
+    web = {"artifact_id": cv["artifact_id"], "sha256": sha(CV_TEXT), "where": "web"}
     async with _bearer_client(token) as agent:
         assert (await _event(agent, app_id, "submit_declined", {"where": "web"})).status_code == 403
         assert (await _event(agent, app_id, "submit_declined", {"where": "chat"})).status_code == 201
         assert (await _check(agent, app_id))["reason"] == "user_declined"
-        assert (await _event(agent, app_id, "submit_approved", {**chat, "where": "web"})).status_code == 403
+        assert (await _event(agent, app_id, "submit_approved", web)).status_code == 403
         assert (await _event(agent, app_id, "submit_approved", chat)).status_code == 201
         verdict = await _check(agent, app_id)
         assert (verdict["decision"], verdict["reason"]) == ("submit", "user_approved"), "a later yes clears a decline"
@@ -1025,7 +1026,7 @@ async def test_no_cv_approval_is_artifact_null_and_a_new_cv_voids_it(authenticat
         app_id = await _bring(client)
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        yes = await _event(agent, app_id, "submit_approved", {"artifact_id": None, "sha256": "", "where": "chat"})
+        yes = await _event(agent, app_id, "submit_approved", {"artifact_id": None, "sha256": "", "where": "chat", "user_words": "yes", "asked": "OK?"})
         assert yes.status_code == 201, yes.text
         assert (await _check(agent, app_id))["reason"] == "user_approved"
     async with authenticated_async_context() as client:
@@ -1437,7 +1438,7 @@ async def test_mcp_get_application_kit_is_the_same_kit(authenticated_async_conte
             assert denied.is_error and "403" in denied.content[0].text
             ok = _payload(await mcp.call_tool("record_event", {
                 "event_type": "cv_seen", "application_id": app_id,
-                "payload": {"artifact_id": kit["cv"]["artifact_id"], "sha256": kit["cv"]["sha256"], "where": "chat"}}))
+                "payload": {"artifact_id": kit["cv"]["artifact_id"], "sha256": kit["cv"]["sha256"], "where": "chat", "user_words": "yes", "asked": "OK?"}}))
             assert ok["event_type"] == "cv_seen"
             again = _payload(await mcp.call_tool("get_application_kit", {"application_id": app_id}))
             assert again["cv"]["seen"]["where"] == "chat" and again["cv"]["seen"]["by"] == "token:claude-code"
@@ -1879,7 +1880,7 @@ async def test_kit_document_text_is_capped_but_sha_is_of_the_full_text(authentic
         assert none["kit"]["sha256"] == kit["kit"]["sha256"], "kit sha is of the full text either way"
         # the sha of the FULL text is still what cv_seen validates against
         async with _bearer_client(await _mint_token(client)) as agent:
-            seen = await _event(agent, app_id, "cv_seen", {"artifact_id": cv["artifact_id"], "sha256": doc["sha256"], "where": "chat"})
+            seen = await _event(agent, app_id, "cv_seen", {"artifact_id": cv["artifact_id"], "sha256": doc["sha256"], "where": "chat", "user_words": "yes", "asked": "OK?"})
         assert seen.status_code == 201, seen.text
         # a short document is untouched (no truncation keys set)
         assert (await _kit(client, app_id)).json()["cover_letter"] is None
