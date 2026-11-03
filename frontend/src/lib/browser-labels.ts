@@ -29,6 +29,7 @@ export const ROUTE_LABELS = {
   account_step: "This site wants a new account: your own browser, or sign in once in Job360's browser",
   linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
   link_unclear: "This link looks broken or disguised: your own browser checks it",
+  learned_bot_check: "Job360's browser was blocked twice on {site}: your own browser runs it",
   waiting: "Waiting for your PC",
 } as const;
 
@@ -63,6 +64,7 @@ export const REASON_WORDS: Record<string, string> = {
   mfa: "It asks for a one-time code. Only you can enter it.",
   only_you: "This step is yours: no browser does it for you.",
   link_unclear: "The apply link has no clear web address, so your own browser checks it.",
+  learned_bot_check: "Job360's browser was blocked twice on this site, so your own browser runs it.",
 };
 
 /** The words for a route reason: the plain line for a known code, "" for an unknown code

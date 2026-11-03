@@ -52,6 +52,7 @@ WHY_WORDS = {
     "default": "You pressed Send for this message.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
     "link_unclear": "This link looks broken or disguised: your own browser checks it.",
+    "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
 }
 
 
@@ -335,6 +336,7 @@ async def _application_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str]
 ) -> list[dict[str, Any]]:
     from src.services.applications import blocked, kit, spine  # noqa: PLC0415
+    from src.services.browser_agent import learned  # noqa: PLC0415
 
     cur = await db._db.execute(
         "SELECT id, job_title, job_company, job_url FROM applications WHERE user_id = ? AND status = 'considering' "
@@ -362,6 +364,17 @@ async def _application_tasks(
     queued = await spine.queued_at_by_app(db, user.id, linked)
     for app_id in sorted(queued, key=lambda i: (queued[i], i)):
         routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application")))
+    # Owner 2026-11-02: a site where Job360's browser was blocked twice (CAPTCHA / bot check) for THIS user:
+    # the next queued job there starts here, before Job360's browser meets the wall again.
+    hosts = await learned.blocked_hosts(db, user.id, now)
+    rest = [i for i, a in apps.items() if i not in blocks and i not in queued
+            and learned.route_for(str(a.get("job_url") or ""), hosts) is not None]
+    later = await spine.queued_at_by_app(db, user.id, rest)
+    for app_id in sorted(later, key=lambda i: (later[i], i)):
+        route = routing.browser_for(url=str(apps[app_id]["job_url"]), queue_kind="application",
+                                    route=learned.LEARNED_ROUTE)
+        if route.kind == "own_browser":
+            routes.append((app_id, route))
     out: list[dict[str, Any]] = []
     for app_id, route in routes:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
@@ -373,7 +386,7 @@ async def _application_tasks(
             "url": a.get("job_url") or "", "contact_id": None, "application_id": app_id, "name": "",
             "message_id": None, "draft_text": "", "draft_chars": 0, "linkedin_state": None,
             "why_own_browser": WHY_WORDS.get(route.reason, ""), "owner_yes": False, "claim": None,
-            "browser": routing.label(route),
+            "browser": routing.label(route, site=routing.site_of(str(a.get("job_url") or ""))[1]),
         })
         if len(out) >= QUEUE_MAX:
             break
