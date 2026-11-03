@@ -480,3 +480,17 @@ def test_the_name_and_topic_checks_read_word_by_word():
     assert cv_checks.sensitive_words("Happy to discuss Salary; no visa needed. I manage pages.") == ["salary", "visa"]
     assert cv_checks.outreach_claims_unsupported("Hi, a Python engineer here.", None) is True
     assert cv_checks.outreach_claims_unsupported("Hi, 12 years of Python.", UserProfile(cv_data=CVData(raw_text=source)))
+
+
+@pytest.mark.asyncio
+async def test_a_second_invited_release_is_refused(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id, cid = await _person(client)
+        mid = await _draft(client, app_id, cid)
+        await _click(client, cid, mid)
+        await _invite(client, cid, mid)
+        await _state(client, cid, "connected")
+        assert (await _take(client, cid))["status"] == "task"  # the approved message, now to a connection
+        again = await _release(client, f"contact:{cid}", "invited")
+        assert again.status_code == 409 and "already" in again.text
+        assert (await _person_state(client, cid))["linkedin_state"] == "connected"

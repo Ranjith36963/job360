@@ -1806,6 +1806,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/autonomy/agreement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Autonomy Agreement
+         * @description Per kind (essay, fixed, cv): cases, agree, agreement_pct, wrong_facts, bar_met; ``pending`` = cases with
+         *     no owner decision yet; ``examples`` = up to 5 recent disagreements (ids and codes only).
+         */
+        get: operations["autonomy_agreement_api_autonomy_agreement_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/browser": {
         parameters: {
             query?: never;
@@ -4069,6 +4090,18 @@ export interface components {
             /** Value */
             value?: unknown;
         };
+        /** AgreementOut */
+        AgreementOut: {
+            bar: components["schemas"]["Bar"];
+            /** Examples */
+            examples: components["schemas"]["Disagreement"][];
+            /** Kinds */
+            kinds: {
+                [key: string]: components["schemas"]["KindAgreement"];
+            };
+            /** Pending */
+            pending: number;
+        };
         /**
          * AlignmentOut
          * @description ``GET …/alignment`` (2026-09-20) — the fit picture: the agent's stored
@@ -4987,6 +5020,13 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /** Bar */
+        Bar: {
+            /** Min Agree Pct */
+            min_agree_pct: number;
+            /** Min Cases */
+            min_cases: number;
         };
         /** BatchContactRowOut */
         BatchContactRowOut: {
@@ -5939,6 +5979,19 @@ export interface components {
             job_company: string;
             /** Job Title */
             job_title: string;
+        };
+        /** Disagreement */
+        Disagreement: {
+            /** Application Id */
+            application_id: number;
+            /** Kind */
+            kind: string;
+            /** Owner */
+            owner: string;
+            /** Question Key */
+            question_key: string;
+            /** Would Clear */
+            would_clear: boolean;
         };
         /** DismissIn */
         DismissIn: {
@@ -7086,6 +7139,19 @@ export interface components {
             resume: {
                 [key: string]: unknown;
             };
+        };
+        /** KindAgreement */
+        KindAgreement: {
+            /** Agree */
+            agree: number;
+            /** Agreement Pct */
+            agreement_pct?: number | null;
+            /** Bar Met */
+            bar_met: boolean;
+            /** Cases */
+            cases: number;
+            /** Wrong Facts */
+            wrong_facts: number;
         };
         /** KitAccountSiteOut */
         KitAccountSiteOut: {
@@ -14187,6 +14253,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    autonomy_agreement_api_autonomy_agreement_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementOut"];
+                };
             };
             /** @description Validation Error */
             422: {

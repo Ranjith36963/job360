@@ -233,10 +233,17 @@ async def for_application(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     bank = await _bank(db, user_id, profile, app_row) if essays else ""
     prior = await _prior_essays(db, user_id, application_id) if essays else []
     cv_id = await spine.frozen_cv_id(db, user_id, application_id)
+    fills = await kit._events(db, user_id, application_id, ("form_filled",))
     art = await spine.get_artifact(db, user_id, application_id, cv_id) if cv_id is not None else None
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     return {
         "watch_only": True,
+        # What the verdicts were about, so the agreement report pairs them with the owner's yes for THIS fill and CV.
+        "form_filled_event_id": int(fills[0]["id"]) if fills else None,
+        "cv_artifact_id": cv_id,
+        "rtw_present": any(
+            a.get("answer") and _is_rtw(str(a["question"]), str(a.get("key") or "")) for a in answers
+        ),
         "essays": [
             essay_verdict(
                 a["question"], str(a.get("key") or ""), a["answer"], bank, prior,
@@ -258,4 +265,5 @@ def event_payload(shadow: dict[str, Any]) -> dict[str, Any]:
                     "reasons": sorted({r.split(":", 1)[0] for r in e["reasons"]})} for e in shadow["essays"]],
         "cv": {"would_clear": shadow["cv"]["would_clear"], "reasons": shadow["cv"]["reasons"]},
         "rtw_ok": shadow["rtw"]["ok"],
+        **{k: shadow[k] for k in ("form_filled_event_id", "cv_artifact_id", "rtw_present") if k in shadow},
     }

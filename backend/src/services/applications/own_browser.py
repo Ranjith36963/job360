@@ -852,7 +852,14 @@ async def release(
             _log("own_browser_release", user.id, "refused", contact_id=contact_id)
             raise SpineError(409, "you do not hold a live claim on this person")
         if reason == INVITED:
-            if not is_after_connect(await _rows(db, contact_id), state["message_id"]):
+            from src.services.applications import contacts  # noqa: PLC0415 - contacts imports this module
+
+            rows = await _rows(db, contact_id)
+            if invite_facts(rows) is not None or await contacts._linkedin_state_now(db, user.id, contact_id) == (
+                "connected"
+            ):
+                raise SpineError(409, "a request already went to this person, or they are connected: never a second")
+            if not is_after_connect(rows, state["message_id"]):
                 raise SpineError(
                     409, "invited is for an after_connect draft only; a note is recorded with outreach_sent"
                 )
