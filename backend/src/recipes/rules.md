@@ -714,7 +714,8 @@ user's "Mark resolved" on the website), check_submit answers `ask` with
 reason `blocked`. `own_browser`: Job360 had marked it blocked (its own browser's block) and
 the page loaded clean in the user's own browser (no CAPTCHA, no sign-in wall): record
 `unblocked` {resolution: "own_browser"}, then check_submit as usual; it clears only the
-block, every other gate still applies (422 for a block not Job360's browser's). A CAPTCHA
+block, every other gate still applies (422 for a block not Job360's browser's, or one the site said: only
+captcha, bot_check, login_needed, account_creation, site_error clear). A CAPTCHA
 or sign-in in the own browser too: change nothing, `hold_released` {reason: blocked}, ask the user. An `upload_failed` block clears itself once a later
 `document_uploaded` is recorded, and its Needs-you ask closes too. `unblocked` closes the ask; with nothing blocked it is 409.
 When the user answers a blocked ask, do what they said, then record

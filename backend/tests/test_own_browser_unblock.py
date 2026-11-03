@@ -181,11 +181,11 @@ async def test_own_browser_clears_job360s_captcha_over_mcp_and_check_submit_then
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reason", sorted(blocked_service.BLOCKED_REASONS))
+@pytest.mark.parametrize("reason", sorted(blocked_service.OWN_BROWSER_CLEARS))
 async def test_any_job360_block_clears_but_the_gate_stays_shut_without_the_owners_yes(
     authenticated_async_context, fixture_user_id, reason,
 ):
-    """Every block reason Job360's browser can write is cleared by own_browser (CAPTCHA and sign-in included),
+    """Every getting-in block Job360's browser can write is cleared by own_browser (CAPTCHA and sign-in included),
     yet with no yes from the user check_submit never answers `submit`."""
     async with authenticated_async_context() as web:
         app_id = await _app(web, fixture_user_id, 2, approve=False)
@@ -283,3 +283,17 @@ def test_the_resolution_is_listed_everywhere_the_agent_reads():
         flat = " ".join(load_recipe(name).text.split())
         assert '`unblocked` {resolution: "own_browser"}' in flat, name
         assert "no CAPTCHA, no sign-in wall" in flat, name
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", sorted(set(blocked_service.BLOCKED_REASONS) - blocked_service.OWN_BROWSER_CLEARS))
+async def test_what_the_site_said_is_never_cleared_by_a_clean_load(authenticated_async_context, fixture_user_id, reason):
+    """Already applied, ID or payment asked, a closed posting...: a clean load elsewhere changes none of it."""
+    async with authenticated_async_context() as web:
+        app_id = await _app(web, fixture_user_id, 2, approve=False)
+        token = await _token(web)
+    await _job360_block(fixture_user_id, app_id, reason)
+    async with _bearer(token) as agent:
+        resp = await _event(agent, app_id, "unblocked", {"resolution": "own_browser"})
+        assert resp.status_code == 422, resp.text
+        assert (await _check(agent, app_id))["reason"] == "blocked"

@@ -67,6 +67,9 @@ BLOCKED_REASONS: dict[str, str] = {
 # other gates still decide. Stored with ``browser: own_browser`` (``which_browser``).
 OWN_BROWSER = which_browser.OWN
 UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped", OWN_BROWSER})
+# The blocks a clean load in another browser can clear: getting in, never what the site said (already applied,
+# ID or payment asked, a closed posting, a test, a code, its own limit): those still need the user.
+OWN_BROWSER_CLEARS = frozenset({"captcha", "bot_check", "login_needed", "account_creation", "site_error"})
 NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked", ALREADY_APPLIED})
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
 # Written only by Job360's own browser (``record_browser_block``), never accepted from a caller: the
@@ -460,6 +463,12 @@ async def before_append(
             raise SpineError(
                 422, "a CAPTCHA, bot check, safety block, ID/payment request or a site saying you already applied is "
                 "never retried by the assistant; the user resolves it (user_did_it) or it is skipped"
+            )
+        if stored["resolution"] == OWN_BROWSER and (events[0]["payload"] or {}).get("reason") not in OWN_BROWSER_CLEARS:
+            _log(user, application_id, event_type, stored, "refused")
+            raise SpineError(
+                422, "unblocked own_browser clears only a CAPTCHA, bot check, sign-in or sign-up wall or site error; "
+                "what the site itself said (already applied, ID or payment, a closed posting...) needs the user",
             )
         if stored["resolution"] == OWN_BROWSER and not job360_wrote(events[0]["payload"]):
             _log(user, application_id, event_type, stored, "refused")
