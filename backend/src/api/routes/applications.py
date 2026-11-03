@@ -3526,9 +3526,8 @@ async def approve_send(
     # A Sent job must be on the batch queue: the apply run reads only the queue, and a job that was never
     # queued (production application 90, 30 Oct) stayed invisible to every run after the user's Send.
     await spine.queue_if_open(db, user.id, application_id, recorded_by="web")
-    from src.services.browser_agent import duty_trigger  # noqa: PLC0415
-
-    await duty_trigger.ignite(user.id, ("batch",), "send_yes", [application_id], db=db)
+    # The web page starts the batch run itself right after Send (frontend assistant-start.ts ->
+    # /api/assistant-trigger/fire), so no second start here: it would only hit the cool-down.
     return await _controls(db, user, application_id)
 
 

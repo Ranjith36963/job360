@@ -1,5 +1,6 @@
 """Owner 2026-11-02 (production application 90): the Send press at 16:03 started nothing and the yes lapsed
-after 2 hours. Now ``approve_send`` lights the user's ``batch`` routine (cause ``send_yes``), the yes lasts
+after 2 hours because the job was never on the queue the apply runs read. Now Send queues the job (the web
+page already starts the run itself after Send), the yes lasts
 7 days (``SUBMIT_APPROVAL_TTL_MINUTES``; the fingerprint still voids it at once when the CV changes) and a
 job the owner pressed Send on is FIRST in ``list_applications(queued=true)``. Helpers are copied."""
 from __future__ import annotations
@@ -91,30 +92,8 @@ def _backdate(app_id: int, minutes: int) -> None:
          (old, app_id))
 
 
-def test_the_yes_default_is_seven_days_and_send_yes_is_a_known_cause():
-    from src.services.browser_agent import duty_trigger
-
+def test_the_yes_default_is_seven_days():
     assert settings.SUBMIT_APPROVAL_TTL_MINUTES == 7 * 24 * 60
-    assert "send_yes" in duty_trigger.CAUSES
-
-
-@pytest.mark.asyncio
-async def test_approve_send_lights_the_batch_routine_with_the_application_id(
-    authenticated_async_context, fixture_user_id, monkeypatch
-):
-    from src.services.browser_agent import duty_trigger
-
-    lit: list[tuple[tuple[str, ...], str, Any]] = []
-
-    async def _ignite(user_id, duties, cause, ids=None, db=None):
-        lit.append((tuple(duties), cause, ids))
-
-    monkeypatch.setattr(duty_trigger, "ignite", _ignite)
-    async with authenticated_async_context() as client:
-        _seed_profile(fixture_user_id)
-        app_id, fill = await _filled_app(client, 1)
-        await _send(client, app_id, fill)
-        assert lit == [(("batch",), "send_yes", [app_id])]
 
 
 @pytest.mark.asyncio
