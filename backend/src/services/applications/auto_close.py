@@ -40,6 +40,9 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 
 CLOSED_BY = "posting_closed"
 UNDO_DETAIL = "Reopened: you said the posting is still open"
+# Slice 2 (auto_applied.py): Job360's own `applied` from an employer's confirmation email.
+CONFIRMED_BY_EMAIL = "confirmed_by_email"
+UNDO_SENT_DETAIL = "Undone: you said it was not sent"
 NOTHING_TO_UNDO = "nothing Job360 closed by itself waits to be undone on this application"
 
 
@@ -123,7 +126,7 @@ async def close_if_proven(
 async def _newest_status_event(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
     types = tuple(settings.APPLICATION_STATUS_EVENT_TYPES)
     cur = await db._db.execute(
-        "SELECT e.id, e.event_type, e.payload FROM application_events e "  # noqa: S608 - placeholders only
+        "SELECT e.id, e.event_type, e.payload, e.recorded_by FROM application_events e "  # noqa: S608
         f"WHERE e.user_id = ? AND e.application_id = ? AND e.event_type IN ({','.join('?' for _ in types)}) "
         "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id "
         "AND c.user_id = e.user_id) ORDER BY e.id DESC LIMIT 1",
@@ -175,13 +178,36 @@ async def undo(db: JobDatabase, user: CurrentUser, application_id: int) -> dict[
         if await cur.fetchone() is None:
             raise SpineError(404, "application not found")
         ev = await _newest_status_event(db, user.id, application_id)
-        if ev is None or not await _our_close(db, user.id, application_id, ev):
+        undoes = await _undoable(db, user.id, application_id, ev)
+        if ev is None or not undoes:
             _log(user.id, application_id, "auto_undo_refused", "nothing_to_undo")
             raise SpineError(409, NOTHING_TO_UNDO)
+        now = datetime.now(timezone.utc).isoformat()
         result = await spine.append_event(
-            db, user_id=user.id, application_id=application_id, event_type="note", detail=UNDO_DETAIL,
-            payload={"undoes": CLOSED_BY}, occurred_at=datetime.now(timezone.utc).isoformat(),
-            recorded_by=actor_for(user), corrects_event_id=int(ev["id"]),
+            db, user_id=user.id, application_id=application_id, event_type="note",
+            detail=UNDO_DETAIL if undoes == CLOSED_BY else UNDO_SENT_DETAIL, payload={"undoes": undoes},
+            occurred_at=now, recorded_by=actor_for(user), corrects_event_id=int(ev["id"]),
         )
-    _log(user.id, application_id, "auto_undone", "ok", undoes=CLOSED_BY)
+        if undoes == CONFIRMED_BY_EMAIL:
+            # One click: the user's "It was not sent" too, so neither the confirmation nor the started submit
+            # comes back to ask again (kit.pending_confirmations, kit.submit_unconfirmed).
+            await spine.append_event(
+                db, user_id=user.id, application_id=application_id, event_type="submit_resolved",
+                payload={"outcome": "not_sent", "where": "web", "by": actor_for(user)},
+                occurred_at=now, recorded_by=actor_for(user),
+            )
+    _log(user.id, application_id, "auto_undone", "ok", undoes=undoes)
     return result
+
+
+async def _undoable(db: JobDatabase, user_id: str, application_id: int, ev: Optional[dict[str, Any]]) -> str:
+    """What the newest surviving status event is, when Job360 wrote it by itself: "" otherwise. An `applied`
+    counts only when recorded by ``system`` (no caller's actor can be that); a close only via ``_our_close``."""
+    if ev is None:
+        return ""
+    p = _payload(ev["payload"])
+    if await _our_close(db, user_id, application_id, ev):
+        return CLOSED_BY
+    if ev["event_type"] == "applied" and p.get("confirmed_by") == "email" and ev.get("recorded_by") == "system":
+        return CONFIRMED_BY_EMAIL
+    return ""

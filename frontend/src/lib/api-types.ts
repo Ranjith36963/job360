@@ -444,9 +444,10 @@ export interface paths {
         put?: never;
         /**
          * Undo Auto
-         * @description "Undo" - the user reopens an application the AI closed by itself (posting closed, auto_close.py):
-         *     a ``note`` correcting that ``withdrawn``. 409 when the newest status event is not Job360's own close.
-         *     Session only; no MCP twin.
+         * @description "Undo" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting
+         *     closed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;
+         *     also records "It was not sent"). A ``note`` correcting that status event. 409 when the newest status event
+         *     is neither. Session only; no MCP twin.
          */
         post: operations["undo_auto_api_applications__application_id__auto_undo_post"];
         delete?: never;

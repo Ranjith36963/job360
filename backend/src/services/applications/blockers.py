@@ -261,12 +261,20 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     notes = await _outreach(db, user_id, sent_ids, now)
 
     confirmed = await kit.pending_confirmations(db, user_id, ids)
+    from src.services.applications import auto_applied  # noqa: PLC0415 - email_match imports contacts
+
+    silent = await auto_applied.silent_submits(db, user_id, ids, now)
     for app_id in ids:
         a, s, out = apps[app_id], state[app_id], result[app_id]
         if (conf := confirmed.get(app_id)) is not None and a["status"] not in _DEAD:
             conf_ref = {"event_id": conf["id"], "subject": conf["source_subject"] or None,
                    "received_at": conf["source_received_at"] or conf["recorded_at"]}
             out.append(_b("confirm_sent", "you", "employer confirmed — did it go out?", conf["recorded_at"], conf_ref))
+        elif (quiet := silent.get(app_id)) is not None and a["status"] not in _DEAD:
+            # Owner 2026-11-02: a started submit with no confirmation email in CONFIRM_SENT_WAIT_DAYS asks the user.
+            quiet_ref = {"event_id": quiet["id"], "reason": "no_confirmation_email"}
+            label = f"no confirmation email in {settings.CONFIRM_SENT_WAIT_DAYS} days — did it go out?"
+            out.append(_b("confirm_sent", "you", label, quiet["recorded_at"], quiet_ref))
         considering = a["status"] == "considering"
         reason, block_ev = s["reason"], s["block_ev"]
         block_since = block_ev["recorded_at"] if block_ev else a["updated_at"]
