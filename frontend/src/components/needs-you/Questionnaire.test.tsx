@@ -88,4 +88,25 @@ describe("Questionnaire (ask once, owner 2026-11-02)", () => {
     await waitFor(() => expect(getQuestionnaire).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("a conflict row asks which is right, starts empty, Use fills the box without saving, OK sends the box text", async () => {
+    getQuestionnaire.mockResolvedValue({ countries: [{ country: "GB", questions: [
+      { ...row("sponsorship.GB.yes_no", "Do you need sponsorship?", null, "guessed"), conflict: ["Yes", "No"] },
+      { ...row("a.b", "Three-way", null, "guessed"), conflict: ["A", "B", "C"] },
+    ] }] });
+    render(<Questionnaire />);
+    expect(await screen.findByTestId("qn-conflict-GB-sponsorship.GB.yes_no"))
+      .toHaveTextContent("You saved both Yes and No for this question in GB — which is right?");
+    expect(screen.getByTestId("qn-conflict-GB-a.b")).toHaveTextContent("You saved A, B and C for this question in GB");
+    const box = screen.getByTestId("qn-input-GB-sponsorship.GB.yes_no");
+    expect(box).toHaveValue("");
+    expect(screen.getByTestId("qn-ok-GB-sponsorship.GB.yes_no")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Use No" }));
+    expect(box).toHaveValue("No");
+    expect(rememberQuestionnaire).not.toHaveBeenCalled(); // Use fills, never saves
+    fireEvent.click(screen.getByTestId("qn-ok-GB-sponsorship.GB.yes_no"));
+    await waitFor(() => expect(rememberQuestionnaire).toHaveBeenCalledWith("GB", [
+      { topic: "sponsorship.GB.yes_no", question: "Do you need sponsorship?", answer: "No" },
+    ]));
+  });
 });

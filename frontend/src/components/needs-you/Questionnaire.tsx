@@ -16,9 +16,19 @@ const mainBtn =
 
 /** Where the box text came from, in plain words. Empty box = no guess yet. */
 const fromLine = (q: QuestionnaireRow) => {
+  if (conflictOf(q).length) return "Pick one, then press OK";
   if (!(q.value || q.answer || "").trim()) return "Your assistant hasn't guessed this yet";
   const f = (q.from ?? "").trim();
   return f ? f[0].toUpperCase() + f.slice(1) : "Your assistant's guess";
+};
+
+/** The values a row's saved answers disagree on; [] = no conflict. Server text, never trusted. */
+const conflictOf = (q: QuestionnaireRow) => (q.conflict ?? []).filter((v) => v.trim());
+
+/** "You saved both Yes and No for this question in GB — which is right?" No topic word is made up. */
+const conflictLine = (vals: string[], cc: string) => {
+  const list = vals.length === 2 ? `both ${vals[0]} and ${vals[1]}` : `${vals.slice(0, -1).join(", ")} and ${vals[vals.length - 1]}`;
+  return `You saved ${list} for this question in ${cc} — which is right?`;
 };
 
 const rowKey = (cc: string, q: QuestionnaireRow) => `${cc}:${q.topic}`;
@@ -47,7 +57,7 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
   const countries = (data?.countries ?? []).filter((c) => c.questions.length > 0);
   if (countries.length === 0) return null;
 
-  const valueOf = (cc: string, q: QuestionnaireRow) => values[rowKey(cc, q)] ?? (q.value || q.answer || "");
+  const valueOf = (cc: string, q: QuestionnaireRow) => values[rowKey(cc, q)] ?? (conflictOf(q).length ? "" : q.value || q.answer || "");
 
   async function remember(cc: string, rows: QuestionnaireRow[]) {
     const items = rows
@@ -79,10 +89,23 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
           <h3 className={label}>{country}</h3>
           {questions.map((q) => (
             <div key={q.topic} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`qn-${country}-${q.topic}`}>
+              {conflictOf(q).length > 0 && (
+                <p className="text-sm" data-testid={`qn-conflict-${country}-${q.topic}`}>{conflictLine(conflictOf(q), country)}</p>
+              )}
               <p className="text-sm font-medium">{q.question}</p>
               <Textarea aria-label={q.question} value={valueOf(country, q)} disabled={busy} placeholder="Type your answer"
                 data-testid={`qn-input-${country}-${q.topic}`}
                 onChange={(e) => setValues((prev) => ({ ...prev, [rowKey(country, q)]: e.target.value }))} />
+              {conflictOf(q).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {conflictOf(q).map((v, i) => (
+                    <button key={`${i}-${v}`} type="button" className={btn} disabled={busy} data-testid={`qn-use-${country}-${q.topic}-${i}`}
+                      onClick={() => setValues((prev) => ({ ...prev, [rowKey(country, q)]: v }))}>
+                      Use {v}
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground" data-testid={`qn-from-${country}-${q.topic}`}>{fromLine(q)}</p>
               <div>
                 <button type="button" className={btn} disabled={busy || !valueOf(country, q).trim()}
