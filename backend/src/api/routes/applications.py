@@ -3663,6 +3663,28 @@ async def resolve_blocked(
     return await _controls(db, user, application_id)
 
 
+@router.post(
+    "/applications/{application_id}/auto/undo", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def undo_auto(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Undo" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting
+    closed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;
+    also records "It was not sent"). A ``note`` correcting that status event. 409 when the newest status event
+    is neither. Session only; no MCP twin."""
+    from src.services.applications import auto_close  # noqa: PLC0415
+
+    try:
+        await auto_close.undo(db, user, application_id)
+    except SpineError as exc:
+        _raise(exc)
+    return await _controls(db, user, application_id)
+
+
 def _submitted_refused(user: CurrentUser, application_id: int, status: int, reason: str) -> HTTPException:
     get_audit_logger().warning(
         "blocked_submitted_refused",
@@ -4122,6 +4144,14 @@ async def _record_event(
         stored_type = str(result.get("event_type") or body.event_type)
         missing = await spine.missing_applied_warnings(db, application_id, stored_type)
         warnings = [*result.get("warnings", []), *missing, *([hold_warning] if hold_warning else [])]
+        if body.event_type == "note" and source and not result.get("already_existed"):
+            from src.services.applications import auto_applied  # noqa: PLC0415
+
+            # Owner 2026-11-02: an employer's confirmation email marks the job sent by itself when it is proven.
+            if auto_applied.is_confirmation(detail) and (sent := await auto_applied.apply_if_proven(
+                db, user, application_id, int(result["event_id"]), source,
+            )):
+                result, warnings = {**result, "status": "applied"}, [*warnings, sent]
         return {**result, "warnings": warnings}
     except SpineError as exc:
         _raise(exc)

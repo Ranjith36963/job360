@@ -1085,8 +1085,8 @@ async def enforce_applied_rule(
     get_audit_logger().warning("submit_rule_refused", extra={"event": "submit_rule_refused", **base, "status": 409})
     words = "; ".join(f"{c} ({OPEN_RULE_WORDS[c]})" for c in codes)
     msg = f"submit_rule_open: do not record this as applied while it is open: {words}. Clear them first."
-    msg += (" If the employer emailed a confirmation, record it as proof (note with the email source) and the "
-            "user confirms on Needs you.")
+    msg += (" If the employer emailed a confirmation, record it as proof (note with the email source): Job360 "
+            "marks it applied when that email proves it, else the user confirms on Needs you.")
     if await submit_unconfirmed(db, user_id, application_id):
         msg += " If the user already pressed Submit in the browser, ask them to press Mark Applied on Job360."
     raise spine.SpineError(409, msg)

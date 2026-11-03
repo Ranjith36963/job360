@@ -194,6 +194,7 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/own-browser/run-now"): "the user's own click: opens the queue for an hour",
     ("POST", "/api/contacts/{contact_id}/own-browser-send"): "the user's own yes to one LinkedIn send",
     ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
+    ("POST", "/api/applications/{application_id}/auto/undo"): "the user's own Undo of what the AI did by itself",
     ("POST", "/api/asks/{ask_id}/answers/save"): "the user's own saved rows read as checked on Needs you",
     ("POST", "/api/asks/{ask_id}/answers/remember"): "the owner's own remember press: reused on later jobs",
     ("POST", "/api/profile/questionnaire/remember"): "the owner's own remember press on the questionnaire",
