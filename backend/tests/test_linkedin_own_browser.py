@@ -319,3 +319,26 @@ def test_the_recipes_send_linkedin_to_the_own_browser_and_company_forms_to_job36
     assert "`update_job` `apply_url` = that form, fill it in job360's browser" in apply
     assert "it waits in the own-browser queue (no job360 day cap; stop at linkedin's own easy apply limit), stop" in apply
     assert "linkedin.com (easy apply) runs only in the user's own browser" in batch
+
+
+@pytest.mark.asyncio
+async def test_an_application_just_let_go_is_not_handed_straight_back(authenticated_async_context):
+    # pc-1523, 2026-11-03: take returned the same application right after the run recorded hold_released.
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 50, "https://www.linkedin.com/jobs/view/50")
+        await _event(client, app_id, "queued")
+        async with await _agent(client) as agent:
+            got = await _take(agent)
+            assert got["status"] == "task" and got["task"]["application_id"] == app_id, got
+            await _event(client, app_id, "hold_released", {"reason": "stopped"})
+            assert (await _take(agent))["status"] == "empty"
+            from datetime import datetime, timedelta, timezone
+
+            async with browser_routes._db() as db:  # noqa: SLF001
+                await db._db.execute(  # noqa: SLF001
+                    "UPDATE application_events SET recorded_at = ? WHERE application_id = ? AND event_type = 'hold_released'",
+                    ((datetime.now(timezone.utc) - timedelta(minutes=61)).isoformat(), app_id),
+                )
+                await db._db.commit()  # noqa: SLF001
+            again = await _take(agent)
+            assert again["status"] == "task" and again["task"]["application_id"] == app_id, again
