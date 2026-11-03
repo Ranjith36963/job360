@@ -2747,13 +2747,13 @@
           "above_line": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
-          "always_ask_job_boards": {
-            "$ref": "#/components/schemas/SettingFieldOut"
-          },
           "apply_hours": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "apply_min_score": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "ask_before_signed_in_submit": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "auto_employer_emails": {
@@ -2905,7 +2905,7 @@
           "network_per_hour",
           "linkedin_sends_per_day",
           "email_sends_per_day",
-          "always_ask_job_boards",
+          "ask_before_signed_in_submit",
           "paused",
           "practice_run"
         ],

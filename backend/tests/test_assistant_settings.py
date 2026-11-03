@@ -54,8 +54,8 @@ SIX = (
     # 2026-11-02 the user's own outreach send limits (tests/test_two_outreach_sends.py).
     "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
     "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
-    # 2026-11-03 always_ask_job_boards (tests/test_always_ask_job_boards.py).
-    "assistant_settings.always_ask_job_boards",
+    # 2026-11-03 ask_before_signed_in_submit (tests/test_ask_before_signed_in_submit.py).
+    "assistant_settings.ask_before_signed_in_submit",
 )
 PROGRESS = "assistant_settings.setup_progress"
 

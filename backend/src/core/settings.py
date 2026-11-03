@@ -983,8 +983,8 @@ PROFILE_EDITABLE_PATHS = (
     # Owner 2026-11-02 - the user's own outreach send limits (whole numbers; null = the default). Raising is riskier.
     "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
     "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
-    # Owner 2026-11-03 - Indeed / LinkedIn style sites always ask before submit (true, the default). Off is riskier.
-    "assistant_settings.always_ask_job_boards",
+    # Owner 2026-11-03 - a submit through the user's own signed-in account always asks (true = default). Off: riskier.
+    "assistant_settings.ask_before_signed_in_submit",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -1075,7 +1075,7 @@ SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60")
 # asks yes. Matched against whole host labels (indeed.co.uk, uk.indeed.com,
 # linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only
 # asks, so a loose match is the safe direction. Owner: Indeed bans automated apply.
-# Owner 2026-11-03: only while the user's assistant_settings.always_ask_job_boards is on (the default).
+# Owner 2026-11-03: they count as the user's signed-in account (assistant_settings.ask_before_signed_in_submit).
 SUBMIT_ASK_ALWAYS_BRANDS = _env_list("SUBMIT_ASK_ALWAYS_BRANDS", ("indeed", "linkedin", "lnkd"))
 # ── S3 application kit (owner decisions 2026-10-08). Every number a parameter. ──
 # A file link the kit hands out: how long it lives and how often it downloads.

@@ -195,9 +195,9 @@ SHAPES: dict[str, dict[str, Any]] = {
         "example": True,
         "note": "find people to reach for new applications on the schedule; never sends. On needs the user's OK",
     },
-    _settings.ALWAYS_ASK_BOARDS_PATH: {
+    _settings.SIGNED_IN_ASK_PATH: {
         "example": True,
-        "note": "true (default) = Indeed / LinkedIn style sites always ask before submit. Off needs the user's OK",
+        "note": "true (default) = a submit through the user's signed-in account asks first. Off needs the user's OK",
     },
     _settings.PC_ON_HOURS_PATH: {
         "example": {"days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "18:00"},

@@ -195,7 +195,7 @@ def test_recipes_carry_the_assistant_settings_rules():
         assert word in setup, word
     apply = flat(load_recipe("apply").text)
     for word in ("settings.paused", "line.switch", "check_submit", "practice run",
-                 "indeed and linkedin answer `ask` unless the user turned that off", "after the user says yes to this one application"):
+                 "answers `ask` unless the user turned that off", "after the user says yes to this one application"):
         assert word in apply, word
     daily = flat(load_recipe("daily").text)
     assert "settings.paused" in daily and "do all apply work as stopped" in daily

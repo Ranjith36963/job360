@@ -780,6 +780,24 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
     return host if isinstance(host, str) and host else None
 
 
+async def _signed_in_account(db: JobDatabase, user_id: str, application_id: int, host: Optional[str]) -> bool:
+    """Owner 2026-11-03 (``may_submit`` rule 7): does this submit go through the user's own signed-in account?
+    True when the newest ``form_filled`` or ``form_swept`` names the user's own browser (``own_browser`` /
+    ``manual``: the caller's word, which only ever adds an ask), or names ``job360`` (checked server-side,
+    ``which_browser.resolve``) while the user has a saved sign-in for the form's ``host``. Neither said: False,
+    and the Indeed / LinkedIn host rule is the fallback."""
+    from src.services.applications import which_browser  # noqa: PLC0415 - which_browser imports spine
+    from src.services.browser_agent import sign_ins  # noqa: PLC0415 - lazy (cryptography)
+
+    newest: dict[str, str] = {}
+    for ev in await _events(db, user_id, application_id, ("form_filled", "form_swept")):
+        newest.setdefault(ev["event_type"], which_browser.read(ev["payload"]))
+    said = set(newest.values())
+    if said & {which_browser.OWN, which_browser.MANUAL}:
+        return True
+    return which_browser.JOB360 in said and bool(host) and await sign_ins.covers_host(db, user_id, str(host))
+
+
 async def last_fill(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:
     """The answers of the NEWEST ``form_filled`` as stored, [] when there is none: what the assistant
     retypes in one browser ``fill`` when the browser closed before the submit (owner decision 2026-10-23).
@@ -850,6 +868,7 @@ async def gate_facts(
         company_avoided=company_avoided(user_id, app_row),
         submit_unconfirmed=await submit_unconfirmed(db, user_id, application_id),
         new_site=await _new_site(db, user_id, application_id, form_host),
+        signed_in_account=await _signed_in_account(db, user_id, application_id, form_host),
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
         approval_stale=stale,

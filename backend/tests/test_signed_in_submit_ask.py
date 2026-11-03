@@ -1,10 +1,12 @@
-"""Owner decision 2026-11-03 - "Indeed and LinkedIn always ask" is the user's own setting.
+"""Owner decision 2026-11-03 - "ask before a submit through my own signed-in account" is the user's setting.
 
-``assistant_settings.always_ask_job_boards`` is on by default, so ``check_submit`` keeps answering
-``ask_always_site`` for Indeed / LinkedIn style sites. Only the user's own web click turns it off; an
-assistant's off waits for the user's confirm (riskier), its on applies at once (safer). With it off, every
-other rule still asks (practice run, new site, CV not seen). The LinkedIn send default is 15 a day.
-All through the real doors (web session, bearer token, MCP tools). Helpers are copied, never imported
+``assistant_settings.ask_before_signed_in_submit`` is on by default: ``check_submit`` answers ``ask_always_site``
+for a submit in the user's own browser (a fill / sweep recorded with ``browser`` own_browser or manual), in
+Job360's browser with a saved sign-in for the form's site, and - the fallback when the route is unknown - on
+Indeed / LinkedIn. Job360's browser with no saved sign-in on a company site is never affected. Only the user's
+own web click turns it off; an assistant's off waits for the user's confirm (riskier), its on applies at once.
+With it off every other rule still asks (practice run, new site, CV not seen). The LinkedIn send default is 15
+a day. All through the real doors (web session, bearer token, MCP tools). Helpers are copied, never imported
 from another test module.
 """
 from __future__ import annotations
@@ -17,7 +19,7 @@ from httpx import ASGITransport, AsyncClient
 from src.core import settings
 from src.services.profile.models import UserPreferences
 
-BOARDS = "assistant_settings.always_ask_job_boards"
+SIGNED_IN = "assistant_settings.ask_before_signed_in_submit"
 SUBMIT = "assistant_settings.submit_mode"
 SCORE = "assistant_settings.apply_min_score"
 ABOVE = "assistant_settings.above_line"
@@ -79,12 +81,22 @@ async def _ready(client: AsyncClient, app_id: int, *, seen: bool = True) -> None
     assert fit.status_code == 200, fit.text
 
 
-async def _check(client: AsyncClient, app_id: int, url: str) -> tuple[str, str]:
-    """Fill and sweep on ``url``'s site (rules 4b, 4c, 5e), then ask the gate."""
-    for event, payload in (("form_filled", {"form_url": url, "fields_count": 1}),
-                           ("form_swept", {"fields_checked": 1, "fixed": 0})):
+async def _record(client: AsyncClient, app_id: int, url: str, browser: str | None = None) -> None:
+    """Fill and sweep on ``url``'s site (rules 4b, 4c, 5e) in ``browser`` (None = not said)."""
+    said = {"browser": browser} if browser else {}
+    for event, payload in (("form_filled", {"form_url": url, "fields_count": 1, **said}),
+                           ("form_swept", {"fields_checked": 1, "fixed": 0, **said})):
         resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": event, "payload": payload})
         assert resp.status_code == 201, resp.text
+
+
+async def _gate(client: AsyncClient, app_id: int, url: str) -> tuple[str, str]:
+    body = (await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})).json()
+    return body["decision"], body["reason"]
+
+
+async def _check(client: AsyncClient, app_id: int, url: str, browser: str | None = None) -> tuple[str, str]:
+    await _record(client, app_id, url, browser)
     body = (await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})).json()
     return body["decision"], body["reason"]
 
@@ -107,6 +119,57 @@ async def _linkedin_ready(client: AsyncClient) -> int:
     return second
 
 
+async def _company_ready(client: AsyncClient) -> int:
+    """Auto mode, the practice run done on FORM's company site: a second job there with everything else OK."""
+    await _patch(client, SUBMIT, "auto_when_sure")
+    first = await _bring(client, 1)
+    await _ready(client, first)
+    await _check(client, first, FORM)
+    await _apply(client, first)
+    second = await _bring(client, 2)
+    await _ready(client, second)
+    return second
+
+
+class _Pool:
+    """Job360's browser has a page open for these keys (``which_browser`` accepts ``browser: job360`` only then)."""
+
+    def __init__(self, keys: list[str]) -> None:
+        self.keys = keys
+
+    def user_keys(self, user_id: str) -> list[str]:
+        return [k for k in self.keys if k.split("#job:")[0] == user_id]
+
+
+async def _job360_fill(client: AsyncClient, user_id: str, app_id: int) -> None:
+    """A fill on FORM in Job360's browser while it has this job's page open, then a sweep that names no browser."""
+    from src.services.browser_agent import agent
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+        mp.setattr(agent, "get_pool", lambda: _Pool([agent.browser_key(user_id, app_id)]))
+        fill = {"form_url": FORM, "fields_count": 1, "browser": "job360"}
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_filled", "payload": fill})
+        assert resp.status_code == 201, resp.text
+    swept = {"event_type": "form_swept", "payload": {"fields_checked": 1, "fixed": 0}}
+    assert (await client.post(f"/api/applications/{app_id}/events", json=swept)).status_code == 201
+    events = (await client.get(f"/api/applications/{app_id}")).json()["events"]
+    newest_fill = max((e for e in events if e["event_type"] == "form_filled"), key=lambda e: e["id"])
+    assert newest_fill["payload"]["browser"] == "job360"
+
+
+async def _save_sign_in(monkeypatch: pytest.MonkeyPatch, user_id: str, host: str) -> None:
+    """The user pressed "Keep me signed in" on ``host`` in Job360's browser."""
+    from cryptography.fernet import Fernet
+
+    from src.api import dependencies as api_deps
+    from src.services.browser_agent import sign_ins
+
+    monkeypatch.setenv("BROWSER_SIGN_IN_KEY", Fernet.generate_key().decode())
+    state = {"cookies": [{"name": "sid", "value": "v", "domain": "." + host, "path": "/"}], "origins": []}
+    assert await sign_ins.save(await api_deps.get_db(), user_id, host, state) == 1
+
+
 def _agent(token: str) -> AsyncClient:
     from src.api.main import app
 
@@ -123,7 +186,7 @@ async def test_on_by_default_linkedin_still_asks_through_the_web_and_the_mcp_doo
 
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        assert (await _view(client))[BOARDS.split(".")[1]] == {"value": True, "effective": True}
+        assert (await _view(client))[SIGNED_IN.split(".")[1]] == {"value": True, "effective": True}
         app_id = await _linkedin_ready(client)
         assert await _check(client, app_id, LINKEDIN) == ("ask", "ask_always_site")
         tools = m.build_server()._tool_manager
@@ -138,18 +201,18 @@ async def test_on_by_default_linkedin_still_asks_through_the_web_and_the_mcp_doo
 
 
 @pytest.mark.asyncio
-async def test_a_web_user_turning_it_off_lets_linkedin_auto_submit(authenticated_async_context, fixture_user_id):
+async def test_an_unknown_route_on_linkedin_follows_the_switch(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         app_id = await _linkedin_ready(client)
         assert await _check(client, app_id, LINKEDIN) == ("ask", "ask_always_site")
-        await _patch(client, BOARDS, False)  # the user's own click applies at once
+        await _patch(client, SIGNED_IN, False)  # the user's own click applies at once
         view = await _view(client)
-        assert view["always_ask_job_boards"] == {"value": False, "effective": False}
+        assert view["ask_before_signed_in_submit"] == {"value": False, "effective": False}
         assert view["waiting"] == []
         assert await _check(client, app_id, LINKEDIN) == ("submit", "auto_when_sure")
         # turning it back on is the safe direction: LinkedIn asks again
-        await _patch(client, BOARDS, True)
+        await _patch(client, SIGNED_IN, True)
         assert await _check(client, app_id, LINKEDIN) == ("ask", "ask_always_site")
 
 
@@ -159,7 +222,7 @@ async def test_with_it_off_the_practice_run_new_site_and_cv_not_seen_still_ask(
 ):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        await _patch(client, BOARDS, False)
+        await _patch(client, SIGNED_IN, False)
         await _patch(client, SUBMIT, "auto_when_sure")
         on_linkedin = await _bring(client, 1)
         await _ready(client, on_linkedin)
@@ -188,32 +251,32 @@ async def test_an_assistants_off_is_held_for_the_users_confirm_and_its_on_applie
         minted = await client.post("/api/tokens", json={"name": "claude-code"})
         assert minted.status_code == 201, minted.text
         async with _agent(minted.json()["token"]) as agent:
-            held = await _patch(agent, BOARDS, False)
-        assert [(w["path"], w["value"]) for w in held["waiting"]] == [(BOARDS, False)]
+            held = await _patch(agent, SIGNED_IN, False)
+        assert [(w["path"], w["value"]) for w in held["waiting"]] == [(SIGNED_IN, False)]
         tools = m.build_server()._tool_manager
         token = m._current_user.set(CurrentUser(
             id=fixture_user_id, email="e2e@example.com", email_verified=True, auth_via="token", actor_name="cc",
         ))
         try:
-            via_mcp = await tools.get_tool("update_profile").fn(edits=[{"path": BOARDS, "value": False}])
+            via_mcp = await tools.get_tool("update_profile").fn(edits=[{"path": SIGNED_IN, "value": False}])
         finally:
             m._current_user.reset(token)
-        assert via_mcp["applied"] == [] and [w["path"] for w in via_mcp["waiting"]] == [BOARDS]
+        assert via_mcp["applied"] == [] and [w["path"] for w in via_mcp["waiting"]] == [SIGNED_IN]
         view = await _view(client)
-        assert view["always_ask_job_boards"] == {"value": True, "effective": True}, "not applied"
-        assert {w["path"] for w in view["waiting"]} == {BOARDS}
+        assert view["ask_before_signed_in_submit"] == {"value": True, "effective": True}, "not applied"
+        assert {w["path"] for w in view["waiting"]} == {SIGNED_IN}
         assert await _check(client, app_id, LINKEDIN) == ("ask", "ask_always_site")
         # the user's confirm on the website applies it
         request_id = view["waiting"][0]["id"]
         confirmed = await client.post(f"/api/assistant-settings/requests/{request_id}/confirm")
         assert confirmed.status_code == 200, confirmed.text
-        assert confirmed.json()["always_ask_job_boards"] == {"value": False, "effective": False}
+        assert confirmed.json()["ask_before_signed_in_submit"] == {"value": False, "effective": False}
         assert await _check(client, app_id, LINKEDIN) == ("submit", "auto_when_sure")
         # an assistant turning it back ON is safer: applied at once
         async with _agent(minted.json()["token"]) as agent:
-            on = await _patch(agent, BOARDS, True)
+            on = await _patch(agent, SIGNED_IN, True)
         assert on["waiting"] == []
-        assert (await _view(client))["always_ask_job_boards"] == {"value": True, "effective": True}
+        assert (await _view(client))["ask_before_signed_in_submit"] == {"value": True, "effective": True}
         assert await _check(client, app_id, LINKEDIN) == ("ask", "ask_always_site")
 
 
@@ -223,3 +286,43 @@ async def test_the_linkedin_daily_send_default_is_15(authenticated_async_context
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         assert (await _view(client))["linkedin_sends_per_day"] == {"value": None, "effective": 15}
+
+
+@pytest.mark.asyncio
+async def test_the_users_own_browser_asks_while_on_and_submits_when_off(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _company_ready(client)
+        assert await _check(client, app_id, FORM) == ("submit", "auto_when_sure"), "a company site, route not said"
+        assert await _check(client, app_id, FORM, "own_browser") == ("ask", "ask_always_site")
+        assert await _check(client, app_id, FORM, "manual") == ("ask", "ask_always_site")
+        await _patch(client, SIGNED_IN, False)
+        assert await _check(client, app_id, FORM, "own_browser") == ("submit", "auto_when_sure")
+
+
+@pytest.mark.asyncio
+async def test_job360s_browser_with_no_saved_sign_in_is_never_affected(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _company_ready(client)
+        await _save_sign_in(monkeypatch, fixture_user_id, "acme.wd5.myworkdayjobs.com")  # another site's sign-in
+        await _job360_fill(client, fixture_user_id, app_id)
+        assert await _gate(client, app_id, FORM) == ("submit", "auto_when_sure")
+        await _patch(client, SIGNED_IN, False)
+        assert await _gate(client, app_id, FORM) == ("submit", "auto_when_sure")
+
+
+@pytest.mark.asyncio
+async def test_job360s_browser_with_a_saved_sign_in_follows_the_switch(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _company_ready(client)
+        await _save_sign_in(monkeypatch, fixture_user_id, "careers.northwind.example")
+        await _job360_fill(client, fixture_user_id, app_id)
+        assert await _gate(client, app_id, FORM) == ("ask", "ask_always_site")
+        await _patch(client, SIGNED_IN, False)
+        assert await _gate(client, app_id, FORM) == ("submit", "auto_when_sure")

@@ -771,9 +771,10 @@ class AssistantSettings:
     network_per_hour: Optional[int] = None
     linkedin_sends_per_day: Optional[int] = None
     email_sends_per_day: Optional[int] = None
-    # Owner 2026-11-03: Indeed / LinkedIn style sites (SUBMIT_ASK_ALWAYS_BRANDS) always answer check_submit `ask`
-    # (ask_always_site). On by default; only the user's own web click turns it off (an assistant's off waits).
-    always_ask_job_boards: bool = True
+    # Owner 2026-11-03: a submit through the user's own signed-in account (their own browser, a saved sign-in in
+    # Job360's browser, or an Indeed / LinkedIn style site) always answers check_submit `ask` (ask_always_site).
+    # On by default; only the user's own web click turns it off (an assistant's off waits).
+    ask_before_signed_in_submit: bool = True
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)
