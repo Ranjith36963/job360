@@ -46,6 +46,9 @@ RELEASE_REASONS = (
     "done",  # only a hunt or people task (pc_duties): finished; every other reason closes one as failed
 )
 RUN_NOW_SLOT = "own_browser:run_now"
+# An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
+# returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
+APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
 DECISIONS = ("approve", "decline")
 WHY_WORDS = {
     "job360_login_required": "Job360's browser hit a sign-in page.",
@@ -625,6 +628,9 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
+    if apps:
+        released = await _recently_released(db, user.id, [int(t["application_id"]) for t in apps], now)
+        apps = [t for t in apps if int(t["application_id"]) not in released]
     if EASY_APPLY_DAILY_MAX > 0 and any(routing.names_linkedin(t["url"]) for t in apps) and (
         await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
     ):  # Easy Apply's own day cap; any other application is still handed out
@@ -638,6 +644,18 @@ async def take(
         return refusal
     _log("own_browser_take", user.id, "empty")
     return _answer("empty", "nothing is waiting for your own browser")
+
+
+async def _recently_released(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> set[int]:
+    """Applications with a ``hold_released`` inside ``APPLICATION_RELEASE_COOLDOWN_MINUTES``."""
+    cutoff = (now - timedelta(minutes=APPLICATION_RELEASE_COOLDOWN_MINUTES)).isoformat()
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT DISTINCT application_id FROM application_events WHERE user_id = ? "  # noqa: S608 - placeholders
+        f"AND event_type = 'hold_released' AND recorded_at >= ? AND application_id IN ({marks})",
+        (user_id, cutoff, *app_ids),
+    )
+    return {int(dict(r)["application_id"]) for r in await cur.fetchall()}
 
 
 async def release(
