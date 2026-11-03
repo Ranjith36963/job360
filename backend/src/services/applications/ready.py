@@ -293,13 +293,32 @@ def _approved_record(
     the general one, and one bound to the job's ``country`` before one bound to none (ask once, owner
     2026-11-02); an answer bound to another country (``answer_match.fits_country``) is not this job's.
     None when there is none, when the matches disagree, or when the matched record's topic has saved
-    answers that disagree (``answer_match.conflicting_topics``) however it was worded (2026-11-03)."""
-    from src.services.profile.answer_match import conflicting_topics, resolve_answer, topic_key  # noqa: PLC0415
+    answers that disagree (``answer_match.conflicting_topics``) however it was worded (2026-11-03).
+    The user's own Verify / Edit on THIS application (``job_only``, :func:`with_job_approvals`) comes
+    first, by topic or wording: it is their word for this job, so no saved answer outranks it and a
+    consent.* / certify.* row (never REUSED from memory) still verifies for the job it was given on."""
+    from src.services.profile.answer_match import (  # noqa: PLC0415
+        conflicting_topics,
+        normalize_question,
+        resolve_answer,
+        topic_key,
+    )
 
-    records = [
+    records: list[dict[str, Any]] = [
         rec for rec in kit._records(profile.user_info.answers)
         if rec.get("approved") is True and kit._present(rec.get("answer"))
     ]
+    want_q, want_topic = normalize_question(question), topic_key(topic) if topic else ""
+    job_only: list[dict[str, Any]] = [r for r in records if r.get("job_only")]
+    for job in reversed(job_only):  # the newest Verify wins
+        by_topic = bool(want_topic) and topic_key(job.get("topic")) == want_topic
+        # "???" has no wording: then only the exact same text is the same question ("!!!" is not).
+        same_text = str(job["question"]).strip() == str(question or "").strip()
+        by_words = normalize_question(job["question"]) == want_q if want_q else same_text
+        if by_topic or by_words:
+            hit: dict[str, Any] = job
+            return hit
+    records = [r for r in records if not r.get("job_only")]
     rec, note = resolve_answer(records, topic=topic or None, question=question, company_key=company_key,
                                country=country)
     if rec is None or note:
@@ -994,7 +1013,12 @@ async def confirm_answer(
     profile = loaded or UserProfile()
     # Dry run only: a bad value (an email that is not one, an over-long answer) still refuses with a 422,
     # but NOTHING is written to the profile - this answer is approved for THIS job only (owner 2026-11-02).
-    for path, value in answer_edits(profile, answer, text, edited=new_text is not None,
+    # Checked on its own, not merged into the remembered answers it never joins: a remembered "Yes" to the
+    # same question must not refuse the user's "No" for this job as "the same question appears twice".
+    from dataclasses import replace  # noqa: PLC0415
+
+    alone = replace(profile, user_info=replace(profile.user_info, answers=[]))
+    for path, value in answer_edits(alone, answer, text, edited=new_text is not None,
                                     company_key=_company_key(card["job_company"]), company=card["job_company"]):
         profile_edits.validate_edit(path, value)
     await spine.append_event(

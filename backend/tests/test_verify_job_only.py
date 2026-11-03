@@ -130,3 +130,66 @@ async def test_remember_is_still_what_makes_the_next_job_fill_itself(authenticat
         assert await _missing(client, job_b) == [], "B is filled without asking after the remember press"
         await _fill_guess(client, job_b)
         assert await _gate_guessed(fixture_user_id, job_b) is False
+
+
+CERTIFY = {"key": "certify.truth", "question": "I certify that everything in this application is true"}
+
+
+@pytest.mark.asyncio
+async def test_verify_clears_a_certify_row_on_this_job_though_it_is_never_reused(
+    authenticated_async_context, fixture_user_id
+):
+    """consent.* / certify.* answers are never REUSED from memory, but the user's own Verify on THIS job is
+    their word for it: the row is verified and the gate's answer_guessed clears (independent check, #1470)."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, "Acme")
+        payload = {"form_url": FORM, "fields_count": 1,
+                   "answers": [{**CERTIFY, "answer": "Yes", "source": "guessed"}]}
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_filled", "payload": payload})
+        assert resp.status_code == 201, resp.text
+        assert await _gate_guessed(fixture_user_id, app_id) is True
+        after = await _verify(client, app_id)
+        assert after["answers"][0]["verified"] is True and "guessed" not in _codes(after)
+        assert await _gate_guessed(fixture_user_id, app_id) is False
+        assert _approved(fixture_user_id) == [], "nothing is saved for reuse"
+
+
+@pytest.mark.asyncio
+async def test_this_jobs_verify_wins_over_a_saved_answer_that_says_otherwise(
+    authenticated_async_context, fixture_user_id
+):
+    """A remembered "Yes" and the user's Verify of "No" on this job are not two answers that disagree: the
+    job's own Verify is the user's word for this job, so the row verifies with "No"."""
+    async with authenticated_async_context() as client:
+        saved = {"path": "user_info.answers", "value": [{"question": VISA["question"], "answer": "Yes", "approved": True}]}
+        resp = await client.patch("/api/profile", json={"edits": [saved]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(client, "Acme")
+        await _fill_guess(client, app_id, answer="No")
+        after = await _verify(client, app_id)
+        assert after["answers"][0]["verified"] is True and "guessed" not in _codes(after)
+        assert await _gate_guessed(fixture_user_id, app_id) is False
+
+
+@pytest.mark.asyncio
+async def test_a_verify_of_a_wordless_question_never_covers_another_wordless_one(
+    authenticated_async_context, fixture_user_id
+):
+    """A punctuation-only question ("???", an unlabelled box) has no wording to match by: Verify of one never
+    verifies a different wordless row the user never saw (independent check, #1470 c3)."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, "Acme")
+
+        async def fill(question: str, answer: str) -> None:
+            payload = {"form_url": FORM, "fields_count": 1,
+                       "answers": [{"question": question, "answer": answer, "source": "guessed"}]}
+            resp = await client.post(f"/api/applications/{app_id}/events",
+                                     json={"event_type": "form_filled", "payload": payload})
+            assert resp.status_code == 201, resp.text
+
+        await fill("???", "Yes")
+        assert (await _verify(client, app_id))["answers"][0]["verified"] is True
+        await fill("!!!", "No")
+        card = await _card(client, app_id)
+        assert card["answers"][0]["verified"] is False and "guessed" in _codes(card)
+        assert await _gate_guessed(fixture_user_id, app_id) is True
