@@ -7,7 +7,7 @@ const getArtifactDiff = vi.fn();
 const getApplicationArtifact = vi.fn();
 const downloadApplicationArtifact = vi.fn();
 const setHidden = vi.fn();
-const fetchApplicationArtifactFile = vi.fn();
+const fetchApplicationArtifactNamed = vi.fn();
 const openPdf = vi.fn();
 vi.mock("@/lib/pdf-pages", () => ({ openPdf: (...a: unknown[]) => openPdf(...a) }));
 const toastSuccess = vi.fn();
@@ -16,7 +16,7 @@ vi.mock("@/lib/api", () => ({
   getArtifactDiff: (...args: unknown[]) => getArtifactDiff(...args),
   downloadApplicationArtifact: (...args: unknown[]) => downloadApplicationArtifact(...args),
   setHidden: (...args: unknown[]) => setHidden(...args),
-  fetchApplicationArtifactFile: (...args: unknown[]) => fetchApplicationArtifactFile(...args),
+  fetchApplicationArtifactNamed: (...args: unknown[]) => fetchApplicationArtifactNamed(...args),
 }));
 vi.mock("@/lib/toast", () => ({
   toast: { success: (m: string) => toastSuccess(m), apiError: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -232,7 +232,7 @@ describe("ArtifactVersions — Hide this version (S11a)", () => {
 
 describe("ArtifactVersions — the CV opens as its PDF (owner 2026-11-03)", () => {
   it("tapping a CV version, or its View, opens every page of the real PDF - not the plain text", async () => {
-    fetchApplicationArtifactFile.mockResolvedValue({ arrayBuffer: async () => new ArrayBuffer(8) });
+    fetchApplicationArtifactNamed.mockResolvedValue({ blob: { arrayBuffer: async () => new ArrayBuffer(8) }, filename: "Ranjith_Guruprakash_CV.pdf" });
     const draw = vi.fn(() => ({ done: Promise.resolve(), cancel: vi.fn() }));
     openPdf.mockResolvedValue({ count: 2, draw, close: vi.fn() });
     getApplicationArtifact.mockReset();
@@ -240,7 +240,7 @@ describe("ArtifactVersions — the CV opens as its PDF (owner 2026-11-03)", () =
     fireEvent.click(screen.getByTestId("artifact-open"));
     expect(await screen.findByTestId("cv-preview")).toHaveTextContent("CV version 3");
     expect(await screen.findByTestId("cv-preview-page-2")).toBeInTheDocument();
-    expect(fetchApplicationArtifactFile).toHaveBeenCalledWith(7, 70, "pdf");
+    expect(fetchApplicationArtifactNamed).toHaveBeenCalledWith(7, 70, "pdf");
     expect(getApplicationArtifact).not.toHaveBeenCalled();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("cv-preview")).not.toBeInTheDocument());

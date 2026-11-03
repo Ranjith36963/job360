@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { fetchApplicationArtifactFile } from "@/lib/api";
+import { fetchApplicationArtifactNamed } from "@/lib/api";
 import { openPdf, type PdfPages } from "@/lib/pdf-pages";
 
 /** The CV as the employer gets it: the real PDF, every page, inside the page (owner, 2026-11-03).
@@ -20,6 +20,7 @@ export function CvPreview({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const [fileName, setFileName] = useState("");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -27,15 +28,31 @@ export function CvPreview({
         data-testid="cv-preview"
       >
         <div className="border-b border-border px-12 py-3 text-center">
-          <DialogTitle className="truncate text-base">{title}</DialogTitle>
+          {/* Owner 2026-11-03: the version and, under it, the file name (e.g. "Ranjith_Guruprakash_CV.pdf"). */}
+          <DialogTitle className="text-base" data-testid="cv-preview-title">
+            {title}
+            {fileName && (
+              <span className="mt-0.5 block break-all font-sans text-xs font-normal text-muted-foreground" data-testid="cv-preview-file">
+                {fileName}
+              </span>
+            )}
+          </DialogTitle>
         </div>
-        {open && <Pages applicationId={applicationId} artifactId={artifactId} />}
+        {open && <Pages applicationId={applicationId} artifactId={artifactId} onName={setFileName} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function Pages({ applicationId, artifactId }: { applicationId: number; artifactId: number }) {
+function Pages({
+  applicationId,
+  artifactId,
+  onName,
+}: {
+  applicationId: number;
+  artifactId: number;
+  onName: (name: string) => void;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [pdf, setPdf] = useState<PdfPages | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +60,11 @@ function Pages({ applicationId, artifactId }: { applicationId: number; artifactI
   useEffect(() => {
     let live = true;
     let opened: PdfPages | null = null;
-    fetchApplicationArtifactFile(applicationId, artifactId, "pdf")
-      .then((blob) => blob.arrayBuffer())
+    fetchApplicationArtifactNamed(applicationId, artifactId, "pdf")
+      .then(({ blob, filename }) => {
+        if (live) onName(filename);
+        return blob.arrayBuffer();
+      })
       .then((bytes) => openPdf(bytes))
       .then((doc) => {
         opened = doc;
@@ -56,7 +76,7 @@ function Pages({ applicationId, artifactId }: { applicationId: number; artifactI
       live = false;
       opened?.close();
     };
-  }, [applicationId, artifactId]);
+  }, [applicationId, artifactId, onName]);
 
   return (
     <div ref={box} className="flex-1 overflow-y-auto bg-muted/40 p-3 sm:p-5" data-testid="cv-preview-pages">

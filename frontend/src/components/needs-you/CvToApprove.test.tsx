@@ -7,11 +7,11 @@ import { JobCards } from "./JobCards";
 const getCvToApprove = vi.fn();
 const markCvSeen = vi.fn();
 const downloadApplicationArtifact = vi.fn();
-const fetchApplicationArtifactFile = vi.fn();
+const fetchApplicationArtifactNamed = vi.fn();
 const openPdf = vi.fn();
 vi.mock("@/lib/pdf-pages", () => ({ openPdf: (...a: unknown[]) => openPdf(...a) }));
 vi.mock("@/lib/api", () => ({
-  fetchApplicationArtifactFile: (...a: unknown[]) => fetchApplicationArtifactFile(...a),
+  fetchApplicationArtifactNamed: (...a: unknown[]) => fetchApplicationArtifactNamed(...a),
   getCvToApprove: (...a: unknown[]) => getCvToApprove(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   downloadApplicationArtifact: (...a: unknown[]) => downloadApplicationArtifact(...a),
@@ -59,7 +59,7 @@ describe("CvToApprove", () => {
 
   it("View CV opens the real PDF in the page, every page of it (owner 2026-11-03)", async () => {
     getCvToApprove.mockResolvedValue({ items: [row(1)] });
-    fetchApplicationArtifactFile.mockResolvedValue({ arrayBuffer: async () => new ArrayBuffer(8) });
+    fetchApplicationArtifactNamed.mockResolvedValue({ blob: { arrayBuffer: async () => new ArrayBuffer(8) }, filename: "Ranjith_Guruprakash_CV.pdf" });
     const draw = vi.fn(() => ({ done: Promise.resolve(), cancel: vi.fn() }));
     openPdf.mockResolvedValue({ count: 2, draw, close: vi.fn() });
     render(<CvToApprove />);
@@ -68,14 +68,17 @@ describe("CvToApprove", () => {
     fireEvent.click(screen.getByTestId("cv-view-1"));
     expect(await screen.findByTestId("cv-preview")).toHaveTextContent("CV version 2");
     expect(await screen.findByTestId("cv-preview-page-2")).toBeInTheDocument();
-    expect(fetchApplicationArtifactFile).toHaveBeenCalledWith(1, 10, "pdf");
+    expect(fetchApplicationArtifactNamed).toHaveBeenCalledWith(1, 10, "pdf");
+    // The version AND the file name the employer gets (owner, 2026-11-03).
+    expect(screen.getByTestId("cv-preview-title")).toHaveTextContent(/^CV version 2/);
+    expect(screen.getByTestId("cv-preview-file")).toHaveTextContent("Ranjith_Guruprakash_CV.pdf");
     await waitFor(() => expect(draw).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/employer searches/i)).not.toBeInTheDocument();
   });
 
   it("a CV that can't be opened says so and points at the download", async () => {
     getCvToApprove.mockResolvedValue({ items: [row(1)] });
-    fetchApplicationArtifactFile.mockRejectedValue(new Error("boom"));
+    fetchApplicationArtifactNamed.mockRejectedValue(new Error("boom"));
     render(<CvToApprove />);
     await screen.findByTestId("job-card-1");
     fireEvent.click(screen.getByTestId("job-row-1-toggle"));
