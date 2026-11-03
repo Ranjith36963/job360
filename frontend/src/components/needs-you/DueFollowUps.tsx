@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { ApplicationSummary } from "@/lib/api";
 import { fetchAllApplications } from "@/lib/home-fetch";
 import { formatDayMonth } from "@/lib/format-date";
+import { useAppHref } from "@/lib/app-href";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 
@@ -17,6 +18,7 @@ export function dueFollowUps(apps: readonly ApplicationSummary[]): ApplicationSu
 }
 
 export function DueBlock({ due }: { due: ApplicationSummary[] }) {
+  const appLink = useAppHref();
   if (due.length === 0) return null;
   return (
     <section aria-labelledby="home-due" data-testid="home-due">
@@ -29,7 +31,7 @@ export function DueBlock({ due }: { due: ApplicationSummary[] }) {
             key={a.id}
             className="flex items-baseline justify-between gap-3 border-t border-border py-2 text-sm first:border-t-0"
           >
-            <Link href={`/applications/${a.id}`} className="min-w-0 underline-offset-2 hover:underline">
+            <Link href={appLink(a.id)} className="min-w-0 underline-offset-2 hover:underline">
               Follow up with {a.job_company || a.job_title}
             </Link>
             {a.follow_up_on && (

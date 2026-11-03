@@ -28,6 +28,7 @@ import { EMPTY_COUNT, fromServerCount, listAllOpenAsks, readSort, saveSort } fro
 import type { Chip, NeedsYouCount, SortKey } from "@/lib/needs-you-items";
 import { NeedsYouControls, readShow, writeShow } from "./NeedsYouControls";
 import { useFoldSet } from "@/components/fold/FoldRow";
+import { NeedsYouOrigin, useAppHref } from "@/lib/app-href";
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
 // a React text node, never as HTML or markdown.
@@ -55,6 +56,7 @@ export function AskCard({
   mode: "open" | "answered";
   onChanged: () => Promise<void>;
 }) {
+  const appLink = useAppHref();
   const [editing, setEditing] = useState(mode === "open");
   const [draft, setDraft] = useState(mode === "open" ? "" : (ask.answer ?? ""));
   const [pending, setPending] = useState<Pending>(null);
@@ -93,7 +95,7 @@ export function AskCard({
           {job &&
             (ask.application_id != null ? (
               <Link
-                href={`/applications/${ask.application_id}`}
+                href={appLink(ask.application_id)}
                 className="underline-offset-2 hover:underline"
               >
                 {job}
@@ -111,7 +113,7 @@ export function AskCard({
       {finish === "done" && ask.application_id != null && (
         <p data-testid="ask-finish-done" className="text-xs text-muted-foreground">
           Did it go through?{" "}
-          <Link href={`/applications/${ask.application_id}`} className="underline underline-offset-2">
+          <Link href={appLink(ask.application_id)} className="underline underline-offset-2">
             Press I sent it on the application
           </Link>
           , or tell your assistant.
@@ -292,13 +294,16 @@ function AnsweredRow({ ask, onChanged }: { ask: Ask; onChanged: () => Promise<vo
 
 /** The requests waiting for the user's OK. Best-effort: a failed read just
  *  shows none, it never blocks the questions. */
-async function waitingRequests(): Promise<WaitingRequest[]> {
+async function waitingRequests(): Promise<{ reqs: WaitingRequest[]; perDay: number | null }> {
   try {
     const view = await getAssistantSettings();
     const line = settingScore(view.apply_min_score);
-    return view.waiting.map((r) => ({ ...r, current_score_line: line, grant_queue: view.auto_grant_scope?.queue ?? null }));
+    return {
+      reqs: view.waiting.map((r) => ({ ...r, current_score_line: line, grant_queue: view.auto_grant_scope?.queue ?? null })),
+      perDay: settingScore(view.linkedin_sends_per_day), // the user's own LinkedIn limit, for the pace line
+    };
   } catch {
-    return [];
+    return { reqs: [], perDay: null };
   }
 }
 
@@ -314,12 +319,14 @@ function announce(openCount: number) {
 }
 
 /** `aside` sits right of the summary on wide screens, below it on narrow ones (the page passes RunNowPanel). */
-export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
+/** `focusJob`: the job the user just came back from (?job=, set by "Back to Needs you"); its row unfolds and scrolls into view. */
+export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJob?: number | null } = {}) {
   const [open, setOpen] = useState<Ask[] | null>(null);
   // What the job list reports: its loaded cards, the asks it could not place, how many jobs it lists.
   const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false, readyTotal: null });
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
+  const [linkedinPerDay, setLinkedinPerDay] = useState<number | null>(null);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
   // Answered is folded until the user opens it (owner plan 3b).
@@ -339,10 +346,11 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
   const fold = useFoldSet();
 
   const apply = useCallback(
-    (o: Ask[], a: Awaited<ReturnType<typeof listAsks>>, w: WaitingRequest[]) => {
+    (o: Ask[], a: Awaited<ReturnType<typeof listAsks>>, w: Awaited<ReturnType<typeof waitingRequests>>) => {
       setOpen(o);
       setAnswered(a.asks);
-      setWaiting(w);
+      setWaiting(w.reqs);
+      setLinkedinPerDay(w.perDay);
       setMoreAnswered(a.asks.length >= PAGE);
       setError(null);
     },
@@ -419,6 +427,11 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
   // A chip that empties (its last item answered) falls back to All.
   const active: Chip = show !== "all" && jobs.settled && count !== null && !(shownCount.byChip[show] > 0) ? "all" : show;
 
+  // A chip that emptied falls back to All: the link says so too, so a reload or a copy of it matches the page.
+  useEffect(() => {
+    if (active !== show) writeShow(active);
+  }, [active, show]);
+
   const countN = count ? count.n : null;
   useEffect(() => {
     if (countN !== null) announce(countN);
@@ -453,6 +466,7 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
   }
 
   return (
+    <NeedsYouOrigin.Provider value={active}>
     <div className="flex min-w-0 flex-col gap-6" data-testid="needs-you-main">
       {(error || (countFailed && !count)) && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
@@ -493,7 +507,7 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         {(active === "all" || active === "answers") && (count === null || count.answerOnce) && (
           <Questionnaire onChanged={() => setCountTick((t) => t + 1)} />
         )}
-        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} />
+        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} linkedinPerDay={linkedinPerDay} focusJob={focusJob} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>
       <OtherList
@@ -551,5 +565,6 @@ export function NeedsYou({ aside }: { aside?: ReactNode } = {}) {
         </section>
       )}
     </div>
+    </NeedsYouOrigin.Provider>
   );
 }
