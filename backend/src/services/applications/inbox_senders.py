@@ -9,7 +9,8 @@ Job360 still never reads mail or ranks a job (VISION rule 4). ``List-Unsubscribe
 on an inbox item, so it is not read here.
 
 Order of the checks: a relay that carries one person's own message (LinkedIn messages, Indeed's
-employer mail) is a person; a known job-alert sender, domain or local-part word is an alert; a
+employer mail) is a person; a listed job-alert address, local part, alert-only host or bulk local-part
+word is an alert (never a whole board domain: recruiters write from it too); a
 no-reply address is automated; anything else is a person who wrote to the user.
 """
 from __future__ import annotations
@@ -22,22 +23,19 @@ RELAY_ADDRESSES = frozenset({
     "messages-noreply@linkedin.com", "inmail-hit-reply@linkedin.com", "hit-reply@linkedin.com",
 })
 RELAY_DOMAINS = frozenset({"indeedemail.com"})
-# Job-alert and newsletter senders: an exact address, or a whole domain (and its subdomains).
+# Job-alert and newsletter senders, listed EXACTLY (review of #1519): a whole board domain is never an
+# alert, because a recruiter writes from it too (richard@reed.co.uk, jane@dice.com). An address is an
+# alert only by its exact address, its exact local part, a bulk word in its local part, or an
+# alert-only host (the full host, never its parent domain).
 ALERT_ADDRESSES = frozenset({
     "jobalerts-noreply@linkedin.com", "jobs-listings@linkedin.com", "jobs-noreply@linkedin.com",
     "newsletters-noreply@linkedin.com", "alert@indeed.com", "noreply@glassdoor.com",
 })
-ALERT_DOMAINS = frozenset({
-    "jobalert.indeed.com", "match.indeed.com", "glassdoor.com", "totaljobs.com", "reed.co.uk",
-    "cv-library.co.uk", "monster.com", "monster.co.uk", "ziprecruiter.com", "simplyhired.com",
-    "careerbuilder.com", "jobsite.co.uk", "adzuna.co.uk", "adzuna.com", "jooble.org", "dice.com",
-    "seek.com.au", "jobs2web.com", "otta.com", "welcometothejungle.com", "wellfound.com",
-    "naukri.com", "jobstreet.com", "bayt.com", "gulftalent.com", "hired.com", "jobleads.com",
-    "builtin.com", "remoteok.com", "weworkremotely.com", "himalayas.app",
-})
-# Words in the local part (split on - _ . +) that name an alert or a newsletter.
+ALERT_LOCALS = frozenset({"jobs-noreply", "jobs-listings", "jobs-digest", "job-digest", "jobmail", "jobmatch"})
+ALERT_HOSTS = frozenset({"jobalert.indeed.com", "match.indeed.com"})
+# Words in the local part (split on - _ . +) that name a bulk alert or a newsletter.
 ALERT_LOCAL_WORDS = frozenset({
-    "alert", "alerts", "jobalert", "jobalerts", "newsletter", "newsletters", "digest", "jobmail", "jobmatch",
+    "alert", "alerts", "jobalert", "jobalerts", "newsletter", "newsletters", "digest",
 })
 # Local parts (separators removed) that never take a reply.
 _NO_REPLY_MARKS = ("noreply", "donotreply", "dontreply")
@@ -78,18 +76,33 @@ def _in_domains(domain: str, domains: frozenset[str]) -> bool:
     return any(".".join(labels[i:]) in domains for i in range(len(labels) - 1))
 
 
+def is_alert_sender(sender: str) -> bool:
+    """The strict bulk-alert test: True only for a listed address, local part or alert-only host, or a
+    bulk word in the local part. A relay of one person's message, or a bare name, is never an alert."""
+    addr = address_of(sender)
+    if not addr:
+        return False
+    local, _, domain = addr.rpartition("@")
+    if addr in RELAY_ADDRESSES or _in_domains(domain, RELAY_DOMAINS):
+        return False
+    return (
+        addr in ALERT_ADDRESSES or local in ALERT_LOCALS or domain in ALERT_HOSTS
+        or any(w in ALERT_LOCAL_WORDS for w in _local_words(local))
+    )
+
+
 def sender_kind(sender: str) -> str:
-    """``person`` | ``alert`` | ``automated`` for one stored sender string."""
+    """``person`` | ``alert`` | ``automated`` for one stored sender string. Fails safe: anything
+    not proven a bulk alert or a no-reply address is a person."""
     addr = address_of(sender)
     if not addr:
         return PERSON  # a bare display name: someone wrote; never hidden on a guess
     local, _, domain = addr.rpartition("@")
     if addr in RELAY_ADDRESSES or _in_domains(domain, RELAY_DOMAINS):
         return PERSON
-    words = _local_words(local)
-    if addr in ALERT_ADDRESSES or _in_domains(domain, ALERT_DOMAINS) or any(w in ALERT_LOCAL_WORDS for w in words):
+    if is_alert_sender(sender):
         return ALERT
-    joined = "".join(words)
+    joined = "".join(_local_words(local))
     if any(mark in joined for mark in _NO_REPLY_MARKS) or joined in _NO_REPLY_LOCALS:
         return AUTOMATED
     return PERSON

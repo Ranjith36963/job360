@@ -197,7 +197,7 @@ async def test_mcp_whats_new_pages_and_lists_stale_alerts(authenticated_async_co
     async with mcp_runtime():
         async with mcp as session:
             await _call(session, "record_events", {"unmatched": [
-                _mail(f"al-{i:02d}", "Totaljobs <jobs@alerts.totaljobs.com>", _iso(now, 10 + i)) for i in range(12)
+                _mail(f"al-{i:02d}", "Totaljobs <alerts@totaljobs.com>", _iso(now, 10 + i)) for i in range(12)
             ] + [_mail("rec-1", "Sam Recruiter <sam@hire.example>", _iso(now, 1), "Your CV")]})
             default = await _call(session, "whats_new", {})
             stale = await _call(session, "whats_new", {"inbox_stale_alerts": True})
@@ -227,8 +227,52 @@ async def test_mcp_whats_new_pages_and_lists_stale_alerts(authenticated_async_co
     ("Workday <do_not_reply@myworkday.com>", "automated"),
     ("notifications@lever.co", "automated"),
     ("Evil <x@notglassdoor.com>", "person"),  # a look-alike domain is not the alert domain
+    # Review of #1519: a person on a job board's own domain is a person, never an alert.
+    ("Richard Samson <richard@reed.co.uk>", "person"),
+    ("jane@dice.com", "person"),
+    ("jo@mail.ziprecruiter.com", "person"),
+    ("jo@hired.com", "person"),
+    ("jo@otta.com", "person"),
+    ("jo@glassdoor.com", "person"),
+    ("jo@indeed.com", "person"),
+    ("Reed <noreply@reed.co.uk>", "automated"),  # no-reply: shown, never hidden as stale
+    ("jobs-noreply@ziprecruiter.com", "alert"),
+    ("x@sub.jobalert.indeed.com", "person"),  # an alert-only host is listed exactly, not its subdomains
 ])
 def test_sender_kind(sender: str, kind: str):
     from src.services.applications.inbox_senders import sender_kind
 
     assert sender_kind(sender) == kind
+
+
+@pytest.mark.asyncio
+async def test_a_recruiter_on_a_job_board_domain_is_never_hidden(authenticated_async_context):
+    """Review of #1519: richard@reed.co.uk and jane@dice.com, open and over 7 days old, stay visible as
+    people, first; the bulk LinkedIn alert of the same age is hidden (and reachable)."""
+    now = datetime.now(timezone.utc)
+    async with authenticated_async_context() as client:
+        await _store(client, [
+            _mail("alert-old", "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>", _iso(now, 12)),
+            _mail("reed-rec", "Richard Samson <richard@reed.co.uk>", _iso(now, 10), "Re: agentic AI roles"),
+            _mail("dice-rec", "Jane <jane@dice.com>", _iso(now, 14), "Your profile"),
+            _mail("alert-new", "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>", _iso(now, 1)),
+        ])
+        default = (await client.get("/api/whats-new")).json()
+        everything = (await client.get("/api/whats-new", params={"inbox_stale_alerts": "true"})).json()
+    items = default["inbox_items"]
+    assert [i["message_id"] for i in items] == ["reed-rec", "dice-rec", "alert-new"]
+    assert [i["sender_kind"] for i in items] == ["person", "person", "alert"]
+    assert default["inbox_page"]["people"] == 2 and default["inbox_page"]["stale_alerts_hidden"] == 1
+    assert [i["message_id"] for i in everything["inbox_items"]] == ["reed-rec", "dice-rec", "alert-new", "alert-old"]
+
+
+def test_a_stale_item_is_hidden_only_when_the_strict_sender_test_agrees():
+    """Lock two: even an item stored as `alert` stays visible unless its sender passes is_alert_sender."""
+    from src.services.applications.inbox_items import _is_stale_alert
+
+    long_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    person = {"sender_kind": "alert", "sender": "Richard <richard@reed.co.uk>", "received_at": long_ago}
+    bulk = {"sender_kind": "alert", "sender": "jobalerts-noreply@linkedin.com", "received_at": long_ago}
+    assert _is_stale_alert(person, cutoff) is False
+    assert _is_stale_alert(bulk, cutoff) is True

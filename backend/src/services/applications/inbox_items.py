@@ -214,7 +214,9 @@ def _when(item: dict[str, Any]) -> str:
 
 def _is_stale_alert(item: dict[str, Any], cutoff: datetime) -> bool:
     """A job-alert digest received before ``cutoff`` (an unreadable date is never hidden)."""
-    if item["sender_kind"] != inbox_senders.ALERT:
+    # Two locks (review of #1519): the stored kind AND the strict sender test, so a recruiter's reply
+    # is never hidden by a looser classification.
+    if item["sender_kind"] != inbox_senders.ALERT or not inbox_senders.is_alert_sender(item.get("sender") or ""):
         return False
     try:
         when = datetime.fromisoformat(_when(item).replace("Z", "+00:00"))
