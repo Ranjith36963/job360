@@ -759,6 +759,9 @@ OUTREACH_SENSITIVE_WORDS = (
 LINKEDIN_FOLLOW_UP_DAYS = int(os.getenv("LINKEDIN_FOLLOW_UP_DAYS", "6"))
 # How often the user's own browser checks My Network for accepted invites while anyone is pending.
 LINKEDIN_PENDING_CHECK_HOURS = int(os.getenv("LINKEDIN_PENDING_CHECK_HOURS", "4"))
+# Owner #12 (2026-11-05): own-browser tasks wait and no PC session took, released or claimed one for longer than
+# this many hours (or ever): the queue, Needs you and whats_due say `pc_idle` (own_browser.pc_idle).
+PC_IDLE_WARN_HOURS = int(os.getenv("PC_IDLE_WARN_HOURS", "3"))
 OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))
 # Every channel together, per user per day (the email gate checks it first).
 OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "300"))

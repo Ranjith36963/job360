@@ -8069,6 +8069,7 @@ export interface components {
              * @default []
              */
             other_ask_ids: number[];
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
         };
         /**
          * NextStepOut
@@ -8350,6 +8351,20 @@ export interface components {
             min?: number | null;
             /** Period */
             period?: string | null;
+        };
+        /**
+         * PcIdleOut
+         * @description Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever).
+         */
+        PcIdleOut: {
+            /** Hours */
+            hours: number;
+            /** Since */
+            since?: string | null;
+            /** Text */
+            text: string;
+            /** Waiting */
+            waiting: number;
         };
         /**
          * PersonFullOut
@@ -8914,6 +8929,7 @@ export interface components {
             open_now: boolean;
             /** Opens At */
             opens_at?: string | null;
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
             /** Pc On Hours */
             pc_on_hours?: {
                 [key: string]: unknown;
@@ -11236,6 +11252,7 @@ export interface components {
             };
             /** Nothing Due */
             nothing_due: boolean;
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
             /** Run Now */
             run_now?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Running */

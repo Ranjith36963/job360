@@ -61,6 +61,7 @@ RELEASE_REASONS = (
 # release: LinkedIn's invitation limit is weekly).
 RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
+TAKE_SLOT = "own_browser:take"  # the newest take by any own-browser session (last_pc_activity_at)
 # An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
 # returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
@@ -374,6 +375,73 @@ async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]
         "opens_at": opens_at.isoformat() if opens_at else None,
         "run_now_until": until.isoformat() if until else None,
     }
+
+
+# ── Has the user's PC worked the queue? (owner #12, 2026-11-05) ──────────────────────────────────────────
+
+
+async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetime]:
+    """The newest sign that a session in the user's own browser worked the queue, from rows only the own-browser
+    door writes: any take, whatever it answered (:data:`TAKE_SLOT`), a person claimed or released
+    (``contact_outreach``), a hunt / people / pending task claimed or closed (the ``pc_duties`` slots; never the
+    user's own Run now slot). A scheduled cloud run never reaches these. ``None``: never."""
+    from src.services.applications import pc_duties  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT MAX(recorded_at) FROM contact_outreach WHERE user_id = ? AND entry IN (?, ?)",
+        (user_id, CLAIMED, RELEASED),
+    )
+    got = await cur.fetchone()
+    found = [_when(got[0]) if got is not None and got[0] else None]
+    slots = [TAKE_SLOT] + [p + k for p in (pc_duties.SLOT, pc_duties.CLAIM) for k in pc_duties.KINDS]
+    cur = await db._db.execute(
+        "SELECT MAX(done_at) FROM assistant_duty_runs WHERE user_id = ? "  # noqa: S608 - placeholders only
+        f"AND duty IN ({','.join('?' for _ in slots)})",
+        (user_id, *slots),
+    )
+    got = await cur.fetchone()
+    found.append(_when(got[0]) if got is not None and got[0] else None)
+    seen = [at for at in found if at is not None]
+    return max(seen) if seen else None
+
+
+async def stamp_take(db: JobDatabase, user_id: str, now: datetime) -> None:
+    """One slot per user: the newest own-browser take, whatever it answered (owner #12: a PC session that is up
+    but finds nothing to do, or is told to wait, is alive). Not a scheduled duty: ``whats_due`` never reads it."""
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat()),
+    )
+    await db._db.commit()
+
+
+def idle_fact(last: Optional[datetime], waiting: int, now: datetime) -> Optional[dict[str, Any]]:
+    """Pure: ``{since, waiting, hours, text}`` when tasks wait for the user's own browser and nothing worked it
+    for MORE than ``PC_IDLE_WARN_HOURS`` (exactly the limit is not yet idle), or ever; else ``None``."""
+    hours = settings.PC_IDLE_WARN_HOURS
+    if waiting <= 0 or (last is not None and now - last <= timedelta(hours=hours)):
+        return None
+    tasks = f"{waiting} task{'' if waiting == 1 else 's'} {'waits' if waiting == 1 else 'wait'}"
+    when = f"since {last.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC" if last is not None else "yet"
+    return {
+        "since": last.isoformat() if last is not None else None, "waiting": waiting, "hours": hours,
+        "text": f"Nothing has worked your PC queue {when}; {tasks}. Start your PC browser session.",
+    }
+
+
+async def pc_idle(db: JobDatabase, user_id: str, now: datetime, waiting: int) -> Optional[dict[str, Any]]:
+    """:func:`idle_fact` for this user; ``None`` while paused (nothing is meant to run) or nothing waits."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    if waiting <= 0:
+        return None
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if rules.is_paused(cfg.paused_until, now):
+        return None
+    return idle_fact(await last_pc_activity_at(db, user_id), waiting, now)
 
 
 # ── The queue ───────────────────────────────────────────────────────────────────────────────────────────
@@ -706,6 +774,7 @@ async def take(
     if not label:
         raise SpineError(422, "session is needed: a short label that tells your sessions apart")
     actor = actor_for(user)
+    await stamp_take(db, user.id, now)
     win = await window(db, user.id, now)
     if win["why"] == "paused":
         _log("own_browser_take", user.id, "paused")

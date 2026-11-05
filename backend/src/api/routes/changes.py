@@ -37,6 +37,7 @@ from pydantic import BaseModel
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user
 from src.api.dependencies import get_request_db
+from src.api.routes.own_browser import PcIdleOut
 from src.repositories.database import JobDatabase
 from src.services.applications import sent_alone
 from src.services.applications.needs_you_count import needs_you_count
@@ -178,6 +179,7 @@ class NeedsYouCountOut(BaseModel):
     other_ask_ids: list[int] = []  # open asks tied to a job that is not a row (e.g. proof missing): shown in Other
     job_ids: list[int] = []  # the jobs waiting on the user, oldest first blocker first (the page's rows)
     job_ids_by_kind: dict[str, list[int]] = {}  # the same ids grouped by their first blocker's kind
+    pc_idle: Optional[PcIdleOut] = None  # owner #12: jobs wait on the user's PC and no PC session worked them
 
 
 @router.get("/needs-you-count", response_model=NeedsYouCountOut, dependencies=AUTH_FIRST)
