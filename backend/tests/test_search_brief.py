@@ -188,6 +188,33 @@ def test_no_residence_means_no_question():
     assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE))["gaps"] == []
 
 
+def test_yes_variants_keep_the_country():
+    # Memory's true keeps the country, whatever else its row or other rows hold.
+    for logistics in (
+        _moves("IN", True),
+        {"countries": [{"country": "IN", "willing_to_relocate": True, "driving_licence": False}]},
+        {"countries": [{"country": "US", "willing_to_relocate": False}, {"country": "IN", "willing_to_relocate": True}]},
+    ):
+        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", logistics)
+        assert brief["gaps"] == [] and brief["work_from"] == ["IN"], logistics
+
+
+def test_unclear_approved_answer_stays_a_gap_with_same_wording():
+    # Anything but a true/false in Memory is not an answer: the same question stays open.
+    for value in ("Yes", "maybe", None, 1):
+        logistics = {"countries": [{"country": "IN", "willing_to_relocate": value}]}
+        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", logistics)
+        assert [g["ask"] for g in brief["gaps"]] == [_Q] and brief["work_from"] == ["IN"], value
+
+
+def test_no_variants_drop_the_country():
+    for logistics in (
+        _moves("IN", False),
+        {"countries": [{"country": "US", "willing_to_relocate": True}, {"country": "IN", "willing_to_relocate": False}]},
+    ):
+        assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", logistics)["work_from"] == [], logistics
+
+
 def test_only_remote_ok_rows_get_the_residence_question():
     in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
     us_remote = {"country": "US", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"}
@@ -198,6 +225,45 @@ def test_only_remote_ok_rows_get_the_residence_question():
 def test_no_remote_row_means_no_residence_question():
     in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
     assert build_search_brief(_rtw(in_onsite), "GB", {})["gaps"] == []
+
+
+# ── the work-from gap closes only through Memory's logistics row (S4) ─────────
+
+def _wf_brief(logistics: Any):
+    rtw = _rtw(
+        {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"},
+    )
+    return build_search_brief(rtw, "GB", logistics)
+
+
+def test_gap_carries_a_fixed_topic():
+    gaps = _wf_brief(None)["gaps"]
+    assert [(g["country"], g["path"], g["field"]) for g in gaps] == [
+        ("IN", "user_info.logistics", "willing_to_relocate")
+    ]
+
+
+def test_gap_closes_via_topic_with_different_wording():
+    # The question's wording plays no part: Memory's IN row answers it.
+    brief = _wf_brief(_moves("IN", True))
+    assert brief["gaps"] == [] and brief["work_from"] == ["GB", "IN"]
+
+
+def test_gap_closes_via_wording_differing_in_case_and_punctuation():
+    rtw = _rtw(
+        {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"},
+    )
+    brief = build_search_brief(rtw, " gb ", _moves("IN", False))  # residence in any case and spacing
+    assert brief["gaps"] == [] and brief["work_from"] == ["GB"]
+
+
+def test_gap_stays_open_for_a_different_topic_or_unapproved_answer():
+    other_country = _moves("US", True)
+    assert [g["country"] for g in _wf_brief(other_country)["gaps"]] == ["IN"]
+    no_answer = {"countries": [{"country": "IN", "driving_licence": True}]}
+    assert [g["field"] for g in _wf_brief(no_answer)["gaps"]] == ["willing_to_relocate"]
 
 
 def test_find_answer_company_scope_and_normalizer():
