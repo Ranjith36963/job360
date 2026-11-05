@@ -1018,6 +1018,11 @@ Job360 counts what you saved; it never ranks or recommends a job. `save_fit` sto
 - `bring_job` can return `repost`: among the jobs the user brought, this title at this company was first
   brought on `first_seen`, 1-90 days ago, under another link. Tell the user; they decide. Never skip a job
   because of it. A 409 from `bring_job` carries the same sentence.
+- `bring_job` on a job the user already has returns `existing: true`, `application_id`, `matched_on`
+  (`same_title_and_company`, `same_url`, `same_company_and_role`, `repost`), `differs` (field names, never
+  values) and `next`: read `next`. The 409 for a different posting carries the same fields. A re-bring saves the
+  facts it sends (`next` says which it overwrote); fix any other differing field with `update_job`. Different
+  posting: bring it again with a title that tells them apart.
 - `checks` (bring_job, get_job, the kit) also carry facts from the user's OWN records:
   `company_history` (earlier applications here: answered, or no answer after 28+ days; a rejection is
   an answer), `similar_ad` (an ad brought in the last 90 days with near-identical text under another
