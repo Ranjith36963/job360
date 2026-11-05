@@ -1157,20 +1157,21 @@ def _ans(question: str, answer: str, **kw: Any) -> dict[str, Any]:
 
 
 def test_resolve_ops_append_upsert_remove_at_give_the_whole_list():
-    saved = [_ans("Notice?", "1 month", topic="notice"), _ans("Why us?", "Mission", company="Acme")]
+    # Outside Memory's families (plan S2 refuses a new saved answer for a Memory fact: see test_memory_first).
+    saved = [_ans("Referee?", "1 month", topic="referee"), _ans("Why us?", "Mission", company="Acme")]
     current = {ANSWERS: saved, NOTES: ["a", "b", "c"]}
 
     [(path, value)] = edits.resolve_ops([(ANSWERS, "append", _ans("New?", "x"), None)], current)
     assert path == ANSWERS and value == [*saved, _ans("New?", "x")]
     # upsert by topic (+ same company): replaced in place, not duplicated
-    notice = _ans("Notice period?", "2 months", topic="notice")
+    notice = _ans("Referee name?", "2 months", topic="referee")
     [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", notice, None)], current)
     assert [r["answer"] for r in value] == ["2 months", "Mission"]
     # upsert by question + company (no topic): replaced; no match = appended
     [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans(" why  US? ", "People", company="ACME"), None)], current)
     assert [r["answer"] for r in value] == ["1 month", "People"]
-    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans("Salary?", "Ask", topic="salary"), None)], current)
-    assert len(value) == 3 and value[-1]["topic"] == "salary"
+    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans("Hobby?", "Ask", topic="hobby"), None)], current)
+    assert len(value) == 3 and value[-1]["topic"] == "hobby"
     [(_, value)] = edits.resolve_ops([(NOTES, "remove_at", None, 1)], current)
     assert value == ["a", "c"]
     # several ops on one path collapse into ONE pair, in call order; a `set` passes through untouched
@@ -1255,22 +1256,23 @@ async def test_patch_item_ops_write_the_resulting_full_list_append_only(
 
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        saved = [_ans("Notice?", "1 month", topic="notice", approved=True), _ans("Why us?", "Mission")]
+        # Outside Memory's families (plan S2 refuses a new saved answer for a Memory fact).
+        saved = [_ans("Referee?", "1 month", topic="referee", approved=True), _ans("Why us?", "Mission")]
         assert (await _patch(client, {"path": ANSWERS, "value": saved})).status_code == 200
-        resp = await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("Visa?", "No")})
+        resp = await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("Portfolio?", "No")})
         assert resp.status_code == 200, resp.text
         answers = (await _get(client))["user_info"]["answers"]
-        assert [a["question"] for a in answers] == ["Notice?", "Why us?", "Visa?"]
+        assert [a["question"] for a in answers] == ["Referee?", "Why us?", "Portfolio?"]
         resp = await _patch(
-            client, {"path": ANSWERS, "op": "upsert", "value": _ans("Notice period?", "2 months", topic="notice")}
+            client, {"path": ANSWERS, "op": "upsert", "value": _ans("Referee name?", "2 months", topic="referee")}
         )
         assert resp.status_code == 200, resp.text
         answers = (await _get(client))["user_info"]["answers"]
         assert [(a["question"], a["answer"]) for a in answers] == [
-            ("Notice period?", "2 months"), ("Why us?", "Mission"), ("Visa?", "No")
+            ("Referee name?", "2 months"), ("Why us?", "Mission"), ("Portfolio?", "No")
         ]
         assert (await _patch(client, {"path": ANSWERS, "op": "remove_at", "index": 1})).status_code == 200
-        assert [a["question"] for a in (await _get(client))["user_info"]["answers"]] == ["Notice period?", "Visa?"]
+        assert [a["question"] for a in (await _get(client))["user_info"]["answers"]] == ["Referee name?", "Portfolio?"]
         # history: one new row per call, each holding the WHOLE list, nothing rewritten
         history = path_history(fixture_user_id, ANSWERS, 10)
         assert [len(row["value"]) for row in history] == [2, 3, 3, 2]

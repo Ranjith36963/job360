@@ -836,6 +836,22 @@ def is_list_path(path: str) -> bool:
     return path in editable_paths() and typing.get_origin(_field_type(path)) is list
 
 
+def _refuse_memory_answer(path: str, value: dict[str, Any]) -> None:
+    """Memory first (owner 2026-11-05, plan S2): a NEW saved answer (append / upsert) in Memory's families
+    is refused, naming the page the user sets it on in Job360. Stored records are not touched."""
+    from src.services.profile.ask_once import memory_note  # noqa: PLC0415
+
+    topic, question = str(value.get("topic") or ""), str(value.get("question") or "")
+    codes = [p for p in topic.split(".") if len(p) == 2 and p.isalpha() and p.isupper()]
+    country = str(value.get("country") or "").upper() or (codes[0] if len(codes) == 1 else None)
+    note = memory_note(topic, question, country)
+    if note:
+        raise ProfileEditError(
+            422, f"{path}: '{topic or question[:80]}' is {note}; ask the user to set it there. Nothing was saved.",
+            "bad_value",
+        )
+
+
 def _apply_op(path: str, op: str, value: Any, index: Any, items: list[Any]) -> list[Any]:
     from src.services.profile import user_info  # noqa: PLC0415 — imports this module
 
@@ -852,6 +868,8 @@ def _apply_op(path: str, op: str, value: Any, index: Any, items: list[Any]) -> l
         return items[:index] + items[index + 1:]
     if value is None:
         raise ProfileEditError(422, f"{path}: {op} needs a value (one item, not the list)", "bad_value")
+    if path == user_info.USER_INFO_ANSWERS_PATH and isinstance(value, dict):
+        _refuse_memory_answer(path, value)
     if op == "upsert":
         if path != user_info.USER_INFO_ANSWERS_PATH:
             raise ProfileEditError(

@@ -939,8 +939,8 @@ async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: 
 
 async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: Any) -> dict[str, Any]:
     """Ask once (owner 2026-11-02): the user pressed "remember" on rows of a job's ask. Each answer is saved
-    as their approved answer under the row's key (``ask_once.remember``: a country-specific one is bound to
-    THIS job's country, any other is global); a per-job row is skipped.
+    as their approved answer under the row's key (``ask_once.remember``); a per-job row is skipped, and a
+    row in Memory's families is never saved (``not_saved``: the user sets it on THIS job's country page).
     The ask itself is not changed. Session only (the route). 404 / 422 write nothing."""
     from src.services.profile import ask_once  # noqa: PLC0415
 
@@ -957,13 +957,15 @@ async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answe
     country = (str((app_row or {}).get("job_country") or "").strip().upper()) or None
     rows = [{"topic": k, "question": str(by_key[k]["question"]),
              "answer": _item_text(f"answers.{k}", v, ASK_ITEM_ANSWER_MAX_CHARS)} for k, v in answers.items()]
-    saved = ask_once.remember(user_id, rows, country)
+    done = ask_once.remember(user_id, rows, country)
+    saved = done["saved"]
     get_audit_logger().info(
         "ask_rows_remembered",
         extra={"event": "ask_rows_remembered", "user_id": user_id, "ask_id": safe_log_value(ask_id),
                "count": len(saved)},
     )
-    return {"saved": saved, "skipped": [k for k in answers if k not in saved], "country": country}
+    return {"saved": saved, "skipped": [k for k in answers if k not in saved], "country": country,
+            "not_saved": done["not_saved"]}
 
 
 def carried_answers(

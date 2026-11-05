@@ -1089,8 +1089,8 @@ export interface paths {
         put?: never;
         /**
          * Remember Ask Row Answers
-         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific
-         *     one for THIS job's country only, the rest global), so the next job asking them needs no owner.
+         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job
+         *     asking them needs no owner. A row in Memory's families is not saved (``not_saved`` says why).
          *     Only the owner's press saves for reuse: session only, no MCP twin.
          *     Per-job rows (how you heard, consent, essays) are skipped.
          */
@@ -3288,8 +3288,8 @@ export interface paths {
         put?: never;
         /**
          * Remember Questionnaire
-         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer,
-         *     bound to ``country`` when it is country-specific (right to work, salary...), else global.
+         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer;
+         *     one in Memory's families (right to work, salary...) is not saved (``not_saved``: set it on that page).
          *     Session only (no MCP twin): nothing is remembered without that press.
          */
         post: operations["remember_questionnaire_api_profile_questionnaire_remember_post"];
@@ -9531,6 +9531,10 @@ export interface components {
         };
         /** RememberOut */
         RememberOut: {
+            /** Not Saved */
+            not_saved?: {
+                [key: string]: string;
+            };
             /** Saved */
             saved: string[];
         };
@@ -9545,6 +9549,10 @@ export interface components {
         RememberRowsOut: {
             /** Country */
             country?: string | null;
+            /** Not Saved */
+            not_saved?: {
+                [key: string]: string;
+            };
             /** Saved */
             saved: string[];
             /** Skipped */

@@ -111,20 +111,21 @@ class RememberRequest(BaseModel):
 
 class RememberOut(BaseModel):
     saved: list[str]
+    # Memory first (plan S2): rows in Memory's families, never saved -> why, naming the page to set it on.
+    not_saved: dict[str, str] = Field(default_factory=dict)
 
 
 @router.post("/profile/questionnaire/remember", response_model=RememberOut, dependencies=AUTH_FIRST)
 async def remember_questionnaire(
     body: RememberRequest, user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer,
-    bound to ``country`` when it is country-specific (right to work, salary...), else global.
+    """The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer;
+    one in Memory's families (right to work, salary...) is not saved (``not_saved``: set it on that page).
     Session only (no MCP twin): nothing is remembered without that press."""
     from src.services.profile import ask_once  # noqa: PLC0415
     from src.services.profile.edits import ProfileEditError  # noqa: PLC0415
 
     try:
-        saved = ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
+        return ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
     except ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    return {"saved": saved}

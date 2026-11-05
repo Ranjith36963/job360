@@ -14344,6 +14344,13 @@
       },
       "RememberOut": {
         "properties": {
+          "not_saved": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Not Saved",
+            "type": "object"
+          },
           "saved": {
             "items": {
               "type": "string"
@@ -14396,6 +14403,13 @@
               }
             ],
             "title": "Country"
+          },
+          "not_saved": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Not Saved",
+            "type": "object"
           },
           "saved": {
             "items": {
@@ -23839,7 +23853,7 @@
     },
     "/api/asks/{ask_id}/answers/remember": {
       "post": {
-        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific\none for THIS job's country only, the rest global), so the next job asking them needs no owner.\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
+        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job\nasking them needs no owner. A row in Memory's families is not saved (``not_saved`` says why).\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
         "operationId": "remember_ask_row_answers_api_asks__ask_id__answers_remember_post",
         "parameters": [
           {
@@ -30555,7 +30569,7 @@
     },
     "/api/profile/questionnaire/remember": {
       "post": {
-        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer,\nbound to ``country`` when it is country-specific (right to work, salary...), else global.\nSession only (no MCP twin): nothing is remembered without that press.",
+        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer;\none in Memory's families (right to work, salary...) is not saved (``not_saved``: set it on that page).\nSession only (no MCP twin): nothing is remembered without that press.",
         "operationId": "remember_questionnaire_api_profile_questionnaire_remember_post",
         "parameters": [
           {
