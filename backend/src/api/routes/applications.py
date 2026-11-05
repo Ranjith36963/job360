@@ -790,6 +790,8 @@ class InboxItemOut(BaseModel):
     resolved_by: Optional[str]
     resolved_at: Optional[str]
     event_id: Optional[int]  # the event recorded with this message id on application_id (None = not yet)
+    # Owner report #14: person (wrote to the user) | alert (job alert / newsletter) | automated (no-reply).
+    sender_kind: str = "person"
 
 
 class AskQuestionOut(BaseModel):
@@ -1272,6 +1274,25 @@ class WhatsNewApplicationOut(BaseModel):
     last_event_at: Optional[str]
 
 
+class InboxSenderGroupOut(BaseModel):
+    sender: str
+    sender_kind: str
+    count: int
+
+
+class InboxPageOut(BaseModel):
+    """whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``."""
+
+    total: int
+    offset: int
+    shown: int
+    more: bool
+    next_offset: Optional[int]
+    people: int  # open items from a person
+    stale_alerts_hidden: int  # job alerts older than INBOX_ALERTS_STALE_DAYS left out (inbox_stale_alerts=true)
+    groups: list[InboxSenderGroupOut]
+
+
 class WhatsNewResponse(BaseModel):
     now: str
     since: str
@@ -1286,8 +1307,10 @@ class WhatsNewResponse(BaseModel):
     proof_missing: list[ProofMissingOut]
     # Gap 10 - interviews in the next 7 days, and the last 3 days' with no outcome recorded yet.
     interviews: InterviewAgenda = InterviewAgenda()
-    # Feature 10 - unmatched mail: every open item + items resolved in the last INBOX_ITEMS_RECENT_DAYS.
+    # Feature 10 - unmatched mail: open items + items resolved in the last INBOX_ITEMS_RECENT_DAYS,
+    # one page (owner report #9/#14): people first, then by sender, then resolved.
     inbox_items: list[InboxItemOut] = Field(default_factory=list)
+    inbox_page: Optional[InboxPageOut] = None
 
 
 class ExportArtifactOut(BaseModel):
@@ -4365,7 +4388,12 @@ async def whats_new(
     since: Optional[str] = Query(None),
     after_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
+    inbox_offset: int = Query(0, ge=0),
+    inbox_stale_alerts: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    return await spine.whats_new(db, user.id, since=since, after_id=after_id, limit=limit)
+    return await spine.whats_new(
+        db, user.id, since=since, after_id=after_id, limit=limit,
+        inbox_offset=inbox_offset, inbox_stale_alerts=inbox_stale_alerts,
+    )

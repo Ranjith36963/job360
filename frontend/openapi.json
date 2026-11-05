@@ -8134,6 +8134,11 @@
             "title": "Sender",
             "type": "string"
           },
+          "sender_kind": {
+            "default": "person",
+            "title": "Sender Kind",
+            "type": "string"
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
@@ -8169,6 +8174,65 @@
           "event_id"
         ],
         "title": "InboxItemOut",
+        "type": "object"
+      },
+      "InboxPageOut": {
+        "description": "whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/InboxSenderGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "more": {
+            "title": "More",
+            "type": "boolean"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "people": {
+            "title": "People",
+            "type": "integer"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "integer"
+          },
+          "stale_alerts_hidden": {
+            "title": "Stale Alerts Hidden",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "offset",
+          "shown",
+          "more",
+          "next_offset",
+          "people",
+          "stale_alerts_hidden",
+          "groups"
+        ],
+        "title": "InboxPageOut",
         "type": "object"
       },
       "InboxSearchOut": {
@@ -8219,6 +8283,29 @@
           "skip_message_ids"
         ],
         "title": "InboxSearchOut",
+        "type": "object"
+      },
+      "InboxSenderGroupOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          },
+          "sender_kind": {
+            "title": "Sender Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sender",
+          "sender_kind",
+          "count"
+        ],
+        "title": "InboxSenderGroupOut",
         "type": "object"
       },
       "InterviewAgenda": {
@@ -19534,6 +19621,16 @@
             },
             "title": "Inbox Items",
             "type": "array"
+          },
+          "inbox_page": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxPageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "interviews": {
             "$ref": "#/components/schemas/InterviewAgenda",
@@ -33065,6 +33162,27 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inbox_offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Inbox Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inbox_stale_alerts",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Inbox Stale Alerts",
+              "type": "boolean"
             }
           },
           {

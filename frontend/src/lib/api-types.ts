@@ -7105,10 +7105,37 @@ export interface components {
             resolved_by: string | null;
             /** Sender */
             sender: string;
+            /**
+             * Sender Kind
+             * @default person
+             */
+            sender_kind: string;
             /** Subject */
             subject: string;
             /** Thread Id */
             thread_id: string | null;
+        };
+        /**
+         * InboxPageOut
+         * @description whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``.
+         */
+        InboxPageOut: {
+            /** Groups */
+            groups: components["schemas"]["InboxSenderGroupOut"][];
+            /** More */
+            more: boolean;
+            /** Next Offset */
+            next_offset: number | null;
+            /** Offset */
+            offset: number;
+            /** People */
+            people: number;
+            /** Shown */
+            shown: number;
+            /** Stale Alerts Hidden */
+            stale_alerts_hidden: number;
+            /** Total */
+            total: number;
         };
         /** InboxSearchOut */
         InboxSearchOut: {
@@ -7124,6 +7151,15 @@ export interface components {
             gmail_after: string;
             /** Skip Message Ids */
             skip_message_ids: string[];
+        };
+        /** InboxSenderGroupOut */
+        InboxSenderGroupOut: {
+            /** Count */
+            count: number;
+            /** Sender */
+            sender: string;
+            /** Sender Kind */
+            sender_kind: string;
         };
         /**
          * InterviewAgenda
@@ -11262,6 +11298,7 @@ export interface components {
             events: components["schemas"]["WhatsNewEventOut"][];
             /** Inbox Items */
             inbox_items?: components["schemas"]["InboxItemOut"][];
+            inbox_page?: components["schemas"]["InboxPageOut"] | null;
             /**
              * @default {
              *       "just_passed": [],
@@ -17759,6 +17796,8 @@ export interface operations {
                 since?: string | null;
                 after_id?: number | null;
                 limit?: number;
+                inbox_offset?: number;
+                inbox_stale_alerts?: boolean;
             };
             header?: {
                 authorization?: string | null;

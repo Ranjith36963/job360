@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications import spine
+from src.services.applications import inbox_senders, spine
 from src.services.applications.spine import SpineError
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -42,6 +42,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     out["thread_id"] = out.get("thread_id") or None
     out["received_at"] = out.get("received_at") or None
+    out["sender_kind"] = inbox_senders.sender_kind(out.get("sender") or "")
     return out
 
 
@@ -207,12 +208,79 @@ async def list_items(db: JobDatabase, user_id: str, status: str, limit: int) -> 
     return [_serialize(dict(r)) for r in await cur.fetchall()]
 
 
-async def for_whats_new(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
-    """Every open item plus the ones resolved in the last INBOX_ITEMS_RECENT_DAYS (open first)."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.INBOX_ITEMS_RECENT_DAYS)).isoformat()
+def _when(item: dict[str, Any]) -> str:
+    return str(item.get("received_at") or item.get("created_at") or "")
+
+
+def _is_stale_alert(item: dict[str, Any], cutoff: datetime) -> bool:
+    """A job-alert digest received before ``cutoff`` (an unreadable date is never hidden)."""
+    if item["sender_kind"] != inbox_senders.ALERT:
+        return False
+    try:
+        when = datetime.fromisoformat(_when(item).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when < cutoff
+
+
+def _group_key(item: dict[str, Any]) -> str:
+    return inbox_senders.address_of(item.get("sender") or "") or (item.get("sender") or "").strip().lower()
+
+
+async def for_whats_new(
+    db: JobDatabase, user_id: str, *, offset: int = 0, limit: Optional[int] = None, stale_alerts: bool = False,
+) -> dict[str, Any]:
+    """Owner report #9/#14 (2026-11-05): ``{"items": one page, "page": {...}}``.
+
+    The candidates are every open item plus the ones resolved in the last INBOX_ITEMS_RECENT_DAYS.
+    Order: open replies from a person (``sender_kind`` person) newest first; then the other open
+    items grouped by sender (the biggest group first, newest first inside it); then the resolved
+    ones, newest first. Job-alert digests received over INBOX_ALERTS_STALE_DAYS ago are left out
+    unless ``stale_alerts`` (never deleted). ``page.next_offset`` pages on; ``page.groups`` counts
+    the open non-person items per sender."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=settings.INBOX_ITEMS_RECENT_DAYS)).isoformat()
     cur = await db._db.execute(
-        _SELECT + "AND (i.resolution = '' OR i.resolved_at >= ?) "
-        "ORDER BY CASE WHEN i.resolution = '' THEN 0 ELSE 1 END, i.id DESC LIMIT ?",
-        (user_id, cutoff, settings.INBOX_ITEMS_WHATS_NEW_MAX),
+        _SELECT + "AND (i.resolution = '' OR i.resolved_at >= ?) ORDER BY i.id DESC LIMIT ?",
+        (user_id, cutoff, settings.INBOX_ITEMS_MAX_PER_USER),
     )
-    return [_serialize(dict(r)) for r in await cur.fetchall()]
+    rows = [_serialize(dict(r)) for r in await cur.fetchall()]
+    stale_before = now - timedelta(days=settings.INBOX_ALERTS_STALE_DAYS)
+    stale = [r for r in rows if _is_stale_alert(r, stale_before)]
+    if not stale_alerts:
+        rows = [r for r in rows if not _is_stale_alert(r, stale_before)]
+
+    def newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(items, key=lambda r: (_when(r), r["id"]), reverse=True)
+
+    open_rows = [r for r in rows if r["resolution"] == ""]
+    people = newest_first([r for r in open_rows if r["sender_kind"] == inbox_senders.PERSON])
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for r in newest_first([r for r in open_rows if r["sender_kind"] != inbox_senders.PERSON]):
+        groups.setdefault(_group_key(r), []).append(r)
+    # The biggest group first; at equal size the group with the newest mail first (sort is stable).
+    ordered_groups = sorted(groups.items(), key=lambda kv: (_when(kv[1][0]), kv[1][0]["id"]), reverse=True)
+    ordered_groups.sort(key=lambda kv: len(kv[1]), reverse=True)
+    others = [r for _, items in ordered_groups for r in items]
+    resolved = newest_first([r for r in rows if r["resolution"] != ""])
+    listing = [*people, *others, *resolved]
+
+    size = settings.INBOX_ITEMS_WHATS_NEW_PAGE if limit is None else limit
+    size = max(1, min(int(size), settings.INBOX_ITEMS_WHATS_NEW_MAX))
+    start = max(0, int(offset))
+    items = listing[start:start + size]
+    more = start + size < len(listing)
+    return {
+        "items": items,
+        "page": {
+            "total": len(listing), "offset": start, "shown": len(items), "more": more,
+            "next_offset": start + size if more else None, "people": len(people),
+            "stale_alerts_hidden": 0 if stale_alerts else len(stale),
+            "groups": [
+                {"sender": key, "sender_kind": items_[0]["sender_kind"], "count": len(items_)}
+                for key, items_ in ordered_groups[:size]
+            ],
+        },
+    }
