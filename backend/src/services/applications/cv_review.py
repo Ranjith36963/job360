@@ -9,13 +9,14 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
 (b) every content line of that CV has an entry whose ``cv_line`` is that line (case, spacing and a leading
     bullet aside) (``line_uncovered``; an entry naming no CV line is ``line_not_in_cv``; a CV of headers only is
     ``no_content``). Exempt, and only these: the name line (the FIRST line, every word a word of the profile's
-    name), a contact line (only emails, links and one phone number, with separators and ``Label:`` words), and a
-    section heading (1-4 alphabetic words, one of 4+ letters: ALL CAPS, ``# Heading`` or ``Heading:``). A summary
-    line is not;
+    name), a contact line (only emails, links and one phone number, with separators; a ``Label:`` word is
+    content), and a section heading (1-4 alphabetic words, one of 4+ letters: ALL CAPS, ``# Heading`` or
+    ``Heading:``) whose every word is already a word of the profile source text. A summary line is not;
 (c) each ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside)
     (``quote_not_in_profile``);
-(d) every number and capitalised name of a ``cv_line`` (``evidence.claim_tokens``) is in its own quote
-    (``claim_not_in_quote``); words are scanned one by one, no regex on caller text;
+(d) every number and capitalised name of a ``cv_line``, its first word too (``evidence.claim_tokens``), is in
+    its own quote (``claim_not_in_quote``); the quote has 3+ words and at least half the line's words of 4+
+    letters (``quote_too_thin``); words are scanned one by one, no regex on caller text;
 (e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
 After weak reviews of :data:`MAX_WEAK` other CV versions on an application, a review of a new one is weak
 (``retry_limit``): one rewrite, one re-review, never a third try.
@@ -41,7 +42,7 @@ PAYLOAD_KEYS = frozenset({"artifact_id", "sha256", "confidence", "lines", "revie
 LINE_KEYS = frozenset({"cv_line", "profile_quote", "field_path"})
 DOWNGRADES = (
     "not_current_cv", "no_content", "line_uncovered", "line_not_in_cv", "quote_not_in_profile",
-    "claim_not_in_quote", "cv_checks_found", "retry_limit",
+    "claim_not_in_quote", "quote_too_thin", "cv_checks_found", "retry_limit",
 )
 MAX_WEAK = 2
 MAX_LINES = 200
@@ -71,7 +72,7 @@ def _is_link(tok: str) -> bool:
 
 
 def is_contact_line(line: str) -> bool:
-    """Only emails, links and ONE phone number (10-15 digits, opening with ``+``, ``(`` or ``0``)."""
+    """Only emails, links and ONE phone number (10-15 digits, opening with ``+``, ``(`` or ``0``), with separators."""
     rest: list[str] = []
     anchor = False
     for raw in line.split():
@@ -80,7 +81,7 @@ def is_contact_line(line: str) -> bool:
             continue
         if _is_email(tok) or _is_link(tok):
             anchor = True
-        elif not (tok.endswith(":") and tok[:-1].isalpha() and len(tok) <= 11):
+        else:  # a label word ("CTO:") is content, never a free pass
             rest.append(tok)
     if not rest:
         return anchor
@@ -106,13 +107,17 @@ def _name_words(profile: Any) -> set[str]:
 
 
 def content_lines(text: str, profile: Any) -> list[str]:
-    """The CV's non-empty lines minus the narrow exemptions (the name line, contact lines, headings)."""
+    """The CV's non-empty lines minus the narrow exemptions (the name line, contact lines, and a heading whose
+    every word the profile already says: "AWS SOLUTIONS ARCHITECT" is a claim unless the profile holds it)."""
     lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
     names = _name_words(profile)
+    known = set(evidence._words(cv_checks.profile_source_text(profile)))
     out: list[str] = []
     for i, line in enumerate(lines):
         words = set(evidence._words(line))
-        if (i == 0 and names and words and words <= names) or is_contact_line(line) or is_heading(line):
+        said = set(evidence._words(line.strip("#*: \t")))
+        heading = is_heading(line) and bool(said) and said <= known
+        if (i == 0 and names and words and words <= names) or is_contact_line(line) or heading:
             continue
         out.append(line)
     return out
@@ -191,10 +196,15 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
             down.add("cv_checks_found")
     source = _norm(cv_checks.profile_source_text(profile))
     for e in entries:
+        body = e["cv_line"].strip().lstrip(_BULLETS + " \t")
         if _norm(e["profile_quote"]) not in source:
             down.add("quote_not_in_profile")
-        if evidence.unsupported_tokens(e["cv_line"].strip().lstrip(_BULLETS + " \t"), e["profile_quote"]):
+        if evidence.unsupported_tokens(body, e["profile_quote"], first_word=True):
             down.add("claim_not_in_quote")
+        content_words = {w for w in evidence._words(body) if len(w) >= 4}
+        quote_words = set(evidence._words(e["profile_quote"]))
+        if len(quote_words) < 3 or 2 * len(content_words & quote_words) < len(content_words):
+            down.add("quote_too_thin")  # a quote must carry the line: 3+ words and half its content words
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
     weak_versions = {e["payload"].get("artifact_id") for e in reviews if e["payload"].get("confidence") != STRONG}
     if len(weak_versions - {payload["artifact_id"]}) >= MAX_WEAK:  # a re-review of a judged version is no new try

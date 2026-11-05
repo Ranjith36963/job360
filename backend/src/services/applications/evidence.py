@@ -54,11 +54,12 @@ def _jaccard(a: set[Any], b: set[Any]) -> float:
     return len(a & b) / len(a | b) if a and b else 0.0
 
 
-def claim_tokens(text: str) -> list[str]:
+def claim_tokens(text: str, *, first_word: bool = False) -> list[str]:
     """Numbers, years, all-caps words, words with ``+``/``#`` and capitalised words that do not open a
-    sentence (an employer, a school, a title, a tool), in order. "I" and a sentence's first word are not."""
+    sentence (an employer, a school, a title, a tool), in order. "I" and a sentence's first word are not, unless
+    ``first_word`` (a CV line has no sentence grammar: its first word may be "Google")."""
     out: list[str] = []
-    start = True
+    start = not first_word
     for raw in str(text or "").split():
         tok = raw.strip(_OUTER)
         if tok.endswith(("'s", "’s")):
@@ -83,13 +84,13 @@ def _digit_runs(tok: str) -> list[str]:
     return [r for r in runs if r]
 
 
-def unsupported_tokens(text: str, bank: str) -> list[str]:
+def unsupported_tokens(text: str, bank: str, *, first_word: bool = False) -> list[str]:
     """Claim tokens of ``text`` the fact bank never says (numbers by value, words as whole words)."""
     cores = {cv_checks._core(m) for m in _digit_runs(bank)}
     words = set(_words(bank))
     low = " ".join(bank.split()).casefold()
     bad: list[str] = []
-    for tok in claim_tokens(text):
+    for tok in claim_tokens(text, first_word=first_word):
         runs = _digit_runs(tok)
         if runs:
             ok = all(cv_checks._core(r) in cores for r in runs)

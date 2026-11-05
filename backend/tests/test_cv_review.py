@@ -23,8 +23,10 @@ from src.services.profile.models import AssistantSettings, CVData, UserProfile
 
 FORM = "https://careers.northwind.example/apply/7"
 RAW = (
-    "Ada Lovelace\nData engineer at Northwind since 2019.\n"
-    "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%."
+    "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
+    "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
+    "Worked on the warehouse migration and cut storage costs in half.\n"
+    "CERTIFICATIONS\nGoogle Cloud Professional Data Engineer, 2022."
 )
 CV = (
     "Ada Lovelace\nada@example.com | +44 7700 900123 | linkedin.com/in/ada\nEXPERIENCE\n"
@@ -130,13 +132,17 @@ async def _gate(client: AsyncClient, app_id: int) -> dict[str, Any]:
 
 
 def test_only_the_name_contact_lines_and_headings_are_exempt():
-    profile = UserProfile(cv_data=CVData(name="Ada Lovelace"))
-    text = ("Ada Lovelace\nada@example.com | github.com/ada\n+44 7700 900123\nPhone: 07700 900123\nEXPERIENCE\n"
+    profile = UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text="Experience, projects and skills."))
+    text = ("Ada Lovelace\nada@example.com | github.com/ada\n+44 7700 900123\nEXPERIENCE\n"
             "# Projects\nSkills:\nSummary: passionate data engineer\nLondon, UK\nData engineer\n2019 2020 2021\n"
-            "Email:\nAWS\nAda Lovelace")
+            "AWS\nAda Lovelace")
     assert cv_review.content_lines(text, profile) == [
         "Summary: passionate data engineer", "London, UK", "Data engineer", "2019 2020 2021", "AWS", "Ada Lovelace",
     ]
+    # A heading is exempt only when the profile already says every word of it; a label word is content.
+    claims = ["AWS SOLUTIONS ARCHITECT", "# Google Cloud Certified", "Kubernetes Administrator:",
+              "CTO: ada@example.com", "Phone: 07700 900123"]
+    assert cv_review.content_lines("\n".join(["Ada Lovelace", *claims]), profile) == claims
     # A first line is the name only when it IS the profile's name; a headline is a content line.
     assert cv_review.content_lines("Senior Data Engineer\nPython", profile) == ["Senior Data Engineer", "Python"]
     assert cv_review.content_lines("Ada Lovelace", UserProfile()) == ["Ada Lovelace"]
@@ -223,21 +229,21 @@ async def test_each_check_forces_weak_with_its_code(authenticated_async_context,
         assert await downgraded(app_id, _review(cv_id, lines=[L1])) == ["line_uncovered"]
         assert await downgraded(other_app, _review(other_cv, summary)) == ["line_uncovered"]
         stray = {**L1, "cv_line": "Led the data team."}
-        assert await downgraded(app_id, _review(cv_id, lines=[L1, L2, stray])) == ["line_not_in_cv"]
+        assert await downgraded(app_id, _review(cv_id, lines=[L1, L2, stray])) == ["line_not_in_cv", "claim_not_in_quote"]
         # (c) a fabricated quote
         fake = {**L2, "profile_quote": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 60%."}
         assert await downgraded(app_id, _review(cv_id, lines=[L1, fake])) == ["quote_not_in_profile", "claim_not_in_quote"]
         # (d) a real quote that does not hold the line's number or names
         short = {**L2, "profile_quote": "Built ETL pipelines in Python"}
-        assert await downgraded(app_id, _review(cv_id, lines=[L1, short])) == ["claim_not_in_quote"]
+        assert await downgraded(app_id, _review(cv_id, lines=[L1, short])) == ["claim_not_in_quote", "quote_too_thin"]
         # (e) the CV's code checks find a number the profile never says
         led = {"cv_line": "- Led a team of 12 engineers.", "profile_quote": "Data engineer", "field_path": "cv_data.raw_text"}
         got = await downgraded(third_app, _review(third_cv, invented, lines=[L1, L2, led]))
-        assert got == ["claim_not_in_quote", "cv_checks_found"]
+        assert got == ["claim_not_in_quote", "quote_too_thin", "cv_checks_found"]
         # the reviewer's own weak is stored weak with nothing downgraded
         own = await _stored(client, other_app, _review(other_cv, summary, lines=[L1, L2, {
             **L1, "cv_line": "Passionate engineer who loves data.", "profile_quote": "Data engineer"}], confidence="weak"))
-        assert (own["confidence"], own["claimed"], own["downgraded"]) == ("weak", "weak", [])
+        assert (own["confidence"], own["claimed"], own["downgraded"]) == ("weak", "weak", ["claim_not_in_quote", "quote_too_thin"])
         # a malformed payload is refused, never stored
         for bad in ({**_review(cv_id), "confidence": "sure"}, {**_review(cv_id), "lines": []},
                     {**_review(cv_id), "cv_text": CV}, _review(cv_id, lines=[{**L1, "profile_quote": ""}])):
@@ -329,3 +335,57 @@ async def test_an_assistant_cannot_turn_the_setting_on(authenticated_async_conte
         async with _agent(token) as agent:  # off is safer: it applies at once
             assert (await agent.patch("/api/profile", json={"edits": [{"path": CV_AUTO, "value": False}]})).status_code == 200
         assert (await client.get("/api/assistant-settings")).json()["cv_auto_approve"]["effective"] is False
+
+
+@pytest.mark.asyncio
+async def test_thin_quotes_unchecked_first_words_and_stretches_are_weak(authenticated_async_context, fixture_user_id):
+    """The independent check's attacks: each was stored strong before the quote had to carry the line."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+
+        async def verdict(line: str, quote: str) -> tuple[str, list[str]]:
+            cv = CV + line + "\n"
+            app_id, cv_id = await _setup(client, cv=cv)
+            got = await _stored(client, app_id, _review(cv_id, cv, lines=[
+                L1, L2, {"cv_line": line, "profile_quote": quote, "field_path": "cv_data.raw_text"}]))
+            return got["confidence"], got["downgraded"]
+
+        # thin quotes: one word of the profile cannot vouch for a line
+        for line, quote in (("- Led the migration and cut costs in half", "the"),
+                            ("- Mentored engineers across the platform team", "engineers"),
+                            ("- Built the reporting layer from scratch", "built"),
+                            ("A passionate leader who loves mentoring teams", "Data engineer")):
+            got = await verdict(line, quote)
+            assert got[0] == "weak" and "quote_too_thin" in got[1], (line, got)
+        # the first word is a claim too
+        for line in ("Google Cloud certified data engineer", "Microsoft data engineer at Northwind",
+                     "Kubernetes data engineer at Northwind", "Snowflake data engineer at Northwind"):
+            got = await verdict(line, "data engineer at Northwind since 2019.")
+            assert got[0] == "weak" and "claim_not_in_quote" in got[1], (line, got)
+        # a stretch: "worked on" is not "led"
+        assert await verdict("- Led the warehouse migration and cut storage costs in half.",
+                             "Worked on the warehouse migration and cut storage costs in half.") == (
+            "weak", ["claim_not_in_quote"])
+        # a heading that carries a claim is a content line: with no quote it is uncovered
+        for heading in ("AWS SOLUTIONS ARCHITECT", "# Google Cloud Certified", "Kubernetes Administrator:",
+                        "CTO: ada@example.com"):
+            cv = CV + heading + "\n"
+            app_id, cv_id = await _setup(client, cv=cv)
+            assert (await _stored(client, app_id, _review(cv_id, cv)))["downgraded"] == ["line_uncovered"], heading
+
+
+@pytest.mark.asyncio
+async def test_honest_lines_stay_strong(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        cv = ("Ada Lovelace\nEXPERIENCE\n- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
+              "- In Python and Snowflake, built ETL pipelines, cutting warehouse costs 30%.\n"
+              "- Built ETL pipelines in Python and Snowflake.\nCERTIFICATIONS\n"
+              "Google Cloud Professional Data Engineer, 2022\n")
+        app_id, cv_id = await _setup(client, cv=cv)
+        full = L2["profile_quote"]
+        lines = [{**L2, "cv_line": ln, "profile_quote": full} for ln in cv.splitlines()[2:5]] + [
+            {"cv_line": "Google Cloud Professional Data Engineer, 2022",
+             "profile_quote": "Google Cloud Professional Data Engineer, 2022.", "field_path": "cv_data.raw_text"}]
+        got = await _stored(client, app_id, _review(cv_id, cv, lines=lines))
+        assert (got["confidence"], got["downgraded"], got["covered"], got["content_lines"]) == ("strong", [], 4, 4)
