@@ -3232,6 +3232,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/memory-covered-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Memory Covered Answers
+         * @description Memory first (plan S3): the user's old saved answers that Memory's families now cover, each with what
+         *     Memory says and a verdict, for the Needs-you card. Session only: the owner cleans these up himself.
+         */
+        get: operations["list_memory_covered_answers_api_profile_memory_covered_answers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/memory-covered-answers/{answer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Memory Covered Answer
+         * @description The owner's own Delete on one listed answer: one ``remove_at`` through ``PATCH /profile`` (history and
+         *     ``profile_edit_id`` as usual), guarded by the version read with it (409 if anything wrote since). 404 when
+         *     no listed answer has that id (already gone, or changed). Session only, no MCP twin.
+         */
+        delete: operations["delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/preferences": {
         parameters: {
             query?: never;
@@ -5857,6 +5900,44 @@ export interface components {
             value: {
                 [key: string]: unknown;
             };
+        };
+        /** CoveredAnswerOut */
+        CoveredAnswerOut: {
+            /** Answer */
+            answer: string;
+            /** Country */
+            country?: string | null;
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Memory */
+            memory?: string | null;
+            /** Question */
+            question: string;
+            /** Saved By */
+            saved_by?: ("web" | "assistant") | null;
+            /** Topic */
+            topic?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "same" | "different" | "memory_empty";
+        };
+        /** CoveredAnswersOut */
+        CoveredAnswersOut: {
+            /** Answers */
+            answers: components["schemas"]["CoveredAnswerOut"][];
+            /** Profile Edit Id */
+            profile_edit_id: number;
+        };
+        /** CoveredDeleteOut */
+        CoveredDeleteOut: {
+            /** Deleted */
+            deleted: string;
+            /** Profile Edit Id */
+            profile_edit_id: number;
         };
         /** CreateAskOut */
         CreateAskOut: {
@@ -16498,6 +16579,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkedInResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memory_covered_answers_api_profile_memory_covered_answers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveredAnswersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                answer_id: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveredDeleteOut"];
                 };
             };
             /** @description Validation Error */

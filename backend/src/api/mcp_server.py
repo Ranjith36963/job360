@@ -1133,7 +1133,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             "search_brief": build_search_brief(
                 profile.user_info.right_to_work,
                 profile.user_info.contact.get("residence_country"),
-                profile.user_info.answers,
+                profile.user_info.logistics,
             ),
             # Owner 2026-10-26 - the common form questions with NO answer yet: draft each as a guess from the
             # profile and save it (rules: "Common form questions"). Absent when none (rule #29).

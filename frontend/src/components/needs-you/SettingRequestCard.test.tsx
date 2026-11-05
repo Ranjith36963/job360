@@ -16,6 +16,7 @@ vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   // Ask once: the Questionnaire card reads this; no countries = nothing to answer, so it hides itself.
   getQuestionnaire: async () => ({ countries: [] }),
+  getCoveredAnswers: async () => ({ answers: [], profile_edit_id: 0 }),
   rememberQuestionnaire: vi.fn().mockResolvedValue({ saved: [] }),
   getSentOnItsOwn: async () => ({ items: [] }),
   rememberAskAnswers: vi.fn().mockResolvedValue({ saved: [], skipped: [] }),

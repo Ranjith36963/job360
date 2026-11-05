@@ -449,7 +449,8 @@ def status(f: DueFacts, answer: dict[str, Any], runs: dict[str, dict[str, Any]])
 
 
 async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
-    """Applications in the batch queue that are still ``considering`` (as the batch list shows it)."""
+    """Applications in the batch queue that are still ``considering`` (as the batch list shows it), less the
+    ones the user's own rule drops (below the line with ``below_line`` skip, S4): no duty, no CV for them."""
     from src.services.applications import spine  # noqa: PLC0415 - spine imports the profile package
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
 
@@ -463,7 +464,9 @@ async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
         f"AND NOT {test_sql}",
         (user_id, *queued, *test_params),
     )
-    return [int(dict(r)["id"]) for r in await cur.fetchall()]
+    ids = [int(dict(r)["id"]) for r in await cur.fetchall()]
+    dropped = await spine.below_line_dropped(db, user_id, ids)
+    return [i for i in ids if i not in dropped]
 
 
 async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
