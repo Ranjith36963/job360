@@ -2240,6 +2240,12 @@ def _applied_after(conn: Any, user_id: str, since: Optional[str]) -> int:
     return int(cnt[0]) if cnt else 0
 
 
+GRANT_COVERS_JOBS_MEANING = (
+    "Jobs a grant confirmed now would cover: all queued, still-considering jobs before your score-line "
+    "rule drops any. Not the apply queue; that is list_applications(queued=true) queue_summary.queued."
+)
+
+
 def _grant_began(conn: Any, user_id: str) -> tuple[Optional[str], Optional[int]]:
     """``(set_at, row id)`` of the ``auto_grant_until`` row the current counted grant began at, or
     ``(None, None)`` with no history. A new grant begins when the end is set while none was in force
@@ -2712,6 +2718,12 @@ def build_settings_view(
         },
         "auto_grant_scope": grant_scope or {
             "queue": {"count": 0, "hosts": [], "no_host": 0}, "granted": None, "unscoped": False,
+        },
+        # The honest name for auto_grant_scope.queue.count (see models.GrantCoversJobsOut): the old key stays
+        # because the web settings view and its pinned tests read it.
+        "grant_covers_jobs": {
+            "count": int(((grant_scope or {}).get("queue") or {}).get("count") or 0),
+            "meaning": GRANT_COVERS_JOBS_MEANING,
         },
         "paused_until": {
             "value": raw.paused_until,

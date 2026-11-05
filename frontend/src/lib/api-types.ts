@@ -4999,6 +4999,13 @@ export interface components {
             cv_auto_approve: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
             email_sends_per_day: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "count": 0,
+             *       "meaning": ""
+             *     }
+             */
+            grant_covers_jobs: components["schemas"]["GrantCoversJobsOut"];
             hunt_every_hours: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
@@ -6951,6 +6958,25 @@ export interface components {
             merged: boolean;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * GrantCoversJobsOut
+         * @description What ``auto_grant_scope.queue.count`` really counts, named honestly. ``count`` = the jobs an
+         *     "Auto for a while" grant confirmed NOW would cover: every job queued and still ``considering``,
+         *     counted BEFORE the user's own score-line rule drops any (and at most 500). It is NOT the apply
+         *     queue: that is ``list_applications(queued=true)``'s ``queue_summary.queued``.
+         */
+        GrantCoversJobsOut: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Meaning
+             * @default
+             */
+            meaning: string;
         };
         /** GrantListResponse */
         GrantListResponse: {
@@ -10597,6 +10623,7 @@ export interface components {
             since: string | null;
             sites?: components["schemas"]["StatsSitesOut"] | null;
             skill_gaps?: components["schemas"]["StatsSkillGapsOut"] | null;
+            today?: components["schemas"]["StatsTodayOut"] | null;
             velocity?: components["schemas"]["StatsVelocityOut"] | null;
         };
         /** StatsRoleGroupOut */
@@ -10737,6 +10764,70 @@ export interface components {
             truncated?: boolean | null;
             /** Truncated Hint */
             truncated_hint?: string | null;
+        };
+        /**
+         * StatsTodayCountsOut
+         * @description Today's counts in the user's own timezone; each is a number, never a list.
+         */
+        StatsTodayCountsOut: {
+            /**
+             * Applied
+             * @default 0
+             */
+            applied: number;
+            /**
+             * Asks Answered
+             * @default 0
+             */
+            asks_answered: number;
+            /**
+             * Asks Opened
+             * @default 0
+             */
+            asks_opened: number;
+            /**
+             * Brought
+             * @default 0
+             */
+            brought: number;
+            /**
+             * Fit Judged
+             * @default 0
+             */
+            fit_judged: number;
+            /**
+             * Outreach Replies
+             * @default 0
+             */
+            outreach_replies: number;
+            /**
+             * Outreach Sent
+             * @default 0
+             */
+            outreach_sent: number;
+            /**
+             * Replies
+             * @default 0
+             */
+            replies: number;
+        };
+        /**
+         * StatsTodayOut
+         * @description ``stats(view="today")``: where the user stands. ``queue_summary`` is the block
+         *     ``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports.
+         */
+        StatsTodayOut: {
+            counts: components["schemas"]["StatsTodayCountsOut"];
+            /** Date */
+            date: string;
+            /** Queue Summary */
+            queue_summary: {
+                [key: string]: unknown;
+            };
+            /** Timezone */
+            timezone: string;
+            /** Waiting On You */
+            waiting_on_you: number;
         };
         /** StatsVelocityOut */
         StatsVelocityOut: {

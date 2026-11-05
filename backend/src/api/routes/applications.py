@@ -2222,6 +2222,30 @@ class StatsReferralsOut(BaseModel):
     note: str
 
 
+class StatsTodayCountsOut(BaseModel):
+    """Today's counts in the user's own timezone; each is a number, never a list."""
+
+    brought: int = 0
+    fit_judged: int = 0
+    applied: int = 0  # receipts sent today
+    asks_opened: int = 0
+    asks_answered: int = 0
+    outreach_sent: int = 0
+    outreach_replies: int = 0
+    replies: int = 0  # application replies (`replied` events)
+
+
+class StatsTodayOut(BaseModel):
+    """``stats(view="today")``: where the user stands. ``queue_summary`` is the block
+    ``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports."""
+
+    date: str
+    timezone: str
+    counts: StatsTodayCountsOut
+    queue_summary: dict[str, Any]
+    waiting_on_you: int
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -2254,6 +2278,7 @@ class StatsResponse(BaseModel):
     skill_gaps: Optional[StatsSkillGapsOut] = None
     sites: Optional[StatsSitesOut] = None
     referrals: Optional[StatsReferralsOut] = None
+    today: Optional[StatsTodayOut] = None
     computed_at: str
 
 
