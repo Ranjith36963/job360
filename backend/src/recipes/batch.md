@@ -3,8 +3,8 @@
 
 Print this checklist and tick each step: [ ] 1 Read  [ ] 2 Queue  [ ] 3 Work  [ ] 4 Gate
 [ ] 5 Pace  [ ] 6 Resume  [ ] 7 End
-**A scheduled run** (the user's task woke you): call `whats_due` first and run this only when it lists `batch`; at the end,
-`mark_done` batch. A scheduled run is never a yes: `check_submit` still decides every submit.
+**A scheduled run** (the user's task woke you): call `whats_due(duties=["batch"])` first (it claims the batch) and run this only when it lists `batch`; at the end,
+`mark_done` batch (refused without that claim). A scheduled run is never a yes: `check_submit` still decides every submit.
 `mark_done` partial or failed is refused while a queued row still needs nothing from the user: work the row it names.
 Large tool outputs, or outputs saved to a file, are normal and never end a run.
 HARD LINES: never submit without `check_submit` saying `submit` (or `ask` plus the user's yes for THAT one
