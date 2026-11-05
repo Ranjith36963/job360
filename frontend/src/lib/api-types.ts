@@ -5251,6 +5251,8 @@ export interface components {
             }[];
             /** Country */
             country?: string | null;
+            /** Differs */
+            differs?: string[];
             /** Duplicate Of */
             duplicate_of?: number | null;
             /** Employer Published At */
@@ -5263,6 +5265,10 @@ export interface components {
             known_people?: components["schemas"]["KnownPeopleOut"];
             /** Listed People */
             listed_people?: components["schemas"]["ListedPersonOut"][] | null;
+            /** Matched On */
+            matched_on?: ("same_title_and_company" | "same_url" | "same_company_and_role" | "repost") | null;
+            /** Next */
+            next?: string | null;
             /** Queue Note */
             queue_note?: string | null;
             /** Queued */

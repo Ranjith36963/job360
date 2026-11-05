@@ -207,7 +207,8 @@ def _tool_error(exc: HTTPException) -> Exception:
     from mcp.server.mcpserver.exceptions import ToolError
 
     detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
-    return ToolError(f"{exc.status_code}: {detail}")
+    extra = getattr(exc, "extra", None)  # a structured refusal (bring_job's 409) keeps its fields
+    return ToolError(f"{exc.status_code}: {detail}" + (f" {json.dumps(extra)}" if extra else ""))
 
 
 def _audit(tool: str, status: str, **fields: Any) -> None:
@@ -1208,11 +1209,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         test: bool = False,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
-        Job360 stores it and starts an application for it, then returns the job id and
-        the application id to work against. It never judges fit: record your verdict
-        with `save_fit`. Same title+company
-        again returns the existing job (existing=true); a different link/location/country
-        is a 409. Never use this to search.
+        Job360 stores it, starts an application and returns the job id and
+        application id. It never judges fit: record your verdict with `save_fit`. A job you already
+        have returns existing=true, application_id, matched_on, differs (field names), next: read next.
+        A different link/location/country is a 409 with the same fields. Never use this to search.
 
         Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
@@ -1224,9 +1224,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         "indeed", "linkedin", "company_careers", "job_board", "referral",
         "visa_sponsor_list", "pasted_by_user", "other". Fix them later with update_job.
 
-        Ad dates (pass them when the ad shows them, YYYY-MM-DD): `posted_at` =
-        the listing's posted date, `employer_published_at` = the date on the
-        employer's own posting. `test`=true: a developer/practice job, kept off lists.
+        Ad dates (YYYY-MM-DD, when the ad shows them): `posted_at` = the listing's date,
+        `employer_published_at` = the employer's own posting date. `test`=true: a practice job, kept off lists.
 
         The reply carries `checks`: plain facts about this ad (full ad or only a
         title/teaser, the apply link's site, ad age, repost, pay or sponsorship
@@ -1236,10 +1235,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
         `origin`: "ai_hunt" (you found it), "your_mail" (a job-alert email), "user_link" or
         "user_paste"; `queue`=true puts it in the batch.
-        `listed_people` (max 10): people the ad names (hiring team), each {"name", "role",
-        "linkedin_url"}; saved as this job's contacts, found_via "job_ad".
+        `listed_people` (max 10): people the ad names, each {"name", "role",
+        "linkedin_url"}; saved as this job's contacts (found_via "job_ad").
         `known_people`: see rules. `client_key`: retry = first reply.
-        `duplicate_of` = id of your open application for that role: nothing new made."""
+        `duplicate_of` = your open application for that role: nothing new made."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         description, visa_detail = _unfence_in(description), _unfence_in(visa_detail)
         try:
@@ -1275,6 +1274,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 "known_people": resp.known_people.model_dump(),
                 "already_existed": resp.already_existed,
                 "duplicate_of": resp.duplicate_of,
+                "matched_on": resp.matched_on, "differs": resp.differs, "next": resp.next,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )
