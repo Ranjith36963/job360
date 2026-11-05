@@ -10461,6 +10461,16 @@
             },
             "title": "Other Ask Ids",
             "type": "array"
+          },
+          "pc_idle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PcIdleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11117,6 +11127,41 @@
           "currency"
         ],
         "title": "PayAdvertisedOut",
+        "type": "object"
+      },
+      "PcIdleOut": {
+        "description": "Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever).",
+        "properties": {
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "waiting",
+          "hours",
+          "text"
+        ],
+        "title": "PcIdleOut",
         "type": "object"
       },
       "PersonFullOut": {
@@ -12387,6 +12432,16 @@
               }
             ],
             "title": "Opens At"
+          },
+          "pc_idle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PcIdleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "pc_on_hours": {
             "anyOf": [
@@ -19336,6 +19391,16 @@
           "nothing_due": {
             "title": "Nothing Due",
             "type": "boolean"
+          },
+          "pc_idle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PcIdleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "run_now": {
             "items": {

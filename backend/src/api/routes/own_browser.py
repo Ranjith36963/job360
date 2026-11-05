@@ -68,6 +68,14 @@ class OwnBrowserTaskItemOut(BaseModel):
     contact_ids: Optional[list[int]] = None
 
 
+class PcIdleOut(BaseModel):
+    """Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever)."""
+    since: Optional[str] = None  # the newest take / release / claim by a PC session; None = never
+    waiting: int
+    hours: int
+    text: str
+
+
 class QueueOut(BaseModel):
     open_now: bool
     why: Why
@@ -76,6 +84,8 @@ class QueueOut(BaseModel):
     run_now_until: Optional[str] = None
     count: int
     tasks: list[OwnBrowserTaskItemOut]
+    # Owner #12: `open_now` says the queue MAY run, never that a PC session is working it; this says none is.
+    pc_idle: Optional[PcIdleOut] = None
 
 
 class TakeIn(BaseModel):
@@ -147,11 +157,13 @@ async def queue(
         label = own_browser.session_label(session) if session else None
         win = await own_browser.window(db, user.id, now)
         tasks = await own_browser.queue_tasks(db, user, now, label)
+        idle = await own_browser.pc_idle(db, user.id, now, len(tasks))
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
     own_browser.log_read(user.id, len(tasks))
-    return QueueOut(**win, count=len(tasks), tasks=[OwnBrowserTaskItemOut(**t) for t in tasks])
+    return QueueOut(**win, count=len(tasks), tasks=[OwnBrowserTaskItemOut(**t) for t in tasks],
+                    pc_idle=PcIdleOut(**idle) if idle else None)
 
 
 @router.post("/own-browser/take", response_model=TakeOut, dependencies=AUTH_FIRST)

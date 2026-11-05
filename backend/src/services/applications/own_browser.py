@@ -27,6 +27,7 @@ handed out; nobody gets a second request.
 """
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -374,6 +375,79 @@ async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]
         "opens_at": opens_at.isoformat() if opens_at else None,
         "run_now_until": until.isoformat() if until else None,
     }
+
+
+# ── Has the user's PC worked the queue? (owner #12, 2026-11-05) ──────────────────────────────────────────
+
+
+async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetime]:
+    """The newest sign that a session in the user's own browser worked the queue, from existing rows only: a
+    person claimed or released (``contact_outreach``), a hunt / people / pending task claimed or closed (the
+    ``pc_duties`` slots; never the user's own Run now slot), or a labelled kit read by an assistant on an
+    application whose link is on linkedin.com (Easy Apply runs only in the own browser). ``None``: never."""
+    from src.services.applications import pc_duties  # noqa: PLC0415
+
+    found: list[Optional[datetime]] = []
+    cur = await db._db.execute(
+        "SELECT MAX(recorded_at) FROM contact_outreach WHERE user_id = ? AND entry IN (?, ?)",
+        (user_id, CLAIMED, RELEASED),
+    )
+    got = await cur.fetchone()
+    found.append(_when(got[0]) if got is not None and got[0] else None)
+    slots = [p + k for p in (pc_duties.SLOT, pc_duties.CLAIM) for k in pc_duties.KINDS]
+    cur = await db._db.execute(
+        "SELECT MAX(done_at) FROM assistant_duty_runs WHERE user_id = ? "  # noqa: S608 - placeholders only
+        f"AND duty IN ({','.join('?' for _ in slots)})",
+        (user_id, *slots),
+    )
+    got = await cur.fetchone()
+    found.append(_when(got[0]) if got is not None and got[0] else None)
+    cur = await db._db.execute(
+        "SELECT e.recorded_at, e.payload, a.job_url FROM application_events e JOIN applications a "
+        "ON a.id = e.application_id AND a.user_id = e.user_id WHERE e.user_id = ? AND e.event_type = 'kit_read' "
+        "AND e.recorded_by <> 'web' ORDER BY e.id DESC LIMIT 200",
+        (user_id,),
+    )
+    for r in await cur.fetchall():
+        row = dict(r)
+        raw = row["payload"]
+        try:
+            payload = raw if isinstance(raw, dict) else json.loads(str(raw or "{}"))
+        except ValueError:
+            payload = {}
+        if isinstance(payload, dict) and payload.get("session") and routing.names_linkedin(str(row["job_url"] or "")):
+            found.append(_when(row["recorded_at"]))
+            break
+    seen = [at for at in found if at is not None]
+    return max(seen) if seen else None
+
+
+def idle_fact(last: Optional[datetime], waiting: int, now: datetime) -> Optional[dict[str, Any]]:
+    """Pure: ``{since, waiting, hours, text}`` when tasks wait for the user's own browser and nothing worked it
+    for MORE than ``PC_IDLE_WARN_HOURS`` (exactly the limit is not yet idle), or ever; else ``None``."""
+    hours = settings.PC_IDLE_WARN_HOURS
+    if waiting <= 0 or (last is not None and now - last <= timedelta(hours=hours)):
+        return None
+    tasks = f"{waiting} task{'' if waiting == 1 else 's'} {'waits' if waiting == 1 else 'wait'}"
+    when = f"since {last.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC" if last is not None else "yet"
+    return {
+        "since": last.isoformat() if last is not None else None, "waiting": waiting, "hours": hours,
+        "text": f"Nothing has worked your PC queue {when}; {tasks}. Start your PC browser session.",
+    }
+
+
+async def pc_idle(db: JobDatabase, user_id: str, now: datetime, waiting: int) -> Optional[dict[str, Any]]:
+    """:func:`idle_fact` for this user; ``None`` while paused (nothing is meant to run) or nothing waits."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    if waiting <= 0:
+        return None
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if rules.is_paused(cfg.paused_until, now):
+        return None
+    return idle_fact(await last_pc_activity_at(db, user_id), waiting, now)
 
 
 # ── The queue ───────────────────────────────────────────────────────────────────────────────────────────

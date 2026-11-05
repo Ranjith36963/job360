@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
+from src.api.routes.own_browser import PcIdleOut
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications.authorship import actor_for
@@ -77,6 +78,9 @@ class WhatsDueOut(BaseModel):
     held_by_running: list[Duty] = Field(default_factory=list)
     expected_every_hours: int
     checked_at: str
+    # Owner #12: own-browser tasks wait and no session in the user's own browser worked them for over
+    # PC_IDLE_WARN_HOURS (or ever): tell the user to start their PC browser session. A scheduled run never works them.
+    pc_idle: Optional[PcIdleOut] = None
 
 
 class MarkDoneIn(BaseModel):
@@ -176,6 +180,10 @@ async def whats_due(
             from src.services.applications.inbox import search_plan  # noqa: PLC0415 - profile <-> spine cycle
 
             item["search"] = await search_plan(db, user.id)
+    from src.services.applications import own_browser  # noqa: PLC0415 - profile <-> spine cycle
+
+    waiting = len(await own_browser.queue_tasks(db, user, now))
+    answer["pc_idle"] = await own_browser.pc_idle(db, user.id, now, waiting)
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 
