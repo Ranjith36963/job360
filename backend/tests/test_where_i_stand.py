@@ -244,3 +244,75 @@ async def test_today_view_counts_the_users_own_day(
     assert today["waiting_on_you"] == 1  # the open ask on `second`
     assert new_ask != old_ask
     assert (await _mcp(token, "stats", {"view": "today"}))["today"] == today
+
+
+async def _today(client: AsyncClient) -> dict[str, Any]:
+    resp = await client.get("/api/applications/stats", params={"view": "today"})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["today"]
+
+
+@pytest.mark.asyncio
+async def test_today_counts_cold_outreach_and_leaves_test_asks_out(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    _Clock(monkeypatch, now)
+    async with authenticated_async_context() as client:
+        real = await _bring(client, 1)
+        test_ad = {**_ad(2), "test": True}
+        resp = await client.post("/api/jobs/bring", json=test_ad)
+        assert resp.status_code == 200, resp.text
+        practice = int(resp.json()["application_id"])
+        # a cold (network) contact: no application, so no application event is ever written for its marks
+        cold = await client.post("/api/contacts", json={"name": "Cleo", "company": "Northwind", "email": "c@northwind.example"})
+        assert cold.status_code in (200, 201), cold.text
+        cid = int((cold.json().get("contact") or cold.json())["id"])
+        for entry in ("sent", "reply"):
+            marked = await client.post(f"/api/contacts/{cid}/outreach", json={"entry": entry, "channel": "email"})
+            assert marked.status_code == 201, marked.text
+        await _ask(client, real, "Notice period?")
+        await _ask(client, practice, "Salary?")  # a test application: left out
+        body = await _today(client)
+    assert body["counts"]["outreach_sent"] == 1 and body["counts"]["outreach_replies"] == 1
+    assert body["counts"]["asks_opened"] == 1
+    assert body["counts"]["brought"] == 1  # the real one; the test application is left out
+
+
+@pytest.mark.asyncio
+async def test_today_query_count_does_not_grow_with_the_queue(authenticated_async_context, fixture_user_id):
+    from src.repositories import pg
+
+    seen = {"n": 0, "on": False}
+    real_execute = pg.Connection.execute
+
+    async def counting(self, sql, params=()):  # type: ignore[no-untyped-def]
+        if seen["on"]:
+            seen["n"] += 1
+        return await real_execute(self, sql, params)
+
+    async def measure(client: AsyncClient) -> int:
+        seen["n"], seen["on"] = 0, True
+        try:
+            await _today(client)
+        finally:
+            seen["on"] = False
+        return seen["n"]
+
+    pg.Connection.execute = counting  # type: ignore[method-assign]
+    try:
+        async with authenticated_async_context() as client:
+            for n in range(1, 4):
+                await _event(client, await _bring(client, n), "queued")
+            small = await measure(client)
+            for n in range(4, 11):
+                app_id = await _bring(client, n)
+                await _event(client, app_id, "queued")
+                await _event(client, app_id, "blocked", {"reason": "login_needed"})
+            checked = await _today(client)
+            large = await measure(client)
+    finally:
+        pg.Connection.execute = real_execute  # type: ignore[method-assign]
+    assert checked["queue_summary"]["queued"] == 10 and checked["queue_summary"]["blocked"] == 7
+    assert checked["waiting_on_you"] == 7
+    assert small == large, (small, large)

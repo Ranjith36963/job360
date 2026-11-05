@@ -4,14 +4,22 @@ A pull-style read of stored state (product rules 4 and 5): counts only, never an
 answer stays small. "Today" is the user's own day in ``users.timezone`` - the window the ``agenda``
 list filter uses (``agenda.agenda_window``) - and every count reads a timestamp that falls inside it:
 
-* ``brought`` / ``fit_judged`` / ``outreach_sent`` / ``outreach_replies`` / ``replies`` - events of
-  that type recorded today (a retracted event, one a ``corrects_event_id`` row names, is skipped).
-* ``applied`` - receipts whose ``sent_at`` is today (the receipt is the proof of an application).
-* ``asks_opened`` / ``asks_answered`` - ``application_asks`` rows asked / (last) answered today.
+* ``brought`` / ``fit_judged`` / ``replies`` - events of that type recorded today (a retracted event,
+  one a ``corrects_event_id`` row names, is skipped).
+* ``outreach_sent`` / ``outreach_replies`` - ``contact_outreach`` rows (entry ``sent`` / ``reply``) whose
+  ``occurred_at`` is today. That ledger holds cold (network) outreach too; a mark only writes an
+  application event when the contact is linked to an application.
+* ``applied`` - receipts whose ``sent_at`` is today (the receipt is the proof of an application). This is
+  NOT ``queue_summary.submitted_today``, which counts ``applied`` events by ``recorded_at``.
+* ``asks_opened`` / ``asks_answered`` - ``application_asks`` rows asked / (last) answered today, general
+  questions included.
 
 ``queue_summary`` is ``queue_preflight.queue_summary``, the function ``list_applications(queued=true)``
-returns, and ``waiting_on_you`` is ``schedule._waiting_on_you``, the count ``whats_due`` reports. Test
-applications (``simulation`` events) are left out of the counts, as in the rest of stats.
+returns. ``waiting_on_you`` is ``schedule._waiting_on_you`` over the open queue: how many queued jobs have
+an open ask, an open block, or a newest CV the user has not seen. It is not ``whats_due``'s field of the
+same name (that is 0 unless the assistant applies on its own) and not the Needs-you count (which also
+holds non-job items). Test applications (``simulation`` events) are left out of the counts, as in the rest
+of stats. The query count does not grow with the queue.
 Every query is scoped by ``user_id`` (rule #12).
 """
 from __future__ import annotations
@@ -21,14 +29,12 @@ from typing import Any
 
 from src.repositories.database import JobDatabase
 from src.services.applications import agenda, queue_preflight, spine
-from src.services.applications.test_marker import TEST_APP_SQL
+from src.services.applications.test_marker import TEST_APP_SQL, test_app_ids
 
-# count name -> the application_events.event_type it counts
+# count name -> the application_events.event_type it counts (outreach comes from contact_outreach, below)
 EVENT_COUNTS = {
     "brought": "brought",
     "fit_judged": "fit_judged",
-    "outreach_sent": "outreach_sent",
-    "outreach_replies": "outreach_replied",
     "replies": "replied",
 }
 
@@ -82,11 +88,20 @@ async def build(db: JobDatabase, user_id: str, now: datetime | None = None) -> d
         [user_id, floor, *test_params],
     )
     counts["applied"] = sum(1 for s in receipts if _within(s, start, end))
+    for name, entry in (("outreach_sent", "sent"), ("outreach_replies", "reply")):
+        stamps = await _times(
+            db,
+            "SELECT occurred_at FROM contact_outreach WHERE user_id = ? AND entry = ? AND occurred_at >= ?",
+            [user_id, entry, floor],
+        )
+        counts[name] = sum(1 for s in stamps if _within(s, start, end))
     for name, column in (("asks_opened", "asked_at"), ("asks_answered", "answered_at")):
         stamps = await _times(
             db,
-            f"SELECT {column} FROM application_asks WHERE user_id = ? AND {column} >= ?",  # noqa: S608 - constant column
-            [user_id, floor],
+            f"SELECT k.{column} FROM application_asks k LEFT JOIN applications a "  # noqa: S608 - constant column
+            f"ON a.id = k.application_id AND a.user_id = k.user_id WHERE k.user_id = ? AND k.{column} >= ? "
+            f"AND (a.id IS NULL OR NOT {test_sql})",
+            [user_id, floor, *test_params],
         )
         counts[name] = sum(1 for s in stamps if _within(s, start, end))
 
@@ -94,7 +109,8 @@ async def build(db: JobDatabase, user_id: str, now: datetime | None = None) -> d
     queue_order, _queued_at = await spine.open_queue(db, user_id, profile)
     cfg = settings_rules.effective((profile or UserProfile()).assistant_settings)
     summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg)
-    waiting = await schedule._waiting_on_you(db, user_id, await schedule._open_queue_ids(db, user_id))
+    tests = await test_app_ids(db, user_id)  # whats_due's queue leaves test jobs out
+    waiting = await schedule._waiting_on_you(db, user_id, [i for i in queue_order if i not in tests])
     return {
         "date": today.isoformat(), "timezone": str(zone), "counts": counts,
         "queue_summary": summary, "waiting_on_you": waiting,
