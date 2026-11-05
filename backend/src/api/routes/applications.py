@@ -3205,7 +3205,11 @@ async def save_fit(
             archetype=body.archetype, remote_policy=body.remote_policy, team_size=body.team_size, via=body.via,
         )
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
-        return {**saved, "line": settings_rules.line_block(body.score, cfg)}
+        line = settings_rules.line_block(body.score, cfg)
+        # S4 (owner 2026-11-05): below the line with below_line skip = off the batch queue, recorded as skipped.
+        if await spine.unqueue_below_line(db, user.id, application_id, body.score, cfg):
+            line["next"] += " Job360 took it off your batch queue (recorded as skipped; the score is kept)."
+        return {**saved, "line": line}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

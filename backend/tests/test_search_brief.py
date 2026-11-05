@@ -143,39 +143,44 @@ def test_hunt_recipe_reads_the_brief_and_names_no_country():
 
 
 # --- residence vs work_from (2026-10-13): a remote job in IN means working from IN ---
+# Memory first S4 (owner 2026-11-05): the answer is Memory's relocation for that country
+# (user_info.logistics countries[].willing_to_relocate), never a saved form answer.
 _Q = "You live in GB. Would you work from IN for a remote job there?"
 _IN_CITIZEN_REMOTE = {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"}
 
 
+def _moves(country: str, value: bool) -> dict[str, Any]:
+    return {"countries": [{"country": country, "willing_to_relocate": value}]}
+
+
 def test_lives_in_gb_indian_citizen_remote_row_asks_would_you_work_from_in():
-    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", [])
-    asks = [g for g in brief["gaps"] if g["path"] == "user_info.answers"]
-    assert len(asks) == 1 and asks[0]["country"] == "IN"
-    assert asks[0]["ask"].startswith("You live in GB. Would you work from IN")
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", {})
+    assert brief["gaps"] == [{
+        "path": "user_info.logistics", "country": "IN", "ask": _Q, "field": "willing_to_relocate",
+    }]
     assert brief["residence_country"] == "GB" and brief["work_from"] == ["IN"]
 
 
-def test_approved_yes_answer_means_no_gap_and_in_stays():
-    ans = [{"question": _Q, "answer": "Yes", "approved": True}]
-    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
+def test_memory_yes_means_no_gap_and_in_stays():
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", _moves("IN", True))
     assert brief["gaps"] == [] and brief["work_from"] == ["IN"]
 
 
-def test_unapproved_answer_is_still_a_gap():
-    ans = [{"question": _Q, "answer": "No", "approved": False}]
-    assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)["gaps"]
-
-
-def test_approved_no_drops_in_from_work_from_and_row_says_anywhere_only():
-    ans = [{"question": _Q, "answer": "No", "approved": True}]
-    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
+def test_memory_no_drops_in_from_work_from_and_row_says_anywhere_only():
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", _moves("IN", False))
     assert brief["gaps"] == [] and brief["work_from"] == []
     line = brief["rows"][0]["counts_if"][0]
     assert line.endswith("work from anywhere") and "IN or" not in line
 
 
+def test_another_countrys_relocation_answer_does_not_close_the_gap():
+    assert [g["country"] for g in build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", _moves("US", True))["gaps"]] == [
+        "IN"
+    ]
+
+
 def test_lives_in_the_same_country_asks_nothing():
-    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "IN", [])
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "IN", {})
     assert brief["gaps"] == [] and brief["work_from"] == ["IN"]
 
 
@@ -184,73 +189,81 @@ def test_no_residence_means_no_question():
 
 
 def test_yes_variants_keep_the_country():
-    for word in ("Yes", "yes ", "Y", "true"):
-        ans = [{"question": _Q, "answer": word, "approved": True}]
-        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
-        assert brief["gaps"] == [] and brief["work_from"] == ["IN"], word
+    # Memory's true keeps the country, whatever else its row or other rows hold.
+    for logistics in (
+        _moves("IN", True),
+        {"countries": [{"country": "IN", "willing_to_relocate": True, "driving_licence": False}]},
+        {"countries": [{"country": "US", "willing_to_relocate": False}, {"country": "IN", "willing_to_relocate": True}]},
+    ):
+        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", logistics)
+        assert brief["gaps"] == [] and brief["work_from"] == ["IN"], logistics
 
 
 def test_unclear_approved_answer_stays_a_gap_with_same_wording():
-    for word in ("maybe", "only if paid in GBP", "Not sure"):
-        ans = [{"question": _Q, "answer": word, "approved": True}]
-        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
-        assert [g["ask"] for g in brief["gaps"]] == [_Q] and brief["work_from"] == ["IN"], word
+    # Anything but a true/false in Memory is not an answer: the same question stays open.
+    for value in ("Yes", "maybe", None, 1):
+        logistics = {"countries": [{"country": "IN", "willing_to_relocate": value}]}
+        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", logistics)
+        assert [g["ask"] for g in brief["gaps"]] == [_Q] and brief["work_from"] == ["IN"], value
 
 
 def test_no_variants_drop_the_country():
-    for word in ("No", "n", "false"):
-        ans = [{"question": _Q, "answer": word, "approved": True}]
-        assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)["work_from"] == [], word
+    for logistics in (
+        _moves("IN", False),
+        {"countries": [{"country": "US", "willing_to_relocate": True}, {"country": "IN", "willing_to_relocate": False}]},
+    ):
+        assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", logistics)["work_from"] == [], logistics
 
 
 def test_only_remote_ok_rows_get_the_residence_question():
     in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
     us_remote = {"country": "US", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"}
-    brief = build_search_brief(_rtw(in_onsite, us_remote), "GB", [])
-    assert [g["country"] for g in brief["gaps"] if g["path"] == "user_info.answers"] == ["US"]
+    brief = build_search_brief(_rtw(in_onsite, us_remote), "GB", {})
+    assert [g["country"] for g in brief["gaps"] if g["path"] == "user_info.logistics"] == ["US"]
 
 
 def test_no_remote_row_means_no_residence_question():
     in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
-    assert build_search_brief(_rtw(in_onsite), "GB", [])["gaps"] == []
+    assert build_search_brief(_rtw(in_onsite), "GB", {})["gaps"] == []
 
 
-# ── answers match a gap by topic or by wording (weak spot #11) ──────────────
+# ── the work-from gap closes only through Memory's logistics row (S4) ─────────
 
-def _wf_brief(answers: list[dict[str, Any]] | None):
+def _wf_brief(logistics: Any):
     rtw = _rtw(
         {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"},
         {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"},
     )
-    return build_search_brief(rtw, "GB", answers)
+    return build_search_brief(rtw, "GB", logistics)
 
 
 def test_gap_carries_a_fixed_topic():
     gaps = _wf_brief(None)["gaps"]
-    assert [(g["country"], g["topic"]) for g in gaps] == [("IN", "work_from.IN")]
+    assert [(g["country"], g["path"], g["field"]) for g in gaps] == [
+        ("IN", "user_info.logistics", "willing_to_relocate")
+    ]
 
 
 def test_gap_closes_via_topic_with_different_wording():
-    brief = _wf_brief([{
-        "question": "Will you work from India for an India-remote role?", "answer": "Yes",
-        "approved": True, "topic": "work_from.IN",
-    }])
+    # The question's wording plays no part: Memory's IN row answers it.
+    brief = _wf_brief(_moves("IN", True))
     assert brief["gaps"] == [] and brief["work_from"] == ["GB", "IN"]
 
 
 def test_gap_closes_via_wording_differing_in_case_and_punctuation():
-    from src.services.profile.search_brief import work_from_question
-
-    q = work_from_question("GB", "IN").upper().replace(".", "!!").replace("?", " ??")
-    brief = _wf_brief([{"question": q, "answer": "No", "approved": True}])  # old item, no topic
+    rtw = _rtw(
+        {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"},
+    )
+    brief = build_search_brief(rtw, " gb ", _moves("IN", False))  # residence in any case and spacing
     assert brief["gaps"] == [] and brief["work_from"] == ["GB"]
 
 
 def test_gap_stays_open_for_a_different_topic_or_unapproved_answer():
-    other = {"question": "Notice period?", "answer": "Yes", "approved": True, "topic": "work_from.US"}
-    assert [g["country"] for g in _wf_brief([other])["gaps"]] == ["IN"]
-    unapproved = {"question": "x", "answer": "Yes", "approved": False, "topic": "work_from.IN"}
-    assert [g["topic"] for g in _wf_brief([unapproved])["gaps"]] == ["work_from.IN"]
+    other_country = _moves("US", True)
+    assert [g["country"] for g in _wf_brief(other_country)["gaps"]] == ["IN"]
+    no_answer = {"countries": [{"country": "IN", "driving_licence": True}]}
+    assert [g["field"] for g in _wf_brief(no_answer)["gaps"]] == ["willing_to_relocate"]
 
 
 def test_find_answer_company_scope_and_normalizer():
@@ -286,11 +299,6 @@ def test_resolve_answer_narrower_wins_aliases_and_ambiguity_fail_closed():
     assert rec is None and note.startswith("ambiguous")
     same = {**base, "question": "C", "answer": "yes"}
     assert resolve_answer([a, same], topic="why_job")[0] is not None, "agreeing candidates are not ambiguous"
-    gap = _wf_brief([
-        {"question": "A", "answer": "Yes", "approved": True, "topic": "work_from.IN"},
-        {"question": "B", "answer": "No", "approved": True, "topic": "work_from.IN"},
-    ])["gaps"]
-    assert [g["topic"] for g in gap] == ["work_from.IN"] and gap[0]["note"].startswith("ambiguous")
 
 
 def test_contract_answer_rides_on_each_place_and_is_never_guessed():

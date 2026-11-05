@@ -2231,7 +2231,10 @@ async def queue_if_open(
     db: JobDatabase, user_id: str, application_id: int, *, recorded_by: str
 ) -> tuple[bool, Optional[str]]:
     """``bring_job queue=true`` (owner ask 2026-10-18): append a ``queued`` event when the application
-    is open (``considering``, no receipt) and not on the queue yet. ``(in_batch_now, note)``."""
+    is open (``considering``, no receipt) and not on the queue yet. ``(in_batch_now, note)``. A job whose
+    stored fit the user's own rule drops (:func:`below_line_dropped`) is never queued (S4)."""
+    if application_id in await below_line_dropped(db, user_id, [application_id]):
+        return False, "below your score line, and below the line you drop jobs"
     if application_id in await queued_at_by_app(db, user_id, [application_id]):
         return True, "already queued"
     row = await get_owned_application(db, user_id, application_id)
@@ -2246,6 +2249,52 @@ async def queue_if_open(
         occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=recorded_by,
     )
     return True, None
+
+
+async def below_line_dropped(db: JobDatabase, user_id: str, ids: list[int], cfg: Any = None) -> set[int]:
+    """Memory first S4 (owner 2026-11-05): which of ``ids`` the user's own rule drops, read now: ``below_line``
+    ``skip`` and the assistant's stored fit under ``apply_min_score`` (``drops_below_line``). The open queue
+    leaves them out, so an old row queued before its fit landed is never worked and gets no CV; nothing is
+    rewritten. No line, another switch or no score = none (rule #29). ``cfg`` = the caller's effective settings
+    (read here when not given). Scoped by ``user_id``; one query."""
+    import asyncio  # noqa: PLC0415
+
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
+
+    if not ids:
+        return set()
+    if cfg is None:
+        profile = await asyncio.to_thread(load_profile, user_id)
+        cfg = settings_rules.effective((profile or UserProfile()).assistant_settings)
+    if cfg.below_line != settings_rules.LINE_SKIP or cfg.apply_min_score is None:
+        return set()
+    cur = await db._db.execute(
+        f"SELECT id, fit_score FROM applications WHERE user_id = ? AND id IN ({','.join('?' for _ in ids)})",  # noqa: S608
+        [user_id, *ids],
+    )
+    return {int(r[0]) for r in await cur.fetchall() if settings_rules.drops_below_line(r[1], cfg)}
+
+
+async def unqueue_below_line(
+    db: JobDatabase, user_id: str, application_id: int, score: Optional[int], cfg: Any,
+) -> bool:
+    """After ``save_fit`` (S4): a queued job whose new fit the user's rule drops leaves the queue, recorded as
+    skipped by Job360 (an ``unqueued`` {reason: other}; the status stays ``considering`` and the fit slot keeps
+    the score, so the history is honest). True when it was taken off."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine
+
+    if not settings_rules.drops_below_line(score, cfg):
+        return False
+    if application_id not in await queued_at_by_app(db, user_id, [application_id]):
+        return False
+    await append_event(
+        db, user_id=user_id, application_id=application_id, event_type="unqueued",
+        occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by="system", payload={"reason": "other"},
+        detail=f"Skipped: fit {score} is below your score line ({cfg.apply_min_score}) and you drop those jobs.",
+    )
+    return True
 
 
 async def queued_at_by_app(
@@ -2864,6 +2913,13 @@ async def list_applications(
             [user_id, *all_queued],
         )
         queued_at = {int(q[0]): all_queued[int(q[0])] for q in await qcur.fetchall()}
+        # S4: a row the user's own rule drops (below the line, below_line skip) is not in the queue.
+        from src.services.profile import assistant_settings as _line_rules  # noqa: PLC0415 - profile <-> spine
+        from src.services.profile.models import UserProfile  # noqa: PLC0415
+
+        cfg = _line_rules.effective((_profile or UserProfile()).assistant_settings)
+        for app_id in await below_line_dropped(db, user_id, list(queued_at), cfg):
+            queued_at.pop(app_id, None)
         queue_order = sorted(queued_at, key=lambda i: (queued_at[i], i))
     queue_position = {app_id: pos for pos, app_id in enumerate(queue_order, start=1)}
     if queued:
