@@ -15,10 +15,14 @@ web, and an ask on a job whose country is unknown.
 """
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import asks
 from src.services.applications.spine import SpineError
+from src.utils.logger import safe_log_value
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -71,7 +75,19 @@ def covered(ask: dict[str, Any], country: Optional[str], by_key: dict[str, dict[
 
 async def close_covered(db: JobDatabase, user_id: str, application_id: Optional[int] = None) -> int:
     """Withdraw every open ask of ``user_id`` (only ``application_id``'s when given) that :func:`covered`
-    says Memory answers, as Job360 with the reason :data:`MEMORY_ANSWERS`. Returns how many closed."""
+    says Memory answers, as Job360 with the reason :data:`MEMORY_ANSWERS`. Returns how many closed.
+
+    A side task of a read (kit, check_submit, Needs you) or a save: any failure here is logged and the caller
+    goes on, never an error of the read itself."""
+    try:
+        return await _close_covered(db, user_id, application_id)
+    except Exception:  # noqa: BLE001 - a side task never breaks the read or save that runs it
+        logger.warning("memory_closes_failed user_id=%s application_id=%s", safe_log_value(user_id),
+                       application_id, exc_info=True)
+        return 0
+
+
+async def _close_covered(db: JobDatabase, user_id: str, application_id: Optional[int]) -> int:
     from src.services.applications import kit  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415

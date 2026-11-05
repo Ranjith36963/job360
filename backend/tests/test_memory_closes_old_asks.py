@@ -262,3 +262,26 @@ async def test_an_equality_value_only_the_assistant_saved_stays_open_until_the_u
             assert (await _asks(web))[ask_id]["status"] == "open"
         await _memory(web, "user_info.equality", {"gender": "Prefer not to say"})
         assert _closed_by_memory((await _asks(web))[ask_id]) == MEMORY_CLOSED
+
+
+@pytest.mark.asyncio
+async def test_a_failure_while_closing_never_breaks_the_read_that_runs_it(authenticated_async_context, monkeypatch):
+    """The close is a side task: if it fails, the kit read, check_submit and the Needs-you list still answer 200,
+    and the ask simply stays open (the independent check, PR #1515)."""
+    from src.services.applications import memory_closes
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("boom")
+
+    async with authenticated_async_context() as web:
+        await _memory(web, "user_info.right_to_work", {"countries": [GB_PAGE]})
+        app_id = await _bring(web, "Bell Integration")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, [_sponsor_row()])
+            monkeypatch.setattr(memory_closes, "covered", broken)
+            for resp in (await agent.get(f"/api/applications/{app_id}/kit"),
+                         await agent.get(f"/api/applications/{app_id}/submit-check"),
+                         await web.get("/api/asks")):
+                assert resp.status_code == 200, resp.text
+        monkeypatch.undo()
+        assert (await _asks(web))[ask_id]["status"] == "open"
