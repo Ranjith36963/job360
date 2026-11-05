@@ -129,3 +129,65 @@ async def remember_questionnaire(
         return ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
     except ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+class CoveredAnswerOut(BaseModel):
+    id: str
+    index: int
+    question: str
+    answer: str
+    country: Optional[str] = None
+    topic: Optional[str] = None
+    # What Memory says for this family and country (S1's reading); None = Memory says nothing yet.
+    memory: Optional[str] = None
+    verdict: Literal["same", "different", "memory_empty"]
+    saved_by: Optional[Literal["web", "assistant"]] = None
+
+
+class CoveredAnswersOut(BaseModel):
+    answers: list[CoveredAnswerOut]
+    profile_edit_id: int
+
+
+class CoveredDeleteOut(BaseModel):
+    deleted: str
+    profile_edit_id: int
+
+
+@router.get("/profile/memory-covered-answers", response_model=CoveredAnswersOut, dependencies=AUTH_FIRST)
+async def list_memory_covered_answers(user: CurrentUser = Depends(require_session_user)) -> dict[str, Any]:  # noqa: B008
+    """Memory first (plan S3): the user's old saved answers that Memory's families now cover, each with what
+    Memory says and a verdict, for the Needs-you card. Session only: the owner cleans these up himself."""
+    from src.services.profile import edits as profile_edits  # noqa: PLC0415
+    from src.services.profile import memory_cleanup  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    version = profile_edits.current_edit_id(user.id)
+    return {"answers": memory_cleanup.covered(load_profile(user.id) or UserProfile()), "profile_edit_id": version}
+
+
+@router.delete("/profile/memory-covered-answers/{answer_id}", response_model=CoveredDeleteOut, dependencies=AUTH_FIRST)
+async def delete_memory_covered_answer(
+    answer_id: str, user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The owner's own Delete on one listed answer: one ``remove_at`` through ``PATCH /profile`` (history and
+    ``profile_edit_id`` as usual), guarded by the version read with it (409 if anything wrote since). 404 when
+    no listed answer has that id (already gone, or changed). Session only, no MCP twin."""
+    from src.api.routes.profile import ProfileEditIn, UpdateProfileRequest, update_profile  # noqa: PLC0415
+    from src.services.profile import edits as profile_edits  # noqa: PLC0415
+    from src.services.profile import memory_cleanup  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    version = profile_edits.current_edit_id(user.id)
+    rows = memory_cleanup.covered(load_profile(user.id) or UserProfile())
+    row = next((r for r in rows if r["id"] == answer_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="That saved answer is not on the list any more.")
+    body = UpdateProfileRequest(
+        edits=[ProfileEditIn(path="user_info.answers", op="remove_at", index=row["index"])],
+        expected_profile_version=version,
+    )
+    resp = await update_profile(body, user)
+    return {"deleted": answer_id, "profile_edit_id": resp.profile.profile_edit_id}

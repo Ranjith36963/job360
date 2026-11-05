@@ -209,6 +209,9 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
         "the user's own Hide from timeline / Show in timeline (S11a)",
     ("POST", "/api/contacts/{contact_id}/duplicate"): "the user's own Duplicate of / Undo; no assistant marks (S11b)",
     ("GET", "/api/people/duplicates"): "the People page's own list of marked duplicates, for Undo (S11b)",
+    ("GET", "/api/profile/memory-covered-answers"): "the Needs-you card of old saved answers Memory covers (S3)",
+    ("DELETE", "/api/profile/memory-covered-answers/{answer_id}"):
+        "the owner's own Delete of one old saved answer; nothing deletes on its own (S3)",
 }
 
 

@@ -103,7 +103,11 @@ _EQUALITY: dict[str, str] = {
     "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
 EQUALITY_KEYS: frozenset[str] = frozenset(_EQUALITY)
-_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases", "country")
+_ANSWER_KEYS = (
+    "question", "answer", "approved", "recorded_at", "company", "topic", "aliases", "country", "saved_by",
+)
+# Plan S3: who saved a record, stamped by the server (``edits._stamp_saved_by``), never taken from a caller.
+ANSWER_SAVED_BY = ("web", "assistant")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
 _SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
 PREFER_NOT_TO_SAY = "Prefer not to say"
@@ -655,6 +659,11 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
                 record["company"] = company_line
         if country:
             record["country"] = country
+        saved_by = raw.get("saved_by")
+        if saved_by is not None:
+            if saved_by not in ANSWER_SAVED_BY:
+                raise _fail(f"{where}.saved_by must be one of {', '.join(ANSWER_SAVED_BY)} (the server sets it)")
+            record["saved_by"] = saved_by
         topic = raw.get("topic")
         if topic is not None and topic != "":
             if not isinstance(topic, str):

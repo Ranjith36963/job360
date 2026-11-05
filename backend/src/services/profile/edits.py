@@ -840,11 +840,10 @@ def _refuse_memory_answer(path: str, value: dict[str, Any]) -> None:
     """Memory first (owner 2026-11-05, plan S2): a NEW saved answer (append / upsert) in Memory's families
     is refused, naming the page the user sets it on in Job360. Stored records are not touched."""
     from src.services.profile.ask_once import memory_note  # noqa: PLC0415
+    from src.services.profile.memory_cleanup import record_country  # noqa: PLC0415
 
     topic, question = str(value.get("topic") or ""), str(value.get("question") or "")
-    codes = [p for p in topic.split(".") if len(p) == 2 and p.isalpha() and p.isupper()]
-    country = str(value.get("country") or "").upper() or (codes[0] if len(codes) == 1 else None)
-    note = memory_note(topic, question, country)
+    note = memory_note(topic, question, record_country(value))
     if note:
         raise ProfileEditError(
             422, f"{path}: '{topic or question[:80]}' is {note}; ask the user to set it there. Nothing was saved.",
@@ -1036,6 +1035,41 @@ def _refuse_memory_overwrite(user_id: str, actor: str, edits: list[tuple[str, An
         raise ProfileEditError(422, memory_fill.refusal(changes), "bad_value")
 
 
+def _answer_key(rec: dict[str, Any]) -> str:
+    return " ".join(str(rec.get("question") or "").lower().split()) + "|" + str(rec.get("country") or "")
+
+
+def _stamp_saved_by(user_id: str, actor: str, edits: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    """Plan S3 (owner 2026-11-05): who saved each ``user_info.answers`` record, set HERE, never trusted from
+    the caller. A record the store already holds with the same question, country and answer keeps its stored
+    ``saved_by`` (an old record has none); a new or changed one gets ``web`` (the user's own click) or
+    ``assistant`` (a token or OAuth write)."""
+    if not any(path == ANSWERS_PATH and isinstance(value, list) for path, value in edits):
+        return edits
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - storage imports this module
+
+    stored = (load_profile(user_id) or UserProfile()).user_info.answers or []
+    before = {_answer_key(r): r for r in stored if isinstance(r, dict)}
+    who = "assistant" if is_assistant_actor(actor) else WEB_ACTOR
+    out: list[tuple[str, Any]] = []
+    for path, value in edits:
+        if path == ANSWERS_PATH and isinstance(value, list):
+            value = [_stamped(rec, before.get(_answer_key(rec)), who) if isinstance(rec, dict) else rec
+                     for rec in value]
+        out.append((path, value))
+    return out
+
+
+def _stamped(rec: dict[str, Any], old: dict[str, Any] | None, who: str) -> dict[str, Any]:
+    rec = {k: v for k, v in rec.items() if k != "saved_by"}
+    if old is not None and old.get("answer") == rec.get("answer"):
+        return {**rec, "saved_by": old["saved_by"]} if old.get("saved_by") else rec
+    return {**rec, "saved_by": who}
+
+
+ANSWERS_PATH = "user_info.answers"  # user_info.USER_INFO_ANSWERS_PATH (that module imports this one)
+
+
 # The counted auto grant's two paths (``assistant_settings.AUTO_GRANT_*_PATH``; that module imports this one).
 _GRANT_PATHS = frozenset({"assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until"})
 
@@ -1102,6 +1136,7 @@ def record_edits(
     if not normalised:
         return []
     _refuse_memory_overwrite(user_id, actor, normalised)
+    normalised = _stamp_saved_by(user_id, actor, normalised)
 
     key = f"profile_edit:{user_id}"
     if (

@@ -895,6 +895,18 @@ export async function rememberQuestionnaire(
   return request("/api/profile/questionnaire/remember", { method: "POST", body: JSON.stringify({ country, items }) });
 }
 
+/** Memory first (plan S3): old saved answers Memory now covers, each beside what Memory says. Web session only. */
+export type CoveredAnswers = _Schemas["CoveredAnswersOut"];
+export type CoveredAnswer = CoveredAnswers["answers"][number];
+export async function getCoveredAnswers(): Promise<CoveredAnswers> {
+  return request("/api/profile/memory-covered-answers");
+}
+
+/** The owner's own Delete of one listed saved answer (one remove_at on the profile; nothing deletes by itself). */
+export async function deleteCoveredAnswer(id: string): Promise<_Schemas["CoveredDeleteOut"]> {
+  return request(`/api/profile/memory-covered-answers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 /** Sent on its own (owner plan 2026-11-02): answers and essays that went to an employer without the user,
  *  with the sources they were checked against. A log, never a to-do. Empty until autonomy step 4 sends. */
 export type SentOnItsOwnItem = _Schemas["SentItem"];
