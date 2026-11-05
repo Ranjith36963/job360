@@ -28,8 +28,8 @@ RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 # Order is the order a new user runs them in. Adding a recipe = add the file
 # AND a row here; tests/test_recipes.py pins that the two agree.
 RECIPE_NAMES: tuple[str, ...] = (
-    "setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "reach", "daily", "feedback", "prep",
-    "debrief", "review", "own_browser", "rules",
+    "setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "write", "reach", "daily", "feedback",
+    "prep", "debrief", "review", "own_browser", "rules",
 )
 
 # Old names that still load: assistants that learned `get_recipe("second_look")` keep working.
