@@ -35,7 +35,16 @@ def test_one_employers_own_wording_still_answers_that_employer():
 
 
 def test_check_form_takes_the_uk_answer_for_a_uk_job():
-    out = kit.form_check({}, [{"question": H1B}, {"question": "x", "key": "sponsorship.GB.yes_no"}], SAVED, None,
-                         None, country="GB")
-    assert [m["question"] for m in out["missing"]] == [H1B]
-    assert [a["value"] for a in out["answered"]] == ["No"]
+    # Memory first (owner 2026-11-05, S1): the UK answer is Memory's GB page; no saved answer is read for it.
+    from src.services.profile.models import UserInfo, UserProfile
+
+    profile = UserProfile(user_info=UserInfo(answers=SAVED, right_to_work={"countries": [
+        {"country": "GB", "needs_sponsorship": False}]}))
+    answers, _missing = kit.compute_answers(profile, [], "GB", None)
+    out = kit.form_check(answers, [{"question": H1B}, {"question": "x", "key": "sponsorship.GB.yes_no"}], SAVED,
+                         None, None, country="GB")
+    assert out["missing"] == []
+    assert [(a["value"], a["source"]) for a in out["answered"]] == [("No", "memory"), ("No", "memory")]
+    no_memory = kit.form_check({}, [{"question": "x", "key": "sponsorship.GB.yes_no"}], SAVED, None, None,
+                               country="GB")
+    assert no_memory["answered"] == [] and "your GB page" in no_memory["missing"][0]["why"]

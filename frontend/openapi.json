@@ -7450,6 +7450,18 @@
               }
             ],
             "title": "Stop For User"
+          },
+          "user_instructions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Instructions"
           }
         },
         "required": [

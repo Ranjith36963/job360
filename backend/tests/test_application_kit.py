@@ -1846,7 +1846,7 @@ async def test_company_scoped_answer_only_in_that_company_kit(authenticated_asyn
         edits = await _patch(client, _e("user_info.answers", [
             {"question": "Consent to BJAK privacy notice?", "answer": "Yes", "approved": True,
              "company": "BJAK Ltd", "recorded_at": "2026-10-14T09:00:00+00:00"},
-            {"question": "Notice period?", "answer": "1 month", "approved": True,
+            {"question": "Coding test OK?", "answer": "Yes", "approved": True,
              "recorded_at": "2026-10-14T09:00:00+00:00"},
         ]))
         assert edits.status_code == 200, edits.text
@@ -1855,11 +1855,11 @@ async def test_company_scoped_answer_only_in_that_company_kit(authenticated_asyn
             return {i["key"]: i for i in kit["answers"]["approved_text"]}
 
         in_bjak = texts((await _kit(client, bjak)).json())
-        assert set(in_bjak) == {"Consent to BJAK privacy notice?", "Notice period?"}
+        assert set(in_bjak) == {"Consent to BJAK privacy notice?", "Coding test OK?"}
         assert in_bjak["Consent to BJAK privacy notice?"]["company"] == "BJAK Ltd"
-        assert "company" not in in_bjak["Notice period?"] or in_bjak["Notice period?"]["company"] is None
+        assert "company" not in in_bjak["Coding test OK?"] or in_bjak["Coding test OK?"]["company"] is None
         in_acme = texts((await _kit(client, acme)).json())
-        assert set(in_acme) == {"Notice period?"}, "the BJAK-only answer never reaches another employer's kit"
+        assert set(in_acme) == {"Coding test OK?"}, "the BJAK-only answer never reaches another employer's kit"
 
 
 async def test_kit_document_text_is_capped_but_sha_is_of_the_full_text(authenticated_async_context, fixture_user_id):
@@ -1922,18 +1922,18 @@ async def test_kit_approved_text_carries_topic_and_bad_topic_is_refused(authenti
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
         bad = await _patch(client, _e("user_info.answers", [
-            {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "Work From India!"},
+            {"question": "Coding test OK?", "answer": "Yes", "approved": True, "topic": "Coding Test!"},
         ]))
         assert bad.status_code == 422, bad.text
         assert "Nothing was saved." in bad.text and "user_info.answers[0].topic" in bad.text
         ok = await _patch(client, _e("user_info.answers", [
-            {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "work_from.IN"},
-            {"question": "Notice period?", "answer": "1 month", "approved": True},
+            {"question": "Coding test OK?", "answer": "Yes", "approved": True, "topic": "form.coding_test"},
+            {"question": "Take-home exercise OK?", "answer": "No", "approved": True},
         ]))
         assert ok.status_code == 200, ok.text
         items = {i["key"]: i for i in (await _kit(client, app_id)).json()["answers"]["approved_text"]}
-        assert items["Work from India?"]["topic"] == "work_from.IN"
-        assert items["Notice period?"].get("topic") is None
+        assert items["Coding test OK?"]["topic"] == "form.coding_test"
+        assert items["Take-home exercise OK?"].get("topic") is None
 
 
 @pytest.mark.asyncio

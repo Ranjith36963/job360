@@ -437,6 +437,8 @@ def _user_check(
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed; ``changed_reason`` says whose act made it differ (see OWNER_EDIT)."""
     rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None, country)
+    if rec is not None and not rec.get("job_only") and a.get("source") == "memory" and str(a.get("key")) in have:
+        rec = None  # Memory first (owner 2026-11-05): a saved answer never overrides a Memory answer
     if rec is not None:
         word = str(rec["answer"])
         if _typed_is(a, word):

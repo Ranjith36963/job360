@@ -67,6 +67,70 @@ def is_country_specific(key: str, question: str) -> bool:
     return bool(words & COUNTRY_WORDS) or {"right", "work"} <= words or {"on", "site"} <= words
 
 
+# Memory first (owner 2026-11-05, plan S1): the kit blocks Memory holds. A form question in one of them is
+# answered from Memory (the country page, its region's, ANY), never from a saved answer.
+MEMORY_BLOCKS = ("contact", "right_to_work", "logistics", "salary", "languages", "equality")
+
+
+def _signals(words: set[str]) -> set[str]:
+    """The :data:`COUNTRY_WORDS` in ``words`` by their first four letters (sponsor / sponsorship are one);
+    "right to work" counts as "authorization" and "on site" as "onsite" (:func:`is_country_specific`)."""
+    out = {w[:4] for w in words if w in COUNTRY_WORDS}
+    if {"right", "work"} <= words:
+        out.add("authorization"[:4])
+    if {"on", "site"} <= words:
+        out.add("onsite"[:4])
+    return out
+
+
+def _field_words(kit_key: str) -> set[str]:
+    """``right_to_work.{cc}.needs_sponsorship`` -> {needs, sponsorship}; ``salary.{cc}`` -> {salary}."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    parts = [p for p in kit_key.split(".") if p != "{cc}"]
+    return set(normalize_question(parts[-1]).split())
+
+
+def _is_kit_key(template: str, key: str) -> bool:
+    """``key`` is the catalog kit key ``template`` for some place (``right_to_work.GB.onsite``)."""
+    want, got = template.split("."), key.split(".")
+    return len(want) == len(got) and all(w == g or w == "{cc}" and g.isupper() for w, g in zip(want, got))
+
+
+def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[str]]:
+    """``(in_memory_family, kit_key)`` for a form question. In a family when ``key`` is a catalog Memory key,
+    when :func:`is_country_specific`, or when the wording is a catalog Memory row's (or names its field). The
+    kit key (``right_to_work.{cc}.needs_sponsorship``) is the ONE catalog row whose own field word the
+    question names and whose words cover the question's; none or several = ``None`` (never a guess)."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    k = (key or "").strip()
+    words = set(normalize_question(question).split())
+    rows = [q for q in common_questions.catalog() if q.get("kit_key")]
+    # A catalog row's own wording, or (for a field named in two words or more: notice_period) all its words.
+    exact = [q["kit_key"] for q in rows if "{cc}" not in q["kit_key"] and (
+        normalize_question(q["question"]) == normalize_question(question)
+        or len(_field_words(q["kit_key"])) > 1 and _field_words(q["kit_key"]) <= words)]
+    named = [q["kit_key"] for q in rows if _is_kit_key(q["kit_key"], k)]
+    if named:
+        return True, named[0]
+    family = is_country_specific(k, question) or bool(exact)
+    if not family:
+        return False, None
+    if exact:
+        return True, (exact[0] if len(set(exact)) == 1 else None)
+    asked = _signals(words | set(normalize_question(k).split()))
+    hits = []
+    for q in rows:
+        own = _signals(_field_words(q["kit_key"]))
+        if own & asked and asked <= own | _signals(set(normalize_question(q["question"]).split())):
+            hits.append(q["kit_key"])
+    full = [h for h in hits if _field_words(h) <= words]
+    most = max((len(_field_words(h)) for h in full), default=0)
+    picked = [h for h in full if len(_field_words(h)) == most] if full else hits
+    return True, (picked[0] if len(picked) == 1 else None)
+
+
 def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -> list[str]:
     """Save each ``{topic, question, answer}`` as the user's approved answer (the user's own web press: the
     caller is a session-only route): bound to ``country`` when :func:`is_country_specific`, else global.

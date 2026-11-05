@@ -58,13 +58,13 @@ async def _check(client: AsyncClient, app_id: int, questions: list[dict[str, Any
 async def test_alias_topic_and_wording_resolve_to_the_saved_value(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _setup(client, fixture_user_id, [
-            _rec("Can you work from India?", "Yes", topic="work_from.IN",
-                 aliases=["Are you able to relocate to India?"]),
+            _rec("Can you take a coding test?", "Yes", topic="form.coding_test",
+                 aliases=["Are you open to a take-home exercise?"]),
         ])
         body = await _check(client, app_id, [
-            {"question": "Are you able to relocate to India?"},  # alias
-            {"question": "can you work from india"},  # wording, case and punctuation ignored
-            {"question": "Willing to work abroad?", "key": "work_from.IN"},  # key = the topic
+            {"question": "Are you open to a take-home exercise?"},  # alias
+            {"question": "can you take a coding test"},  # wording, case and punctuation ignored
+            {"question": "Happy with a technical test?", "key": "form.coding_test"},  # key = the topic
             {"question": "Do you hold a dog licence?"},
         ])
         assert [(a["value"], a["matched_by"]) for a in body["answered"]] == [
@@ -77,12 +77,12 @@ async def test_alias_topic_and_wording_resolve_to_the_saved_value(authenticated_
 async def test_company_answer_is_narrower_and_wins(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _setup(client, fixture_user_id, [
-            _rec("Work from India?", "Yes", topic="work_from.IN"),
-            _rec("Work from India? (Northwind)", "No", topic="work_from.IN", company="Northwind"),
+            _rec("Coding test OK?", "Yes", topic="form.coding_test"),
+            _rec("Coding test OK? (Northwind)", "No", topic="form.coding_test", company="Northwind"),
             _rec("Why us?", "Southwind pipelines.", company="Southwind"),
         ])
         body = await _check(client, app_id, [
-            {"question": "x", "key": "work_from.IN"}, {"question": "Why us?"},
+            {"question": "x", "key": "form.coding_test"}, {"question": "Why us?"},
         ])
         assert [a["value"] for a in body["answered"]] == ["No"], "Northwind's own answer, not the general Yes"
         assert [m["question"] for m in body["missing"]] == ["Why us?"], "another company's answer never widens"

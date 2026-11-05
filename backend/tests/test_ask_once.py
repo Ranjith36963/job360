@@ -82,7 +82,9 @@ async def test_a_right_to_work_answer_remembered_once_fills_that_country_only(
             (VISA["key"], "No", "GB")]
 
         same = await _bring(client, "Globex", "GB")
-        assert await _form_check_missing(client, same, VISA) == [], "the saved answer fills the next UK form"
+        # Memory first (owner 2026-11-05, S1): a sponsorship question is answered from the GB page only; a
+        # remembered answer no longer fills it (plan S2 moves "remember" to write the country page).
+        assert await _form_check_missing(client, same, VISA) == [VISA["question"]], "Memory, never a saved answer"
         await _fill_guess(client, same, "No", VISA)
         assert await _gate_guessed(fixture_user_id, same) is False, "no answer_guessed: the owner's word"
 
@@ -108,7 +110,9 @@ async def test_a_global_answer_remembered_once_fills_every_country(authenticated
         assert [(r["topic"], r["answer"], r.get("country")) for r in _approved(fixture_user_id)] == [
             (Q["key"], "4 weeks", None)], "a notice period is the same in every country: saved global"
         other = await _bring(client, "Initech", "US")
-        assert await _form_check_missing(client, other) == [], "the US form is filled without asking"
+        # Memory first (owner 2026-11-05, S1): a notice period is Memory's (logistics), so check_form asks for it
+        # on Memory; the remembered answer still verifies what was typed (plan S2 moves the write to Memory).
+        assert await _form_check_missing(client, other) == [Q["question"]], "Memory, never a saved answer"
         await _fill_guess(client, other, "4 weeks")
         assert await _gate_guessed(fixture_user_id, other) is False
 

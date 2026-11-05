@@ -700,6 +700,8 @@ class FormCheckOut(BaseModel):
     the form and decides."""
 
     application_id: int
+    # Memory first (owner 2026-11-05): the user's own rules, read before every value below; absent = none.
+    user_instructions: Optional[dict[str, Any]] = None
     questions_count: int
     answered: list[FormAnsweredOut]
     missing: list[FormMissingOut]
