@@ -11,6 +11,7 @@ import { OtherList } from "./OtherList";
 import { StartedNotConfirmed } from "./StartedNotConfirmed";
 import { DueFollowUps } from "./DueFollowUps";
 import { Questionnaire } from "./Questionnaire";
+import { MemoryCoveredAnswers } from "./MemoryCoveredAnswers";
 import { SentOnItsOwn } from "./SentOnItsOwn";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
@@ -507,6 +508,8 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
         {(active === "all" || active === "answers") && (count === null || count.answerOnce) && (
           <Questionnaire onChanged={() => setCountTick((t) => t + 1)} />
         )}
+        {/* Memory first (plan S3): old saved answers Memory now covers; the owner deletes each one. Silent when none. */}
+        {(active === "all" || active === "answers") && <MemoryCoveredAnswers />}
         <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} linkedinPerDay={linkedinPerDay} focusJob={focusJob} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>

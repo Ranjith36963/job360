@@ -5266,6 +5266,131 @@
         "title": "CountryPickOut",
         "type": "object"
       },
+      "CoveredAnswerOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "saved_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "web",
+                  "assistant"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved By"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "verdict": {
+            "enum": [
+              "same",
+              "different",
+              "memory_empty"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "index",
+          "question",
+          "answer",
+          "verdict"
+        ],
+        "title": "CoveredAnswerOut",
+        "type": "object"
+      },
+      "CoveredAnswersOut": {
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/CoveredAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "profile_edit_id": {
+            "title": "Profile Edit Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answers",
+          "profile_edit_id"
+        ],
+        "title": "CoveredAnswersOut",
+        "type": "object"
+      },
+      "CoveredDeleteOut": {
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "string"
+          },
+          "profile_edit_id": {
+            "title": "Profile Edit Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted",
+          "profile_edit_id"
+        ],
+        "title": "CoveredDeleteOut",
+        "type": "object"
+      },
       "CreateAskOut": {
         "properties": {
           "already_existed": {
@@ -30420,6 +30545,147 @@
           }
         },
         "summary": "Upload Linkedin",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/memory-covered-answers": {
+      "get": {
+        "description": "Memory first (plan S3): the user's old saved answers that Memory's families now cover, each with what\nMemory says and a verdict, for the Needs-you card. Session only: the owner cleans these up himself.",
+        "operationId": "list_memory_covered_answers_api_profile_memory_covered_answers_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoveredAnswersOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Memory Covered Answers",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/memory-covered-answers/{answer_id}": {
+      "delete": {
+        "description": "The owner's own Delete on one listed answer: one ``remove_at`` through ``PATCH /profile`` (history and\n``profile_edit_id`` as usual), guarded by the version read with it (409 if anything wrote since). 404 when\nno listed answer has that id (already gone, or changed). Session only, no MCP twin.",
+        "operationId": "delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "answer_id",
+            "required": true,
+            "schema": {
+              "title": "Answer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoveredDeleteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Memory Covered Answer",
         "tags": [
           "profile"
         ]
