@@ -675,11 +675,13 @@ async def test_two_actors_both_show_in_the_path_history(authenticated_async_cont
         token = await _mint_token(client, name="claude-code")
         assert (await _patch(client, {"path": CONTACT, "value": {"preferred_name": "web Ada"}})).status_code == 200
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, {"path": CONTACT, "value": {"preferred_name": "agent Ada"}})).status_code == 200
+        # S2b: an assistant fills only an empty field; it never changes the user's preferred_name.
+        filled = {"preferred_name": "web Ada", "legal_first_name": "Ada"}
+        assert (await _patch(agent, {"path": CONTACT, "value": filled})).status_code == 200
     async with authenticated_async_context() as client:
         rows = (await client.get("/api/profile/edits/history", params={"path": CONTACT})).json()["rows"]
     assert [r["set_by"] for r in rows] == ["token:claude-code", "web"]
-    assert rows[0]["value"] == {"preferred_name": "agent Ada"}
+    assert rows[0]["value"] == filled
     assert rows[1]["value"] == {"preferred_name": "web Ada"}
     assert all(r["set_at"] for r in rows)
 
@@ -835,7 +837,10 @@ async def test_clear_preferences_keeps_the_memory_and_clears_salary(authenticate
         )).status_code == 200
     async with _bearer_client(token) as agent:
         # "ask" (not "auto"): S2 holds an assistant's "auto" as a waiting request.
-        assert (await _patch(agent, *ALL_EDITS, {"path": "preferences.daily_check", "value": "ask"})).status_code == 200
+        # S2b: the assistant keeps the user's DE salary row and only adds AE (a set row is the user's to change).
+        salary = next(e for e in ALL_EDITS if e["path"] == SALARY)
+        edits_ = [e for e in ALL_EDITS if e["path"] != SALARY] + [{**salary, "value": [record, *salary["value"]]}]
+        assert (await _patch(agent, *edits_, {"path": "preferences.daily_check", "value": "ask"})).status_code == 200
     async with authenticated_async_context() as client:
         assert (await client.post("/api/profile/edits/keep", json={"path": EQ})).status_code == 200
         resp = await client.post("/api/profile/clear", data={"section": "preferences"})
@@ -967,17 +972,18 @@ async def test_take_back_of_an_assistant_memory_edit_falls_back_to_the_base(
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
-        save_user_info(fixture_user_id, UserInfo(contact={"preferred_name": "Base Ada"}), "test")
-    async with _bearer_client(token) as agent:
-        assert (await _patch(agent, {"path": CONTACT, "value": {"preferred_name": "Agent Ada"}})).status_code == 200
+        save_user_info(fixture_user_id, UserInfo(contact={"legal_first_name": "Base"}), "test")
+    async with _bearer_client(token) as agent:  # S2b: the assistant fills the empty preferred_name only
+        agent_value = {"legal_first_name": "Base", "preferred_name": "Agent Ada"}
+        assert (await _patch(agent, {"path": CONTACT, "value": agent_value})).status_code == 200
     async with authenticated_async_context() as client:
         body = await _get(client)
-        assert body["user_info"]["contact"] == {"preferred_name": "Agent Ada"}
+        assert body["user_info"]["contact"] == agent_value
         edit = next(e for e in body["agent_edits"] if e["path"] == CONTACT)
-        assert edit["previous_value"] == {"preferred_name": "Base Ada"}
+        assert edit["previous_value"] == {"legal_first_name": "Base"}
         resp = await client.post("/api/profile/edits/take-back", json={"path": CONTACT})
         assert resp.status_code == 200, resp.text
-        assert resp.json()["user_info"]["contact"] == {"preferred_name": "Base Ada"}
+        assert resp.json()["user_info"]["contact"] == {"legal_first_name": "Base"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

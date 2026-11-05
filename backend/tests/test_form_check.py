@@ -259,13 +259,13 @@ async def test_confirmed_false_is_carried_through(authenticated_async_context, f
             headers={"Authorization": f"Bearer {agent_token}"},
         ) as agent:
             put = await agent.patch("/api/profile", json={"edits": [
-                _e("user_info.logistics", {"notice_period": "2 weeks"})]})
+                _e("user_info.logistics", {"notice_period": "1 month", "start_on_site_abroad": True})]})
             assert put.status_code == 200, put.text
             body = (await _form_check(agent, app_id, [
                 {"question": "Notice", "key": "logistics.notice_period"},
                 {"question": "Email", "key": "contact.email"},
             ])).json()
-        assert body["answered"][0]["value"] == "2 weeks" and body["answered"][0]["confirmed"] is False
+        assert body["answered"][0]["value"] == "1 month" and body["answered"][0]["confirmed"] is False
         assert "confirmed" not in body["answered"][1]
 
 

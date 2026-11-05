@@ -165,3 +165,142 @@ async def test_update_profile_refuses_a_sponsorship_upsert_and_saves_nothing(
         detail = resp.json()["detail"]
         assert "Nothing was saved." in detail and "user_info.right_to_work" in detail and "your GB page" in detail
         assert current_edit_id(fixture_user_id) == before, "nothing written"
+
+
+# ── Plan S2b (owner 2026-11-05): Memory is filled once from chat, then only the user changes it in Job360 ──
+
+RTW_PATH = "user_info.right_to_work"
+GB = {"country": "GB", "work_authorization": "visa", "needs_sponsorship": False}
+
+
+async def _token(client: Any) -> str:
+    resp = await client.post("/api/tokens", json={"name": "claude-code"})
+    assert resp.status_code == 201, resp.text
+    return resp.json()["token"]
+
+
+def _assistant(token: str) -> Any:
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.main import app
+
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                       headers={"Authorization": f"Bearer {token}"})
+
+
+def _rtw_edit(*rows: dict[str, Any]) -> dict[str, Any]:
+    return {"path": RTW_PATH, "value": {"countries": list(rows)}, "source": "user_said", "remember": True}
+
+
+def _rows(user_id: str) -> dict[str, dict[str, Any]]:
+    from src.services.profile.storage import load_profile
+
+    countries = (load_profile(user_id).user_info.right_to_work or {}).get("countries") or []
+    return {r["country"]: {k: v for k, v in r.items() if k != "set_by"} for r in countries}
+
+
+async def _setup_gb(client: Any, user_id: str) -> str:
+    """(a) A setup-like assistant write on an empty profile fills GB's right to work; returns the token."""
+    token = await _token(client)
+    async with _assistant(token) as agent:
+        resp = await agent.patch("/api/profile", json={"edits": [_rtw_edit(GB)]})
+    assert resp.status_code == 200, resp.text
+    assert _rows(user_id) == {"GB": GB}
+    return token
+
+
+@pytest.mark.asyncio
+async def test_setup_fills_an_empty_profile_then_a_changed_gb_fact_is_refused_and_nothing_saved(
+    authenticated_async_context, fixture_user_id
+):
+    from src.services.profile.edits import current_edit_id
+
+    async with authenticated_async_context() as client:
+        token = await _setup_gb(client, fixture_user_id)
+        before = current_edit_id(fixture_user_id)
+        async with _assistant(token) as agent:  # (b) a later assistant write changing GB needs_sponsorship
+            resp = await agent.patch("/api/profile", json={"edits": [_rtw_edit({**GB, "needs_sponsorship": True})]})
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"] == (
+            "user_info.right_to_work.countries GB needs_sponsorship is already set; the user changes it on their "
+            "GB page in Job360. Only empty fields can be filled from chat. Nothing was saved."
+        )
+        assert current_edit_id(fixture_user_id) == before, "nothing written"
+        assert _rows(fixture_user_id) == {"GB": GB}
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_may_add_a_new_country_row_and_fill_an_empty_field(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        token = await _setup_gb(client, fixture_user_id)
+        pl = {"country": "PL", "work_authorization": "needs_sponsorship", "needs_sponsorship": True}
+        async with _assistant(token) as agent:  # (c) a PL row (no row yet) plus GB's empty remote_ok
+            resp = await agent.patch("/api/profile", json={"edits": [_rtw_edit({**GB, "remote_ok": True}, pl)]})
+        assert resp.status_code == 200, resp.text
+        assert _rows(fixture_user_id) == {"GB": {**GB, "remote_ok": True}, "PL": pl}
+
+
+@pytest.mark.asyncio
+async def test_the_owners_web_edit_still_changes_gb_sponsorship(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        await _setup_gb(client, fixture_user_id)
+        changed = {**GB, "work_authorization": "needs_sponsorship", "needs_sponsorship": True}
+        resp = await client.patch("/api/profile", json={"edits": [{"path": RTW_PATH, "value": {"countries": [changed]}}]})
+        assert resp.status_code == 200, resp.text  # (d) the session-cookie web actor
+        assert _rows(fixture_user_id) == {"GB": changed}
+
+
+@pytest.mark.asyncio
+async def test_instructions_stay_writable_from_chat(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        token = await _setup_gb(client, fixture_user_id)
+        lines = ["Hold the visa question until they ask."]
+        async with _assistant(token) as agent:  # (e) the GB page's instructions, and the user's own rules (held for Confirm, as before)
+            resp = await agent.patch("/api/profile", json={"edits": [_rtw_edit({**GB, "instructions": lines})]})
+            assert resp.status_code == 200, resp.text
+            notes = await agent.patch("/api/profile", json={"edits": [
+                {"path": "preferences.assistant_notes", "value": ["Never apply on Fridays."], "source": "user_said"}]})
+        assert notes.status_code == 200, notes.text
+        assert _rows(fixture_user_id) == {"GB": {**GB, "instructions": lines}}
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_edit_with_one_empty_and_one_set_field_saves_nothing(
+    authenticated_async_context, fixture_user_id
+):
+    from src.services.profile.edits import current_edit_id
+
+    async with authenticated_async_context() as client:
+        token = await _setup_gb(client, fixture_user_id)
+        before = current_edit_id(fixture_user_id)
+        async with _assistant(token) as agent:  # (f) remote_ok is empty, work_authorization is set: all or nothing
+            resp = await agent.patch("/api/profile", json={"edits": [
+                _rtw_edit({**GB, "remote_ok": True, "work_authorization": "permanent_resident"}),
+                {"path": "user_info.contact", "value": {"preferred_name": "Ada"}, "source": "user_said"}]})
+        assert resp.status_code == 422, resp.text
+        assert "GB work_authorization is already set" in resp.json()["detail"]
+        assert current_edit_id(fixture_user_id) == before, "nothing written"
+        assert _rows(fixture_user_id) == {"GB": GB}
+
+
+@pytest.mark.parametrize(("path", "old", "new", "expected"), [
+    ("user_info.contact", {"email": "a@b.co"}, {"email": "a@b.co", "phone": "+44 1"}, []),
+    ("user_info.contact", {"email": "a@b.co"}, {"email": "c@d.co"}, [("user_info.contact email", None)]),
+    ("user_info.equality", {"veteran": False}, {"veteran": True}, [("user_info.equality veteran", None)]),
+    ("user_info.equality", {}, {"veteran": False}, []),
+    ("user_info.languages", [{"language": "English", "level": "native"}],
+     [{"language": "english", "level": "native"}, {"language": "Polish", "level": "basic"}], []),
+    ("user_info.languages", [{"language": "Polish", "level": "basic"}], [],
+     [("user_info.languages polish row", None)]),
+    ("preferences.salary_by_country", [{"country": "GB", "min": 1, "max": 2, "currency": "GBP", "period": "year"}],
+     [{"country": "GB", "min": 3, "max": 3, "currency": "GBP", "period": "year"}],
+     [("preferences.salary_by_country GB min", "GB"), ("preferences.salary_by_country GB max", "GB")]),
+    ("user_info.logistics", {"notice_period": "1 month"}, None, [("user_info.logistics notice_period", None)]),
+    ("user_info.answers", [{"question": "q"}], [], []),
+])
+def test_overwrites_names_only_set_fields(path, old, new, expected):
+    from src.services.profile import memory_fill
+
+    assert memory_fill.overwrites(path, old, new) == expected
