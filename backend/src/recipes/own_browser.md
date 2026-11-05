@@ -26,7 +26,7 @@ Print this checklist and tick each step:
 3. **The right draft.** `not_connected`: by default a request WITHOUT a note; the draft is the message sent once they
    accept (`draft_kind="after_connect"`, at most 400; the task says `no_note`). A note only if the user asked: at most
    200 characters (300 with Premium, only if the user set it). `connected`: a message of at most 400. Wrong kind or too
-   long: rewrite it (`get_recipe("doctor")`; true facts only) with `save_artifact(contact_id, kind="outreach",
+   long: rewrite it (get_recipe("write"), then `get_recipe("doctor")`) with `save_artifact(contact_id, kind="outreach",
    channel="linkedin", draft_kind=...)`, release `draft_rewritten`: the user must press Send again for the new text.
 4. **The gate.** `check_outreach(contact_id, message_id, session)` right before you send. `send` (owner_clicked, or
    a reason below) = go. `ask` (needs_owner_click) = do not send. `stop` = do not send; tell the user its `detail`

@@ -243,7 +243,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "reach", "daily", "feedback", "prep", "debrief", "review", "own_browser", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "write", "reach", "daily", "feedback", "prep", "debrief", "review", "own_browser", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")
@@ -506,3 +506,26 @@ def test_no_recipe_records_submit_attempted_before_a_job360_browser_click():
         assert phrase in text, name
         assert "right before the click `record_event` `submit_attempted`" not in text, name
         assert "before each click `record_event` `submit_attempted`" not in text, name
+
+
+def test_the_write_recipe_sets_each_kind_its_length_and_who_sends_it():
+    """The outreach-writing guide: a note at most 200 characters, a message short (aim 200-300, at most 400), one
+    follow-up, true facts only; only the new-connection path goes without the user, never a connection or a reply."""
+    from src.api.routes.recipes import load_recipe
+    from src.services.profile import assistant_settings
+
+    text = load_recipe("write").text
+    flat_text = flat(text)
+    assert len(text.splitlines()) <= 70 and "Print this checklist and tick each step:" in text
+    for words in (
+        "at most 200 (300 with premium, only if set)", "aim 200-300, at most 400", "aim 150-250, at most 400",
+        "never pad to reach the limit", "over the hard limit: it is never sent", "never a third message",
+        "never claim the user did or knows anything the profile lacks", "no fact = leave it out",
+        "the user always presses send", "a person already connected, or anyone who replied: the user always sends",
+        "after a reply, never write back yourself", "never ask for a job, a referral",
+        "information only", "get_recipe(\"doctor\")",
+    ):
+        assert words in flat_text, words
+    assert assistant_settings.LINKEDIN_MESSAGE_MAX_CHARS == 400  # the guide's hard limit is the gate's
+    for recipe in ("reach", "own_browser"):
+        assert 'get_recipe("write")' in load_recipe(recipe).text, recipe
