@@ -21,7 +21,7 @@ from src.services import idempotency
 from src.services.applications import asks as asks_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import inbox_items as inbox_items_service
-from src.services.applications import plain_words
+from src.services.applications import memory_closes, plain_words
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
@@ -129,6 +129,7 @@ async def list_asks(
     try:
         if actor_for(user) == "web" and status == "open":  # the user's own page tidies old duplicates once
             await asks_service.tidy_open_asks(db, user.id)
+            await memory_closes.close_covered(db, user.id)  # old asks Memory now answers close (Memory first)
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset, exclude_test=True)
         if actor_for(user) == "web" and status == "open":
             rows = _with_saved_answers(user.id, rows)

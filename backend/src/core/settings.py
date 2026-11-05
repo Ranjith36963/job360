@@ -472,6 +472,11 @@ INBOX_ITEMS_MAX_OPEN_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_OPEN_PER_USER", "
 INBOX_ITEMS_MAX_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_PER_USER", "2000"))  # open + resolved + dismissed
 INBOX_ITEMS_RECENT_DAYS = int(os.getenv("INBOX_ITEMS_RECENT_DAYS", "30"))  # resolved items whats_new still lists
 INBOX_ITEMS_WHATS_NEW_MAX = int(os.getenv("INBOX_ITEMS_WHATS_NEW_MAX", "100"))
+# Owner report #9/#14 (2026-11-05): whats_new shows this many inbox items per page (people first;
+# `inbox_page.next_offset` pages on) and leaves job-alert digests older than INBOX_ALERTS_STALE_DAYS
+# out unless `inbox_stale_alerts` is true. Nothing is deleted.
+INBOX_ITEMS_WHATS_NEW_PAGE = int(os.getenv("INBOX_ITEMS_WHATS_NEW_PAGE", "10"))
+INBOX_ALERTS_STALE_DAYS = int(os.getenv("INBOX_ALERTS_STALE_DAYS", "7"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)
