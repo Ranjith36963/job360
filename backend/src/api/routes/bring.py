@@ -41,7 +41,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Iterable, Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -172,6 +172,63 @@ def posting_differences(
     if have_country and country and have_country != country:
         diffs.append("country")
     return diffs
+
+# Closed set for ``matched_on``: HOW bring recognised an application the caller already has.
+BRING_MATCHED_ON = ("same_title_and_company", "same_url", "same_company_and_role", "repost")
+
+
+def brought_differences(
+    app_row: dict[str, Any], body: BringJobRequest, facts: dict[str, Any], catalog_url: str = ""
+) -> list[str]:
+    """Field NAMES (never values) where what the caller just brought differs from the
+    stored application. Only a field both sides state can differ (rule #29)."""
+    diffs = posting_differences(app_row, body, facts.get("country"), catalog_url)
+    have_title = " ".join(str(app_row.get("job_title") or "").casefold().split())
+    if have_title and have_title != " ".join(body.title.casefold().split()):
+        diffs.append("title")
+    have_remote = app_row.get("job_remote")
+    if have_remote is not None and facts.get("remote") is not None and bool(have_remote) != facts["remote"]:
+        diffs.append("remote")
+    for name, col in (
+        ("found_on", "job_found_on"), ("posted_at", "ad_posted_at"), ("employer_published_at", "employer_published_at"),
+    ):
+        have, want = app_row.get(col), facts.get(name)
+        if have and want and str(have) != str(want):
+            diffs.append(name)
+    return diffs
+
+
+def existing_next(
+    application_id: int, differs: list[str], *, overwritten: Iterable[str] = (), changed: bool = True,
+) -> str:
+    """The one-line instruction that rides every reply (and 409) where bring met an application the caller has.
+    ``overwritten``: the differing fields this bring already saved over the stored ones (a re-bring writes its
+    facts), so they are reported as overwritten, never as still to fix."""
+    text = f"Already in Job360 as #{application_id}; nothing new was created" + ("." if changed else " or changed.")
+    saved = [d for d in differs if d in set(overwritten)]
+    rest = [d for d in differs if d not in saved]
+    if saved:
+        text += (
+            f" Overwritten with this ad's values: {', '.join(saved)} (fix with update_job on #{application_id} "
+            "if the old ones were right)."
+        )
+    if rest:
+        text += (
+            f" The stored job differs from this ad in: {', '.join(rest)}. If it is the same job, "
+            f"call update_job on #{application_id}; if it is a different posting, "
+            "bring it again with a title that tells them apart."
+        )
+    return text
+
+
+class BringConflict(HTTPException):
+    """The 409 for a different posting under a title+company the caller already brought.
+    ``detail`` stays the plain sentence (clients read it); ``extra`` rides next to it in the body."""
+
+    def __init__(self, detail: str, extra: dict[str, Any]) -> None:
+        super().__init__(status_code=409, detail=detail)
+        self.extra = extra
+
 
 # Bounds are guardrails, not product limits: a real ad is 500–8,000 chars; the
 # cap stops a pasted PDF dump (or a hostile 50 MB body) from becoming a
@@ -316,6 +373,12 @@ class BringJobResponse(BaseModel):
     # as an application the user still has OPEN; nothing new was created and ``application_id`` is that
     # one. Closed value: null or an application id. Web-session brings are never refused this way.
     duplicate_of: Optional[int] = None
+    # Set whenever ``existing`` is true: HOW the application was recognised (closed set
+    # BRING_MATCHED_ON), the field NAMES where this ad differs from the stored job (never values),
+    # and a one-line instruction for the assistant.
+    matched_on: Optional[Literal["same_title_and_company", "same_url", "same_company_and_role", "repost"]] = None
+    differs: list[str] = Field(default_factory=list)
+    next: Optional[str] = None
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -446,10 +509,13 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
                     "application_id": dup_id, "status": "refused",
                 },
             )
+            dup_diffs = brought_differences(dup_app, body, clean_facts)
             return BringJobResponse(
                 job=application_job_response(dup_app, dict(dup_cat) if dup_cat else None),
                 existing=True, application_id=dup_id, status=str(dup_app.get("status") or ""),
-                duplicate_of=dup_id, **{k: dup_facts[k] for k in job_facts.JOB_FACT_FIELDS},
+                duplicate_of=dup_id, matched_on="same_company_and_role", differs=dup_diffs,
+                next=existing_next(dup_id, dup_diffs, changed=False),
+                **{k: dup_facts[k] for k in job_facts.JOB_FACT_FIELDS},
             )
 
     now = datetime.now(timezone.utc).isoformat()
@@ -510,6 +576,7 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
     # second application would need a second catalog row. Refuse BEFORE any
     # visa/fact write and tell the agent exactly how to proceed.
     mine = await applications_spine.get_application_by_job(db, user.id, job_id)
+    rebring_differs: list[str] = []
     if mine is not None:
         mine_row = await applications_spine.get_owned_application(db, user.id, int(mine["id"])) or {}
         diffs = posting_differences(mine_row, body, clean_facts.get("country"), str(row.get("apply_url") or ""))
@@ -531,9 +598,12 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
                         "days_since": repost["days_since"], "status": "refused",
                     },
                 )
-            raise HTTPException(
-                status_code=409,
-                detail=(
+            conflict_differs = brought_differences(mine_row, body, clean_facts, str(row.get("apply_url") or ""))
+            matched = "same_url" if same_link_job_id is not None else "same_title_and_company"
+            if repost and repost["application_id"] == int(mine["id"]):
+                matched = "repost"
+            raise BringConflict(
+                (
                     f"You already brought this title at this company as application {int(mine['id'])}, "
                     f"and this ad differs from it in: {', '.join(diffs)}. Nothing was changed. "
                     f"If it is the SAME job, keep using application {int(mine['id'])} "
@@ -542,7 +612,14 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
                     "again with a title that tells the two apart, e.g. add the city in brackets."
                     + (_repost_sentence(repost) if repost else "")
                 ),
+                {
+                    "existing": True, "application_id": int(mine["id"]), "matched_on": matched,
+                    "differs": conflict_differs,
+                    "next": existing_next(int(mine["id"]), conflict_differs, changed=False),
+                },
             )
+        # Same posting: what this paste says that the stored job does not (computed BEFORE any fact is written).
+        rebring_differs = brought_differences(mine_row, body, clean_facts, str(row.get("apply_url") or ""))
 
     # R1/R2 — the Application is born HERE, in the same request: upsert the
     # `applications` row for (user, job) with status='considering', copy the
@@ -700,6 +777,12 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         existing=bool(birth["existing"]),
         application_id=birth["application_id"],
         status=birth["status"],
+        matched_on=(
+            "same_url" if same_link_job_id is not None else "same_title_and_company"
+        ) if birth["existing"] else None,
+        differs=rebring_differs if birth["existing"] else [],
+        next=existing_next(birth["application_id"], rebring_differs, overwritten=given_facts)
+        if birth["existing"] else None,
         ad_posted_at=stored.get("ad_posted_at"),
         employer_published_at=stored.get("employer_published_at"),
         checks=checks,
