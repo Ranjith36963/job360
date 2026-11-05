@@ -3,10 +3,11 @@
 Remember ONLY on the owner's press: an answer to a standard (not per-job) form question is saved as an
 approved ``user_info.answers`` record bound to its key AND the job's country, only when the owner presses
 "remember" on Needs you ("OK all and remember", or a row's own Remember). Nothing else saves for reuse.
-Only a country-specific question (:func:`is_country_specific`: right to work, sponsorship, salary,
-relocation, on-site) is bound to the job's country; every other answer (phone, notice period) is global.
-A saved record is what ``answer_match`` / ``ready._approved_record`` already read as the user's word, so
-the next job in that country asking it needs no owner; another country still asks (``fits_country``).
+Memory first (owner 2026-11-05, plan S2): a question in Memory's families (:func:`memory_question`: right
+to work, sponsorship, salary, notice, relocation, on-site, location, equality, contact) is NEVER saved: the
+user sets it once on their country page (or Memory) in Job360, and nothing here writes Memory. Every other
+answer (an essay, how you heard) is saved globally. A saved record is what ``answer_match`` /
+``ready._approved_record`` already read as the user's word, so the next job asking it needs no owner.
 
 The questionnaire: up to :data:`PER_COUNTRY` common questions per country the user works in, picked
 from ``common_questions`` rows that are guessed (to verify) or not known, most-guessed first.
@@ -131,29 +132,49 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
     return True, (picked[0] if len(picked) == 1 else None)
 
 
-def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -> list[str]:
+def memory_note(topic: str, question: str, country: Optional[str]) -> Optional[str]:
+    """Why a row in Memory's families (:func:`memory_question`) is never kept as a saved answer (owner
+    2026-11-05, plan S2): Memory and the country pages are set by the user in Job360 itself, so the reason
+    names the page to set it on. ``None`` for a row outside Memory's families."""
+    family, template = memory_question(topic, question)
+    if not family:
+        return None
+    where = common_questions.save_path({"kit_key": template}) if template else "Memory"
+    per_country = template is None or "{cc}" in template
+    page = f"your {country} page" if per_country and country else "your Memory page"
+    return (f"a Memory fact ({where}), never kept as a saved answer: the user sets it on {page} "
+            "in Job360 (Memory)")
+
+
+def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -> dict[str, Any]:
     """Save each ``{topic, question, answer}`` as the user's approved answer (the user's own web press: the
-    caller is a session-only route): bound to ``country`` when :func:`is_country_specific`, else global.
-    Upserts on topic + country. Returns the topics saved; a per-job row is skipped, and so is a
-    country-specific one when the job's country is unknown (it must never become global). All-or-nothing:
-    a bad value writes nothing (422)."""
+    caller is a session-only route); ``country`` is the job's, named in a Memory row's reason.
+    Upserts on topic. A row in Memory's families is never saved (:func:`memory_note`, plan S2): it is in
+    ``not_saved`` with the page to set it on; Memory itself is not written. Every country-specific row
+    (:func:`is_country_specific`) is in Memory's families, so what is saved is global. A per-job row is
+    skipped. Returns ``{saved: [topic], not_saved: {topic: why}}``. All-or-nothing: a bad value writes
+    nothing (422)."""
     from src.services.profile import edits as profile_edits  # noqa: PLC0415
     from src.services.profile import user_info  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
 
-    keep = [
-        r for r in rows if str(r.get("answer") or "").strip() and reusable(r["topic"], r["question"])
-        and (country or not is_country_specific(r["topic"], r["question"]))
-    ]
+    not_saved: dict[str, str] = {}
+    keep = []
+    for r in rows:
+        if not str(r.get("answer") or "").strip() or not reusable(r["topic"], r["question"]):
+            continue
+        note = memory_note(r["topic"], r["question"], country)
+        if note:
+            not_saved[r["topic"]] = note
+        else:
+            keep.append(r)
     if not keep:
-        return []
+        return {"saved": [], "not_saved": not_saved}
     loaded, _ = load_profile_with_overlay(user_id)
     records = [dict(r) for r in (loaded or UserProfile()).user_info.answers or [] if isinstance(r, dict)]
     for r in keep:
-        bound = bool(country) and is_country_specific(r["topic"], r["question"])
-        new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True,
-               "topic": r["topic"], **({"country": str(country).upper()} if bound else {})}
+        new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"]}
         records = user_info.upsert_answer(records, new)
     value = profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, records)
     if load_profile(user_id, with_overlay=False) is None:
@@ -162,7 +183,7 @@ def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -
         user_id, profile_edits.WEB_ACTOR, [(user_info.USER_INFO_ANSWERS_PATH, value)],
         enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
     )
-    return [r["topic"] for r in keep]
+    return {"saved": [r["topic"] for r in keep], "not_saved": not_saved}
 
 
 def _key(row: dict[str, Any]) -> str:

@@ -1,8 +1,8 @@
 """Ask once (owner answers 2026-11-02, questions 2 and 3).
 
-Only the owner's "remember" press saves an answer for reuse; the saved answer is bound to the job's
-country, so the next job in that country needs no owner and another country still asks. Real HTTP
-doors and VALUE asserts (rule #21).
+Only the owner's "remember" press saves an answer for reuse. Memory first (owner 2026-11-05, plan S2): a
+question in Memory's families (right to work, sponsorship, notice, contact...) is never saved: the user sets
+it on the country page in Job360. Real HTTP doors and VALUE asserts (rule #21).
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-Q = {"key": "notice_weeks", "question": "What is your notice period?"}  # global: true in every country
+Q = {"key": "take_home", "question": "Are you happy to do a take-home exercise?"}  # outside Memory: saved
 VISA = {"key": "needs_visa", "question": "Will you need visa sponsorship to work in this role?"}  # one country
 
 
@@ -64,40 +64,42 @@ def _approved(user_id: str) -> list[dict[str, Any]]:
     return [] if profile is None else [r for r in profile.user_info.answers or [] if r.get("approved") is True]
 
 
+def _memory(user_id: str) -> tuple[Any, Any]:
+    from src.services.profile.storage import load_profile
+
+    profile = load_profile(user_id)
+    return (None, None) if profile is None else (profile.user_info.answers, profile.user_info.right_to_work)
+
+
 @pytest.mark.asyncio
-async def test_a_right_to_work_answer_remembered_once_fills_that_country_only(
-    authenticated_async_context, fixture_user_id
-):
+async def test_a_memory_row_is_never_remembered_as_a_saved_answer(authenticated_async_context, fixture_user_id):
+    """Plan S2 (owner 2026-11-05): a GB sponsorship row and a PL right-to-work row save nothing, neither a
+    saved answer nor Memory (the user sets Memory in Job360); the reply names the country page."""
+    rtw = {"key": "pl_rtw", "question": "Do you have the right to work in Poland?"}
     async with authenticated_async_context() as client:
-        first = await _bring(client, "Acme", "GB")
-        ask_id = await _ask(client, first, VISA)
-        # Answering alone remembers nothing (owner answer 2: only the press saves for reuse).
-        resp = await client.post(f"/api/asks/{ask_id}/answer", json={"answers": {VISA["key"]: "No"}})
+        before = _memory(fixture_user_id)
+        for country, row, answer in (("GB", VISA, "No"), ("PL", rtw, "Yes")):
+            app_id = await _bring(client, "Acme" + country, country)
+            ask_id = await _ask(client, app_id, row)
+            resp = await client.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {row["key"]: answer}})
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert (body["saved"], body["skipped"], body["country"]) == ([], [row["key"]], country)
+            assert f"your {country} page" in body["not_saved"][row["key"]]
+            assert "user_info.right_to_work" in body["not_saved"][row["key"]]
+            assert _memory(fixture_user_id) == before, "no saved answer, no Memory write"
+            assert await _form_check_missing(client, app_id, row) == [row["question"]], "Memory still asks"
+
+
+@pytest.mark.asyncio
+async def test_an_unclear_answer_to_a_memory_row_saves_nothing_and_says_so(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, "Acme", "GB")
+        ask_id = await _ask(client, app_id, VISA)
+        resp = await client.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {VISA["key"]: "depends"}})
         assert resp.status_code == 200, resp.text
-        assert _approved(fixture_user_id) == []
-        resp = await client.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {VISA["key"]: "No"}})
-        assert resp.status_code == 200, resp.text
-        assert resp.json() == {"saved": [VISA["key"]], "skipped": [], "country": "GB"}
-        assert [(r["topic"], r["answer"], r.get("country")) for r in _approved(fixture_user_id)] == [
-            (VISA["key"], "No", "GB")]
-
-        same = await _bring(client, "Globex", "GB")
-        # Memory first (owner 2026-11-05, S1): a sponsorship question is answered from the GB page only; a
-        # remembered answer no longer fills it (plan S2 moves "remember" to write the country page).
-        assert await _form_check_missing(client, same, VISA) == [VISA["question"]], "Memory, never a saved answer"
-        await _fill_guess(client, same, "No", VISA)
-        assert await _gate_guessed(fixture_user_id, same) is False, "no answer_guessed: the owner's word"
-
-        other = await _bring(client, "Initech", "US")
-        assert await _form_check_missing(client, other, VISA) == [VISA["question"]], "a US form still asks"
-        await _fill_guess(client, other, "No", VISA)
-        assert await _gate_guessed(fixture_user_id, other) is True, "a UK answer never crosses to the US"
-
-        # The US answer is its own record: one per question AND country.
-        us_ask = await _ask(client, other, VISA)
-        resp = await client.post(f"/api/asks/{us_ask}/answers/remember", json={"answers": {VISA["key"]: "Yes"}})
-        assert resp.status_code == 200 and resp.json()["country"] == "US", resp.text
-        assert {r["country"]: r["answer"] for r in _approved(fixture_user_id)} == {"GB": "No", "US": "Yes"}
+        assert resp.json()["saved"] == [] and "your GB page" in resp.json()["not_saved"][VISA["key"]]
+    assert _approved(fixture_user_id) == []
 
 
 @pytest.mark.asyncio
@@ -105,15 +107,13 @@ async def test_a_global_answer_remembered_once_fills_every_country(authenticated
     async with authenticated_async_context() as client:
         first = await _bring(client, "Acme", "GB")
         ask_id = await _ask(client, first, Q)
-        resp = await client.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {Q["key"]: "4 weeks"}})
+        resp = await client.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {Q["key"]: "Yes"}})
         assert resp.status_code == 200 and resp.json()["saved"] == [Q["key"]], resp.text
         assert [(r["topic"], r["answer"], r.get("country")) for r in _approved(fixture_user_id)] == [
-            (Q["key"], "4 weeks", None)], "a notice period is the same in every country: saved global"
+            (Q["key"], "Yes", None)], "an answer outside Memory is the same in every country: saved global"
         other = await _bring(client, "Initech", "US")
-        # Memory first (owner 2026-11-05, S1): a notice period is Memory's (logistics), so check_form asks for it
-        # on Memory; the remembered answer still verifies what was typed (plan S2 moves the write to Memory).
-        assert await _form_check_missing(client, other) == [Q["question"]], "Memory, never a saved answer"
-        await _fill_guess(client, other, "4 weeks")
+        assert await _form_check_missing(client, other) == [], "the US form is filled without asking"
+        await _fill_guess(client, other, "Yes")
         assert await _gate_guessed(fixture_user_id, other) is False
 
 
@@ -128,18 +128,18 @@ async def test_remember_skips_per_job_rows_and_an_assistant_cannot_press_it(
         heard = {"key": "how_heard", "question": "How did you hear about us?"}
         ask_id = await _ask(client, app_id, Q, heard)
         resp = await client.post(f"/api/asks/{ask_id}/answers/remember",
-                                 json={"answers": {Q["key"]: "4 weeks", "how_heard": "LinkedIn"}})
+                                 json={"answers": {Q["key"]: "Yes", "how_heard": "LinkedIn"}})
         assert resp.status_code == 200, resp.text
         assert resp.json()["saved"] == [Q["key"]] and resp.json()["skipped"] == ["how_heard"]
         token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
                            headers={"Authorization": f"Bearer {token}"}) as agent:
-        refused = await agent.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {Q["key"]: "1 week"}})
+        refused = await agent.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {Q["key"]: "No"}})
         assert refused.status_code == 403, refused.text
         refused = await agent.post("/api/profile/questionnaire/remember", json={
             "country": "GB", "items": [{"topic": "x", "question": "X?", "answer": "Y"}]})
         assert refused.status_code == 403, refused.text
-    assert [r["answer"] for r in _approved(fixture_user_id)] == ["4 weeks"]
+    assert [r["answer"] for r in _approved(fixture_user_id)] == ["Yes"]
 
 
 @pytest.mark.asyncio
@@ -160,25 +160,30 @@ async def test_questionnaire_lists_up_to_ten_per_country_and_a_remembered_row_le
         gb = out[0]["questions"]
         assert 0 < len(gb) <= 10 and not any(q["per_job"] or q["verified"] for q in gb)
         assert gb[0]["label"] == "guessed" and gb[0]["topic"] == "contact.website", "the guessed row comes first"
-        row = next(q for q in gb if q["topic"] == "contact.phone")
+        row = next(q for q in gb if q["topic"] == "contact.website")
         resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
-            {"topic": row["topic"], "question": row["question"], "answer": "+44 7700 900123"}]})
-        assert resp.status_code == 200 and resp.json() == {"saved": ["contact.phone"]}, resp.text
+            {"topic": row["topic"], "question": row["question"], "answer": "ada.dev"}]})
+        assert resp.status_code == 200 and resp.json() == {"saved": ["contact.website"], "not_saved": {}}, resp.text
         after = {c["country"]: [q["topic"] for q in c["questions"]]
                  for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
-        assert "contact.phone" not in after["GB"] and "contact.phone" not in after["US"], "global: off every list"
-        # A country-specific row leaves only its own country's list.
+        assert "contact.website" not in after["GB"] and "contact.website" not in after["US"], "global: off every list"
+        # Memory first (plan S2): a Memory row (phone, sponsorship) is never saved; it stays until the user sets
+        # it on that page in Job360.
         rtw = "right_to_work.GB.needs_sponsorship"
         assert rtw in after["GB"] and "right_to_work.US.needs_sponsorship" in after["US"]
         question = next(q["question"] for q in gb if q["topic"] == rtw)
+        phone = next(q["question"] for q in gb if q["topic"] == "contact.phone")
         resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
-            {"topic": rtw, "question": question, "answer": "No"}]})
-        assert resp.status_code == 200, resp.text
+            {"topic": rtw, "question": question, "answer": "No"},
+            {"topic": "contact.phone", "question": phone, "answer": "+44 7700 900123"}]})
+        assert resp.status_code == 200 and resp.json()["saved"] == [], resp.text
+        assert "your GB page" in resp.json()["not_saved"][rtw]
+        assert "your Memory page" in resp.json()["not_saved"]["contact.phone"]
         after = {c["country"]: [q["topic"] for q in c["questions"]]
                  for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
-        assert rtw not in after["GB"] and "right_to_work.US.needs_sponsorship" in after["US"]
+        assert rtw in after["GB"] and "contact.phone" in after["GB"]
         saved = {r["topic"]: r.get("country") for r in _approved(fixture_user_id)}
-        assert saved == {"contact.phone": None, rtw: "GB"}
+        assert saved == {"contact.website": None}
 
 
 def test_a_country_bound_answer_matches_only_that_country():
@@ -230,19 +235,19 @@ async def test_the_answer_once_card_counts_once_and_the_newer_press_wins(
         topics = {c["country"]: [q["topic"] for q in c["questions"]]
                   for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
         assert "contact.phone" not in topics["GB"] and "contact.phone" not in topics["US"]
-        rtw = "right_to_work.GB.needs_sponsorship"
+        site = "contact.website"
         count = (await client.get("/api/needs-you-count")).json()
         rows = sum(len(t) for t in topics.values())
         assert (count["answer_once"], count["n"]) == (rows, 1), "the questionnaire is one card on the count"
-        question = "Do you need sponsorship to work in GB?"
-        for answer in ("Yes", "No"):  # pressed twice: the newer press replaces the older, never a tie
+        question = "Personal website or portfolio"
+        for answer in ("old.dev", "ada.dev"):  # pressed twice: the newer press replaces the older, never a tie
             resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
-                {"topic": rtw, "question": question, "answer": answer}]})
+                {"topic": site, "question": question, "answer": answer}]})
             assert resp.status_code == 200, resp.text
         from src.services.profile.answer_match import find_answer
         from src.services.profile.storage import load_profile
 
         answers = load_profile(fixture_user_id).user_info.answers
-        assert find_answer(answers, topic=rtw, country="GB")["answer"] == "No"
+        assert find_answer(answers, topic=site, country="GB")["answer"] == "ada.dev"
         gb = [q["topic"] for q in (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]]
-        assert rtw not in gb
+        assert site not in gb

@@ -87,7 +87,7 @@ def test_a_write_never_rewrites_or_merges_saved_twins():
 
 
 @pytest.mark.asyncio
-async def test_answer_once_shows_a_conflict_row_and_remembering_one_value_removes_it(
+async def test_answer_once_shows_a_conflict_row_and_a_press_on_it_saves_nothing(
     authenticated_async_context, fixture_user_id
 ):
     from src.services.profile import edits as profile_edits
@@ -108,13 +108,14 @@ async def test_answer_once_shows_a_conflict_row_and_remembering_one_value_remove
         gb = (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]
         row = next(q for q in gb if q["conflict"])
         assert (row["topic"], row["conflict"], row["answer"]) == ("sponsorship.GB.yes_no", ["Yes", "No"], None)
+        # Memory first (owner 2026-11-05, plan S2): sponsorship is Memory's, so a press saves nothing and points
+        # to the GB page; the stored twins are left for the owner's clean-up (S3), never deleted here.
         resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
             {"topic": row["topic"], "question": row["question"], "answer": "No"}]})
-        assert resp.status_code == 200, resp.text
-        gb = (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]
-        assert not any(q["conflict"] for q in gb)
+        assert resp.status_code == 200 and resp.json()["saved"] == [], resp.text
+        assert "your GB page" in resp.json()["not_saved"]["sponsorship.GB.yes_no"]
     mine = [r for r in load_profile(fixture_user_id).user_info.answers if "sponsorship" in str(r.get("topic"))]
-    assert [(r["topic"], r["answer"]) for r in mine] == [("sponsorship.GB.yes_no", "No")]
+    assert [(r["topic"], r["answer"]) for r in mine] == [("sponsorship.GB.yes_no", "Yes"), ("sponsorship.gb.yes_no", "No")]
 
 
 # ── Verifier seams (2026-11-03): twins worded differently, and a narrower answer over a broader one ──

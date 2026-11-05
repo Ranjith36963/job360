@@ -131,3 +131,37 @@ def test_the_ready_card_never_turns_a_memory_answer_into_a_saved_one():
     typed = {"question": SPONSOR_Q, "answer": "No", "key": key, "source": "memory"}
     saved = {"user_info.right_to_work": (WEB_ACTOR, "2026-11-01T09:00:00+00:00")}
     assert ready._user_check(typed, profile, saved, None, have, None, "GB")[:2] == (True, None)
+
+
+# ── Plan S2 (owner 2026-11-05): no NEW saved answer for a Memory fact; Memory is set by the user in Job360 ──
+
+
+@pytest.mark.parametrize("op", ["append", "upsert"])
+def test_a_new_saved_answer_in_memorys_families_is_refused_naming_the_country_page(op):
+    from src.services.profile import edits
+    from src.services.profile.edits import ProfileEditError
+
+    new = _saved("Do you need visa sponsorship?", "No", "sponsorship.GB.yes_no")
+    with pytest.raises(ProfileEditError) as info:
+        edits.resolve_ops([("user_info.answers", op, new, None)], {"user_info.answers": []})
+    assert info.value.status_code == 422
+    assert "user_info.right_to_work" in info.value.detail and "your GB page" in info.value.detail
+    essay = _saved("Why do you want to join us?", "The mission.", "why_us")
+    [(_, value)] = edits.resolve_ops([("user_info.answers", op, essay, None)], {"user_info.answers": []})
+    assert value == [essay], "outside Memory: saved as before"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_refuses_a_sponsorship_upsert_and_saves_nothing(
+    authenticated_async_context, fixture_user_id
+):
+    from src.services.profile.edits import current_edit_id
+
+    async with authenticated_async_context() as client:
+        before = current_edit_id(fixture_user_id)
+        resp = await client.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "op": "upsert",
+            "value": _saved("Do you need visa sponsorship?", "No", "sponsorship.GB.yes_no")}]})
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert "Nothing was saved." in detail and "user_info.right_to_work" in detail and "your GB page" in detail
+        assert current_edit_id(fixture_user_id) == before, "nothing written"

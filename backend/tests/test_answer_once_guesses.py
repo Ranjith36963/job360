@@ -127,7 +127,7 @@ async def test_remembering_a_guessed_row_makes_it_verified(authenticated_async_c
         row = (await _asked(client))["website"]
         resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
             {"topic": row["topic"], "question": row["question"], "answer": row["value"]}]})
-        assert resp.status_code == 200 and resp.json() == {"saved": ["contact.website"]}, resp.text
+        assert resp.status_code == 200 and resp.json() == {"saved": ["contact.website"], "not_saved": {}}, resp.text
         assert "website" not in await _asked(client), "answered once: not asked again"
         rows = {r["id"]: r for r in (await client.get("/api/profile/common-questions")).json()["questions"]}
         assert (rows["website"]["answer"], rows["website"]["verified"], rows["website"]["label"]) == (
