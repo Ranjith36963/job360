@@ -3127,6 +3127,8 @@ async def whats_new(
     since: Optional[str] = None,
     after_id: Optional[int] = None,
     limit: int = 50,
+    inbox_offset: int = 0,
+    inbox_stale_alerts: bool = False,
 ) -> dict[str, Any]:
     """R9 — what changed across ALL of the caller's applications since a
     cursor. Paged and ordered by ``recorded_at`` (when Job360 learned it),
@@ -3236,11 +3238,13 @@ async def whats_new(
     # Feature 10 - unmatched mail, likewise carried whatever `since` says.
     from src.services.applications.inbox_items import for_whats_new  # noqa: PLC0415
 
+    # Owner report #9/#14: one page, people first, stale job alerts left out unless asked for.
+    inbox = await for_whats_new(db, user_id, offset=inbox_offset, stale_alerts=inbox_stale_alerts)
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
         "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
-        "inbox_items": await for_whats_new(db, user_id),
+        "inbox_items": inbox["items"], "inbox_page": inbox["page"],
     }
 
 

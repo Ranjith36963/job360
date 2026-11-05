@@ -949,7 +949,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             out["topics_more"] = len(topics) - _BRIEF_TOPICS
         return out
 
-    def _brief(full: dict[str, Any]) -> dict[str, Any]:
+    def _brief(full: dict[str, Any], search_plan: bool = False) -> dict[str, Any]:
         """The run view of a full get_profile payload: same values, minus the bulk."""
         fields = full.get("fields") or {}
         keep = (
@@ -959,6 +959,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             "profile_edit_id", "unconfirmed", "raw_available", "outreach_templates", "raw",
         )
         out = {k: full[k] for k in keep if k in full}
+        if isinstance(out.get("search_brief"), dict) and not search_plan:
+            # Owner report #9 (2026-11-05): the plan repeats every row's counts_if line (30 rows on a real
+            # profile) on every call; only the hunt reads it, so it rides search_plan=true (or view="full").
+            out["search_brief"] = {k: v for k, v in out["search_brief"].items() if k != "plan"}
         out["basics"] = {p: fields[p] for p in _BRIEF_PATHS if fields.get(p) not in (None, "", [], {})}
         if full.get("country_pages"):  # country pages: the places with a page (full view has each page)
             out["basics"]["countries"] = list(full["country_pages"])
@@ -982,6 +986,11 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             Field(description='"brief" (default): what a run reads. "full": adds fields, shapes, editable_paths, '
                               "agent_edits - for setup and for writes that need a current value."),
         ] = "brief",
+        search_plan: Annotated[
+            bool,
+            Field(description="true: the brief's search_brief also carries `plan` (each place's order and "
+                              "effort_pct) - the hunt reads it. The full view always has it."),
+        ] = False,
     ) -> dict[str, Any]:
         """READ `instructions` FIRST: the user's own rules; they override your defaults, never a HARD LINE.
 
@@ -1005,7 +1014,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
 
-        HUNT: `search_brief.rows` = the ONLY places to search (`plan` = their order);
+        HUNT: `search_brief.rows` = the ONLY places to search (`plan` = their order, with search_plan=true);
         `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
@@ -1185,7 +1194,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable_paths},
             **({"raw": _raw_block(profile.cv_data, raw_section, raw_offset)} if include_raw else {}),
         }
-        return full if view == "full" else _brief(full)
+        return full if view == "full" else _brief(full, search_plan)
 
     @mcp.tool()
     async def bring_job(
@@ -2087,7 +2096,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
-    async def whats_new(since: Optional[str] = None, after_id: Optional[int] = None, limit: int = 50) -> dict[str, Any]:
+    async def whats_new(
+        since: Optional[str] = None, after_id: Optional[int] = None, limit: int = 50,
+        inbox_offset: int = 0, inbox_stale_alerts: bool = False,
+    ) -> dict[str, Any]:
         """What happened across ALL of the user's applications since a given
         time — for an agent waking up and asking "what did I miss?". Paged by
         when Job360 recorded each event, never by when it happened in the
@@ -2095,10 +2107,14 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `open_asks` — the user's unanswered questions — whatever `since` says. Also
         `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6),
         `interviews` {upcoming (next 7 days: prep), just_passed (last 3 days, no outcome recorded: ask how it went)},
-        and `inbox_items` (unmatched mail from record_events: skip those message ids)."""
+        and `inbox_items` (unmatched mail from record_events: skip those message ids): one page, replies from a
+        person (`sender_kind` person) first, then the rest grouped by sender; `inbox_page.next_offset` -> pass as
+        `inbox_offset` while `more`. Job alerts older than 7 days are left out: `inbox_stale_alerts=true` lists them."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.whats_new(since, after_id, limit, db, _user())
+                resp = await applications_route.whats_new(
+                    since, after_id, limit, inbox_offset, inbox_stale_alerts, db, _user()
+                )
         except HTTPException as exc:
             _audit("whats_new", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None

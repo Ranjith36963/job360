@@ -475,7 +475,9 @@ UNMATCHED MAIL (record_events): mail you read but cannot tie to ONE application 
 `unmatched` of one `record_events` call (message_id, thread_id, sender, subject, received_at).
 Job360 stores it once as a Needs-you item; the user picks its application or dismisses it
 on Job360. Set `dismissed: true` only when the user told you, in chat, that it is about no
-job. Skip every message id listed in `whats_new` `inbox_items`. A row with resolution
+job. Skip every message id listed in `whats_new` `inbox_items` (one page: pass `inbox_page.next_offset` as
+`inbox_offset` while `more`; a person's reply comes first; job alerts over 7 days old need
+`inbox_stale_alerts=true`; storing one again is harmless, `already_existed`). A row with resolution
 `matched` and no `event_id` means the user picked its application: read the email again and
 record its event on that application with its `source`. `events` takes record_event's
 arguments plus `application_id`, and each item is judged on its own. A cold contact's
@@ -745,7 +747,7 @@ A confirmation email while `record_application` is refused (`submit_rule_open`, 
 
 VIEWS: get_profile is BRIEF by default - what a run reads: `instructions`, `memory_notes`, `settings`,
 `basics` (contact, targets, right_to_work and salary per country, daily_check; unset = absent), `answers`
-(counts + topics), `search_brief` and the newest 5 `lessons`. `get_profile(view="full")` adds `fields` (every
+(counts + topics), `search_brief` (rows and gaps; its `plan` only with `search_plan=true`) and the newest 5 `lessons`. `get_profile(view="full")` adds `fields` (every
 editable path's value), `shapes`, `editable_paths`, `agent_edits`, `skills` and `common_questions_open`: use it
 in setup and before any write that sends a current value. Every `fields[...]` below is the full view.
 
