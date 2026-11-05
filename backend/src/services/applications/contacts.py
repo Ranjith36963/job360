@@ -2070,8 +2070,19 @@ async def outreach_gate_facts(
     linkedin = await _linkedin_gate_facts(
         db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc), context
     )
+    checks: dict[str, Any] = {}
+    if str(target.get("channel") or "") == "email":  # LinkedIn reads the same two checks in its own facts
+        from src.services.applications import cv_checks  # noqa: PLC0415
+
+        text = str(target.get("text") or "")
+        profile = await _load_profile_or_none(user_id)
+        checks = {
+            "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile, context),
+            "sensitive": bool(cv_checks.sensitive_words(text)),
+        }
     return settings_rules.OutreachFacts(
         **linkedin,
+        **checks,
         message_found=True,
         latest_draft=int(target["id"]) == max(int(r["id"]) for r in messages),
         channel=str(target.get("channel") or ""),

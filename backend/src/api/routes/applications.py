@@ -3044,6 +3044,19 @@ async def outreach_check(
         verdict = settings_rules.OutreachDecision(
             "ask", "unsupported_numbers", f"The draft states a number your profile does not support. {unsupported}"
         )
+    # The Doctor's code checks hold for every channel (owner 2026-11-05): an email gets the LinkedIn message's
+    # name check and sensitive-topic check too. LinkedIn reads them inside the gate.
+    if verdict.decision == "send" and facts.channel == "email" and facts.unsupported_claims:
+        verdict = settings_rules.OutreachDecision(
+            "ask", "unsupported_claims",
+            "The email names something the profile lacks. Fix it from the profile, or save a Gmail draft and ask_user.",
+        )
+    if verdict.decision == "send" and facts.channel == "email" and facts.sensitive:
+        verdict = settings_rules.OutreachDecision(
+            "ask", "sensitive_topic",
+            "The email raises visa, salary, health or another private topic: the user's to raise. Save a Gmail "
+            "draft and ask_user.",
+        )
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",

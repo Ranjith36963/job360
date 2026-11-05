@@ -529,7 +529,7 @@ def test_the_write_recipe_sets_each_kind_its_length_and_who_sends_it():
         assert words in flat_text, words
     assert assistant_settings.LINKEDIN_MESSAGE_MAX_CHARS == 400  # the guide's hard limits are the gate's
     assert settings.LINKEDIN_NOTE_MAX_CHARS == 200
-    assert "on an email it does not check this, so you must" in flat_text  # the gate checks LinkedIn only
+    assert "on linkedin and email alike" in flat_text  # the gate checks both channels (email since 2026-11-05)
     assert "never the kind" in flat_text  # the label is the approach: variant stats group on it
     for kind in ("after_connect", "connection_note", "`message`", "`email`"):
         assert kind in text, kind
