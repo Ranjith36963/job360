@@ -27,7 +27,6 @@ handed out; nobody gets a second request.
 """
 from __future__ import annotations
 
-import json
 import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -62,6 +61,7 @@ RELEASE_REASONS = (
 # release: LinkedIn's invitation limit is weekly).
 RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
+TAKE_SLOT = "own_browser:take"  # the newest take by any own-browser session (last_pc_activity_at)
 # An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
 # returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
@@ -381,20 +381,19 @@ async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]
 
 
 async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetime]:
-    """The newest sign that a session in the user's own browser worked the queue, from existing rows only: a
-    person claimed or released (``contact_outreach``), a hunt / people / pending task claimed or closed (the
-    ``pc_duties`` slots; never the user's own Run now slot), or a labelled kit read by an assistant on an
-    application whose link is on linkedin.com (Easy Apply runs only in the own browser). ``None``: never."""
+    """The newest sign that a session in the user's own browser worked the queue, from rows only the own-browser
+    door writes: any take, whatever it answered (:data:`TAKE_SLOT`), a person claimed or released
+    (``contact_outreach``), a hunt / people / pending task claimed or closed (the ``pc_duties`` slots; never the
+    user's own Run now slot). A scheduled cloud run never reaches these. ``None``: never."""
     from src.services.applications import pc_duties  # noqa: PLC0415
 
-    found: list[Optional[datetime]] = []
     cur = await db._db.execute(
         "SELECT MAX(recorded_at) FROM contact_outreach WHERE user_id = ? AND entry IN (?, ?)",
         (user_id, CLAIMED, RELEASED),
     )
     got = await cur.fetchone()
-    found.append(_when(got[0]) if got is not None and got[0] else None)
-    slots = [p + k for p in (pc_duties.SLOT, pc_duties.CLAIM) for k in pc_duties.KINDS]
+    found = [_when(got[0]) if got is not None and got[0] else None]
+    slots = [TAKE_SLOT] + [p + k for p in (pc_duties.SLOT, pc_duties.CLAIM) for k in pc_duties.KINDS]
     cur = await db._db.execute(
         "SELECT MAX(done_at) FROM assistant_duty_runs WHERE user_id = ? "  # noqa: S608 - placeholders only
         f"AND duty IN ({','.join('?' for _ in slots)})",
@@ -402,24 +401,19 @@ async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetim
     )
     got = await cur.fetchone()
     found.append(_when(got[0]) if got is not None and got[0] else None)
-    cur = await db._db.execute(
-        "SELECT e.recorded_at, e.payload, a.job_url FROM application_events e JOIN applications a "
-        "ON a.id = e.application_id AND a.user_id = e.user_id WHERE e.user_id = ? AND e.event_type = 'kit_read' "
-        "AND e.recorded_by <> 'web' ORDER BY e.id DESC LIMIT 200",
-        (user_id,),
-    )
-    for r in await cur.fetchall():
-        row = dict(r)
-        raw = row["payload"]
-        try:
-            payload = raw if isinstance(raw, dict) else json.loads(str(raw or "{}"))
-        except ValueError:
-            payload = {}
-        if isinstance(payload, dict) and payload.get("session") and routing.names_linkedin(str(row["job_url"] or "")):
-            found.append(_when(row["recorded_at"]))
-            break
     seen = [at for at in found if at is not None]
     return max(seen) if seen else None
+
+
+async def stamp_take(db: JobDatabase, user_id: str, now: datetime) -> None:
+    """One slot per user: the newest own-browser take, whatever it answered (owner #12: a PC session that is up
+    but finds nothing to do, or is told to wait, is alive). Not a scheduled duty: ``whats_due`` never reads it."""
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat()),
+    )
+    await db._db.commit()
 
 
 def idle_fact(last: Optional[datetime], waiting: int, now: datetime) -> Optional[dict[str, Any]]:
@@ -780,6 +774,7 @@ async def take(
     if not label:
         raise SpineError(422, "session is needed: a short label that tells your sessions apart")
     actor = actor_for(user)
+    await stamp_take(db, user.id, now)
     win = await window(db, user.id, now)
     if win["why"] == "paused":
         _log("own_browser_take", user.id, "paused")

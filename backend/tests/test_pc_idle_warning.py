@@ -13,9 +13,12 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.api.auth_deps import CurrentUser
+from src.api.routes import browser as browser_routes
 from src.api.routes import own_browser as own_browser_route
 from src.api.routes import schedule as schedule_route
 from src.core import settings
+from src.services.applications import blocked as blocked_service
 from src.services.applications import needs_you_count as needs_you_module
 
 NOW = datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)  # a Wednesday, inside 09:00-17:00 London (= UTC)
@@ -45,14 +48,19 @@ class _Clock:
             monkeypatch.setattr(module, "datetime", _Frozen)
 
 
-async def _person(client: AsyncClient, applied: bool = False) -> tuple[int, int]:
-    """One application with one LinkedIn draft; returns (contact_id, message_id)."""
-    resp = await client.post("/api/jobs/bring", json=_AD)
+async def _bring(client: AsyncClient, n: int = 0, url: str = "") -> int:
+    ad = {**_AD, "title": f"Engineer {n}", "apply_url": url or f"https://northwind.example/c/{n}"}
+    resp = await client.post("/api/jobs/bring", json=ad)
     assert resp.status_code == 200, resp.text
-    app_id = int(resp.json()["application_id"])
+    return int(resp.json()["application_id"])
+
+
+async def _person(client: AsyncClient, applied: bool = False, n: int = 0) -> tuple[int, int]:
+    """One application with one LinkedIn draft; returns (contact_id, message_id)."""
+    app_id = await _bring(client, 100 + n)
     added = await client.post(
         f"/api/applications/{app_id}/contacts",
-        json={"name": "Priya", "role": "Recruiter", "linkedin_url": "https://www.linkedin.com/in/priya"},
+        json={"name": f"Priya {n}", "role": "Recruiter", "linkedin_url": f"https://www.linkedin.com/in/priya{n}"},
     )
     assert added.status_code == 201, added.text
     contact_id = int(added.json()["contact"]["id"])
@@ -85,13 +93,20 @@ async def _agent(client: AsyncClient) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"})
 
 
-async def _pc_takes_at(client: AsyncClient, clock: _Clock, at: datetime) -> None:
-    """The user's PC session takes the task at ``at`` (its claim is the activity), then the clock returns to NOW."""
+async def _pc_takes_at(client: AsyncClient, clock: _Clock, at: datetime, status: str = "task") -> dict[str, Any]:
+    """The user's PC session calls take at ``at`` (any answer is activity), then the clock returns to NOW."""
     clock.at = at
     async with await _agent(client) as agent:
         got = await agent.post("/api/own-browser/take", json={"session": "pc"})
-        assert got.status_code == 200 and got.json()["status"] == "task", got.text
+        assert got.status_code == 200 and got.json()["status"] == status, got.text
     clock.at = NOW
+    return got.json()
+
+
+async def _queue(client: AsyncClient) -> dict[str, Any]:
+    resp = await client.get("/api/own-browser/queue")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
 
 async def _three_reads(client: AsyncClient) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -170,3 +185,75 @@ async def test_the_boundary_is_exactly_the_limit(authenticated_async_context, mo
     assert queue["pc_idle"] == _idle(NOW - LIMIT, 1)
     assert due["pc_idle"] == _idle(NOW - LIMIT, 1)
     assert count["pc_idle"] == _idle(NOW - LIMIT, 1)
+
+
+# ── what counts as the PC working the queue (checker's cases on #1517) ─────────
+
+
+@pytest.mark.asyncio
+async def test_a_cloud_kit_read_on_a_linkedin_job_is_not_pc_activity(authenticated_async_context, monkeypatch):
+    _Clock(monkeypatch)
+    async with authenticated_async_context() as client:
+        await _waiting(client)
+        linkedin_job = await _bring(client, 1, "https://www.linkedin.com/jobs/view/4242")
+        async with await _agent(client) as cloud:  # a scheduled cloud run reads a kit with its own session label
+            kit = await cloud.get(f"/api/applications/{linkedin_job}/kit", params={"session": "cloud-batch"})
+            assert kit.status_code == 200, kit.text
+        queue = await _queue(client)
+    assert queue["count"] == 1 and queue["pc_idle"] == _idle(None, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_take_that_answers_wait_is_pc_activity(authenticated_async_context, monkeypatch):
+    clock = _Clock(monkeypatch)
+    async with authenticated_async_context() as client:
+        await _waiting(client)
+        other, _ = await _person(client, n=1)
+        sent = await client.post(f"/api/contacts/{other}/outreach", json={"entry": "sent", "channel": "linkedin"})
+        assert sent.status_code == 201, sent.text  # a LinkedIn send just went: the next take must wait
+        assert (await _queue(client))["pc_idle"] == _idle(None, 1)
+        got = await _pc_takes_at(client, clock, NOW - timedelta(hours=1), status="wait")
+        assert got["task"] is None and got["wait_seconds"] > 0
+        queue = await _queue(client)
+    assert queue["count"] == 1 and queue["pc_idle"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_pc_duties_claim_is_pc_activity(authenticated_async_context, monkeypatch):
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
+
+    clock = _Clock(monkeypatch)
+    save_profile(
+        UserProfile(cv_data=CVData(raw_text="Python data engineer.", name="Ada Lovelace", skills=["Python"]),
+                    preferences=UserPreferences(target_job_titles=["Data Engineer"])),
+        authenticated_async_context.fixture_user_id, source_action="cv_upload",
+    )
+    async with authenticated_async_context() as client:
+        edit = await client.patch(
+            "/api/profile", json={"edits": [{"path": "assistant_settings.hunt_every_hours", "value": 6}]}
+        )
+        assert edit.status_code == 200, edit.text
+        assert (await _queue(client))["pc_idle"] == _idle(None, 1)  # the LinkedIn hunt waits for the PC
+        got = await _pc_takes_at(client, clock, NOW - timedelta(hours=1))
+        assert got["task"]["kind"] == "linkedin_search"
+        queue = await _queue(client)
+    assert [t["kind"] for t in queue["tasks"]] == ["linkedin_search"]  # its 30-minute claim lapsed: due again
+    assert queue["pc_idle"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_non_linkedin_application_taken_by_the_pc_is_pc_activity(authenticated_async_context, monkeypatch):
+    clock = _Clock(monkeypatch)
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 2)
+        user = CurrentUser(id=authenticated_async_context.fixture_user_id, email="u@example.com")
+        async with browser_routes._db() as db:  # noqa: SLF001 - Job360's own browser hit a sign-in wall
+            await blocked_service.record_browser_block(
+                db, user, app_id, {"reason": "login_needed", "step": "Job360 browser", "page_host": "careers.example"}
+            )
+        assert (await _queue(client))["pc_idle"] == _idle(None, 1)
+        got = await _pc_takes_at(client, clock, NOW - timedelta(hours=1))
+        assert got["task"]["task_id"] == f"application:{app_id}"
+        queue = await _queue(client)
+    assert queue["count"] == 1 and queue["pc_idle"] is None
