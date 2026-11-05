@@ -68,7 +68,8 @@
     "autonomy_shadow",
     "submit_cleared",
     "submit_cleared_used",
-    "answer_verified"
+    "answer_verified",
+    "cv_reviewed"
   ],
   "process": [
     "process_log",

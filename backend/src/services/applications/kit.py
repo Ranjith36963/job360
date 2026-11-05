@@ -39,7 +39,7 @@ from urllib.parse import urlsplit
 
 from src.core import settings
 from src.services.applications import blocked as blocked_service
-from src.services.applications import email_channel, event_examples, spine
+from src.services.applications import cv_review, email_channel, event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application, classify_host
 from src.services.applications.spine import SpineError
@@ -872,6 +872,9 @@ async def gate_facts(
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
+        cv_review=await cv_review.review_state(
+            db, user_id, application_id, cv["artifact_id"] if cv else None, cv["sha256"] if cv else ""
+        ),
         has_cv=cv is not None,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
@@ -954,7 +957,11 @@ async def _cv_not_approved(
     """The CV the receipt would freeze has neither a ``cv_seen`` nor a ``submit_approved`` matching its id and
     text. Staleness and the approval TTL never count here (auto mode asks ``cv_not_seen`` first, so a seen
     CV is the user's yes). No CV at all counts as not approved (owner 2026-11-01): an assistant may not record
-    it; the user marks it applied themselves."""
+    it; the user marks it applied themselves. With ``cv_auto_approve`` on, a stored ``strong`` ``cv_reviewed`` of
+    that exact CV counts as approved too (owner 2026-11-05: the gate cleared ``cv_not_seen`` on it)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
     frozen = await spine.frozen_cv_id(db, user_id, application_id, cv_artifact_id, channel)
     if frozen is None:
         return True
@@ -962,10 +969,15 @@ async def _cv_not_approved(
     if art is None or art["kind"] != "cv":
         return False  # the receipt route reports a bad id itself
     sha = sha256_text(art["text"])
-    return not any(
+    if any(
         cv_mark_matches(ev, frozen, sha)
         for ev in await _events(db, user_id, application_id, ("cv_seen", "submit_approved"))
-    )
+    ):
+        return False
+    cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if not cfg.cv_auto_approve:
+        return True
+    return await cv_review.review_state(db, user_id, application_id, frozen, sha) != cv_review.STRONG
 
 
 async def open_rule_items(

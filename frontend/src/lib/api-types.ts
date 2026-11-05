@@ -4996,6 +4996,7 @@ export interface components {
             check_every: string;
             company_cap: components["schemas"]["SettingFieldOut"];
             company_cap_days: components["schemas"]["SettingFieldOut"];
+            cv_auto_approve: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
             email_sends_per_day: components["schemas"]["SettingFieldOut"];
             hunt_every_hours: components["schemas"]["SettingFieldOut"];
