@@ -71,7 +71,7 @@ def _missing(profile: UserProfile, overlay: list[dict[str, Any]], has_profile: b
         log.warning("doctor_missing_kit_failed", extra={"event": "doctor_missing_kit_failed"})
     try:
         info = profile.user_info
-        brief = build_search_brief(info.right_to_work, (info.contact or {}).get("residence_country"), info.answers)
+        brief = build_search_brief(info.right_to_work, (info.contact or {}).get("residence_country"), info.logistics)
         out.extend({"key": str(g.get("path") or ""), "why": str(g.get("ask") or "")} for g in brief["gaps"])
     except Exception:  # noqa: BLE001
         log.warning("doctor_missing_brief_failed", extra={"event": "doctor_missing_brief_failed"})

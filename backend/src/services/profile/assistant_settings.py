@@ -808,6 +808,13 @@ def line_side(fit_score: Optional[int], line: Optional[int]) -> LineSide:
     return "above" if fit_score >= line else "below"
 
 
+def drops_below_line(fit_score: Optional[int], cfg: EffectiveSettings) -> bool:
+    """True when the user's own rule drops this job (owner 2026-10-19, S4 2026-11-05): ``below_line`` is
+    ``skip`` and the assistant's fit is under the user's line. No line or no score = False (rule #29). Job360
+    only compares the user's line with the assistant's number; it never scores a job (rule 4). Pure."""
+    return cfg.below_line == LINE_SKIP and line_side(fit_score, cfg.apply_min_score) == "below"
+
+
 def effective_inbox_values() -> frozenset[str]:  # pragma: no cover — documentation helper
     """The values ``preferences.daily_check`` may hold (kept for readers)."""
     return VALID_DAILY_CHECK_VALUES
@@ -1368,7 +1375,7 @@ def may_submit(
     pace = _pace_stop(cfg, counts, now)
     if pace is not None:
         return pace
-    if cfg.below_line == LINE_SKIP and line_side(application.fit_score, cfg.apply_min_score) == "below":
+    if drops_below_line(application.fit_score, cfg):
         return SubmitDecision(
             "stop", "below_score_line",
             f"This job is below your score line ({cfg.apply_min_score}) and you chose to drop those. "
