@@ -280,6 +280,26 @@ async def test_today_counts_cold_outreach_and_leaves_test_asks_out(
 
 
 @pytest.mark.asyncio
+async def test_today_leaves_outreach_to_a_test_applications_contact_out(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    _Clock(monkeypatch, now)
+    async with authenticated_async_context() as client:
+        resp = await client.post("/api/jobs/bring", json={**_ad(3), "test": True})
+        assert resp.status_code == 200, resp.text
+        practice = int(resp.json()["application_id"])
+        made = await client.post(f"/api/applications/{practice}/contacts",
+                                 json={"name": "Tess", "email": "t@northwind.example"})
+        assert made.status_code in (200, 201), made.text
+        cid = int((made.json().get("contact") or made.json())["id"])
+        marked = await client.post(f"/api/contacts/{cid}/outreach", json={"entry": "sent", "channel": "email"})
+        assert marked.status_code == 201, marked.text
+        body = await _today(client)
+    assert body["counts"]["outreach_sent"] == 0  # the test application's contact is left out, as stats does
+
+
+@pytest.mark.asyncio
 async def test_today_query_count_does_not_grow_with_the_queue(authenticated_async_context, fixture_user_id):
     from src.repositories import pg
 

@@ -29,7 +29,7 @@ from typing import Any
 
 from src.repositories.database import JobDatabase
 from src.services.applications import agenda, queue_preflight, spine
-from src.services.applications.test_marker import TEST_APP_SQL, test_app_ids
+from src.services.applications.test_marker import TEST_APP_SQL, TEST_ID_SQL, test_app_ids
 
 # count name -> the application_events.event_type it counts (outreach comes from contact_outreach, below)
 EVENT_COUNTS = {
@@ -88,11 +88,15 @@ async def build(db: JobDatabase, user_id: str, now: datetime | None = None) -> d
         [user_id, floor, *test_params],
     )
     counts["applied"] = sum(1 for s in receipts if _within(s, start, end))
+    # A contact on a test application is left out, as stats does; a cold contact (no application) counts.
+    test_c, test_c_params = TEST_ID_SQL("ac.application_id", "ac.user_id")
     for name, entry in (("outreach_sent", "sent"), ("outreach_replies", "reply")):
         stamps = await _times(
             db,
-            "SELECT occurred_at FROM contact_outreach WHERE user_id = ? AND entry = ? AND occurred_at >= ?",
-            [user_id, entry, floor],
+            "SELECT o.occurred_at FROM contact_outreach o LEFT JOIN application_contacts ac "  # noqa: S608
+            "ON ac.id = o.contact_id AND ac.user_id = o.user_id "
+            f"WHERE o.user_id = ? AND o.entry = ? AND o.occurred_at >= ? AND NOT {test_c}",
+            [user_id, entry, floor, *test_c_params],
         )
         counts[name] = sum(1 for s in stamps if _within(s, start, end))
     for name, column in (("asks_opened", "asked_at"), ("asks_answered", "answered_at")):
