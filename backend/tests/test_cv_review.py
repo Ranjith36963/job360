@@ -375,6 +375,35 @@ async def test_thin_quotes_unchecked_first_words_and_stretches_are_weak(authenti
 
 
 @pytest.mark.asyncio
+async def test_the_cv_text_decides_case_and_a_word_the_profile_never_says_is_weak(
+    authenticated_async_context, fixture_user_id,
+):
+    """The second check's attacks: a lowercased copy of the line hid "Google"; "twelve" and "kubernetes" are not
+    capitalised claims, yet the profile never says them; a heading of profile words is still a claim."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+
+        async def verdict(line: str, entry_line: str, quote: str) -> tuple[str, list[str]]:
+            cv = CV + line + "\n"
+            app_id, cv_id = await _setup(client, cv=cv)
+            got = await _stored(client, app_id, _review(cv_id, cv, lines=[
+                L1, L2, {"cv_line": entry_line, "profile_quote": quote, "field_path": "cv_data.raw_text"}]))
+            return got["confidence"], got["downgraded"]
+
+        line = "- Built ETL pipelines in Python and Snowflake at Google"
+        got = await verdict(line, line.lower(), "Built ETL pipelines in Python and Snowflake")
+        assert got[0] == "weak" and "claim_not_in_quote" in got[1], got
+        for line, quote in (("- Built ETL pipelines in Python and kubernetes", "Built ETL pipelines in Python"),
+                            ("- Worked on the warehouse migration with twelve engineers",
+                             "Worked on the warehouse migration")):
+            got = await verdict(line, line, quote)
+            assert got[0] == "weak" and "claim_not_in_quote" in got[1], (line, got)
+        cv = CV + "DATA ENGINEER\n"  # every word is in the profile, but it is a title, not a section name
+        app_id, cv_id = await _setup(client, cv=cv)
+        assert (await _stored(client, app_id, _review(cv_id, cv)))["downgraded"] == ["line_uncovered"]
+
+
+@pytest.mark.asyncio
 async def test_honest_lines_stay_strong(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)

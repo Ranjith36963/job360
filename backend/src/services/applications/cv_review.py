@@ -90,6 +90,15 @@ def is_contact_line(line: str) -> bool:
             and rest[0][0] in "+(0")
 
 
+# A heading is exempt only when every word is a section name: "SENIOR DATA ENGINEER" is a claim, never a heading.
+SECTION_WORDS = frozenset((
+    "about", "achievements", "and", "awards", "career", "certifications", "competencies", "contact", "core",
+    "courses", "education", "employment", "experience", "history", "interests", "key", "languages", "objective",
+    "other", "personal", "professional", "profile", "projects", "publications", "qualifications", "references",
+    "relevant", "selected", "skills", "summary", "technical", "training", "volunteering", "work",
+))
+
+
 def is_heading(line: str) -> bool:
     s = line.strip()
     words = s.strip("#*: \t").replace("&", " ").replace("/", " ").split()
@@ -116,7 +125,7 @@ def content_lines(text: str, profile: Any) -> list[str]:
     for i, line in enumerate(lines):
         words = set(evidence._words(line))
         said = set(evidence._words(line.strip("#*: \t")))
-        heading = is_heading(line) and bool(said) and said <= known
+        heading = is_heading(line) and bool(said) and said <= known and said <= SECTION_WORDS
         if (i == 0 and names and words and words <= names) or is_contact_line(line) or heading:
             continue
         out.append(line)
@@ -195,16 +204,23 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
         if cv_checks.check_text("cv", cv["text"], profile):
             down.add("cv_checks_found")
     source = _norm(cv_checks.profile_source_text(profile))
+    known = set(evidence._words(cv_checks.profile_source_text(profile)))
+    actual: dict[str, list[str]] = {}
+    for ln in (cv["text"].splitlines() if cv else []):  # the CV's own text decides case, never the entry's copy
+        actual.setdefault(line_key(ln), []).append(ln.strip().lstrip(_BULLETS + " \t"))
     for e in entries:
-        body = e["cv_line"].strip().lstrip(_BULLETS + " \t")
+        bodies = actual.get(line_key(e["cv_line"])) or [e["cv_line"].strip().lstrip(_BULLETS + " \t")]
         if _norm(e["profile_quote"]) not in source:
             down.add("quote_not_in_profile")
-        if evidence.unsupported_tokens(body, e["profile_quote"], first_word=True):
-            down.add("claim_not_in_quote")
-        content_words = {w for w in evidence._words(body) if len(w) >= 4}
         quote_words = set(evidence._words(e["profile_quote"]))
-        if len(quote_words) < 3 or 2 * len(content_words & quote_words) < len(content_words):
-            down.add("quote_too_thin")  # a quote must carry the line: 3+ words and half its content words
+        for body in bodies:
+            if evidence.unsupported_tokens(body, e["profile_quote"], first_word=True):
+                down.add("claim_not_in_quote")
+            content_words = {w for w in evidence._words(body) if len(w) >= 4}
+            if content_words - quote_words - known:  # "kubernetes", "twelve": a long word the profile never says
+                down.add("claim_not_in_quote")
+            if len(quote_words) < 3 or 2 * len(content_words & quote_words) < len(content_words):
+                down.add("quote_too_thin")
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
     weak_versions = {e["payload"].get("artifact_id") for e in reviews if e["payload"].get("confidence") != STRONG}
     if len(weak_versions - {payload["artifact_id"]}) >= MAX_WEAK:  # a re-review of a judged version is no new try
