@@ -2433,9 +2433,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         ALL OR NOTHING: one refused edit = NOTHING saved; fix it, resend ALL paths in one call (a path left
         out is lost). A refusal shows each path's shape.
         A write REPLACES THE WHOLE VALUE of its path: send the current value + your change.
-        List paths take "op": append (value = 1 item), remove_at (+"index"),
+        List paths (e.g. preferences.excluded_skills) take "op": append (value = 1 item), remove_at (+"index"),
         upsert (1 user_info.answers record; replaces same topic/question+company).
-        Optional expected_profile_version = the `profile_edit_id` you last read (get_profile, this reply):
+        expected_profile_version = the `profile_edit_id` you last read (get_profile/this reply):
         a write landed since = 409 stale_profile, nothing saved; re-read. Add preferences.assistant_notes only if asked.
 
         Memory paths (closed key sets): user_info.contact, user_info.right_to_work, user_info.logistics,
@@ -2446,12 +2446,12 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `approved: true` only after the user agrees the wording.
         Equality/salary/visa: only once the user says "remember it": add "remember": true, else not saved.
 
-        Settings (`assistant_settings.*`): only when the user says so in chat.
+        Settings (`assistant_settings.*`): only when the user says so.
         `apply_min_score` is the user's OWN score line (0-100; ask,
-        never guess); `above_line` ask|auto, `below_line` ask|auto|skip (skip = drop the job).
+        never guess); `above_line` ask|auto, `below_line` ask|auto|skip (skip = drop it).
         More freedom (an `auto` switch, a line move making a side auto, auto_when_sure, a higher or
         removed daily_cap, ending a pause, `daily_check`/`outreach_send` = "auto") is NOT applied: it returns
-        in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
+        in `waiting` (+ a `not_saved` line); the user confirms on Needs-you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
         you, visa, logistics, equality, settings. Send the current value + the round just finished."""
