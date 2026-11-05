@@ -82,8 +82,11 @@ async def close_covered(db: JobDatabase, user_id: str, application_id: Optional[
     try:
         return await _close_covered(db, user_id, application_id)
     except Exception:  # noqa: BLE001 - a side task never breaks the read or save that runs it
-        logger.warning("memory_closes_failed user_id=%s application_id=%s", safe_log_value(user_id),
-                       application_id, exc_info=True)
+        logger.warning(
+            "memory_closes_failed", exc_info=True,
+            extra={"event": "memory_closes_failed", "user_id": safe_log_value(user_id),
+                   "application_id": safe_log_value(application_id)},
+        )
         return 0
 
 
