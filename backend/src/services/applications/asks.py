@@ -1046,13 +1046,15 @@ def _user_only_to_clear(ask: dict[str, Any]) -> bool:
 
 
 async def withdraw_ask(
-    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False
+    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False,
+    detail: str = "",
 ) -> dict[str, Any]:
     """Take an OPEN ask back (no longer needed). 404 if not the caller's,
     409 if it is already answered or already withdrawn. ``own_only`` (an
     assistant calling, owner 2026-10-23): only an ask ``withdrawn_by`` itself
     asked (403 otherwise), and only with a ``reason`` (422 when empty). The
-    reason is stored on the ask and shown on the application's timeline."""
+    reason is stored on the ask and shown on the application's timeline; ``detail`` (Job360's own closes,
+    ``memory_closes``) replaces the "Why: <reason>" words the timeline shows."""
     clean_reason = clean_withdraw_reason(reason)
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
@@ -1080,6 +1082,8 @@ async def withdraw_ask(
             raise SpineError(409, "ask is no longer open")
         if existing["application_id"] is not None:
             shown = f"Why: {clean_reason}. Asked: {existing['question']}" if clean_reason else existing["question"]
+            if detail:
+                shown = f"{detail} Asked: {existing['question']}"
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="ask_withdrawn",
                 detail=shown[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
