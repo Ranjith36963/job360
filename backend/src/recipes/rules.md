@@ -388,7 +388,8 @@ not ask.
 
 SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
 runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
-`reach` = get_recipe("reach") for its `application_ids` only, `batch`), then `mark_done` each (reach with
+`reach` = get_recipe("reach") for its `application_ids` only, `batch`: claim it with `whats_due(duties=["batch"])`, or
+`mark_done` batch is refused), then `mark_done` each (reach with
 its `application_ids`); `nothing_due` = end at once without
 writing anything. A duty under `running` is another run's right now: leave it. `reason` run_now = the user pressed Run now: run it now. `hunt_hold` queue_full =
 the queue is full, so no hunt until it drains. `batch_hold` waiting_on_you = every queued job waits on the user.

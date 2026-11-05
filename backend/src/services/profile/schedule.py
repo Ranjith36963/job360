@@ -316,6 +316,12 @@ async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
     return any(k.startswith(RUNNING) and now - at < window for k, at in (await load_stamps(db, user_id)).items())
 
 
+async def claim_live(db: JobDatabase, user_id: str, duty: str, now: datetime) -> bool:
+    """True while a run holds ``duty`` itself (taken less than ``DUTY_CLAIM_MINUTES`` before ``now``)."""
+    at = (await load_stamps(db, user_id)).get(RUNNING + duty)
+    return at is not None and now - at < timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+
+
 def reach_key(application_id: int) -> str:
     """The stamp slot for one application the people hunt has worked."""
     return f"reach:{application_id}"

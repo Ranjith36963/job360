@@ -184,6 +184,7 @@ async def whats_due(
 # then stopped with failed/needs_user. A partial or failed batch stop with no outside blocker (rate
 # limit, network, sign-in, plan, tool) is the same early stop.
 _NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
+BATCH_NOT_CLAIMED = 'You did not claim the batch: call whats_due(duties=["batch"]) first. Nothing was recorded.'
 
 
 async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
@@ -240,9 +241,13 @@ async def mark_done(
         raise HTTPException(status_code=422, detail="a failed run needs a reason (one of the closed list)")
     if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
         raise HTTPException(status_code=404, detail="application not found")
+    now = datetime.now(timezone.utc)
+    # S5 (prod, 4 runs): a run closed a batch it never claimed (a plain whats_due, or none), pushing the next
+    # batch back. Only an assistant's whats_due(duties=["batch"]) claims, so only an assistant is refused.
+    if body.duty == "batch" and actor_for(user) != "web" and not await schedule.claim_live(db, user.id, "batch", now):
+        raise HTTPException(status_code=409, detail=BATCH_NOT_CLAIMED)
     if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
         await _refuse_early_batch_stop(db, user)
-    now = datetime.now(timezone.utc)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
     _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "")
     failures = int((await schedule.load_runs(db, user.id)).get(body.duty, {}).get("failures") or 0)

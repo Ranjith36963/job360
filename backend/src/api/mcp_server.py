@@ -1613,7 +1613,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         reason: MarkDoneReason = None, note: MarkDoneNote = "",
     ) -> dict[str, Any]:
         """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
-        takes `application_ids`, the ones you worked). `outcome` = done | partial | failed; `reason`
+        takes `application_ids`, the ones you worked; batch is refused 409 unless whats_due(duties=["batch"])
+        claimed it). `outcome` = done | partial | failed; `reason`
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
         network_blocked | rate_limited | needs_user | error (a closed set: free text is refused; put prose in
         `note`, at most 300 characters, accepted but not stored yet). A failed duty waits 2h, 4h, 8h... (at
