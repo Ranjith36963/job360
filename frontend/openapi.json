@@ -2820,6 +2820,9 @@
           "company_cap_days": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "cv_auto_approve": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "daily_cap": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2935,6 +2938,7 @@
           "network_per_hour",
           "linkedin_sends_per_day",
           "email_sends_per_day",
+          "cv_auto_approve",
           "paused",
           "practice_run"
         ],

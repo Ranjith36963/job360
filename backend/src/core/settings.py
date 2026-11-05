@@ -413,6 +413,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # only. SERVER-WRITTEN (record_event refuses it): {question, answer, edited, form_filled_event_id, key?}.
     # Read by ready.job_approvals; never part of the profile, so no other job reuses it.
     "answer_verified",
+    # Owner decision 2026-11-05: a fresh reviewer's verdict on one CV version {artifact_id, sha256, confidence,
+    # lines, reviewer}. Job360 VERIFIES it and stores the checked confidence, codes and counts, never the text
+    # (services/applications/cv_review.py).
+    "cv_reviewed",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
@@ -997,6 +1001,9 @@ PROFILE_EDITABLE_PATHS = (
     # Owner 2026-11-02 - the user's own outreach send limits (whole numbers; null = the default). Raising is riskier.
     "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
     "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
+    # Owner 2026-11-05 - a CV a separate reviewer verified as strong goes without the owner's look (true / false).
+    # On is riskier.
+    "assistant_settings.cv_auto_approve",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

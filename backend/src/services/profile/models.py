@@ -771,6 +771,9 @@ class AssistantSettings:
     network_per_hour: Optional[int] = None
     linkedin_sends_per_day: Optional[int] = None
     email_sends_per_day: Optional[int] = None
+    # Owner 2026-11-05: in auto mode, may a CV that a separate reviewer judged strong (and Job360 verified,
+    # services/applications/cv_review.py) go without the user's look? False = no (default). On is riskier.
+    cv_auto_approve: bool = False
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

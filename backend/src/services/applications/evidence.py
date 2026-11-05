@@ -220,9 +220,9 @@ async def _prior_essays(db: JobDatabase, user_id: str, application_id: int) -> l
 
 
 async def for_application(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> dict[str, Any]:
-    """``{watch_only, essays: [{question_key, would_clear, reasons}], cv: {would_clear, reasons},
+    """``{watch_only, essays: [{question_key, would_clear, reasons}], cv: {would_clear, reasons}, cv_review,
     rtw: {ok, detail}}`` for the newest fill and the CV the receipt would freeze."""
-    from src.services.applications import kit, spine  # noqa: PLC0415 - kit imports this module lazily
+    from src.services.applications import cv_review, kit, spine  # noqa: PLC0415 - kit imports this module lazily
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -252,6 +252,10 @@ async def for_application(db: JobDatabase, user_id: str, app_row: dict[str, Any]
             for a in essays
         ],
         "cv": cv_verdict(str(art["text"]) if art and art["kind"] == "cv" else None, profile),
+        # Owner 2026-11-05: the separate reviewer's verified verdict on that same CV (strong | weak | none).
+        "cv_review": await cv_review.review_state(
+            db, user_id, application_id, cv_id, kit.sha256_text(str(art["text"]))
+        ) if art and art["kind"] == "cv" else cv_review.NONE,
         "rtw": rtw_verdict(answers, profile, kit.normalized_company_key(str(app_row.get("job_company") or "")),
                            country),
     }
@@ -263,7 +267,8 @@ def event_payload(shadow: dict[str, Any]) -> dict[str, Any]:
     return {
         "essays": [{"question_key": e["question_key"], "would_clear": e["would_clear"],
                     "reasons": sorted({r.split(":", 1)[0] for r in e["reasons"]})} for e in shadow["essays"]],
-        "cv": {"would_clear": shadow["cv"]["would_clear"], "reasons": shadow["cv"]["reasons"]},
+        "cv": {"would_clear": shadow["cv"]["would_clear"], "reasons": shadow["cv"]["reasons"],
+               **({"review": shadow["cv_review"]} if "cv_review" in shadow else {})},
         "rtw_ok": shadow["rtw"]["ok"],
         **{k: shadow[k] for k in ("form_filled_event_id", "cv_artifact_id", "rtw_present") if k in shadow},
     }

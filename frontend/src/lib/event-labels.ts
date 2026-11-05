@@ -130,6 +130,8 @@ export const EVENT_LABEL: Record<string, string> = {
   submit_cleared_used: "Submit check used by the receipt",
   // Owner decision 2026-11-02: Verify / Edit on the Ready card approves an answer for this job only.
   answer_verified: "Answer approved for this job",
+  // Owner decision 2026-11-05: a fresh reviewer's verdict on one CV version, checked by Job360.
+  cv_reviewed: "CV checked by a second reviewer",
 };
 
 function relayedWords(payload: unknown): boolean {

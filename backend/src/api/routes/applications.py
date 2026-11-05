@@ -54,6 +54,7 @@ from src.services.applications import asks as asks_service
 from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
+from src.services.applications import cv_review as cv_review_service
 from src.services.applications import diff as diff_service
 from src.services.applications import (
     duplicates,
@@ -4005,7 +4006,8 @@ async def _record_event(
         else:
             payload = spine.validate_payload(
                 body.payload,
-                max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
+                max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES
+                if body.event_type in ("form_filled", cv_review_service.EVENT_TYPE) else None,
             )
         payload = spine.validate_outcome_payload(body.event_type, payload)
         payload = spine.validate_auto_email_payload(body.event_type, payload)
@@ -4042,6 +4044,12 @@ async def _record_event(
             payload = which_browser.stamp(
                 await kit_service.check_kit_event(db, user, application_id, body.event_type, payload), browser
             )
+        if body.event_type == cv_review_service.EVENT_TYPE:
+            # Owner 2026-11-05: Job360 verifies the reviewer's evidence and stores the CHECKED confidence (M5: the
+            # MCP record_event tool calls this route function, so it inherits the check).
+            if body.corrects_event_id is not None or source is not None:
+                raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
+            payload = await cv_review_service.check(db, user, application_id, payload)
         if body.event_type in outcome_suggestions.EVENT_TYPES:
             # Feature 9: a suggestion never moves status; checks + dedupe live in the service,
             # in the ROUTE function, so the MCP record_event tool inherits them (M5).

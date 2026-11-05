@@ -302,6 +302,7 @@ class AssistantSettingsView(BaseModel):
     network_per_hour: SettingFieldOut
     linkedin_sends_per_day: SettingFieldOut
     email_sends_per_day: SettingFieldOut
+    cv_auto_approve: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""

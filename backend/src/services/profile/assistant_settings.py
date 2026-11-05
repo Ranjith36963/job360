@@ -36,6 +36,8 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
 * ``outreach_per_company`` / ``network_per_hour`` / ``linkedin_sends_per_day`` / ``email_sends_per_day`` - the
   user's own outreach send limits (owner 2026-11-02); ``None`` = the default, and an operator backstop
   (:data:`OUTREACH_LIMITS`) always holds above them. Raising one is riskier.
+* ``cv_auto_approve`` — ``True`` | ``False`` (default): in auto mode, a CV whose stored ``cv_reviewed`` is
+  ``strong`` for its exact id + sha clears ``cv_not_seen`` (owner 2026-11-05). Turning it on is riskier.
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -116,6 +118,7 @@ HUNT_EVERY_PATH = f"{HEAD}.hunt_every_hours"
 HUNT_EVERY_MAX = 168  # one week
 PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
 PC_ON_HOURS_PATH = f"{HEAD}.pc_on_hours"
+CV_AUTO_APPROVE_PATH = f"{HEAD}.cv_auto_approve"
 PC_ON_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # Owner 2026-11-02 - the user's own outreach send limits: field -> (default, operator backstop setting name).
 OUTREACH_LIMITS: dict[str, tuple[int, str]] = {
@@ -130,7 +133,7 @@ SETTING_PATHS: tuple[str, ...] = (
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
-    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS,
+    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, CV_AUTO_APPROVE_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -387,7 +390,7 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
@@ -433,6 +436,7 @@ class EffectiveSettings:
     network_per_hour: int = settings.NETWORK_PER_HOUR_DEFAULT
     linkedin_sends_per_day: int = settings.LINKEDIN_SENDS_PER_DAY_DEFAULT
     email_sends_per_day: int = settings.EMAIL_SENDS_PER_DAY_DEFAULT
+    cv_auto_approve: bool = False
 
 
 def outreach_backstop(name: str) -> int:
@@ -537,6 +541,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         people_hunt=bool(s.people_hunt),
         pc_on_hours=_pc_on_hours(s.pc_on_hours),
         **{name: outreach_limit(name, getattr(s, name)) for name in OUTREACH_LIMITS},
+        cv_auto_approve=s.cv_auto_approve is True,
     )
 
 
@@ -591,7 +596,7 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == INBOX_MODE_PATH:
         return raw or ""
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
         return bool(raw)
     if path == OUTREACH_SEND_PATH:
         return _outreach_send(raw)
@@ -701,6 +706,7 @@ def classify_change(
     network_per_hour     raised                                         lowered, or equal
     linkedin_sends_      raised                                         lowered, or equal
     per_day / email_...
+    cv_auto_approve      off -> on (a reviewed CV goes unseen)          on -> off (applies at once)
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -750,7 +756,7 @@ def classify_change(
         return "safer"
     if path == INBOX_MODE_PATH:
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
         return "riskier" if (bool(after) and not bool(before)) else "safer"
     if path == OUTREACH_SEND_PATH:
         return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
@@ -970,6 +976,9 @@ class SubmitFacts:
     # draft). An email application (check_submit ``form_url`` = ``mailto:``) stops ``email_not_drafted``
     # without one, or when the mailto address is not this recipient; a yes never clears it.
     email_to: Optional[str] = None
+    # Owner 2026-11-05: the newest stored ``cv_reviewed`` of the latest CV (exact id + sha): strong | weak | none.
+    # With ``cv_auto_approve`` on, in auto mode, ``strong`` clears ``cv_not_seen`` and nothing else.
+    cv_review: str = "none"
     # Autonomy slice 3 (watch-only): ``evidence.for_application`` when ``kit.gate_facts(shadow=True)``.
     # ``may_submit`` NEVER reads it; it is not compared or hashed, so it cannot change a verdict.
     autonomy_shadow: Optional[dict[str, Any]] = field(default=None, compare=False)
@@ -1320,7 +1329,8 @@ def may_submit(
        now before ``auto_grant_until`` and fewer than ``auto_grant_count`` applied since it began) is ``confirm`` -> ask
        (``grant_scope`` when a grant is active but does not cover this application: it was not in the user's
        queue when they confirmed the grant, or its form host is not the one snapshotted then - slice 30)
-    9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
+    9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``; with ``cv_auto_approve`` on, a
+       stored ``strong`` review of that exact CV (``cv_review``) clears it (``cv_unsupported_claims`` stays)
     10. first application since auto-submit was turned on -> ask ``practice_run``
     10b. auto mode and the form host has no earlier applied application -> ask ``new_site_first_time``
     11. otherwise -> submit ``auto_when_sure``
@@ -1795,7 +1805,8 @@ def _first_ask(
         return SubmitDecision(
             "ask", "submit_mode_confirm", "Submit mode is confirm. Fill the form, stop before submit and ask yes."
         )
-    if not (application.cv_seen or application.approved):
+    reviewed = cfg.cv_auto_approve and application.cv_review == "strong"
+    if not (application.cv_seen or application.approved or reviewed):
         return SubmitDecision(
             "ask", "cv_not_seen",
             "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes.",
@@ -2705,6 +2716,7 @@ def build_settings_view(
         "hunt_every_hours": {"value": raw.hunt_every_hours, "effective": eff.hunt_every_hours},
         "people_hunt": {"value": raw.people_hunt, "effective": eff.people_hunt},
         "pc_on_hours": {"value": raw.pc_on_hours, "effective": eff.pc_on_hours},
+        "cv_auto_approve": {"value": raw.cv_auto_approve, "effective": eff.cv_auto_approve},
         **{name: {"value": getattr(raw, name), "effective": getattr(eff, name)} for name in OUTREACH_LIMITS},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
