@@ -105,3 +105,15 @@ async def test_a_true_plain_email_still_sends(authenticated_async_context, fixtu
         saved = await _draft(client, app_id, cid, "Hi Rita, I have 2 years of Python at Acme and would like to talk.")
         verdict = await _check(client, cid, int(saved["artifact_id"]))
         assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+
+
+@pytest.mark.asyncio
+async def test_an_email_with_no_profile_text_to_check_against_asks(authenticated_async_context, fixture_user_id):
+    """Fail closed: with nothing to vouch for the email, it never goes on its own."""
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        save_profile(UserProfile(cv_data=CVData(raw_text="", name="Ada Lovelace")), fixture_user_id,
+                     source_action="cv_upload")
+        saved = await _draft(client, app_id, cid, "Hi Rita, I would like to talk about the data team.")
+        verdict = await _check(client, cid, int(saved["artifact_id"]))
+        assert (verdict["decision"], verdict["reason"]) == ("ask", "unsupported_claims")
