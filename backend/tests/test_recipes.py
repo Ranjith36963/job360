@@ -512,6 +512,7 @@ def test_the_write_recipe_sets_each_kind_its_length_and_who_sends_it():
     """The outreach-writing guide: a note at most 200 characters, a message short (aim 200-300, at most 400), one
     follow-up, true facts only; only the new-connection path goes without the user, never a connection or a reply."""
     from src.api.routes.recipes import load_recipe
+    from src.core import settings
     from src.services.profile import assistant_settings
 
     text = load_recipe("write").text
@@ -526,6 +527,11 @@ def test_the_write_recipe_sets_each_kind_its_length_and_who_sends_it():
         "information only", "get_recipe(\"doctor\")",
     ):
         assert words in flat_text, words
-    assert assistant_settings.LINKEDIN_MESSAGE_MAX_CHARS == 400  # the guide's hard limit is the gate's
+    assert assistant_settings.LINKEDIN_MESSAGE_MAX_CHARS == 400  # the guide's hard limits are the gate's
+    assert settings.LINKEDIN_NOTE_MAX_CHARS == 200
+    assert "on an email it does not check this, so you must" in flat_text  # the gate checks LinkedIn only
+    assert "never the kind" in flat_text  # the label is the approach: variant stats group on it
+    for kind in ("after_connect", "connection_note", "`message`", "`email`"):
+        assert kind in text, kind
     for recipe in ("reach", "own_browser"):
         assert 'get_recipe("write")' in load_recipe(recipe).text, recipe
