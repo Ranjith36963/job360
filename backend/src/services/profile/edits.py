@@ -1020,6 +1020,22 @@ def apply_overlay_rows(profile: UserProfile, rows: list[dict[str, Any]]) -> User
     return profile
 
 
+def _refuse_memory_overwrite(user_id: str, actor: str, edits: list[tuple[str, Any]]) -> None:
+    """Plan S2b (owner 2026-11-05): an assistant may fill an EMPTY Memory field (first-time setup), never
+    change one already set; the user changes it in Job360. A 422 before any write: nothing saved."""
+    from src.services.profile import memory_fill  # noqa: PLC0415
+
+    paths = [path for path, _ in edits if path in memory_fill.MEMORY_PATHS]
+    if not paths or not is_assistant_actor(actor):
+        return
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - storage imports this module
+
+    stored = field_values(load_profile(user_id) or UserProfile(), paths)
+    changes = [c for path, value in edits if path in stored for c in memory_fill.overwrites(path, stored[path], value)]
+    if changes:
+        raise ProfileEditError(422, memory_fill.refusal(changes), "bad_value")
+
+
 # The counted auto grant's two paths (``assistant_settings.AUTO_GRANT_*_PATH``; that module imports this one).
 _GRANT_PATHS = frozenset({"assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until"})
 
@@ -1085,6 +1101,7 @@ def record_edits(
         normalised = [(path, value) for path, value in edits]
     if not normalised:
         return []
+    _refuse_memory_overwrite(user_id, actor, normalised)
 
     key = f"profile_edit:{user_id}"
     if (
