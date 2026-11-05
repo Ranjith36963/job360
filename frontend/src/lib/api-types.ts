@@ -6790,6 +6790,10 @@ export interface components {
             questions_count: number;
             /** Stop For User */
             stop_for_user?: boolean | null;
+            /** User Instructions */
+            user_instructions?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * FormCheckRequest

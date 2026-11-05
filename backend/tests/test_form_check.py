@@ -63,7 +63,7 @@ async def _seed_answers(client: AsyncClient) -> None:
         _e("user_info.contact", {"email": "ada@example.com", "phone": "+44 7700 900123"}),
         _e("user_info.logistics", {"notice_period": "1 month"}),
         _e("user_info.answers", [
-            {"question": "notice period in days", "answer": "30", "approved": True,
+            {"question": "security clearance level held", "answer": "30", "approved": True,
              "recorded_at": "2026-10-01T09:00:00+00:00"},
             {"question": "Why Southwind?", "answer": "Their pipelines.", "approved": True,
              "company": "Southwind", "recorded_at": "2026-10-01T09:00:00+00:00"},
@@ -111,7 +111,7 @@ def _answers() -> dict[str, list[dict[str, Any]]]:
             {"key": "contact.phone", "value": "123", "source": "memory", "saved_at": "x", "confirmed": False},
         ],
         "approved_text": [
-            {"key": "Notice period (in days)?", "value": "30", "source": "approved_text", "saved_at": None},
+            {"key": "Security clearance (level held)?", "value": "30", "source": "approved_text", "saved_at": None},
         ],
     }
 
@@ -125,15 +125,15 @@ def test_pure_normalization_is_casefold_and_alnum_runs():
 def test_pure_form_check_matches_key_wording_and_reports_gaps():
     out = kit_service.form_check(_answers(), [
         {"question": "Email", "required": True, "key": "contact.email"},
-        {"question": "Notice (days)", "required": True, "key": "notice period in days"},
-        {"question": "NOTICE PERIOD in days", "required": False},
+        {"question": "Clearance (level)", "required": True, "key": "security clearance level held"},
+        {"question": "SECURITY CLEARANCE level held", "required": False},
         {"question": "Phone", "key": "contact.phone"},
         {"question": "Favourite colour", "key": "logistics.colour"},
     ])
     assert [(a["question"], a["key"], a["value"], a["matched_by"]) for a in out["answered"]] == [
         ("Email", "contact.email", "a@b.c", "key"),
-        ("Notice (days)", "Notice period (in days)?", "30", "key"),
-        ("NOTICE PERIOD in days", "Notice period (in days)?", "30", "wording"),
+        ("Clearance (level)", "Security clearance (level held)?", "30", "key"),
+        ("SECURITY CLEARANCE level held", "Security clearance (level held)?", "30", "wording"),
         ("Phone", "contact.phone", "123", "key"),
     ]
     assert out["answered"][3]["confirmed"] is False and "confirmed" not in out["answered"][0]
@@ -189,15 +189,15 @@ async def test_wording_match_ignores_case_and_punctuation(authenticated_async_co
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
         await _seed_answers(client)
-        body = (await _form_check(client, app_id, [{"question": "Notice period (In days)?"}])).json()
-        # Notice period is a sensitive question (gap audit #14); this answer is the user's own approved one,
+        body = (await _form_check(client, app_id, [{"question": "Security clearance (Level held)?"}])).json()
+        # Security clearance is a sensitive question (gap audit #14); this answer is the user's own approved one,
         # so it is filled as it is (owner 2026-10-26: only an answer the user has not stood behind waits).
         assert body["answered"] == [{
-            "question": "Notice period (In days)?", "required": True, "key": "notice period in days",
+            "question": "Security clearance (Level held)?", "required": True, "key": "security clearance level held",
             "value": "30", "source": "approved_text", "matched_by": "wording",
         }]
         # The agent may also pass the saved approved_text question itself as the key.
-        keyed = (await _form_check(client, app_id, [{"question": "Notice?", "key": "Notice Period in Days"}])).json()
+        keyed = (await _form_check(client, app_id, [{"question": "Clearance?", "key": "Security Clearance Level Held"}])).json()
         assert keyed["answered"][0]["value"] == "30" and keyed["answered"][0]["matched_by"] == "key"
 
 
@@ -756,7 +756,7 @@ async def test_an_approved_answer_an_assistant_saved_still_waits_on_a_private_qu
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
                                headers={"Authorization": f"Bearer {token}"}) as agent:
             saved = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "value": [
-                {"question": "notice period in days", "answer": "30", "approved": True}]}]})
+                {"question": "security clearance level held", "answer": "30", "approved": True}]}]})
             assert saved.status_code == 200, saved.text
-        [row] = (await _form_check(client, app_id, [{"question": "Notice period (In days)?"}])).json()["answered"]
+        [row] = (await _form_check(client, app_id, [{"question": "Security clearance (Level held)?"}])).json()["answered"]
         assert (row["value"], row.get("needs_confirmation")) == ("30", True)

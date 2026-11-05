@@ -52,6 +52,7 @@ from src.services.profile.answer_match import (
     superseded,
     topic_key,
 )
+from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -2292,6 +2293,8 @@ def compute_answers(
                 continue  # given for ONE employer; this kit is for another (or an unknown) one
             if not fits_country(rec, country):
                 continue  # a sponsorship / right-to-work answer for another country (owner, 2026-10-26)
+            if memory_question(str(rec.get("topic") or ""), str(rec["question"]))[0]:
+                continue  # Memory first (owner 2026-11-05): Memory's families come from Memory, never a saved answer
             if topic_key(rec.get("topic")) in bad:
                 ambiguous.setdefault(topic_key(rec.get("topic")), str(rec["topic"]))
                 continue
@@ -2330,9 +2333,11 @@ def compute_answers(
         region = region_of(country)
         for via in ([region] if region else []) + ["ANY"]:
             via_items = [i for i in out["right_to_work"] if i["key"].startswith(f"right_to_work.{via}.")]
-            if via_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
-                for item in via_items:
-                    field = item["key"].rsplit(".", 1)[1]
+            # Field by field (S1): the country's own page wins where it says something; a field it leaves
+            # empty is read from the region's page, then ANY's.
+            for item in via_items:
+                field = item["key"].rsplit(".", 1)[1]
+                if f"right_to_work.{country}.{field}" not in have:
                     out["right_to_work"].append(
                         _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
                               applies_via=via, **({"confirmed": False} if item.get("confirmed") is False else {}))
@@ -2865,6 +2870,10 @@ FORM_NEXT_CONFIRM = (
     " Confirm every `needs_confirmation` answer with the user in that same message, and raise each one with "
     "ask_user so it shows on Needs you: the user checks it there before anything is sent."
 )
+FORM_NEXT_INSTRUCTIONS = (
+    "Instructions first: `user_instructions` are the user's own rules; where a line speaks to a question it "
+    "wins over the value below (Memory, then Profile). "
+)
 FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
 # NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
@@ -2951,10 +2960,49 @@ def is_document_question(text: str) -> bool:
     return bool(_CV_FILE_RE.search(low) or _LETTER_FILE_RE.search(low))
 
 
+# Memory first (owner 2026-11-05, plan S1): a work-authorization status read as a yes/no answer. A status
+# outside this closed set (models.VALID_WORK_AUTH_STATUSES) is no yes/no: a gap, never a guess.
+_AUTH_YES_NO = {"citizen": "Yes", "permanent_resident": "Yes", "visa": "Yes", "needs_sponsorship": "No"}
+_ONSITE_YES_NO = {"yes": "Yes", "no": "No"}
+
+
+def _memory_answer(
+    by_key: dict[str, dict[str, Any]], template: Optional[str], country: Optional[str],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """``(item, why)`` for a question in Memory's families (:func:`ask_once.memory_question`): the kit's Memory
+    item for the job's country (compute_answers already falls back to the region's page, then ANY's), read
+    as the form's answer (true = "Yes"). Never a saved answer; no item = a gap naming the page to fill."""
+    from src.services.profile.common_questions import _shown  # noqa: PLC0415
+
+    page = f"your {country} page" if country else "the country page"
+    if template is None:
+        return None, ("a Memory question (right to work, sponsorship, salary, location...) that matches no single "
+                      f"Memory fact: ask the user, then add the answer on {page}")
+    if "{cc}" in template and not country:
+        return None, "the job's country is not set, so Memory cannot answer this"
+    key = template.replace("{cc}", country or "")
+    item = by_key.get(key)
+    if item is None or item.get("source") not in ("memory", "profile", "approved_text"):
+        return None, (f"{key} is not in Memory: ask the user once, then add it on {page} "
+                      "(or its region's page); a saved form answer is not used")
+    value, field = item["value"], key.rsplit(".", 1)[-1]
+    if field == "work_authorization":
+        mapped: Any = _AUTH_YES_NO.get(str(value))
+    elif field == "onsite":
+        mapped = _ONSITE_YES_NO.get(str(value))
+    elif isinstance(value, bool):
+        mapped = "Yes" if value else "No"
+    else:
+        mapped = _shown(value) if isinstance(value, (dict, list)) else value
+    if mapped is None:
+        return None, f"Memory says {key} = {value}, which is no yes/no answer: ask the user"
+    return {**item, "value": mapped}, ""
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
-    country: Optional[str] = None,
+    country: Optional[str] = None, instructions: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
@@ -2970,6 +3018,9 @@ def form_check(
     A ``file`` question for the CV or the cover letter is answered by the application's newest saved
     artifact of that kind (``documents``: kind -> artifact row), source ``artifact``, even when a saved
     answer matched; none saved = the saved answer, else a gap.
+    Memory first (owner 2026-11-05): a question in Memory's families (:func:`ask_once.memory_question`) is
+    answered from Memory only (:func:`_memory_answer`), never from a saved answer. ``instructions`` (the
+    user's own rules, :func:`user_instructions`) come first in the result and win wherever they speak.
     Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
@@ -3000,7 +3051,19 @@ def form_check(
         item: Optional[dict[str, Any]] = None
         matched_by = "key"
         why = ""
-        if key is not None:
+        family, template = memory_question(key, text)
+        own = by_key.get(key) if key is not None else None
+        if own is not None and (not family or own.get("source") != "approved_text"):
+            item = own  # the run named a kit item: Memory's own key (or, outside Memory, a saved answer's)
+        elif family:
+            # Memory first (owner 2026-11-05): Memory's families never take a saved answer, and saved
+            # answers that disagree no longer block them.
+            if key is not None and key.split(".", 1)[0] in MEMORY_BLOCKS and template is None:
+                why = f"key '{key}' is not in this application's kit"  # no Memory fact by that name
+            else:
+                item, why = _memory_answer(by_key, template, country)
+            matched_by = "key" if key is not None else "wording"
+        elif key is not None:
             item = by_key.get(key)
             if item is None:
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
@@ -3026,7 +3089,7 @@ def form_check(
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
                 why = "no saved answer for this question"
-        if _contradicted(item):
+        if not family and _contradicted(item):
             item, why = None, AMBIGUOUS
         # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
         # answer (production 2026-10-30: a stale "CV v1, artifact 128" label won every form's "Resume");
@@ -3085,7 +3148,10 @@ def form_check(
         nxt += FORM_NEXT_CONFIRM
     if knockouts:
         nxt += FORM_NEXT_KNOCKOUT
+    if instructions:
+        nxt = FORM_NEXT_INSTRUCTIONS + nxt
     out: dict[str, Any] = {
+        **({"user_instructions": instructions} if instructions else {}),
         "questions_count": len(questions), "answered": answered, "missing": missing,
         "counts": {"answered": len(answered), "missing": len(missing), "missing_required": missing_required},
         "needs_confirmation": confirm, "knockouts": knockouts, "next": nxt,
@@ -3093,6 +3159,20 @@ def form_check(
     if knockouts:
         out["stop_for_user"] = True
     return out
+
+
+def user_instructions(profile: Any, country: Optional[str]) -> Optional[dict[str, Any]]:
+    """The user's own rules for a form, read before Memory (owner 2026-11-05): get_profile's ``instructions``
+    (assistant notes that are no Memory step fact) and this country's page lines (else its region's, else
+    ANY's). ``None`` when there are none (rule #29)."""
+    from src.services.profile.edits import STEP_FACT_PREFIXES  # noqa: PLC0415
+
+    notes = [n for n in (profile.preferences.assistant_notes or [])
+             if isinstance(n, str) and n.strip() and not n.startswith(STEP_FACT_PREFIXES)]
+    told = country_pages.instructions_for(profile.user_info.right_to_work, country)
+    out: dict[str, Any] = {**({"lines": notes} if notes else {}),
+                           **({"country": {"for": country, **told}} if told else {})}
+    return out or None
 
 
 async def check_form(
@@ -3120,7 +3200,7 @@ async def check_form(
             documents[kind] = row
     out = form_check(
         answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None, documents,
-        country=country,
+        country=country, instructions=user_instructions(profile, country),
     )
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,

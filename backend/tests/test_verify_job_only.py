@@ -127,7 +127,8 @@ async def test_remember_is_still_what_makes_the_next_job_fill_itself(authenticat
         assert resp.status_code == 200 and resp.json()["saved"] == [VISA["key"]], resp.text
         assert [(r["topic"], r["answer"], r.get("country")) for r in _approved(fixture_user_id)] == [
             (VISA["key"], "No", "GB")]
-        assert await _missing(client, job_b) == [], "B is filled without asking after the remember press"
+        # Memory first (owner 2026-11-05, S1): the sponsorship question waits on Memory's page, not this saved answer.
+        assert await _missing(client, job_b) == [VISA["question"]], "Memory, never a saved answer"
         await _fill_guess(client, job_b)
         assert await _gate_guessed(fixture_user_id, job_b) is False
 
