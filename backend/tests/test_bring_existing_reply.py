@@ -41,6 +41,9 @@ async def test_same_job_rebring_says_existing_and_what_differs(authenticated_asy
     assert out["differs"] == ["remote", "found_on"]
     assert f"#{first['application_id']}" in out["next"] and "update_job" in out["next"]
     assert "SECRET-AD-TEXT" not in out["next"] and "juro.example" not in out["next"]
+    # the re-bring already saved remote and found_on: `next` says so, never "fix them" as if still old
+    assert "Overwritten with this ad's values: remote, found_on" in out["next"]
+    assert "differs from this ad in" not in out["next"]
     assert await _count_apps() == before
 
 

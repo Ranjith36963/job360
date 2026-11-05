@@ -41,7 +41,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Iterable, Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -198,17 +198,26 @@ def brought_differences(
     return diffs
 
 
-def existing_next(application_id: int, differs: list[str], *, wrote_facts: bool, changed: bool = True) -> str:
-    """The one-line instruction that rides every reply (and 409) where bring met an application the caller has."""
+def existing_next(
+    application_id: int, differs: list[str], *, overwritten: Iterable[str] = (), changed: bool = True,
+) -> str:
+    """The one-line instruction that rides every reply (and 409) where bring met an application the caller has.
+    ``overwritten``: the differing fields this bring already saved over the stored ones (a re-bring writes its
+    facts), so they are reported as overwritten, never as still to fix."""
     text = f"Already in Job360 as #{application_id}; nothing new was created" + ("." if changed else " or changed.")
-    if differs:
+    saved = [d for d in differs if d in set(overwritten)]
+    rest = [d for d in differs if d not in saved]
+    if saved:
         text += (
-            f" The stored job differs from this ad in: {', '.join(differs)}. If it is the same job, "
+            f" Overwritten with this ad's values: {', '.join(saved)} (fix with update_job on #{application_id} "
+            "if the old ones were right)."
+        )
+    if rest:
+        text += (
+            f" The stored job differs from this ad in: {', '.join(rest)}. If it is the same job, "
             f"call update_job on #{application_id}; if it is a different posting, "
             "bring it again with a title that tells them apart."
         )
-    if wrote_facts:
-        text += " Facts you sent (country, remote, found_on, dates) were saved on it."
     return text
 
 
@@ -505,7 +514,7 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
                 job=application_job_response(dup_app, dict(dup_cat) if dup_cat else None),
                 existing=True, application_id=dup_id, status=str(dup_app.get("status") or ""),
                 duplicate_of=dup_id, matched_on="same_company_and_role", differs=dup_diffs,
-                next=existing_next(dup_id, dup_diffs, wrote_facts=False, changed=False),
+                next=existing_next(dup_id, dup_diffs, changed=False),
                 **{k: dup_facts[k] for k in job_facts.JOB_FACT_FIELDS},
             )
 
@@ -606,7 +615,7 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
                 {
                     "existing": True, "application_id": int(mine["id"]), "matched_on": matched,
                     "differs": conflict_differs,
-                    "next": existing_next(int(mine["id"]), conflict_differs, wrote_facts=False, changed=False),
+                    "next": existing_next(int(mine["id"]), conflict_differs, changed=False),
                 },
             )
         # Same posting: what this paste says that the stored job does not (computed BEFORE any fact is written).
@@ -772,7 +781,7 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
             "same_url" if same_link_job_id is not None else "same_title_and_company"
         ) if birth["existing"] else None,
         differs=rebring_differs if birth["existing"] else [],
-        next=existing_next(birth["application_id"], rebring_differs, wrote_facts=bool(given_facts))
+        next=existing_next(birth["application_id"], rebring_differs, overwritten=given_facts)
         if birth["existing"] else None,
         ad_posted_at=stored.get("ad_posted_at"),
         employer_published_at=stored.get("employer_published_at"),
