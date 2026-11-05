@@ -2735,6 +2735,10 @@ async def build_kit(
             429, f"too many kit reads this hour (KIT_READS_MAX_PER_HOUR = {settings.KIT_READS_MAX_PER_HOUR})"
         )
 
+    from src.services.applications import memory_closes  # noqa: PLC0415 - it imports kit
+
+    # Memory first: an old ask on this job that Memory now answers closes before the kit is read.
+    await memory_closes.close_covered(db, user.id, application_id)
     profile, country, answers, missing = await _application_answers(db, user, app_row, job_country_only=True)
     missing = kit_missing(missing)
     answers_omitted = 0

@@ -62,7 +62,7 @@ async def log_http_exception(request: Request, exc: StarletteHTTPException) -> J
         )
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
+        content={"detail": exc.detail, **(getattr(exc, "extra", None) or {})},
         headers=getattr(exc, "headers", None),
     )
 

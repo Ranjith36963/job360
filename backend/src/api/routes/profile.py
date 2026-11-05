@@ -943,7 +943,27 @@ async def update_profile(
     with profile_edits.user_edit_lock(user.id):
         resp = _apply_profile_edits(body, user)
     await _ignite_schedule_change(user, resp)
+    await _close_asks_memory_answers(user.id, [e.path for e in resp.applied])
     return resp
+
+
+async def _close_asks_memory_answers(user_id: str, paths: list[str]) -> None:
+    """Memory first (owner 2026-11-05): after a Memory save, the user's open asks that Memory now answers
+    for their job's country close (``memory_closes``, as Job360). The save already landed, so a failure
+    here is logged, never turned into an error for the save."""
+    from src.services.applications import memory_closes  # noqa: PLC0415
+
+    if not memory_closes.MEMORY_PATHS.intersection(paths):
+        return
+    import contextlib  # noqa: PLC0415
+
+    from src.api.dependencies import get_request_db  # noqa: PLC0415
+
+    try:
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            await memory_closes.close_covered(db, user_id)
+    except Exception:  # noqa: BLE001 - the Memory save stands; the next kit or Needs-you read retries
+        logger.warning("memory_closes_failed", exc_info=True)
 
 
 # Ignition (owner 2026-10-24): a schedule change the user SAVED on the website starts that duty once.
@@ -1360,6 +1380,7 @@ async def keep_edit(
             "actor": safe_log_value(actor_for(user)),
         },
     )
+    await _close_asks_memory_answers(user.id, [path])
     return load_profile_response(user.id)[1]
 
 

@@ -60,6 +60,7 @@ from src.services.applications import (
     duplicates,
     hiding,
     interview_payloads,
+    memory_closes,
     outcome_suggestions,
     plain_words,
     process_log,
@@ -3875,6 +3876,8 @@ async def submit_check(
             db, user.id, now, application_id, window_days=cfg.company_cap_days
         )
         hold = await kit_service.live_hold(db, user, application_id, now, label)
+        # Memory first: an old ask on this job that Memory now answers closes before it is counted.
+        await memory_closes.close_covered(db, user.id, application_id)
         facts = await kit_service.gate_facts(
             db, user.id, app_row, email_verified=email_verification_satisfied(user),
             other_session_hold=kit_service.hold_fact(hold), shadow=True,

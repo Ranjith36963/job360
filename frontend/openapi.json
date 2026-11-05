@@ -3534,6 +3534,13 @@
             ],
             "title": "Country"
           },
+          "differs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Differs",
+            "type": "array"
+          },
           "duplicate_of": {
             "anyOf": [
               {
@@ -3590,6 +3597,34 @@
               }
             ],
             "title": "Listed People"
+          },
+          "matched_on": {
+            "anyOf": [
+              {
+                "enum": [
+                  "same_title_and_company",
+                  "same_url",
+                  "same_company_and_role",
+                  "repost"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched On"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
           },
           "queue_note": {
             "anyOf": [
