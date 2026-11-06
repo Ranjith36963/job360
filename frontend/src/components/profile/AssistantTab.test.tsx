@@ -179,6 +179,36 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("send reviewed CVs: turning on asks to confirm first, off is one click", async () => {
+    await ready();
+    const toggle = screen.getByTestId("cv-auto-approve-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent(
+      "A CV goes on its own only when the code check and a second AI reviewer both pass it (strong). Anything weak still waits for you. Works only when automatic submit is on.",
+    );
+    fireEvent.click(toggle);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("cv-auto-approve-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.cv_auto_approve", value: true }]),
+    );
+  });
+
+  it("send reviewed CVs: Cancel sends nothing; on to off applies at once", async () => {
+    await ready();
+    fireEvent.click(screen.getByTestId("cv-auto-approve-toggle"));
+    fireEvent.click(screen.getByTestId("cv-auto-approve-cancel"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    getAssistantSettings.mockResolvedValue(view({ cv_auto_approve: field(true, true) }));
+    await ready();
+    const on = screen.getAllByTestId("cv-auto-approve-toggle").find((t) => t.getAttribute("aria-checked") === "true");
+    expect(on).toBeTruthy();
+    fireEvent.click(on!);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.cv_auto_approve", value: false }]),
+    );
+  });
+
   it("automatic outreach emails: turning on asks to confirm first", async () => {
     await ready();
     const toggle = screen.getByTestId("outreach-send-toggle");
