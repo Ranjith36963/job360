@@ -195,6 +195,10 @@ SHAPES: dict[str, dict[str, Any]] = {
         "example": True,
         "note": "find people to reach for new applications on the schedule; never sends. On needs the user's OK",
     },
+    _settings.SIGNED_IN_ASK_PATH: {
+        "example": True,
+        "note": "true (default) = a submit through the user's signed-in account asks first. Off needs the user's OK",
+    },
     _settings.CV_AUTO_APPROVE_PATH: {
         "example": False,
         "note": "a CV the reviewer judged strong (and Job360 verified) skips the user's look in auto mode. "

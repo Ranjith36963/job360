@@ -571,6 +571,7 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
         settings_rules.AUTO_GRANT_COUNT_PATH, settings_rules.AUTO_GRANT_UNTIL_PATH,
         settings_rules.HUNT_EVERY_PATH, settings_rules.PEOPLE_HUNT_PATH,
         settings_rules.PC_ON_HOURS_PATH, *settings_rules.OUTREACH_LIMIT_PATHS, settings_rules.CV_AUTO_APPROVE_PATH,
+        settings_rules.SIGNED_IN_ASK_PATH,
     }
 )
 

@@ -742,7 +742,8 @@ OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 —
 # stored setting can pass, so a typo can never send thousands.
 OUTREACH_PER_COMPANY_DEFAULT = 5  # job-outreach sends per company within OUTREACH_COMPANY_WINDOW_DAYS
 NETWORK_PER_HOUR_DEFAULT = 5  # network sends per rolling hour
-LINKEDIN_SENDS_PER_DAY_DEFAULT = 20
+# Owner 2026-11-03: 15 (was 20), so a week of sends stays under LinkedIn's weekly invitation limit.
+LINKEDIN_SENDS_PER_DAY_DEFAULT = 15
 # Easy Apply submits a day through the own-browser queue. 0 = no Job360 cap (owner, 2026-11-03): LinkedIn's own
 # Easy Apply limit decides, and the user's browser stops when LinkedIn shows it.
 EASY_APPLY_DAILY_MAX = int(os.getenv("EASY_APPLY_DAILY_MAX", "0"))
@@ -1013,6 +1014,8 @@ PROFILE_EDITABLE_PATHS = (
     # Owner 2026-11-02 - the user's own outreach send limits (whole numbers; null = the default). Raising is riskier.
     "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
     "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
+    # Owner 2026-11-03 - a submit through the user's own signed-in account always asks (true = default). Off: riskier.
+    "assistant_settings.ask_before_signed_in_submit",
     # Owner 2026-11-05 - a CV a separate reviewer verified as strong goes without the owner's look (true / false).
     # On is riskier.
     "assistant_settings.cv_auto_approve",
@@ -1106,6 +1109,7 @@ SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60")
 # asks yes. Matched against whole host labels (indeed.co.uk, uk.indeed.com,
 # linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only
 # asks, so a loose match is the safe direction. Owner: Indeed bans automated apply.
+# Owner 2026-11-03: they count as the user's signed-in account (assistant_settings.ask_before_signed_in_submit).
 SUBMIT_ASK_ALWAYS_BRANDS = _env_list("SUBMIT_ASK_ALWAYS_BRANDS", ("indeed", "linkedin", "lnkd"))
 # ── S3 application kit (owner decisions 2026-10-08). Every number a parameter. ──
 # A file link the kit hands out: how long it lives and how often it downloads.

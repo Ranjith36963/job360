@@ -4978,6 +4978,7 @@ export interface components {
             above_line: components["schemas"]["SettingFieldOut"];
             apply_hours: components["schemas"]["SettingFieldOut"];
             apply_min_score: components["schemas"]["SettingFieldOut"];
+            ask_before_signed_in_submit: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
             auto_grant_count: components["schemas"]["SettingFieldOut"];
             /**

@@ -36,6 +36,10 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
 * ``outreach_per_company`` / ``network_per_hour`` / ``linkedin_sends_per_day`` / ``email_sends_per_day`` - the
   user's own outreach send limits (owner 2026-11-02); ``None`` = the default, and an operator backstop
   (:data:`OUTREACH_LIMITS`) always holds above them. Raising one is riskier.
+* ``ask_before_signed_in_submit`` — ``True`` (default) | ``False``: a submit through the user's own signed-in
+  account (the user's own browser, a sign-in saved in Job360's browser, or an Indeed / LinkedIn style site)
+  always answers ``ask`` (``ask_always_site``). Turning it off is riskier, so only the user's own web click
+  applies it (owner 2026-11-03); every other submit rule still holds.
 * ``cv_auto_approve`` — ``True`` | ``False`` (default): in auto mode, a CV whose stored ``cv_reviewed`` is
   ``strong`` for its exact id + sha clears ``cv_not_seen`` (owner 2026-11-05). Turning it on is riskier.
 
@@ -120,6 +124,7 @@ PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
 PC_ON_HOURS_PATH = f"{HEAD}.pc_on_hours"
 CV_AUTO_APPROVE_PATH = f"{HEAD}.cv_auto_approve"
 PC_ON_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+SIGNED_IN_ASK_PATH = f"{HEAD}.ask_before_signed_in_submit"
 # Owner 2026-11-02 - the user's own outreach send limits: field -> (default, operator backstop setting name).
 OUTREACH_LIMITS: dict[str, tuple[int, str]] = {
     "outreach_per_company": (settings.OUTREACH_PER_COMPANY_DEFAULT, "OUTREACH_COMPANY_MAX"),
@@ -133,7 +138,7 @@ SETTING_PATHS: tuple[str, ...] = (
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
-    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, CV_AUTO_APPROVE_PATH,
+    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -390,7 +395,7 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH):
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
@@ -436,6 +441,8 @@ class EffectiveSettings:
     network_per_hour: int = settings.NETWORK_PER_HOUR_DEFAULT
     linkedin_sends_per_day: int = settings.LINKEDIN_SENDS_PER_DAY_DEFAULT
     email_sends_per_day: int = settings.EMAIL_SENDS_PER_DAY_DEFAULT
+    # Owner 2026-11-03 - rule 7 (ask_always_site, a signed-in submit) applies only while this is on.
+    ask_before_signed_in_submit: bool = True
     cv_auto_approve: bool = False
 
 
@@ -541,6 +548,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         people_hunt=bool(s.people_hunt),
         pc_on_hours=_pc_on_hours(s.pc_on_hours),
         **{name: outreach_limit(name, getattr(s, name)) for name in OUTREACH_LIMITS},
+        ask_before_signed_in_submit=s.ask_before_signed_in_submit is not False,
         cv_auto_approve=s.cv_auto_approve is True,
     )
 
@@ -606,6 +614,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return _pc_on_hours(raw)
     if path in OUTREACH_LIMIT_PATHS:
         return outreach_limit(OUTREACH_LIMIT_PATHS[path], raw)
+    if path == SIGNED_IN_ASK_PATH:
+        return raw is not False  # only a stored false turns it off; anything else reads as on
     raise KeyError(path)
 
 
@@ -706,6 +716,8 @@ def classify_change(
     network_per_hour     raised                                         lowered, or equal
     linkedin_sends_      raised                                         lowered, or equal
     per_day / email_...
+    ask_before_signed_   on -> off (a submit through the user's own     off -> on (applies at once)
+    in_submit            signed-in account may go on to auto-submit)
     cv_auto_approve      off -> on (a reviewed CV goes unseen)          on -> off (applies at once)
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
@@ -769,6 +781,8 @@ def classify_change(
         return "safer"
     if path in OUTREACH_LIMIT_PATHS:
         return "riskier" if after > before else "safer"
+    if path == SIGNED_IN_ASK_PATH:
+        return "riskier" if (bool(before) and not bool(after)) else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -983,6 +997,11 @@ class SubmitFacts:
     # draft). An email application (check_submit ``form_url`` = ``mailto:``) stops ``email_not_drafted``
     # without one, or when the mailto address is not this recipient; a yes never clears it.
     email_to: Optional[str] = None
+    # Owner 2026-11-03 (rule 7): this submit goes through the user's own signed-in account
+    # (``kit._signed_in_account``). For an assistant the SERVER decides the browser: unless Job360's browser makes
+    # this click or holds this application's page, it is the user's own browser; Job360's browser counts only
+    # with a saved sign-in for the form's site. An own_browser / manual label since the last kit read only adds it.
+    signed_in_account: bool = False
     # Owner 2026-11-05: the newest stored ``cv_reviewed`` of the latest CV (exact id + sha): strong | weak | none.
     # With ``cv_auto_approve`` on, in auto mode, ``strong`` clears ``cv_not_seen`` and nothing else.
     cv_review: str = "none"
@@ -1356,11 +1375,16 @@ def may_submit(
         ``line_ask_below``. Checked inside ``_first_ask`` right after the
         duplicate ask, so a stored yes still clears it.
     6. site unknown -> ask ``unknown_site``
-    7. Indeed / LinkedIn style site -> ask ``ask_always_site``
+    7. an Indeed / LinkedIn style site (``SUBMIT_ASK_ALWAYS_BRANDS``) while ``ask_before_signed_in_submit`` is on
+       (the default) -> ask ``ask_always_site``. Off (only the user's own web click): rules 8-11 decide
     8. the mode (the job's override, else ``submit_mode`` - or auto while a counted ``auto_grant`` is active:
        now before ``auto_grant_until`` and fewer than ``auto_grant_count`` applied since it began) is ``confirm`` -> ask
        (``grant_scope`` when a grant is active but does not cover this application: it was not in the user's
        queue when they confirmed the grant, or its form host is not the one snapshotted then - slice 30)
+    8b. auto, and the submit goes through the user's own signed-in account (``SubmitFacts.signed_in_account``: an
+       assistant's submit that Job360's browser neither clicks nor holds the page of, Job360's browser with a saved
+       sign-in for the form's site, or a fill / sweep labelled ``own_browser`` / ``manual``) while
+       ``ask_before_signed_in_submit`` is on -> ask ``ask_always_site`` (confirm mode already asks at rule 8)
     9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``; with ``cv_auto_approve`` on, a
        stored ``strong`` review of that exact CV (``cv_review``) clears it (``cv_unsupported_claims`` stays)
     10. first application since auto-submit was turned on -> ask ``practice_run``
@@ -1773,6 +1797,16 @@ def _pace_stop(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) -> O
     return None
 
 
+def _signed_in_ask() -> SubmitDecision:
+    """Rule 7 / 8b: a submit through the user's own signed-in account, while ``ask_before_signed_in_submit`` is on."""
+    return SubmitDecision(
+        "ask", "ask_always_site",
+        "This submit goes through your own signed-in account (your own browser, a sign-in saved in Job360's "
+        "browser, or Indeed / LinkedIn), and you asked to say yes to each one. Fill the form, stop before "
+        "submit and ask yes.",
+    )
+
+
 def _first_ask(
     cfg: EffectiveSettings,
     application: SubmitFacts,
@@ -1821,11 +1855,8 @@ def _first_ask(
         return SubmitDecision(
             "ask", "unknown_site", "The site could not be read. Fill the form, stop before submit and ask yes."
         )
-    if kind == "brand":
-        return SubmitDecision(
-            "ask", "ask_always_site",
-            "This site does not allow automatic applying. Fill the form, stop before submit and ask yes.",
-        )
+    if cfg.ask_before_signed_in_submit and not email and kind == "brand":
+        return _signed_in_ask()
     if not auto:
         if override is not None:
             return SubmitDecision(
@@ -1837,6 +1868,10 @@ def _first_ask(
         return SubmitDecision(
             "ask", "submit_mode_confirm", "Submit mode is confirm. Fill the form, stop before submit and ask yes."
         )
+    # 8b. In confirm mode every submit already asks (rule 8); in auto mode a submit through the user's own
+    # signed-in account asks while the user's switch is on (owner 2026-11-03).
+    if cfg.ask_before_signed_in_submit and not email and application.signed_in_account:
+        return _signed_in_ask()
     reviewed = cfg.cv_auto_approve and application.cv_review == "strong"
     if not (application.cv_seen or application.approved or reviewed):
         return SubmitDecision("ask", "cv_not_seen", _cv_not_seen_detail(cfg, application))
@@ -2759,6 +2794,9 @@ def build_settings_view(
         "pc_on_hours": {"value": raw.pc_on_hours, "effective": eff.pc_on_hours},
         "cv_auto_approve": {"value": raw.cv_auto_approve, "effective": eff.cv_auto_approve},
         **{name: {"value": getattr(raw, name), "effective": getattr(eff, name)} for name in OUTREACH_LIMITS},
+        "ask_before_signed_in_submit": {
+            "value": raw.ask_before_signed_in_submit, "effective": eff.ask_before_signed_in_submit,
+        },
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

@@ -765,12 +765,16 @@ class AssistantSettings:
     # Always a safer change: every send in the user's own browser still needs the user's click.
     pc_on_hours: Optional[dict[str, Any]] = None
     # Owner 2026-11-02: the user's own outreach send limits (check_outreach). None = the default in core/settings
-    # (5 job sends per company in OUTREACH_COMPANY_WINDOW_DAYS, 5 network sends an hour, 20 LinkedIn and 40 email
+    # (5 job sends per company in OUTREACH_COMPANY_WINDOW_DAYS, 5 network sends an hour, 15 LinkedIn and 40 email
     # sends a day); an operator backstop (core/settings *_MAX) always holds above them. Raising one is riskier.
     outreach_per_company: Optional[int] = None
     network_per_hour: Optional[int] = None
     linkedin_sends_per_day: Optional[int] = None
     email_sends_per_day: Optional[int] = None
+    # Owner 2026-11-03: a submit through the user's own signed-in account (their own browser, a saved sign-in in
+    # Job360's browser, or an Indeed / LinkedIn style site) always answers check_submit `ask` (ask_always_site).
+    # On by default; only the user's own web click turns it off (an assistant's off waits).
+    ask_before_signed_in_submit: bool = True
     # Owner 2026-11-05: in auto mode, may a CV that a separate reviewer judged strong (and Job360 verified,
     # services/applications/cv_review.py) go without the user's look? False = no (default). On is riskier.
     cv_auto_approve: bool = False

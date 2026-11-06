@@ -134,6 +134,28 @@ async def forget(db: Any, user_id: str, host: str) -> bool:
     return bool(getattr(cur, "rowcount", 0))
 
 
+async def covers_host(db: Any, user_id: str, host: str) -> bool:
+    """Is a saved sign-in of this user in use on ``host``? Job360's browser loads every saved sign-in, so: a
+    saved site that is ``host`` or a parent / child of it, or a saved cookie that applies to ``host`` (an
+    unreadable row counts by its site alone). Owner 2026-11-03, check_submit rule 7."""
+    target = site_host(host)
+    if not target:
+        return False
+    cur = await db._db.execute("SELECT site_host, state_enc FROM browser_sign_ins WHERE user_id = ?", (user_id,))
+    for r in await cur.fetchall():
+        saved = str(r["site_host"] or "")
+        if _applies_to(saved, target) or _applies_to(target, saved):
+            return True
+        try:
+            state = decrypt_state(r["state_enc"]) or {}
+        except SignInKeyMissingError:
+            continue
+        cookies = state.get("cookies") or []
+        if any(isinstance(c, dict) and _applies_to(str(c.get("domain") or ""), target) for c in cookies):
+            return True
+    return False
+
+
 async def load_all(db: Any, user_id: str) -> dict[str, Any]:
     """Every saved sign-in of this user as one storage state (unreadable rows are skipped)."""
     cur = await db._db.execute("SELECT state_enc FROM browser_sign_ins WHERE user_id = ?", (user_id,))

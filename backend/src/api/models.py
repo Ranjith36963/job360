@@ -313,6 +313,8 @@ class AssistantSettingsView(BaseModel):
     network_per_hour: SettingFieldOut
     linkedin_sends_per_day: SettingFieldOut
     email_sends_per_day: SettingFieldOut
+    # Owner 2026-11-03 - a submit through the user's own signed-in account always asks first (default true).
+    ask_before_signed_in_submit: SettingFieldOut
     cv_auto_approve: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool

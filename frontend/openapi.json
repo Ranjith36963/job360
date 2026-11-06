@@ -2786,6 +2786,9 @@
           "apply_min_score": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "ask_before_signed_in_submit": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "auto_employer_emails": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2945,6 +2948,7 @@
           "network_per_hour",
           "linkedin_sends_per_day",
           "email_sends_per_day",
+          "ask_before_signed_in_submit",
           "cv_auto_approve",
           "paused",
           "practice_run"

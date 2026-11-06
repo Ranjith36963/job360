@@ -82,6 +82,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.fit_record import fit_view
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
+from src.services.profile.edits import WEB_ACTOR
 from src.services.profile.models import UserProfile
 from src.services.profile.storage import load_profile
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -3906,6 +3907,8 @@ async def submit_check(
         facts = await kit_service.gate_facts(
             db, user.id, app_row, email_verified=email_verification_satisfied(user),
             other_session_hold=kit_service.hold_fact(hold), shadow=True,
+            # Owner 2026-11-03 (rule 7): an assistant's route is the server's fact, never its own label.
+            assistant=actor_for(user) != WEB_ACTOR,
         )
     except SpineError as exc:
         _raise(exc)

@@ -54,6 +54,8 @@ SIX = (
     # 2026-11-02 the user's own outreach send limits (tests/test_two_outreach_sends.py).
     "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
     "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
+    # 2026-11-03 ask_before_signed_in_submit (tests/test_signed_in_submit_ask.py).
+    "assistant_settings.ask_before_signed_in_submit",
     # 2026-11-05 cv_auto_approve (tests/test_cv_review.py).
     "assistant_settings.cv_auto_approve",
 )

@@ -91,10 +91,14 @@ def _gate_and_files(
     from src.api.routes import applications as applications_route  # noqa: PLC0415 - avoid an import cycle
 
     async def _check(form_url: str) -> dict[str, Any]:
-        async with _db() as db:
-            return await applications_route.submit_check(
-                application_id, form_url=form_url, session=session, db=db, user=user
-            )
+        said = which_browser.SERVER_SAYS.set(which_browser.JOB360)  # this gate is for Job360's browser's own click
+        try:
+            async with _db() as db:
+                return await applications_route.submit_check(
+                    application_id, form_url=form_url, session=session, db=db, user=user
+                )
+        finally:
+            which_browser.SERVER_SAYS.reset(said)
 
     async def _mark() -> None:
         try:
