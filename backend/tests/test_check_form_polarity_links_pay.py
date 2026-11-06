@@ -304,3 +304,14 @@ def test_lowercase_in_and_is_stay_words():
     assert kit.form_words("What is your expected salary in the UK?", "GB") == [
         "what", "is", "your", "expected", "salary", "in", kit.CTRY]
     assert kit.form_words("Expected salary in IN", "GB") == [kit.FOREIGN]
+
+
+def test_a_yes_no_suffix_keeps_the_job_country_and_another_code_is_foreign():
+    """Pinned from the release check (2026-11-06): a mixed-case "Yes/No" tail never reads as a country
+    code, the job's own code is the job's country, and another country's code makes the question foreign."""
+    from src.services.applications.kit import form_words
+
+    words = form_words("Do you need sponsorship to work in the UK? (Yes/No)", "GB")
+    assert words[-1] != "xforeignx" and "xforeignx" not in words
+    assert form_words("Expected salary in US", "US")[-1] == form_words("Expected salary in the UK", "GB")[-1]
+    assert form_words("Expected salary in DE", "GB") == ["xforeignx"]
