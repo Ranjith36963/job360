@@ -175,6 +175,38 @@ def test_a_strong_review_clears_only_cv_not_seen_and_only_with_the_setting_in_au
     assert rules.effective(AssistantSettings()).cv_auto_approve is False
 
 
+def test_cv_not_seen_message_names_the_review_when_auto_approve_is_on():
+    """With ``cv_auto_approve`` on, the ask tells the agent what clears it; the reason code never changes."""
+    on = rules.effective(AssistantSettings(apply_min_score=50, above_line="auto", below_line="auto",
+                                           submit_mode="auto_when_sure", cv_auto_approve=True))
+    off = rules.effective(AssistantSettings(apply_min_score=50, above_line="auto", below_line="auto",
+                                            submit_mode="auto_when_sure"))
+    base = rules.SubmitFacts(status="considering", has_receipt=False, submit_override=None, fit_score=80,
+                             form_filled=True, form_swept=True, form_host="careers.northwind.example")
+    counts = rules.SubmitCounts(submitted_today=0, applied_since_auto_on=1)
+    now = datetime(2026, 11, 5, 12, tzinfo=timezone.utc)
+
+    def ask(c: rules.EffectiveSettings, **kw: Any) -> rules.SubmitDecision:
+        return rules.may_submit(c, rules.SubmitFacts(**{**base.__dict__, **kw}), FORM, counts, now=now)
+
+    none = ask(on, cv_review="none")
+    assert (none.decision, none.reason) == ("ask", "cv_not_seen")
+    for part in ('get_recipe("doctor")', "CV review", "FRESH reviewer", "record_event cv_reviewed",
+                 "{artifact_id, sha256, confidence, lines, reviewer}", "weak a second time waits for the user"):
+        assert part in none.detail, part
+    weak = ask(on, cv_review="weak")
+    assert (weak.decision, weak.reason) == ("ask", "cv_not_seen")
+    assert "waits for the user" in weak.detail and "show the CV" in weak.detail
+    assert "third time" in weak.detail and "retry_limit" in weak.detail
+    assert "record_event cv_reviewed" not in weak.detail
+    old = "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes."
+    for review in ("none", "weak"):
+        out = ask(off, cv_review=review)
+        assert (out.decision, out.reason, out.detail) == ("ask", "cv_not_seen", old)
+    strong = ask(on, cv_review="strong")
+    assert (strong.decision, strong.reason) == ("submit", "auto_when_sure")
+
+
 # ── Through the real doors ───────────────────────────────────────────────────
 
 
