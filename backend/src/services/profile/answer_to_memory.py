@@ -6,11 +6,11 @@ is saved into that country's Memory permanently; nobody asks again." The user's 
 families (:func:`ask_once.memory_question`) to :func:`plan`, which converts the answer to the field's real
 shape or refuses:
 
-* yes/no -> a bool (sponsorship, relocation), only for a question in a known DIRECT phrasing
-  (:data:`_DIRECT`, a positive allow-list; "eligible without sponsorship" is not saved); on-site ->
-  ``yes`` / ``no`` / ``only_if_sponsored`` (direct phrasing only); a work authorization only as one of its
-  own statuses (a yes/no is no status); travel -> a whole 0-100 percent ("No" = 0, direct phrasing only);
-  a salary -> ``{min, max, currency, period}`` for THAT country, the currency as written (never
+* A yes/no, a travel figure or a salary is read only for a question that is EXACTLY one of
+  :data:`EXACT_PHRASINGS` (or the catalog's own text), normalised with the job's country as ``<country>``.
+* yes/no -> a bool (sponsorship, relocation); on-site -> ``yes`` / ``no`` / ``only_if_sponsored``; a work
+  authorization only as one of its own statuses (a yes/no is no status); travel -> a whole 0-100 percent
+  ("No" = 0); a salary -> ``{min, max, currency, period}`` for THAT country, the currency as written (never
   converted), the period as said, else ``year`` when min >= :data:`YEAR_FLOOR` (else not saved); a
   floor ("at least", a "minimum salary" question) is never stored; notice, start, contact and equality
   lines as written (the validators judge).
@@ -29,7 +29,6 @@ from typing import Any, Optional
 
 _YES, _NO = frozenset({"yes", "y", "true"}), frozenset({"no", "n", "false"})
 _CAVEATS = frozenset({"but", "only", "if", "unless", "except", "maybe", "depends", "depending", "sometimes"})
-_FLOOR_WORDS = frozenset({"minimum", "min", "least", "lowest", "floor"})
 _YEAR = frozenset({"year", "yearly", "annual", "annually", "annum", "pa", "yr"})
 _MONTH = frozenset({"month", "monthly", "mo"})
 _FILLER = frozenset({"per", "a", "an", "gross", "base"})
@@ -93,51 +92,77 @@ def salary(text: str, country: str) -> Optional[dict[str, Any]]:
             "period": period.pop() if period else "year"}
 
 
-# A yes/no is stored only for a question in one of these DIRECT phrasings (a positive allow-list): a verb
-# word AND a subject word of the field, and no polarity word at all. "eligible without sponsorship", "free
-# of any need", "unwilling to relocate", "don't you need": an inverted or either/or question is not saved.
-_DIRECT: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "needs_sponsorship": (frozenset({"need", "needs", "require", "requires"}), frozenset({"sponsorship", "sponsor"})),
-    "willing_to_relocate": (frozenset({"willing", "open"}), frozenset({"relocate", "relocation", "relocating"})),
-    "onsite": (frozenset({"willing", "open", "able", "happy"}), frozenset({"office", "onsite", "site"})),
-    "travel_ok_pct": (frozenset({"willing", "open", "able", "happy"}), frozenset({"travel", "travelling"})),
+# EXACT PHRASINGS (checker on #1526, 2026-11-06): a question's answer is stored only when the question,
+# normalised (:func:`normalise_question`), is EXACTLY one of these, or the catalog's own text for that key.
+# Anything else (another country, an extra word, a parenthetical, a contraction) is not saved.
+_SUFFIXES = ("", " to work in <country>", " in <country>", " for this role", " to work in this role")
+_SPONSOR_BASES = (
+    "do you need sponsorship", "do you require sponsorship", "will you need sponsorship",
+    "will you require sponsorship", "do you need visa sponsorship", "do you require visa sponsorship",
+    "will you need visa sponsorship", "will you require visa sponsorship", "will your employment require sponsorship",
+)
+EXACT_PHRASINGS: dict[str, frozenset[str]] = {
+    "needs_sponsorship": frozenset(b + x for b in _SPONSOR_BASES for x in _SUFFIXES),
+    "willing_to_relocate": frozenset(b + x for b in ("are you willing to relocate", "are you open to relocation")
+                                     for x in ("", " to <country>")),
+    "onsite": frozenset({"are you willing to work on site", "are you willing to work onsite",
+                         "are you willing to work from the office", "are you willing to work in the office"}),
+    "travel_ok_pct": frozenset({"are you willing to travel", "are you willing to travel for work"}),
+    "salary": frozenset(b + x for b in ("what are your salary expectations", "expected salary", "desired salary",
+                                        "desired pay") for x in ("", " in <country>")),
 }
-# "t" is the tail of every n't ("don't" -> don t); "or" is an either/or ("on-site or hybrid").
-_POLARITY = frozenset({
-    "without", "free", "exempt", "unable", "unwilling", "cannot", "cant", "can", "don", "doesn", "won", "t",
-    "never", "no", "none", "ineligible", "not", "or", "unless", "except", "instead", "nor", "neither",
-})
-_NOW_OR_FUTURE = ["now", "or", "in", "the", "future"]  # "Will you now or in the future need..." is direct
+_DROP = (" now or in the future ", " or in the future ")
+_YES_NO_TAILS = (" yes or no", " yes no")
 
 
-def _question_words(question: str) -> set[str]:
-    """The question's words, with the standard "now or in the future" taken out (it is not an either/or)."""
-    words = _words(question)
-    for i in range(len(words) - len(_NOW_OR_FUTURE) + 1):
-        if words[i:i + len(_NOW_OR_FUTURE)] == _NOW_OR_FUTURE:
-            words = words[:i] + words[i + len(_NOW_OR_FUTURE):]
-            break
-    return set(words)
+def normalise_question(question: str, country: Optional[str]) -> str:
+    """Lower case, letters and single spaces only; the job's country (its code as written in capitals, its
+    name, a common name) -> ``<country>``; "now or in the future" dropped; a trailing "yes no" dropped."""
+    import unicodedata  # noqa: PLC0415
+
+    from src.services.profile import countries  # noqa: PLC0415
+
+    plain = unicodedata.normalize("NFKD", question).encode("ascii", "ignore").decode("ascii")
+    tokens = "".join(ch if ch.isalpha() else " " for ch in plain).split()
+    cc = (country or "").upper()
+    short = {a.upper() for a, c in countries._ALIASES.items() if c == cc and len(a) <= 2} | {cc}
+    text = " " + " ".join("<country>" if cc and t.isupper() and t in short else t.lower() for t in tokens) + " "
+    if cc:
+        names = {countries._fold(countries.NAMES.get(cc, ""))}
+        names |= {a for a, c in countries._ALIASES.items() if c == cc and len(a) > 2}
+        for name in sorted((n for n in names if n), key=len, reverse=True):
+            text = text.replace(f" the {name} ", " <country> ").replace(f" {name} ", " <country> ")
+    for drop in _DROP:
+        text = text.replace(drop, " ")
+    text = text.strip()
+    for tail in _YES_NO_TAILS:
+        if text.endswith(tail):
+            text = text[: -len(tail)]
+    return text
 
 
-def direct(field: str, question: str) -> bool:
-    """True when ``question`` asks ``field`` in a known direct phrasing (:data:`_DIRECT`), so "Yes" means
-    the field is true. Anything else is not a yes/no Job360 may store."""
-    verbs, subjects = _DIRECT[field]
-    words = _question_words(question)
-    return bool(words & verbs) and bool(words & subjects) and not words & _POLARITY
+def exact(field: str, template: str, question: str, country: Optional[str]) -> bool:
+    """True when ``question`` is one of :data:`EXACT_PHRASINGS` for ``field`` (``salary`` for salary.{cc}),
+    or the catalog's own question for ``template``, once both are normalised for ``country``."""
+    from src.services.profile import common_questions  # noqa: PLC0415
+
+    said = normalise_question(question, country)
+    if said in EXACT_PHRASINGS[field]:
+        return True
+    own = [q["question"].replace("{country}", country or "") for q in common_questions.catalog()
+           if q.get("kit_key") == template]
+    return any(said == normalise_question(text, country) for text in own)
 
 
 def convert(template: str, question: str, answer: str, country: Optional[str]) -> Optional[Any]:
     """The answer in the shape of the Memory field ``template`` names, or ``None`` (never a guess)."""
     from src.services.profile.models import VALID_WORK_AUTH_STATUSES  # noqa: PLC0415
 
-    field = template.rsplit(".", 1)[-1]
-    if field in _DIRECT and not direct(field, question):
-        return None  # an inverted, negated or either/or question: a yes/no could mean its opposite
-    if template == "salary.{cc}":
-        words = _question_words(question)
-        return None if not country or (_FLOOR_WORDS | _POLARITY) & words else salary(answer, country)
+    field = "salary" if template == "salary.{cc}" else template.rsplit(".", 1)[-1]
+    if field in EXACT_PHRASINGS and not exact(field, template, question, country):
+        return None  # not one of the exact phrasings: a yes/no (or a figure) could mean something else
+    if field == "salary":
+        return salary(answer, country) if country else None
     if field in ("needs_sponsorship", "willing_to_relocate"):
         return yes_no(answer)
     if field == "onsite":

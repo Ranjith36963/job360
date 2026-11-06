@@ -162,6 +162,17 @@ INVERTED = [
     ("sponsorship.de.q5", "Can you start without requiring sponsorship?"),
     ("sponsorship.de.q6", "Don't you need sponsorship to work in Germany?"),
     ("relocation.de.q7", "Are you unwilling to relocate?"),
+    # Re-check at 677cd6f65: glued contractions, another country, scoped relocation, a parenthetical.
+    ("sponsorship.de.q8", "Dont you need sponsorship?"),
+    ("sponsorship.de.q9", "Doesnt you need sponsorship?"),
+    ("sponsorship.de.q10", "Wont you need sponsorship?"),
+    ("sponsorship.de.q11", "Arent you need sponsorship?"),
+    ("sponsorship.de.q12", "Do you need sponsorship to work in the UK?"),
+    ("sponsorship.de.q13", "Do you need sponsorship to work in France?"),
+    ("relocation.de.q14", "Are you willing to relocate only within the UK?"),
+    ("relocation.de.q15", "Are you open to relocating abroad?"),
+    ("sponsorship.de.q16", "Do you need sponsorship? (answer N/A for citizens)"),
+    ("sponsorship.de.q17", "Do you only need sponsorship for a second job?"),
 ]
 
 
@@ -249,12 +260,40 @@ def test_shapes_are_converted_or_refused_never_guessed():
                                       "4000-4500 GBP")] == [None] * 6
     assert salary("10000 EUR", "DE")["period"] == "year" and salary("9999 EUR", "DE") is None
     rel = "logistics.{cc}.willing_to_relocate"
-    assert convert(rel, "Willing to relocate?", "Yes", "DE") is True
-    assert convert("logistics.{cc}.travel_ok_pct", "Willing to travel?", "25%", "DE") == 25
-    assert convert("right_to_work.{cc}.onsite", "Willing to work on site?", "Only if sponsored", "DE") == "only_if_sponsored"
+    assert convert(rel, "Are you willing to relocate?", "Yes", "DE") is True
+    assert convert("logistics.{cc}.travel_ok_pct", "Are you willing to travel?", "25%", "DE") == 25
+    assert convert("right_to_work.{cc}.onsite", "Are you willing to work on site?", "Only if sponsored", "DE") == "only_if_sponsored"
     assert convert("right_to_work.{cc}.onsite", "Willing to work on-site or hybrid?", "Yes", "DE") is None, "either/or"
     assert convert("logistics.{cc}.travel_ok_pct", "Unable to travel?", "No", "DE") is None
     sponsor = "right_to_work.{cc}.needs_sponsorship"
     assert convert(sponsor, "Will you now or in the future require visa sponsorship?", "Yes", "DE") is True
     assert convert("right_to_work.{cc}.work_authorization", "Allowed to work?", "Yes", "DE") is None
     assert convert("salary.{cc}", "Minimum salary you would accept", "50000 EUR", "DE") is None, "a floor"
+
+
+def test_every_exact_phrasing_is_saved_and_another_country_is_not():
+    """Each allow-listed phrasing (EXACT_PHRASINGS, the job's country written as its name) converts; the
+    catalog's own texts too; the same question naming another country does not."""
+    from src.services.profile.answer_to_memory import EXACT_PHRASINGS, convert
+
+    templates = {"needs_sponsorship": ("right_to_work.{cc}.needs_sponsorship", "No", False),
+                 "willing_to_relocate": ("logistics.{cc}.willing_to_relocate", "Yes", True),
+                 "onsite": ("right_to_work.{cc}.onsite", "No", "no"),
+                 "travel_ok_pct": ("logistics.{cc}.travel_ok_pct", "20%", 20),
+                 "salary": ("salary.{cc}", "50000-60000 EUR",
+                            {"country": "DE", "min": 50000, "max": 60000, "currency": "EUR", "period": "year"})}
+    for field, phrases in EXACT_PHRASINGS.items():
+        template, answer, want = templates[field]
+        for phrase in sorted(phrases):
+            question = phrase.replace("<country>", "Germany").capitalize() + "?"
+            assert convert(template, question, answer, "DE") == want, question
+            if "<country>" in phrase:
+                assert convert(template, phrase.replace("<country>", "France") + "?", answer, "DE") is None, phrase
+    sponsor = "right_to_work.{cc}.needs_sponsorship"
+    for question in ("Will you now or in the future need visa sponsorship in DE?",  # the catalog's own text
+                     "Do you need sponsorship to work in DE? (Yes/No)", "Do you need sponsorship to work in Germany?"):
+        assert convert(sponsor, question, "No", "DE") is False, question
+    assert convert("logistics.{cc}.willing_to_relocate", "Willing to relocate within Germany?", "Yes", "DE") is True
+    assert convert("salary.{cc}", "Expected salary in Germany", "55000 EUR", "DE")["min"] == 55000
+    assert convert(sponsor, "Do you need sponsorship to work in the United Kingdom?", "No", "DE") is None
+    assert convert(sponsor, "Do you need sponsorship to work in the United Kingdom?", "No", "GB") is False
