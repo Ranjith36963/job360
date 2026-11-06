@@ -74,10 +74,39 @@ def is_country_specific(key: str, question: str) -> bool:
 MEMORY_BLOCKS = ("contact", "right_to_work", "logistics", "salary", "languages", "equality")
 
 
+# Pay words a form uses for the salary it expects ("Desired Pay", "Desired compensation"; live run 2026-11-06):
+# read as "salary", so they name the salary rows (the job country's range) and nothing else.
+_PAY_WORDS = frozenset({"pay", "compensation"})
+# Contact links (live run 2026-11-06): a label asking for the USER'S OWN link on ONE site ("Link to your
+# LinkedIn profile"). ALLOW-list: every word is the site, a link word or one of the user's own phrasing words;
+# anything else (how you heard, two sites, a referrer's link) is not the user's link.
+_LINK_SITES = {"linkedin": "contact.linkedin_url", "github": "contact.github_url"}
+_LINK_WORDS = frozenset({"url", "link", "profile", "page", "address"})
+_OWN_LINK_WORDS = frozenset({"your", "my", "to", "a", "the", "please", "share", "provide", "enter", "add", "paste",
+                             "what", "is", "public", "full", "optional"})
+
+
+def _contact_link(words: set[str]) -> Optional[str]:
+    """The contact URL key a label asking for the user's own link names (:data:`_LINK_SITES`), else ``None``.
+    Anything off the allow-list (a referrer's link, a username, a LinkedIn post or certificate) is ``None``."""
+    sites = {_LINK_SITES[w] for w in words if w in _LINK_SITES}
+    if len(sites) != 1 or words - set(_LINK_SITES) - _LINK_WORDS - _OWN_LINK_WORDS:
+        return None
+    return next(iter(sites)) if len(words) == 1 or words & _LINK_WORDS else None
+
+
+def own_link_label(question: str) -> bool:
+    """True when the question is an allow-listed ask for the user's own LinkedIn or GitHub link."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    return _contact_link(set(normalize_question(question).split())) is not None
+
+
 def _signals(words: set[str]) -> set[str]:
     """The :data:`COUNTRY_WORDS` in ``words`` by their first four letters (sponsor / sponsorship are one);
-    "right to work" counts as "authorization" and "on site" as "onsite" (:func:`is_country_specific`)."""
-    out = {w[:4] for w in words if w in COUNTRY_WORDS}
+    "right to work" counts as "authorization", "on site" as "onsite" (:func:`is_country_specific`) and a
+    :data:`_PAY_WORDS` word as "salary"."""
+    out = {"sala" if w in _PAY_WORDS else w[:4] for w in words if w in COUNTRY_WORDS}
     if {"right", "work"} <= words:
         out.add("authorization"[:4])
     if {"on", "site"} <= words:
@@ -108,6 +137,10 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
 
     k = (key or "").strip()
     words = set(normalize_question(question).split())
+    if not k and words & set(_LINK_SITES) and _contact_link(words) is None:
+        return False, None  # names the site but is no allow-listed ask for the user's own link (catalog too)
+    if words & _PAY_WORDS:
+        words.add("salary")  # "Desired pay" names the salary field (:data:`_PAY_WORDS`)
     rows = [q for q in common_questions.catalog() if q.get("kit_key")]
     # A catalog row's own wording, or (for a field named in two words or more: notice_period) all its words.
     exact = [q["kit_key"] for q in rows if "{cc}" not in q["kit_key"] and (
@@ -116,6 +149,9 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
     named = [q["kit_key"] for q in rows if _is_kit_key(q["kit_key"], k)]
     if named:
         return True, named[0]
+    link = None if k else _contact_link(words)
+    if link:
+        return True, link
     family = is_country_specific(k, question) or bool(exact)
     if not family:
         return False, None

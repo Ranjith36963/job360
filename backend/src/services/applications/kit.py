@@ -52,7 +52,7 @@ from src.services.profile.answer_match import (
     superseded,
     topic_key,
 )
-from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question
+from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question, own_link_label
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -3027,6 +3027,214 @@ def _memory_answer(
     return {**item, "value": mapped}, ""
 
 
+# Sponsorship polarity (live run 2026-11-06, two checker rounds): "Are you eligible to work in the UK WITHOUT
+# requiring sponsorship?" asks the opposite of needs_sponsorship. ALLOW-lists only: the normalised question
+# (:func:`form_words`) must be one of the fixed wordings below - as-is (_SPONSOR_DIRECT, plus the catalog's own
+# text), negated (_SPONSOR_INVERTED); anything else is a gap. Compared whole, never with a regex on caller text.
+CTRY = "xcountryx"  # the job's own country, wherever the form names it (:func:`form_words`)
+_TWO_LETTER_PLACES = frozenset({"uk", "us", "gb"})  # other lowercase 2-letter codes are words ("in", "is", "pa")
+# An UPPERCASE 2-letter country code that is not the job's own ("Expected salary in IN" on a GB job) names
+# another country: :func:`form_words` returns only this word, which is on no allow-list, so the question is a gap.
+FOREIGN = "xforeignx"
+_DROPPED = (("now", "or", "will", "you", "in", "the", "future"), ("now", "or", "in", "the", "future"))
+
+
+def _letter_runs(text: str) -> list[str]:
+    """Runs of letters as written (NFKC first, capitals kept); everything else separates words."""
+    words, cur = [], []
+    for ch in unicodedata.normalize("NFKC", str(text or "")):
+        if ch.isalpha():
+            cur.append(ch)
+        elif cur:
+            words.append("".join(cur))
+            cur = []
+    return words + (["".join(cur)] if cur else [])
+
+
+def form_words(text: str, country: Optional[str]) -> list[str]:
+    """A form question as letters-only words: the job's country (its name or code, "the UK") as :data:`CTRY`,
+    "now or in the future" / "now or will you in the future" dropped, and a trailing "yes no" dropped.
+    An UPPERCASE 2-letter country code ("IN", "IS") is read from the original text: the job's own code is
+    :data:`CTRY`, any other makes the whole question ``[FOREIGN]`` (a gap)."""
+    from src.services.profile.countries import to_iso2  # noqa: PLC0415
+
+    cased = _letter_runs(text)
+    raw = [w.casefold() for w in cased]
+    words: list[str] = []
+    i = 0
+    while i < len(raw):
+        if len(cased[i]) == 2 and cased[i].isupper() and (code := to_iso2(cased[i], strict=True)):
+            if code != (country or "").upper():
+                return [FOREIGN]
+            if words and words[-1] == "the":
+                words.pop()
+            words.append(CTRY)
+            i += 1
+            continue
+        for n in (3, 2, 1):
+            span = " ".join(raw[i:i + n])
+            if i + n <= len(raw) and country and (n > 1 or len(span) > 2 or span in _TWO_LETTER_PLACES) \
+                    and to_iso2(span, strict=True) == country:
+                if words and words[-1] == "the":
+                    words.pop()
+                words.append(CTRY)
+                i += n
+                break
+        else:
+            words.append(raw[i])
+            i += 1
+    for drop in _DROPPED:
+        j = 0
+        while j + len(drop) <= len(words):
+            if tuple(words[j:j + len(drop)]) == drop:
+                del words[j:j + len(drop)]
+            else:
+                j += 1
+    if words[-3:] == ["yes", "or", "no"]:
+        del words[-3:]
+    elif words[-2:] == ["yes", "no"]:
+        del words[-2:]
+    return words
+
+
+def _wordings(*parts: tuple[str, ...]) -> frozenset[str]:
+    """Every wording made by picking one option from each part (an option may be "")."""
+    out = [""]
+    for options in parts:
+        out = [f"{a} {b}" for a in out for b in options]
+    return frozenset(" ".join(w.split()) for w in out)
+
+
+_FOR = ("", f"to work in {CTRY}", f"in {CTRY}", "for this role", "for this position", "for this job",
+        "for this remote role")
+_SPONSOR_DIRECT = frozenset({
+    "sponsorship", "visa sponsorship", "sponsorship required", "sponsorship needed", "visa sponsorship required",
+    f"visa sponsorship {CTRY}", f"sponsorship required for {CTRY}",
+    # Greenhouse's standard US wording ("... for employment visa status (e.g. H-1B visa status)?").
+    "will you require sponsorship for employment visa status e g h b visa status",
+}) | _wordings(("do", "will", "would"), ("you",), ("need", "require"), ("", "visa"), ("sponsorship",), _FOR)
+_SPONSOR_INVERTED = _wordings(
+    ("are you eligible to", "are you authorised to", "are you authorized to", "can you"),
+    ("work", "live and work"), (f"in {CTRY} without",), ("", "requiring", "needing"), ("", "visa", "employer"),
+    ("sponsorship",),
+)
+POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
+                "clear: ask the user, never guess")
+
+
+def _sponsorship_reading(text: str, country: Optional[str], keyed: bool = False) -> Optional[str]:
+    """``"direct"``, ``"inverted"`` or ``None`` (a gap): the normalised wording is on one allow-list. A run that
+    named the kit key with a placeholder for a question (no word of three letters) keeps the key's reading."""
+    from src.services.profile import answer_to_memory, common_questions  # noqa: PLC0415
+
+    words = form_words(text, country)
+    if words == [FOREIGN]:
+        return None  # names another country than the job's: never read as this job's sponsorship question
+    said = " ".join(words)
+    catalog = {" ".join(form_words(str(q["question"]).replace("{country}", CTRY), country))
+               for q in common_questions.catalog() if str(q.get("kit_key") or "").endswith(".needs_sponsorship")}
+    if said in _SPONSOR_DIRECT or said in catalog or (keyed and not any(len(w) > 2 for w in words)):
+        return "direct"
+    # Answer once (#1526): the wordings it stores needs_sponsorship from are all as-is ones; read them the same.
+    if answer_to_memory.exact("needs_sponsorship", "right_to_work.{cc}.needs_sponsorship", text, country):
+        return "direct"
+    return "inverted" if said in _SPONSOR_INVERTED else None
+
+
+def _yes_no(value: Any) -> Optional[str]:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    return {"yes": "Yes", "no": "No"}.get(str(value).strip().casefold())
+
+
+def _sponsorship_polarity(
+    item: dict[str, Any], text: str, country: Optional[str], keyed: bool,
+) -> tuple[Optional[dict[str, Any]], str]:
+    """The ``needs_sponsorship`` answer read for THIS wording: as-is, negated, or a gap (:data:`POLARITY_WHY`)."""
+    reading = _sponsorship_reading(text, country, keyed)
+    if reading == "direct":
+        return item, ""
+    said = _yes_no(item["value"])
+    if reading == "inverted" and said is not None:
+        return {**item, "value": "No" if said == "Yes" else "Yes", "polarity": "inverted"}, ""
+    return None, POLARITY_WHY
+
+
+# Pay asked in a currency (live run 2026-11-06): Job360 never converts, so a salary answer whose saved currency
+# is not the one the form asks for is a gap. Codes chosen not to collide with English words; "$" is any dollar.
+_CURRENCY_WORDS: dict[str, frozenset[str]] = {
+    **{c: frozenset({c.upper()}) for c in (
+        "gbp", "usd", "eur", "inr", "aed", "cad", "aud", "sgd", "chf", "sek", "nok", "dkk", "pln", "jpy", "cny",
+        "hkd", "nzd", "zar", "sar", "qar", "myr", "brl", "mxn", "ils", "czk", "huf", "ron", "kwd", "bhd", "omr",
+        "egp", "ngn", "kes", "pkr", "lkr", "bdt", "idr", "thb", "krw", "twd")},
+    "pounds": frozenset({"GBP"}), "sterling": frozenset({"GBP"}), "euro": frozenset({"EUR"}),
+    "euros": frozenset({"EUR"}), "rupees": frozenset({"INR", "PKR", "LKR", "NPR"}),
+}
+_DOLLARS = frozenset({"USD", "CAD", "AUD", "SGD", "NZD", "HKD"})
+_CURRENCY_SYMBOLS = {"£": frozenset({"GBP"}), "€": frozenset({"EUR"}), "₹": frozenset({"INR"}), "$": _DOLLARS}
+
+
+# Pay period and scale (checker, 2026-11-06): a period word must name the saved period; with none, only a yearly
+# figure answers. Equity, bonus, totals, "k" / thousands and day rates are never the saved base range: a gap.
+_PERIOD_WORDS = {
+    "hour": "hour", "hourly": "hour", "hr": "hour", "day": "day", "daily": "day", "week": "week",
+    "weekly": "week", "month": "month", "monthly": "month", "annum": "year", "annual": "year",
+    "annually": "year", "year": "year", "yearly": "year", "yr": "year",
+}
+_SAVED_PERIOD = {"year": "year", "annual": "year", "yearly": "year", "month": "month", "monthly": "month"}
+_PLAIN_PAY_WORDS = frozenset({
+    "salary", "pay", "compensation", "desired", "expected", "expectation", "expectations", "your", "what", "is",
+    "are", "annual", "annually", "yearly", "per", "year", "annum", "pa", "gross", "base", "in", "range",
+})
+_NOT_BASE_PAY = frozenset({"equity", "bonus", "bonuses", "total", "ote", "k", "thousand", "thousands", "commission",
+                           "stock", "options", "lakh", "lakhs", "lpa"})
+
+
+def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
+    """Why a salary answer cannot be sent to this wording, else ``""``: another currency, another period (none
+    named = a year), or not the base range (equity, bonus, total, k, a day rate). A plain value (no record) is
+    sent only to a wording naming no period."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    if form_words(text, country) == [FOREIGN]:
+        return "the form asks about pay in another country than this job's: ask the user"
+    words = set(normalize_question(text).split())
+    odd = sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
+    if odd:
+        return f"the form asks for more than the saved base pay range ({', '.join(odd)}): ask the user"
+    asked_periods = {_PERIOD_WORDS[w] for w in words if w in _PERIOD_WORDS}
+    have_period = None
+    if isinstance(saved, dict):
+        have_period = _SAVED_PERIOD.get(str(saved.get("period") or "").strip().casefold())
+    if have_period is None:
+        # A saved record with no known period answers nothing; a plain value only a wording naming no period.
+        wrong_period = isinstance(saved, dict) or bool(asked_periods)
+    elif asked_periods:
+        wrong_period = asked_periods != {have_period}
+    else:
+        wrong_period = have_period != "year"
+    if wrong_period:
+        per = ", ".join(sorted(asked_periods)) or "a year (no period named)"
+        return (f"the form asks for pay per {per}; Memory holds pay per {have_period or 'an unknown period'} "
+                "and Job360 never converts: ask the user")
+    asked = [_CURRENCY_WORDS[w] for w in words if w in _CURRENCY_WORDS]
+    asked += [codes for sym, codes in _CURRENCY_SYMBOLS.items() if sym in text]
+    asked += [_DOLLARS for w in ("dollar", "dollars") if w in words]
+    have = str(saved.get("currency") or "").upper() if isinstance(saved, dict) else ""
+    if asked and not (have and all(have in codes for codes in asked)):
+        want = ", ".join(sorted(set().union(*asked)))
+        return (f"the form asks for pay in {want}; Memory holds {have or 'no currency'} for "
+                f"{country or 'this job'} and Job360 never converts: ask the user")
+    # ALLOW-list (checker round 2): beside the pay word, only words of a plain expected-pay question.
+    allowed = _PLAIN_PAY_WORDS | {CTRY} | {w for w, codes in _CURRENCY_WORDS.items() if have in codes}
+    allowed |= {"dollar", "dollars"} if have in _DOLLARS else set()
+    allowed |= {"month", "monthly"} if have_period == "month" else set()
+    extra = sorted({w for w in form_words(text, country) if w not in allowed})
+    if extra:
+        return (f"the form asks more than a plain expected pay range ({', '.join(extra)}): ask the user")
+    return ""
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
@@ -3080,6 +3288,8 @@ def form_check(
         matched_by = "key"
         why = ""
         family, template = memory_question(key, text)
+        if family and template is None and _sponsorship_reading(text, country) is not None:
+            template = "right_to_work.{cc}.needs_sponsorship"  # an allow-listed sponsorship wording names the fact
         own = by_key.get(key) if key is not None else None
         if own is not None and (not family or own.get("source") != "approved_text"):
             item = own  # the run named a kit item: Memory's own key (or, outside Memory, a saved answer's)
@@ -3119,6 +3329,19 @@ def form_check(
                 why = "no saved answer for this question"
         if not family and _contradicted(item):
             item, why = None, AMBIGUOUS
+        if item is not None and str(item["key"]) in ("contact.linkedin_url", "contact.github_url") \
+                and not own_link_label(text):
+            item, why = None, ("not a plain ask for your own link (maybe someone else's link, a handle or another "
+                               "page on the site): ask the user")
+        if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
+            # "eligible ... WITHOUT sponsorship" = the negation; only allow-listed wordings are answered
+            item, why = _sponsorship_polarity(item, text, country, key is not None)
+        pay = str(item["key"] if item is not None else template or "").startswith("salary.")
+        if pay:
+            sensitive = True
+            gap = _pay_gap(text,by_key.get(str(item["key"]), item)["value"], country) if item else ""
+            if gap:
+                item, why = None, gap
         # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
         # answer (production 2026-10-30: a stale "CV v1, artifact 128" label won every form's "Resume");
         # with none saved yet, the saved answer stands. A text question about the CV never gets here.
@@ -3142,7 +3365,7 @@ def form_check(
             item = None
         # A knock-out is spotted from the question and key alone - never from a gap in the profile or CV
         # (career-ops apply.md:72: a missing field is not evidence the candidate lacks the credential).
-        if _is_knockout(text, key):
+        if _is_knockout(text, key) or pay:
             knockouts.append({"question": text, "key": key, **({"value": item["value"]} if item is not None else {})})
         if item is None:
             row_m: dict[str, Any] = {"question": text, "required": required, "why": why}
@@ -3159,6 +3382,8 @@ def form_check(
         }
         if ftype != "unknown":
             row["field_type"] = ftype
+        if item.get("polarity"):
+            row["polarity"] = item["polarity"]  # the saved fact, negated for this wording
         if item.get("confirmed") is False:
             row["confirmed"] = False
         if _over_limit(item["value"], q.get("limit"), str(q.get("limit_unit") or "chars")):
