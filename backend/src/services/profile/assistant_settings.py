@@ -1258,9 +1258,11 @@ _CV_NEEDS_REVIEW = (
     "weak a second time waits for the user."
 )
 _CV_REVIEW_WEAK = (
-    "The newest review of this CV is weak, so it waits for the user: show the CV and get the user's OK, then "
-    "fill the form and ask yes. Do not review this CV a third time (after two weak CV versions on an "
-    "application, a new review is weak: retry_limit)."
+    "The newest review of this CV is weak. If it is this application's first weak review, rewrite only the "
+    "weak lines once from the profile's own words, save, and have the new version reviewed (doctor row CV "
+    "review); a rewrite is allowed only once. Otherwise it waits for the user: show the CV and get the user's "
+    "OK, then fill the form and ask yes (after two weak CV versions on an application, a new review is weak: "
+    "retry_limit)."
 )
 
 

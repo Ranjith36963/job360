@@ -197,7 +197,7 @@ def test_cv_not_seen_message_names_the_review_when_auto_approve_is_on():
     weak = ask(on, cv_review="weak")
     assert (weak.decision, weak.reason) == ("ask", "cv_not_seen")
     assert "waits for the user" in weak.detail and "show the CV" in weak.detail
-    assert "third time" in weak.detail and "retry_limit" in weak.detail
+    assert "only once" in weak.detail and "retry_limit" in weak.detail and "waits for the user" in weak.detail
     assert "record_event cv_reviewed" not in weak.detail
     old = "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes."
     for review in ("none", "weak"):
