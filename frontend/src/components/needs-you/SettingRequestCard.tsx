@@ -156,7 +156,7 @@ export function describeSettingRequest(
         title: "Send reviewed CVs without asking me",
         change:
           value === true
-            ? "Your assistant asks to send CVs that pass both checks without asking you first"
+            ? "Let your assistant send CVs that pass both checks without asking you first"
             : "Ask me to look at every CV before it goes",
       };
     case "assistant_settings.hunt_every_hours":

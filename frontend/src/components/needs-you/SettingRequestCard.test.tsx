@@ -114,7 +114,7 @@ describe("describeSettingRequest", () => {
   it("cv auto approve: on reads in plain words; off says you look at every CV", () => {
     const on = describeSettingRequest("assistant_settings.cv_auto_approve", true);
     expect(on.title).toBe("Send reviewed CVs without asking me");
-    expect(on.change).toBe("Your assistant asks to send CVs that pass both checks without asking you first");
+    expect(on.change).toBe("Let your assistant send CVs that pass both checks without asking you first");
     expect(describeSettingRequest("assistant_settings.cv_auto_approve", false).change).toBe(
       "Ask me to look at every CV before it goes",
     );
