@@ -3032,14 +3032,17 @@ def _memory_answer(
 # (:func:`form_words`) must be one of the fixed wordings below - as-is (_SPONSOR_DIRECT, plus the catalog's own
 # text), negated (_SPONSOR_INVERTED); anything else is a gap. Compared whole, never with a regex on caller text.
 CTRY = "xcountryx"  # the job's own country, wherever the form names it (:func:`form_words`)
-_TWO_LETTER_PLACES = frozenset({"uk", "us", "gb"})  # other 2-letter codes are words ("in", "is", "pa")
+_TWO_LETTER_PLACES = frozenset({"uk", "us", "gb"})  # other lowercase 2-letter codes are words ("in", "is", "pa")
+# An UPPERCASE 2-letter country code that is not the job's own ("Expected salary in IN" on a GB job) names
+# another country: :func:`form_words` returns only this word, which is on no allow-list, so the question is a gap.
+FOREIGN = "xforeignx"
 _DROPPED = (("now", "or", "will", "you", "in", "the", "future"), ("now", "or", "in", "the", "future"))
 
 
-def _letter_words(text: str) -> list[str]:
-    """Runs of letters, casefolded (NFKC first); everything else separates words."""
+def _letter_runs(text: str) -> list[str]:
+    """Runs of letters as written (NFKC first, capitals kept); everything else separates words."""
     words, cur = [], []
-    for ch in unicodedata.normalize("NFKC", str(text or "")).casefold():
+    for ch in unicodedata.normalize("NFKC", str(text or "")):
         if ch.isalpha():
             cur.append(ch)
         elif cur:
@@ -3050,13 +3053,24 @@ def _letter_words(text: str) -> list[str]:
 
 def form_words(text: str, country: Optional[str]) -> list[str]:
     """A form question as letters-only words: the job's country (its name or code, "the UK") as :data:`CTRY`,
-    "now or in the future" / "now or will you in the future" dropped, and a trailing "yes no" dropped."""
+    "now or in the future" / "now or will you in the future" dropped, and a trailing "yes no" dropped.
+    An UPPERCASE 2-letter country code ("IN", "IS") is read from the original text: the job's own code is
+    :data:`CTRY`, any other makes the whole question ``[FOREIGN]`` (a gap)."""
     from src.services.profile.countries import to_iso2  # noqa: PLC0415
 
-    raw = _letter_words(text)
+    cased = _letter_runs(text)
+    raw = [w.casefold() for w in cased]
     words: list[str] = []
     i = 0
     while i < len(raw):
+        if len(cased[i]) == 2 and cased[i].isupper() and (code := to_iso2(cased[i], strict=True)):
+            if code != (country or "").upper():
+                return [FOREIGN]
+            if words and words[-1] == "the":
+                words.pop()
+            words.append(CTRY)
+            i += 1
+            continue
         for n in (3, 2, 1):
             span = " ".join(raw[i:i + n])
             if i + n <= len(raw) and country and (n > 1 or len(span) > 2 or span in _TWO_LETTER_PLACES) \
@@ -3114,6 +3128,8 @@ def _sponsorship_reading(text: str, country: Optional[str], keyed: bool = False)
     from src.services.profile import answer_to_memory, common_questions  # noqa: PLC0415
 
     words = form_words(text, country)
+    if words == [FOREIGN]:
+        return None  # names another country than the job's: never read as this job's sponsorship question
     said = " ".join(words)
     catalog = {" ".join(form_words(str(q["question"]).replace("{country}", CTRY), country))
                for q in common_questions.catalog() if str(q.get("kit_key") or "").endswith(".needs_sponsorship")}
@@ -3180,6 +3196,8 @@ def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
     sent only to a wording naming no period."""
     from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
 
+    if form_words(text, country) == [FOREIGN]:
+        return "the form asks about pay in another country than this job's: ask the user"
     words = set(normalize_question(text).split())
     odd = sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
     if odd:

@@ -273,3 +273,34 @@ def test_other_linkedin_things_are_never_the_users_profile_url(question):
         answered, missing = _one(_profile(), question, **extra)
         assert answered is None, (question, extra, answered)
         assert missing is not None
+
+
+# ── 4. An UPPERCASE country code other than the job's own (checker round 3): IN, IS and PA are no words ──
+
+@pytest.mark.parametrize("question", ["Expected salary in IN", "Do you need sponsorship to work in IS?"])
+def test_another_countrys_uppercase_code_is_a_gap(question):
+    for needs in (False, True):
+        answered, missing = _one(_profile(needs), question)
+        assert answered is None, (question, needs, answered)
+        assert missing is not None
+
+
+def test_the_jobs_own_uppercase_code_is_answered():
+    answered, missing = _one(_profile(), "Expected salary in GB")
+    assert missing is None, missing
+    assert (answered["key"], answered["value"]) == ("salary.GB", "40000-45000 GBP year")
+
+
+def test_on_an_india_job_in_is_the_jobs_own_code():
+    profile = _profile(salary=[{"country": "IN", "min": 2000000, "max": 2500000, "currency": "INR",
+                                "period": "year"}])
+    out = _form(profile, [{"question": "Expected salary in IN"}], country="IN")
+    assert out["missing"] == [], out["missing"]
+    assert out["answered"][0]["key"] == "salary.IN"
+    assert "INR" in out["answered"][0]["value"]
+
+
+def test_lowercase_in_and_is_stay_words():
+    assert kit.form_words("What is your expected salary in the UK?", "GB") == [
+        "what", "is", "your", "expected", "salary", "in", kit.CTRY]
+    assert kit.form_words("Expected salary in IN", "GB") == [kit.FOREIGN]
