@@ -3219,8 +3219,9 @@ def _visa_example(inside: str) -> bool:
 
 def _employer_sponsorship(text: str, country: Optional[str], company_key: Optional[str]) -> bool:
     """True for :data:`_EMPLOYER_HEAD` + THIS job's own company (``company_key``, the rule-1 key) + one of
-    :data:`_EMPLOYER_TAILS`, then nothing but an optional closing visa example (:func:`_visa_example`)."""
-    if not company_key:
+    :data:`_EMPLOYER_TAILS`, then nothing but an optional closing visa example (:func:`_visa_example`).
+    The "unknown" placeholder (a job brought with no company) is no company: never matched."""
+    if not company_key or company_key == "unknown":
         return False
     main = str(text or "").strip().rstrip("?.! ").strip()
     if main.endswith(")"):

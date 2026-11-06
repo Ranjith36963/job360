@@ -226,3 +226,14 @@ def test_salary_with_bonus_or_another_exclusion_is_a_gap(question):
     answered, missing = _one(_profile(), question)
     assert answered is None, answered
     assert "ask the user" in missing["why"]
+
+
+@pytest.mark.parametrize("name", ["Unknown", "None", "N/A", "null", "NaN"])
+def test_a_job_with_no_company_never_matches_a_placeholder_name(name):
+    """Pinned from the final check (2026-11-06): a job brought with no company has the key "unknown";
+    "from None" or "from N/A" is never its company, so the employer wording is a gap."""
+    from src.services.applications.kit import _employer_sponsorship
+
+    q = (f"Will you now or in the future require sponsorship from {name} to obtain, maintain or extend "
+         "employment based work authorization (for example, H-1B, TN, E-3)?")
+    assert _employer_sponsorship(q, "GB", "unknown") is False
