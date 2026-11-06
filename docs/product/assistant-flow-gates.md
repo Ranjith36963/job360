@@ -45,11 +45,11 @@ Pause is the `paused_until` setting: empty, `until_resumed`, or a future time. A
 
 | Cap | Value | Where it lives |
 |---|---|---|
-| LinkedIn notes and messages, per day | 10 (`LINKEDIN_DAILY_MAX`). Stop reason `linkedin_daily_cap_reached`. | `own_browser.py`, check at `assistant_settings.py`. Test: `backend/tests/test_own_browser.py`. |
+| LinkedIn notes and messages, per day | The user's own limit, under an operator ceiling. Stop reason `linkedin_daily_cap_reached`. | `assistant_settings.linkedin_daily_max` — the ONE number `check_outreach` and `own_browser.take` share. Test: `backend/tests/test_own_browser.py`. |
 | LinkedIn gap between sends | 120 seconds, at least 2 minutes (`LINKEDIN_MIN_GAP_SECONDS`). Stop reason `too_soon`. | `own_browser.py`, check at `assistant_settings.py`. Same test. |
 | Easy Apply, per day | No Job360 cap by default (owner, 2026-11-03): LinkedIn's own Easy Apply limit decides. `EASY_APPLY_DAILY_MAX` (env, default 0 = off) sets an operator cap; then `take` answers `daily_limit` and other applications still go. | `own_browser.py` (`take` counts with `easy_apply_today`). Test: `backend/tests/test_linkedin_own_browser.py`. |
 | Daily submit cap | The user's `daily_cap` setting. No cap by default (`None`). Largest value accepted: 500 (`ASSISTANT_DAILY_CAP_MAX`). Stop reason `daily_cap_reached`, ends the run. | Path, range check and decision: `assistant_settings.py`. Max: `core/settings.ASSISTANT_DAILY_CAP_MAX`. |
-| Found while reading: outreach email caps | 10 a day (`OUTREACH_AUTO_SENDS_MAX_PER_DAY`), 2 people per company in 14 days (`OUTREACH_COMPANY_MAX`, `OUTREACH_COMPANY_WINDOW_DAYS`). Also settings `company_cap` and `weekly_cap`. | `core/settings.py`; used at `assistant_settings.py`; paths `assistant_settings.py`. |
+| Outreach caps (email, LinkedIn, per company, per hour) | Each is the user's own number under an operator ceiling — never a constant to quote. | `assistant_settings.OUTREACH_LIMITS` (every limit with its default and its ceiling), applied by `assistant_settings.outreach_limit`. |
 
 ### 1e. Browser route rules
 
@@ -99,11 +99,10 @@ All dated 2026-10-26 (owner).
 
 ## 3. Planned settings for "Connect your assistant"
 
-To build. None of these exist on the page yet.
+To build:
 
 | Setting | What it does | Status |
 |---|---|---|
-| LinkedIn caps | Show, and let the user lower: 10 notes/messages a day, 2 minutes apart, 10 Easy Apply a day. | To build. Today these are code constants, not settings (`own_browser.py`). |
 | Browser routes view, with Reset | Show which sites run in the own browser and why. Reset clears what route learning learned. | To build, after PR F1. |
 
 ## 4. Measured: job boards from Job360's browser (2026-10-26, production)
