@@ -297,3 +297,17 @@ def test_every_exact_phrasing_is_saved_and_another_country_is_not():
     assert convert("salary.{cc}", "Expected salary in Germany", "55000 EUR", "DE")["min"] == 55000
     assert convert(sponsor, "Do you need sponsorship to work in the United Kingdom?", "No", "DE") is None
     assert convert(sponsor, "Do you need sponsorship to work in the United Kingdom?", "No", "GB") is False
+
+
+def test_uk_nations_count_as_the_uk_and_lowercase_us_is_never_a_country():
+    """Pinned from the independent check (2026-11-06): England, Scotland and Wales name the UK's own
+    sponsorship system, so a GB job saves them; on a DE job they are another country and nothing is saved.
+    Lowercase "us" is the pronoun, never the United States."""
+    from src.services.profile.answer_to_memory import convert
+
+    sponsor = "right_to_work.{cc}.needs_sponsorship"
+    for nation in ("England", "Scotland", "Wales"):
+        assert convert(sponsor, f"Do you need sponsorship to work in {nation}?", "No", "GB") is False, nation
+        assert convert(sponsor, f"Do you need sponsorship to work in {nation}?", "No", "DE") is None, nation
+    assert convert(sponsor, "Do you need us to sponsor you?", "No", "US") is None
+    assert convert(sponsor, "Do you need sponsorship to work in US?", "No", "US") is False
