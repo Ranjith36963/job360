@@ -43,6 +43,7 @@ from src.services.applications import cv_review, email_channel, event_examples, 
 from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application, classify_host
 from src.services.applications.spine import SpineError
+from src.services.auth import run_credential
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import country_pages
 from src.services.profile.answer_match import (
@@ -1400,6 +1401,8 @@ def _where(user: CurrentUser, event_type: str, payload: dict[str, Any]) -> str:
 # Owner 2026-11-02: a chat approval is real only when it carries the owner's own words and exactly what he was
 # shown. where=web (his own click) takes neither; where=chat needs both.
 CHAT_APPROVAL_KEYS = frozenset({"user_words", "asked"})
+# The events a where=chat payload makes the user's own word: refused from a scheduled-run token.
+CHAT_APPROVAL_EVENTS = frozenset({"cv_seen", "submit_approved", "submit_declined"})
 USER_WORDS_MAX = 500
 ASKED_MAX = 2000
 USER_WORDS_MISSING = "quote the user's own reply in user_words"
@@ -1867,6 +1870,9 @@ async def check_kit_event(
     tool inherits it. A malformed payload is refused ONCE with every problem and a
     valid example (:func:`payload_problems`); the rules below only ever see a
     well-formed one."""
+    if event_type in CHAT_APPROVAL_EVENTS and isinstance(payload, dict) and payload.get("where") == "chat":
+        # Owner 2026-11-02 (option b): a scheduled run's own token never says the user said so in chat.
+        run_credential.refuse_if_run(user, event_type)
     if event_type not in SERVER_ONLY_EVENTS:
         problems = payload_problems(event_type, payload)
         if problems:

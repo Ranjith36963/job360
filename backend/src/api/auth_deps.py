@@ -72,6 +72,10 @@ class CurrentUser:
     # `src/services/applications/authorship.py::actor_for` is the ONLY place
     # this is read.
     actor_name: Optional[str] = None
+    # Owner 2026-11-02 (option b): True only for a personal token minted "for scheduled runs"
+    # (`api_tokens.for_scheduled_runs`, migration 0093). OAuth and web sessions are always False. Such a
+    # caller may do run work but never approve for the user (`services.auth.run_credential`).
+    scheduled_run: bool = False
 
 
 def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
@@ -137,6 +141,7 @@ async def _current_user_from_personal_bearer(request: Request, token: str) -> Cu
         email_verified=owner.email_verified,
         auth_via="token",
         actor_name=owner.name,
+        scheduled_run=owner.for_scheduled_runs,
     )
 
 

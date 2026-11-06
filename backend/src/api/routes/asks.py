@@ -24,6 +24,7 @@ from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import memory_closes, plain_words
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
+from src.services.auth import run_credential
 
 router = APIRouter(tags=["asks"])
 
@@ -176,6 +177,8 @@ async def answer_ask(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    # An answer is the user's own word (it can save approved "Leave blank" answers): never from a run's token.
+    run_credential.refuse_if_run(user, "answer_ask")
     try:
         out = await asks_service.answer_ask(
             db, user.id, ask_id, body.answer, actor_for(user), body.user_words, answers=body.answers

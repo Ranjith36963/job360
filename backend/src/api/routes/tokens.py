@@ -21,6 +21,9 @@ router = APIRouter(prefix="/tokens", tags=["tokens"])
 
 class CreateTokenRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+    # Owner 2026-11-02 (option b): the token for the user's scheduled tasks only. It may do run work but
+    # every approval it sends for the user is refused (403 chat_approval_from_run). Set once, here.
+    for_scheduled_runs: bool = False
 
     @field_validator("name")
     @classmethod
@@ -37,6 +40,7 @@ class TokenSummary(BaseModel):
     prefix: str
     created_at: str
     last_used_at: str | None
+    for_scheduled_runs: bool = False
 
 
 class TokenCreated(TokenSummary):
@@ -68,7 +72,9 @@ async def create_token(
             detail="Confirm your email address first: open the link we emailed you, then create a token.",
         )
     cap = settings.API_TOKENS_PER_USER
-    made = await api_tokens.mint(str(DB_PATH), user_id=user.id, name=body.name, cap=cap)
+    made = await api_tokens.mint(
+        str(DB_PATH), user_id=user.id, name=body.name, cap=cap, for_scheduled_runs=body.for_scheduled_runs
+    )
     if made is None:
         raise HTTPException(
             status_code=409,
