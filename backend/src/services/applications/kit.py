@@ -3027,6 +3027,87 @@ def _memory_answer(
     return {**item, "value": mapped}, ""
 
 
+# Sponsorship polarity (live run 2026-11-06): "Are you eligible to work in the UK WITHOUT requiring
+# sponsorship?" asks the opposite of needs_sponsorship, so its answer is the negation. Read word by word (no
+# regex on caller text). No negation = the question asks whether sponsorship is needed (as-is); one "without"
+# after an eligibility word, and no need-verb before it = inverted; anything else is unclear: a gap.
+_NEGATORS = frozenset({"not", "no", "never", "nor", "neither", "without", "cannot", "unable", "ineligible",
+                       "unauthorised", "unauthorized", "none"})
+_CONTRACTED = frozenset({"don", "doesn", "didn", "won", "can", "isn", "aren", "wouldn", "shouldn", "couldn"})
+_ELIGIBLE_WORDS = frozenset({"eligible", "authorised", "authorized", "allowed", "entitled", "permitted", "able",
+                             "legally", "can", "could", "right"})
+_NEED_WORDS = frozenset({"need", "needs", "require", "requires", "required", "requiring", "want"})
+POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
+                "clear: ask the user, never guess")
+
+
+def _sponsorship_reading(text: str) -> Optional[str]:
+    """``"direct"``, ``"inverted"`` or ``None`` (unclear) for a sponsorship question (see above)."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    words = normalize_question(text).split()
+    negs = []
+    for i, w in enumerate(words):
+        if w == "no" and "yes" in words[max(0, i - 2):i]:
+            continue  # the "Yes/No" a label carries, not a negation
+        if w in _NEGATORS or (w == "t" and i > 0 and words[i - 1] in _CONTRACTED):
+            negs.append(i)
+    if not negs:
+        return "direct"
+    if len(negs) == 1 and words[negs[0]] == "without":
+        before = set(words[:negs[0]])
+        if before & _ELIGIBLE_WORDS and not before & _NEED_WORDS:
+            return "inverted"
+    return None
+
+
+def _yes_no(value: Any) -> Optional[str]:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    return {"yes": "Yes", "no": "No"}.get(str(value).strip().casefold())
+
+
+def _sponsorship_polarity(item: dict[str, Any], text: str) -> tuple[Optional[dict[str, Any]], str]:
+    """The ``needs_sponsorship`` answer read for THIS wording: as-is, negated, or a gap (:data:`POLARITY_WHY`)."""
+    reading = _sponsorship_reading(text)
+    if reading == "direct":
+        return item, ""
+    said = _yes_no(item["value"])
+    if reading == "inverted" and said is not None:
+        return {**item, "value": "No" if said == "Yes" else "Yes", "polarity": "inverted"}, ""
+    return None, POLARITY_WHY
+
+
+# Pay asked in a currency (live run 2026-11-06): Job360 never converts, so a salary answer whose saved currency
+# is not the one the form asks for is a gap. Codes chosen not to collide with English words; "$" is any dollar.
+_CURRENCY_WORDS: dict[str, frozenset[str]] = {
+    **{c: frozenset({c.upper()}) for c in (
+        "gbp", "usd", "eur", "inr", "aed", "cad", "aud", "sgd", "chf", "sek", "nok", "dkk", "pln", "jpy", "cny",
+        "hkd", "nzd", "zar", "sar", "qar", "myr", "brl", "mxn", "ils", "czk", "huf", "ron", "kwd", "bhd", "omr",
+        "egp", "ngn", "kes", "pkr", "lkr", "bdt", "idr", "thb", "krw", "twd")},
+    "pounds": frozenset({"GBP"}), "sterling": frozenset({"GBP"}), "euro": frozenset({"EUR"}),
+    "euros": frozenset({"EUR"}), "rupees": frozenset({"INR", "PKR", "LKR", "NPR"}),
+}
+_DOLLARS = frozenset({"USD", "CAD", "AUD", "SGD", "NZD", "HKD"})
+_CURRENCY_SYMBOLS = {"£": frozenset({"GBP"}), "€": frozenset({"EUR"}), "₹": frozenset({"INR"}), "$": _DOLLARS}
+
+
+def _currency_gap(text: str, saved: Any, country: Optional[str]) -> str:
+    """Why a salary answer cannot be sent to this wording (another currency than the saved one), else ``""``."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    words = set(normalize_question(text).split())
+    asked = [_CURRENCY_WORDS[w] for w in words if w in _CURRENCY_WORDS]
+    asked += [codes for sym, codes in _CURRENCY_SYMBOLS.items() if sym in text]
+    asked += [_DOLLARS for w in ("dollar", "dollars") if w in words]
+    have = str(saved.get("currency") or "").upper() if isinstance(saved, dict) else ""
+    if not asked or (have and all(have in codes for codes in asked)):
+        return ""
+    want = ", ".join(sorted(set().union(*asked)))
+    return (f"the form asks for pay in {want}; Memory holds {have or 'no currency'} for {country or 'this job'} "
+            "and Job360 never converts: ask the user")
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
@@ -3119,6 +3200,14 @@ def form_check(
                 why = "no saved answer for this question"
         if not family and _contradicted(item):
             item, why = None, AMBIGUOUS
+        if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
+            item, why = _sponsorship_polarity(item, text)  # "eligible ... WITHOUT sponsorship" = the negation
+        pay = str(item["key"] if item is not None else template or "").startswith("salary.")
+        if pay:
+            sensitive = True
+            gap = _currency_gap(text, by_key.get(str(item["key"]), item)["value"], country) if item else ""
+            if gap:
+                item, why = None, gap
         # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
         # answer (production 2026-10-30: a stale "CV v1, artifact 128" label won every form's "Resume");
         # with none saved yet, the saved answer stands. A text question about the CV never gets here.
@@ -3142,7 +3231,7 @@ def form_check(
             item = None
         # A knock-out is spotted from the question and key alone - never from a gap in the profile or CV
         # (career-ops apply.md:72: a missing field is not evidence the candidate lacks the credential).
-        if _is_knockout(text, key):
+        if _is_knockout(text, key) or pay:
             knockouts.append({"question": text, "key": key, **({"value": item["value"]} if item is not None else {})})
         if item is None:
             row_m: dict[str, Any] = {"question": text, "required": required, "why": why}
@@ -3159,6 +3248,8 @@ def form_check(
         }
         if ftype != "unknown":
             row["field_type"] = ftype
+        if item.get("polarity"):
+            row["polarity"] = item["polarity"]  # the saved fact, negated for this wording
         if item.get("confirmed") is False:
             row["confirmed"] = False
         if _over_limit(item["value"], q.get("limit"), str(q.get("limit_unit") or "chars")):
