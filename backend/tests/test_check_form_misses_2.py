@@ -123,3 +123,11 @@ def test_someone_elses_email_is_a_gap(question):
         answered, missing = _one(_profile(), question, **extra)
         assert answered is None, (question, extra, answered)
         assert missing is not None
+
+
+def test_mail_address_can_be_a_postal_address_so_it_is_a_gap():
+    """Pinned from the independent check (2026-11-06): "Mail address" may mean a postal address, so it
+    never maps to the user's email."""
+    from src.services.profile.ask_once import memory_question
+
+    assert memory_question(None, "Mail address") != (True, "contact.email")

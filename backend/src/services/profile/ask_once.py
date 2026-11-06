@@ -108,7 +108,7 @@ _PHONE_CORE = frozenset({"phone", "mobile", "telephone", "cell"})
 _PHONE_EXTRA = frozenset({"number", "no"})
 _DIAL_CORE = frozenset({"dial", "dialing", "dialling", "calling"})
 _EMAIL_LABELS = tuple(frozenset(w) for w in (
-    {"email"}, {"email", "address"}, {"e", "mail"}, {"e", "mail", "address"}, {"mail", "address"}))
+    {"email"}, {"email", "address"}, {"e", "mail"}, {"e", "mail", "address"}))
 
 
 def _contact_label(words: list[str]) -> Optional[str]:
