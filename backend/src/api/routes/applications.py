@@ -4050,6 +4050,10 @@ async def _record_event(
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
         if body.event_type == ready_service.JOB_APPROVAL_EVENT:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the web Verify), not by a caller")
+        if body.event_type in cv_review_service.SERVER_ONLY_EVENTS:
+            raise SpineError(
+                422, f"{body.event_type} is written by Job360 itself (the receipt / Wrong fact), not by a caller",
+            )
         if body.event_type == evidence_service.EVENT_TYPE or body.event_type in submit_clearance.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (check_submit), not by a caller")
         if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
@@ -4144,6 +4148,7 @@ async def _record_event(
         # G338: `submit_attempted` is a claim - the row lock, the 409 checks and the append are
         # one transaction, so of two sessions that both passed check_submit only one may click.
         clearance: Optional[int] = None
+        cv_on_review: Optional[dict[str, Any]] = None
         if body.event_type == "applied":
             # Owner rule 2026-10-31: an assistant cannot record applied with items open (409); the user's
             # own click is stamped with what was open.
@@ -4153,6 +4158,7 @@ async def _record_event(
             # Autonomy A8: an assistant's first `applied` spends one check_submit `submit` (a repeat is a note).
             if not await kit_service.already_applied(db, user.id, application_id):
                 clearance = await submit_clearance.required(db, user.id, application_id, actor_for(user))
+            cv_on_review = await cv_review_service.review_clearance(db, user.id, application_id, actor_for(user))
         claim: contextlib.AbstractAsyncContextManager[Any] = (
             kit_service.submit_claim(db, user, application_id)
             if body.event_type == "submit_attempted"
@@ -4173,6 +4179,7 @@ async def _record_event(
                     db, user.id, application_id, actor_for(user), clearance,
                     {"applied_event_id": int(result["event_id"])},
                 )
+            await cv_review_service.record_sent(db, user.id, application_id, cv_on_review, actor_for(user))
         if source:
             # Feature 10: this message was waiting as an unmatched inbox item - it now has its application.
             await inbox_items_service.resolve_by_event(
@@ -4393,7 +4400,10 @@ async def record_application_receipt(
             db, user.id, application_id, actor_for(user), cv_artifact_id=body.cv_artifact_id,
             channel=body.channel,
         )
-        return await spine.record_receipt(
+        cv_on_review = await cv_review_service.review_clearance(
+            db, user.id, application_id, actor_for(user), cv_artifact_id=body.cv_artifact_id, channel=body.channel,
+        )
+        receipt = await spine.record_receipt(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             open_at_submit=open_at_submit,
             channel=body.channel, note=body.note, confirmation=body.confirmation,
@@ -4404,6 +4414,8 @@ async def record_application_receipt(
             recipient=body.recipient, gmail_message_id=body.gmail_message_id,
             browser=which_browser.resolve(user.id, application_id, body.browser) if body.browser else None,
         )
+        await cv_review_service.record_sent(db, user.id, application_id, cv_on_review, actor_for(user))
+        return receipt
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     except SpineError as exc:

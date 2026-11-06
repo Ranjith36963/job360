@@ -337,7 +337,7 @@ async def test_without_any_yes_the_message_after_acceptance_is_never_queued(auth
         assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, mid) == ("send", "owner_clicked")
         assert (await client.post(f"/api/contacts/{cid}/outreach", json={"entry": "sent", "channel": "linkedin"})).status_code == 201
-        assert (await client.get("/api/sent-on-its-own")).json() == {"items": []}
+        assert (await client.get("/api/sent-on-its-own")).json() == {"items": [], "cv_sample": []}
 
 
 @pytest.mark.asyncio

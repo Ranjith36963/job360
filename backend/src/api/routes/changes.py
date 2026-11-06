@@ -41,6 +41,7 @@ from src.api.routes.own_browser import PcIdleOut
 from src.repositories.database import JobDatabase
 from src.services.applications import sent_alone
 from src.services.applications.needs_you_count import needs_you_count
+from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["changes"])
 
@@ -204,7 +205,7 @@ class SentItem(BaseModel):
     application_id: Optional[int] = None  # None: a LinkedIn item for a person with no job
     job_company: str
     job_title: str
-    kind: str  # "answer" | "essay" | "linkedin_request" | "linkedin_message"
+    kind: str  # "answer" | "essay" | "linkedin_request" | "linkedin_message" | "cv" (id < 0)
     question: str
     answer: str
     sources: list[SentSource] = []
@@ -214,6 +215,7 @@ class SentItem(BaseModel):
 
 class SentOnItsOwnOut(BaseModel):
     items: list[SentItem]
+    cv_sample: list[int] = []  # today's check: up to 5 unreported ``cv`` ids (sent_alone.daily_sample)
 
 
 @router.get("/sent-on-its-own", response_model=SentOnItsOwnOut, dependencies=AUTH_FIRST)
@@ -222,8 +224,14 @@ async def sent_on_its_own_route(
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the Needs-you page's own read
 ) -> Any:
     """Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
-    sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed."""
-    return SentOnItsOwnOut(items=[SentItem(**i) for i in await sent_alone.list_items(db, user.id)])
+    sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,
+    and CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check."""
+    items = await sent_alone.list_items(db, user.id)
+    cv_ids = [i["id"] for i in items if i["kind"] == "cv" and not i["reported_wrong"]]
+    day = await sent_alone.today(db, user.id)
+    return SentOnItsOwnOut(
+        items=[SentItem(**i) for i in items], cv_sample=sent_alone.daily_sample(user.id, cv_ids, day),
+    )
 
 
 @router.post("/sent-on-its-own/{item_id}/wrong-fact", status_code=204, dependencies=AUTH_FIRST)
@@ -232,8 +240,17 @@ async def report_wrong_fact_route(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own press, never an agent's
 ) -> Response:
-    """The user's "Wrong fact" press on one item. Autonomy step 4 records it and stops reusing that fact;
-    until it ships there is no item to press on, so every id is 404."""
-    if await sent_alone.get_item(db, user.id, item_id) is None:
+    """The user's "Wrong fact" press on one item. On a ``cv`` item (owner 2026-11-06) it is recorded (the item
+    reads ``reported_wrong``) and automatic CV sending (``cv_auto_approve``) is turned off at once. Other kinds
+    arrive with autonomy step 4 (409). Another user's item, or none, is 404."""
+    item = await sent_alone.get_item(db, user.id, item_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="No such item sent on its own.")
-    raise HTTPException(status_code=409, detail="Reporting a wrong fact arrives with autonomy step 4.")
+    if item["kind"] != "cv":
+        raise HTTPException(status_code=409, detail="Reporting a wrong fact arrives with autonomy step 4.")
+    await sent_alone.report_cv_wrong_fact(db, user.id, item)
+    get_audit_logger().info("cv_wrong_fact", extra={
+        "event": "cv_wrong_fact", "user_id": safe_log_value(user.id), "item_id": safe_log_value(item_id),
+        "application_id": safe_log_value(item["application_id"]), "cv_auto_approve": False, "result": "ok",
+    })
+    return Response(status_code=204)

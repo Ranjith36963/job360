@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications import kit, spine
+from src.services.applications import cv_review, kit, spine
 from src.services.applications.email_match import match_email
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -165,12 +165,14 @@ async def apply_if_proven(
             return None
         # Like the user's own Mark Applied: what was still open is stamped on the event (the doctor lists it).
         open_at_submit = await kit.open_rule_items(db, user.id, application_id)
+        cv_on_review = await cv_review.review_clearance(db, user.id, application_id, SYSTEM_ACTOR)
         await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type="applied", detail=APPLIED_DETAIL,
             payload={"confirmed_by": CONFIRMED_BY, "note_event_id": int(note_id),
                      **({"open_at_submit": open_at_submit} if open_at_submit else {})},
             occurred_at=source["received_at"], recorded_by=SYSTEM_ACTOR,  # never before the fill (_not_proven)
         )
+        await cv_review.record_sent(db, user.id, application_id, cv_on_review, SYSTEM_ACTOR)
     _log(user.id, application_id, "auto_applied", "ok")
     return ("Job360 recorded this application as applied: the employer's confirmation email matches only this "
             "job, where a submit was started or the form filled. The user can undo it on the website.")

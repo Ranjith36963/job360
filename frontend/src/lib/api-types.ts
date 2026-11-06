@@ -3687,7 +3687,8 @@ export interface paths {
         /**
          * Sent On Its Own Route
          * @description Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
-         *     sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed.
+         *     sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,
+         *     and CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check.
          */
         get: operations["sent_on_its_own_route_api_sent_on_its_own_get"];
         put?: never;
@@ -3709,8 +3710,9 @@ export interface paths {
         put?: never;
         /**
          * Report Wrong Fact Route
-         * @description The user's "Wrong fact" press on one item. Autonomy step 4 records it and stops reusing that fact;
-         *     until it ships there is no item to press on, so every id is 404.
+         * @description The user's "Wrong fact" press on one item. On a ``cv`` item (owner 2026-11-06) it is recorded (the item
+         *     reads ``reported_wrong``) and automatic CV sending (``cv_auto_approve``) is turned off at once. Other kinds
+         *     arrive with autonomy step 4 (409). Another user's item, or none, is 404.
          */
         post: operations["report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post"];
         delete?: never;
@@ -9979,6 +9981,11 @@ export interface components {
         };
         /** SentOnItsOwnOut */
         SentOnItsOwnOut: {
+            /**
+             * Cv Sample
+             * @default []
+             */
+            cv_sample: number[];
             /** Items */
             items: components["schemas"]["SentItem"][];
         };
