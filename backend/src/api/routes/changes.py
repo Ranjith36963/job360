@@ -215,7 +215,7 @@ class SentItem(BaseModel):
 
 class SentOnItsOwnOut(BaseModel):
     items: list[SentItem]
-    cv_sample: list[int] = []  # today's check: up to 5 ``cv`` item ids, the same all day (sent_alone.daily_sample)
+    cv_sample: list[int] = []  # today's check: up to 5 unreported ``cv`` ids (sent_alone.daily_sample)
 
 
 @router.get("/sent-on-its-own", response_model=SentOnItsOwnOut, dependencies=AUTH_FIRST)
@@ -227,9 +227,10 @@ async def sent_on_its_own_route(
     sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,
     and CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check."""
     items = await sent_alone.list_items(db, user.id)
-    cv_ids = [i["id"] for i in items if i["kind"] == "cv"]
+    cv_ids = [i["id"] for i in items if i["kind"] == "cv" and not i["reported_wrong"]]
+    day = await sent_alone.today(db, user.id)
     return SentOnItsOwnOut(
-        items=[SentItem(**i) for i in items], cv_sample=sent_alone.daily_sample(user.id, cv_ids, sent_alone.today()),
+        items=[SentItem(**i) for i in items], cv_sample=sent_alone.daily_sample(user.id, cv_ids, day),
     )
 
 

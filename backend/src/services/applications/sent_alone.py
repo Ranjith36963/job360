@@ -13,12 +13,12 @@ CV (owner 2026-11-06, the safety net before ``cv_auto_approve``): kind ``cv`` is
 on a strong ``cv_reviewed`` instead of the user's look, read from the server-written ``cv_sent_on_review`` event
 (cv_review.py) and the review it names. Its id is the NEGATIVE of that event id: LinkedIn items keep their
 positive ``contact_outreach`` ids, so the two never collide and the id stays a whole number for old clients.
-``reported_wrong`` = a ``cv_wrong_fact`` event names it. :func:`daily_sample` picks 5 CV items a day to check.
+``reported_wrong`` = a ``cv_wrong_fact`` event names it. :func:`daily_sample` picks 5 unreported CV items a day
+to check (a fixed hash rank per user, day and id).
 """
 from __future__ import annotations
 
 import hashlib
-import random
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -29,16 +29,22 @@ _LIMIT = 200
 SAMPLE_SIZE = 5
 
 
-def today() -> date:
-    """The day the sample is drawn for (UTC); tests patch it."""
-    return datetime.now(timezone.utc).date()
+async def today(db: JobDatabase, user_id: str) -> date:
+    """The day the sample is drawn for: the user's own day (``users.timezone``); tests patch it."""
+    from src.services.applications import spine  # noqa: PLC0415
+
+    return await spine.user_today(db, user_id)
 
 
 def daily_sample(user_id: str, ids: list[int], day: date) -> list[int]:
-    """Up to :data:`SAMPLE_SIZE` of ``ids``, the same all ``day`` for this user (seeded by user + date)."""
-    seed = hashlib.sha256(f"{user_id}|{day.isoformat()}".encode()).hexdigest()
-    pool = sorted(set(ids))
-    return sorted(random.Random(seed).sample(pool, min(SAMPLE_SIZE, len(pool))))  # noqa: S311 - not security
+    """The day's check: the :data:`SAMPLE_SIZE` ids that rank lowest by ``sha256(user|day|id)``. Each id's rank
+    is fixed for the day, so the same pool always gives the same picks, and a new item never moves the others'
+    ranks. Honest limit: a new item that ranks BELOW the fifth pick does replace it, and the caller leaves
+    reported items out, so a reported pick makes room for the next one. The picks are otherwise stable."""
+    def rank(i: int) -> str:
+        return hashlib.sha256(f"{user_id}|{day.isoformat()}|{i}".encode()).hexdigest()
+
+    return sorted(sorted(set(ids), key=rank)[:SAMPLE_SIZE])
 
 
 def _payload(raw: Any) -> dict[str, Any]:
@@ -61,36 +67,57 @@ def _review_sources(review: dict[str, Any]) -> list[dict[str, str]]:
 
 async def _cv_items(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     """Kind ``cv``: one per ``cv_sent_on_review`` event, only from stored rows."""
-    from src.services.applications import cv_review, spine  # noqa: PLC0415
+    from src.services.applications import cv_review  # noqa: PLC0415
 
-    cur = await db._db.execute(
-        "SELECT id, event_type, application_id, payload, recorded_at FROM application_events WHERE user_id = ? "
-        "AND event_type IN (?, ?) ORDER BY id DESC LIMIT ?",
-        (user_id, cv_review.SENT_EVENT, cv_review.WRONG_FACT_EVENT, _LIMIT * 2),
+    async def rows(sql: str, args: tuple[Any, ...]) -> list[dict[str, Any]]:
+        cur = await db._db.execute(sql, args)
+        return [dict(r) for r in await cur.fetchall()]
+
+    def marks(ids: list[int]) -> str:
+        return ",".join("?" for _ in ids) or "NULL"
+
+    sent = await rows(
+        "SELECT id, application_id, payload, recorded_at FROM application_events WHERE user_id = ? "
+        "AND event_type = ? ORDER BY id DESC LIMIT ?", (user_id, cv_review.SENT_EVENT, _LIMIT),
     )
-    rows = [dict(r) for r in await cur.fetchall()]
-    reported = {
-        _payload(r["payload"]).get("sent_event_id") for r in rows if r["event_type"] == cv_review.WRONG_FACT_EVENT
-    }
+    if not sent:
+        return []
+    # Read apart from the sent rows, so reports never push older CV items out of the cap.
+    reported = {_payload(r["payload"]).get("sent_event_id") for r in await rows(
+        "SELECT payload FROM application_events WHERE user_id = ? AND event_type = ?",
+        (user_id, cv_review.WRONG_FACT_EVENT),
+    )}
+    for r in sent:
+        r["payload"] = _payload(r["payload"])
+    app_ids = sorted({int(r["application_id"]) for r in sent})
+    review_ids = sorted({int(p) for r in sent if isinstance(p := r["payload"].get("review_event_id"), int)})
+    art_ids = sorted({int(a) for r in sent if isinstance(a := r["payload"].get("artifact_id"), int)})
+    apps = {int(a["id"]): a for a in await rows(
+        f"SELECT id, job_company, job_title FROM applications WHERE user_id = ? AND id IN ({marks(app_ids)})",  # noqa: S608
+        (user_id, *app_ids),
+    )}
+    reviews = {int(v["id"]): v for v in await rows(
+        "SELECT id, application_id, payload FROM application_events WHERE user_id = ? AND event_type = ? "  # noqa: S608
+        f"AND id IN ({marks(review_ids)})", (user_id, cv_review.EVENT_TYPE, *review_ids),
+    )}
+    arts = {int(a["id"]): a for a in await rows(
+        f"SELECT id, application_id, kind, version_no FROM application_artifacts WHERE id IN ({marks(art_ids)})",  # noqa: S608
+        tuple(art_ids),
+    )}
     out: list[dict[str, Any]] = []
-    for r in rows:
-        if r["event_type"] != cv_review.SENT_EVENT:
+    for r in sent:
+        app_id, p = int(r["application_id"]), r["payload"]
+        app, review, art = apps.get(app_id), reviews.get(p.get("review_event_id")), arts.get(p.get("artifact_id"))
+        # Never invent: every part must be a stored row of this user, on this application.
+        if app is None or review is None or art is None or art["kind"] != "cv":
             continue
-        app_id, p = int(r["application_id"]), _payload(r["payload"])
-        app = await spine.get_owned_application(db, user_id, app_id)
-        cur = await db._db.execute(
-            "SELECT payload FROM application_events WHERE id = ? AND user_id = ? AND application_id = ? "
-            "AND event_type = ?", (p.get("review_event_id"), user_id, app_id, cv_review.EVENT_TYPE),
-        )
-        review = await cur.fetchone()
-        art = await spine.get_artifact(db, user_id, app_id, int(p["artifact_id"])) if p.get("artifact_id") else None
-        if app is None or review is None or art is None:
-            continue  # never invent: every part must be a stored row of this user
+        if int(review["application_id"]) != app_id or int(art["application_id"]) != app_id:
+            continue
         out.append({
             "id": -int(r["id"]), "application_id": app_id, "job_company": str(app.get("job_company") or ""),
             "job_title": str(app.get("job_title") or ""), "kind": "cv", "question": "CV sent after a strong review",
             "answer": f"CV version {art.get('version_no')} (artifact {art['id']})",
-            "sources": _review_sources(_payload(dict(review)["payload"])), "sent_at": str(r["recorded_at"]),
+            "sources": _review_sources(_payload(review["payload"])), "sent_at": str(r["recorded_at"]),
             "reported_wrong": int(r["id"]) in reported,
         })
     return out
