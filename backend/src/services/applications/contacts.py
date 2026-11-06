@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -1619,8 +1619,9 @@ async def over_limit_notes(db: JobDatabase, user_id: str, contact_ids: list[int]
         "SELECT o.contact_id, o.channel, o.text FROM contact_outreach o "  # noqa: S608 - only "?" is formatted in
         f"WHERE o.user_id = ? AND o.entry = 'message' AND o.contact_id IN ({marks}) "
         "AND o.id = (SELECT MAX(x.id) FROM contact_outreach x WHERE x.contact_id = o.contact_id "
-        "AND x.entry = 'message')",
-        (user_id, *contact_ids),
+        "AND x.entry = 'message') AND NOT EXISTS (SELECT 1 FROM contact_outreach k WHERE k.contact_id = o.contact_id "
+        "AND k.entry = ? AND k.text = CAST(o.id AS TEXT))",
+        (user_id, *contact_ids, own_browser.AFTER_CONNECT),
     )
     long = {
         int(r["contact_id"]): len(str(r["text"] or ""))
@@ -1671,6 +1672,12 @@ async def _check_draft_kind(
                 422, f"a LinkedIn message is at most {settings_rules.LINKEDIN_MESSAGE_MAX_CHARS} characters; "
                 f"this one is {len(text)}. Shorten it.",
             )
+    message_max = settings_rules.LINKEDIN_MESSAGE_MAX_CHARS
+    if draft_kind == "after_connect" and (channel != "linkedin" or len(text) > message_max):
+        raise SpineError(
+            422, f"an after_connect draft is a LinkedIn message of at most {settings_rules.LINKEDIN_MESSAGE_MAX_CHARS} "
+            f"characters (sent once they accept a request without a note); this one is {len(text)} on {channel}.",
+        )
     if draft_kind == "inmail" and len(text) > settings.LINKEDIN_INMAIL_BODY_MAX_CHARS:
         raise SpineError(
             422, f"an InMail body is at most {settings.LINKEDIN_INMAIL_BODY_MAX_CHARS} characters; "
@@ -1903,6 +1910,14 @@ async def record_outreach(
                             source_message_id or "", clean_label,
                         ),
                     )
+                    if draft_kind == "after_connect":  # Job360's own marker row: the request goes without a note
+                        await db._db.execute(
+                            "INSERT INTO contact_outreach (user_id, contact_id, entry, channel, text, version_no, "
+                            "occurred_at, recorded_at, recorded_by, source_message_id, label) "
+                            "VALUES (?, ?, ?, 'linkedin', ?, NULL, ?, ?, ?, '', '')",
+                            (user_id, contact_id, own_browser.AFTER_CONNECT, str(int(ins.lastrowid or 0)), occurred,
+                             now, actor),
+                        )
             except pg.IntegrityError:
                 continue
             outreach_id = int(ins.lastrowid or 0)
@@ -2035,12 +2050,13 @@ async def outreach_gate_facts(
     _apply_current_fields(current, (await _latest_edits_for_user(db, user_id)).get(contact_id, {}))
     application_id = contact.get("application_id")
     closed = False
-    job_company = ""
+    job_company = job_title = ""
     if application_id is not None:
         app_row = await get_owned_application(db, user_id, int(application_id))
         if app_row is not None:
             closed = str(app_row.get("status") or "") in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
             job_company = str(app_row.get("job_company") or "")
+            job_title = str(app_row.get("job_title") or "")
     company = contact_company_key({"company": current.get("company"), "job_company": job_company})
     email = (current.get("email") or "").strip().lower()
     bounced = False
@@ -2050,11 +2066,23 @@ async def outreach_gate_facts(
             (user_id, email),
         )
         bounced = await cur.fetchone() is not None
+    context = " ".join(str(v or "") for v in (current.get("name"), current.get("company"), job_company, job_title))
     linkedin = await _linkedin_gate_facts(
-        db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc)
+        db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc), context
     )
+    checks: dict[str, Any] = {}
+    if str(target.get("channel") or "") == "email":  # LinkedIn reads the same two checks in its own facts
+        from src.services.applications import cv_checks  # noqa: PLC0415
+
+        text = str(target.get("text") or "")
+        profile = await _load_profile_or_none(user_id)
+        checks = {
+            "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile, context),
+            "sensitive": bool(cv_checks.sensitive_words(text)),
+        }
     return settings_rules.OutreachFacts(
         **linkedin,
+        **checks,
         message_found=True,
         latest_draft=int(target["id"]) == max(int(r["id"]) for r in messages),
         channel=str(target.get("channel") or ""),
@@ -2072,7 +2100,7 @@ async def outreach_gate_facts(
 
 async def _linkedin_gate_facts(
     db: JobDatabase, user_id: str, contact_id: int, rows: list[dict[str, Any]], target: dict[str, Any],
-    current: dict[str, Any], session: str, actor: str, now: datetime,
+    current: dict[str, Any], session: str, actor: str, now: datetime, context: str = "",
 ) -> dict[str, Any]:
     """The LinkedIn facts of :class:`OutreachFacts` (``{}`` for any other channel: nothing is read). The click
     and the claim come from ``own_browser.derive`` (the one place that reads those rows); the pace from the
@@ -2082,19 +2110,32 @@ async def _linkedin_gate_facts(
     from src.services.applications import kit  # noqa: PLC0415
 
     label = kit.clean_session(session)
-    task = own_browser.derive(rows, now)
+    task = own_browser.derive(rows, now, auto=True)  # a claim on a draft with no click counts; the gate weighs it
     mine = task is not None and int(task["message_id"]) == int(target["id"])
     holder = (
         (task["claimed_by"], task["claimed_actor"])
         if task is not None and mine and task["state"] == "in_progress" else None
     )
     last, today = await own_browser.pace_facts(db, user_id, now, exclude_contact_id=contact_id)
+    text = str(target.get("text") or "")
+    invite = own_browser.invite_facts(rows)
+    profile = await _load_profile_or_none(user_id)
+    from src.services.applications import cv_checks  # noqa: PLC0415
+
     return {
+        "after_connect": own_browser.is_after_connect(rows, int(target["id"])),
+        "invited": invite is not None,
+        "invite_owner_approved": own_browser.owner_yes_carries(rows, int(target["id"])),
+        "invites_this_week": await own_browser.invites_since(db, user_id, now - timedelta(days=7)),
+        "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile, context),
+        "sensitive": bool(cv_checks.sensitive_words(text)),
+        **own_browser.follow_up_facts(rows, int(target["id"]), now),
         "has_linkedin_url": bool((current.get("linkedin_url") or "").strip()),
         "linkedin_state": current.get("linkedin_state") or None,
         "text_chars": len(str(target.get("text") or "")),
         "premium": await _linkedin_premium_by_user(user_id, contact_id),
-        "owner_approved": mine and task is not None and task["state"] in ("queued", "in_progress"),
+        "owner_approved": mine and task is not None and task["state"] in ("queued", "in_progress")
+        and not task.get("auto"),
         "claimed_by_other": holder is not None and holder != (label, actor),
         "claimed_by_caller": holder is not None and holder == (label, actor),
         "invite_limit_until": await own_browser.weekly_limit_until(db, user_id, now),
@@ -2111,7 +2152,8 @@ async def count_company_sends(db: JobDatabase, user_id: str, key: str, since: st
         "SELECT ac.id AS contact_id, ac.company, a.job_company FROM contact_outreach co "
         "JOIN application_contacts ac ON ac.id = co.contact_id "
         "JOIN applications a ON a.id = ac.application_id "
-        "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ?",
+        "WHERE co.user_id = ? AND ac.user_id = ? AND co.recorded_at >= ? "
+        "AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited'))",
         (user_id, user_id, since),
     )
     rows = [dict(r) for r in await cur.fetchall()]
@@ -2216,6 +2258,8 @@ async def _full_contact_view(
     view["outreach"] = _outreach_view(rows, include_text=include_text)
     view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
     view["own_browser_task"] = own_browser.public_task(own_browser.derive(rows, datetime.now(timezone.utc)))
+    # One LinkedIn follow-up is due (any person, with a job or not): the assistant drafts it.
+    view["linkedin_follow_up_due"] = own_browser.follow_up_due(rows, datetime.now(timezone.utc))
     # A newest draft over the note limit that nobody has sent or skipped: the assistant's job, not the user's.
     last_msg = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
     closed = any(r["entry"] in ("sent", "reply", "skipped") and int(r["id"]) > last_msg for r in rows)

@@ -352,7 +352,7 @@ async def queue_summary(
         int(r["application_id"])
         for r in await ready.ready_rows(db, user_id, limit=settings.READY_TO_SEND_MAX)
     } & in_queue
-    blocked_ids = {a for a in in_queue if await blocked_service.open_block(db, user_id, a) is not None}
+    blocked_ids = set(await blocked_service.open_blocks(db, user_id, sorted(in_queue)))  # one query, not one per job
     asked_ids = (await _open_ask_apps(db, user_id, sorted(in_queue))) - blocked_ids
     return {
         "queued": len(in_queue),

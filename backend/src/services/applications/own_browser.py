@@ -17,6 +17,13 @@ Append-only: the state is derived from the newest rows, nothing is updated. Run 
 at least ``LINKEDIN_MIN_GAP_SECONDS`` apart and at most the user's own ``assistant_settings.linkedin_sends_per_day``
 (``rules.linkedin_daily_max``: default 15, operator backstop 100) a day, enforced in :func:`take`.
 Assistant-neutral on purpose. Logs ids and closed values only, never message text.
+
+Connect, then message (owner 2026-11-03): a draft saved with ``draft_kind="after_connect"`` carries a Job360
+``after_connect`` row (text = its message id). For a person not connected, the send is a request WITHOUT a note;
+the session releases the claim with reason ``invited`` and Job360 saves ``linkedin_state`` pending. Once they are
+connected the same person is queued again, and the message goes without a new click when the user approved the
+request or ``outreach_send`` is auto (``check_outreach`` auto_after_accept, fact-checked). A pending person is never
+handed out; nobody gets a second request.
 """
 from __future__ import annotations
 
@@ -41,8 +48,10 @@ QUEUE_MAX = 50
 ROWS_PER_CONTACT_MAX = 200
 LINKEDIN_MIN_GAP_SECONDS = 120
 EASY_APPLY_DAILY_MAX = settings.EASY_APPLY_DAILY_MAX  # 0 = no Job360 cap; LinkedIn's own limit decides
+AFTER_CONNECT, INVITED = "after_connect", "invited"
 RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
+    INVITED,  # a request without a note went out: Job360 saves linkedin_state pending
     "done",  # only a hunt or people task (pc_duties): finished; every other reason closes one as failed
 )
 # A released person is not handed out again for RELEASE_BACKOFF_MINUTES, whatever the reason (2026-11-03: a run
@@ -52,6 +61,7 @@ RELEASE_REASONS = (
 # release: LinkedIn's invitation limit is weekly).
 RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
+TAKE_SLOT = "own_browser:take"  # the newest take by any own-browser session (last_pc_activity_at)
 # An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
 # returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
@@ -109,7 +119,81 @@ def _when(raw: Any) -> Optional[datetime]:
 # ── Pure: the state of one person's send, from their outreach rows (oldest first) ──────────────────────
 
 
-def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]]:
+def is_after_connect(rows: list[dict[str, Any]], message_id: int) -> bool:
+    """Message ``message_id`` was saved as ``after_connect`` (the request goes without a note)."""
+    return any(r["entry"] == AFTER_CONNECT and str(r.get("text")) == str(message_id) for r in rows)
+
+
+def invite_facts(rows: list[dict[str, Any]]) -> Optional[dict[str, Optional[int]]]:
+    """``None`` when no request went to this person; else ``{"approved_message": id}``: the message the user's
+    newest decision before the request said yes to (``None``: it went under ``outreach_send`` auto). The user's
+    Send binds to that exact text: a draft saved later is a new text the user has not seen."""
+    sent = [int(r["id"]) for r in rows if r["entry"] == RELEASED and r.get("text") == INVITED]
+    if not sent:
+        return None
+    before = [r for r in rows if r["entry"] in (APPROVED, DECLINED) and int(r["id"]) < sent[-1]]
+    yes = before[-1] if before and before[-1]["entry"] == APPROVED else None
+    return {"approved_message": int(yes["text"]) if yes is not None and str(yes["text"]).isdigit() else None}
+
+
+def follow_up_facts(rows: list[dict[str, Any]], mid: int, now: datetime) -> dict[str, Any]:
+    """``{follow_up, linkedin_sent_to_person, days_since_sent}`` for draft ``mid`` (the gate's facts): a follow-up is
+    a draft saved after the newest LinkedIn message went."""
+    sent = [r for r in rows if r["entry"] == "sent" and r["channel"] == "linkedin"]
+    last = _when(sent[-1]["recorded_at"]) if sent else None
+    return {
+        "follow_up": bool(sent) and mid > int(sent[-1]["id"]), "linkedin_sent_to_person": len(sent),
+        "days_since_sent": (now - last).days if last is not None else 0,
+    }
+
+
+def follow_up_due(rows: list[dict[str, Any]], now: datetime) -> bool:
+    """Pure: the assistant drafts this person's one follow-up now: ONE LinkedIn message went
+    ``LINKEDIN_FOLLOW_UP_DAYS`` or more ago, no reply, and nothing was drafted after it."""
+    sent = [r for r in rows if r["entry"] == "sent" and r["channel"] == "linkedin"]
+    if len(sent) != 1 or any(r["entry"] == "reply" for r in rows):
+        return False
+    if any(r["entry"] in ("message", "sent") and int(r["id"]) > int(sent[0]["id"]) for r in rows):
+        return False
+    at = _when(sent[0]["recorded_at"])
+    return at is not None and (now - at).days >= settings.LINKEDIN_FOLLOW_UP_DAYS
+
+
+def follow_up_held(rows: list[dict[str, Any]], mid: int, now: datetime) -> bool:
+    """A follow-up draft the queue must not hand out: a second one, one not yet due, or one after a reply."""
+    got = follow_up_facts(rows, mid, now)
+    if not got["linkedin_sent_to_person"]:
+        return False
+    return (got["linkedin_sent_to_person"] >= 2 or got["days_since_sent"] < settings.LINKEDIN_FOLLOW_UP_DAYS
+            or any(r["entry"] == "reply" for r in rows))
+
+
+def _carried(rows: list[dict[str, Any]], mid: int, auto: bool) -> bool:
+    """A yes without a click on this draft: ``outreach_send`` auto (after a request, or an ``after_connect`` draft
+    before one), or the user's Send on the request for THIS exact message."""
+    if invite_facts(rows) is not None:
+        return auto or owner_yes_carries(rows, mid)
+    return auto and is_after_connect(rows, mid)
+
+
+def owner_yes_carries(rows: list[dict[str, Any]], mid: int) -> bool:
+    """The user's Send on the request covers draft ``mid``: it is that exact message, or the one follow-up drafted
+    after that exact message went (a LinkedIn ``sent`` mark whose newest earlier draft is it)."""
+    invited = invite_facts(rows)
+    approved = invited["approved_message"] if invited is not None else None
+    if approved is None:
+        return False
+    if mid == approved:
+        return True
+    for i, row in enumerate(rows):
+        if row["entry"] == "sent" and row["channel"] == "linkedin":
+            drafts = [int(r["id"]) for r in rows[:i] if r["entry"] == "message"]
+            if drafts and drafts[-1] == approved:
+                return mid > int(row["id"])
+    return False
+
+
+def derive(rows: list[dict[str, Any]], now: datetime, auto: bool = False) -> Optional[dict[str, Any]]:
     """The contact's own-browser send state, or ``None`` when there is nothing to send: the newest message is
     not a LinkedIn one, or a ``sent`` / ``reply`` mark is newer than it. Else ``{state, message_id,
     approved_at, claim_until, claimed_by}`` with state waiting_on_you (no click yet) | queued | in_progress
@@ -124,13 +208,17 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
     base: dict[str, Any] = {
         "message_id": mid, "approved_at": None, "claim_until": None, "claimed_by": "", "claimed_actor": "",
     }
-    if not decisions:
+    if not decisions and not _carried(rows, mid, auto):
         return {**base, "state": "waiting_on_you"}
-    last = decisions[-1]
-    if last["entry"] == DECLINED:
+    if decisions and decisions[-1]["entry"] == DECLINED:
         return {**base, "state": "declined"}
-    base["approved_at"] = last["recorded_at"]
-    after = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and int(r["id"]) > int(last["id"])]
+    if decisions:
+        anchor = int(decisions[-1]["id"])
+        base["approved_at"] = decisions[-1]["recorded_at"]
+    else:  # no click: only claims after the draft (and after the request) count
+        base["auto"] = True
+        anchor = max([mid] + [int(r["id"]) for r in rows if r["entry"] == RELEASED and r.get("text") == INVITED])
+    after = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and int(r["id"]) > anchor]
     if after and after[-1]["entry"] == CLAIMED:
         until = (_when(after[-1]["recorded_at"]) or now) + timedelta(minutes=CLAIM_MINUTES)
         if until > now:
@@ -142,11 +230,12 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
 
 
 def backoff_until(rows: list[dict[str, Any]], now: datetime) -> Optional[datetime]:
-    """When a released person may be taken again: the newest claim / release after the newest approval is a
-    release, under :data:`RELEASE_BACKOFF_MINUTES` ago. Else ``None``."""
-    approvals = [int(r["id"]) for r in rows if r["entry"] == APPROVED]
-    after = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and approvals and int(r["id"]) > approvals[-1]]
-    if not after or after[-1]["entry"] != RELEASED:
+    """When a released person may be taken again: the newest claim / release after the newest approval (or the
+    newest draft: a person with no click, 2026-11-03) is a release, under :data:`RELEASE_BACKOFF_MINUTES` ago. Else
+    ``None``. A release with reason ``invited`` is a request that went, not a give-up: no wait."""
+    anchors = [int(r["id"]) for r in rows if r["entry"] in (APPROVED, "message")]
+    after = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and anchors and int(r["id"]) > max(anchors)]
+    if not after or after[-1]["entry"] != RELEASED or after[-1].get("text") == INVITED:
         return None
     until = (_when(after[-1]["recorded_at"]) or now) + timedelta(minutes=RELEASE_BACKOFF_MINUTES)
     return until if until > now else None
@@ -288,11 +377,85 @@ async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]
     }
 
 
+# ── Has the user's PC worked the queue? (owner #12, 2026-11-05) ──────────────────────────────────────────
+
+
+async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetime]:
+    """The newest sign that a session in the user's own browser worked the queue, from rows only the own-browser
+    door writes: any take, whatever it answered (:data:`TAKE_SLOT`), a person claimed or released
+    (``contact_outreach``), a hunt / people / pending task claimed or closed (the ``pc_duties`` slots; never the
+    user's own Run now slot). A scheduled cloud run never reaches these. ``None``: never."""
+    from src.services.applications import pc_duties  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT MAX(recorded_at) FROM contact_outreach WHERE user_id = ? AND entry IN (?, ?)",
+        (user_id, CLAIMED, RELEASED),
+    )
+    got = await cur.fetchone()
+    found = [_when(got[0]) if got is not None and got[0] else None]
+    slots = [TAKE_SLOT] + [p + k for p in (pc_duties.SLOT, pc_duties.CLAIM) for k in pc_duties.KINDS]
+    cur = await db._db.execute(
+        "SELECT MAX(done_at) FROM assistant_duty_runs WHERE user_id = ? "  # noqa: S608 - placeholders only
+        f"AND duty IN ({','.join('?' for _ in slots)})",
+        (user_id, *slots),
+    )
+    got = await cur.fetchone()
+    found.append(_when(got[0]) if got is not None and got[0] else None)
+    seen = [at for at in found if at is not None]
+    return max(seen) if seen else None
+
+
+async def stamp_take(db: JobDatabase, user_id: str, now: datetime) -> None:
+    """One slot per user: the newest own-browser take, whatever it answered (owner #12: a PC session that is up
+    but finds nothing to do, or is told to wait, is alive). Not a scheduled duty: ``whats_due`` never reads it."""
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat()),
+    )
+    await db._db.commit()
+
+
+def idle_fact(last: Optional[datetime], waiting: int, now: datetime) -> Optional[dict[str, Any]]:
+    """Pure: ``{since, waiting, hours, text}`` when tasks wait for the user's own browser and nothing worked it
+    for MORE than ``PC_IDLE_WARN_HOURS`` (exactly the limit is not yet idle), or ever; else ``None``."""
+    hours = settings.PC_IDLE_WARN_HOURS
+    if waiting <= 0 or (last is not None and now - last <= timedelta(hours=hours)):
+        return None
+    tasks = f"{waiting} task{'' if waiting == 1 else 's'} {'waits' if waiting == 1 else 'wait'}"
+    when = f"since {last.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC" if last is not None else "yet"
+    return {
+        "since": last.isoformat() if last is not None else None, "waiting": waiting, "hours": hours,
+        "text": f"Nothing has worked your PC queue {when}; {tasks}. Start your PC browser session.",
+    }
+
+
+async def pc_idle(db: JobDatabase, user_id: str, now: datetime, waiting: int) -> Optional[dict[str, Any]]:
+    """:func:`idle_fact` for this user; ``None`` while paused (nothing is meant to run) or nothing waits."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    if waiting <= 0:
+        return None
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if rules.is_paused(cfg.paused_until, now):
+        return None
+    return idle_fact(await last_pc_activity_at(db, user_id), waiting, now)
+
+
 # ── The queue ───────────────────────────────────────────────────────────────────────────────────────────
 
 
 async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[dict[str, Any]]:
     from src.services.applications import contacts  # noqa: PLC0415
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    auto = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings).outreach_send == (
+        rules.OUTREACH_SEND_AUTO
+    )
 
     # Only a person whose NEWEST decision is an approval of their NEWEST message, a LinkedIn one with no
     # sent / reply mark since: finished approvals must never fill the LIMIT.
@@ -309,18 +472,39 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         "ORDER BY a.id ASC LIMIT ?",
         (user_id, APPROVED, APPROVED, DECLINED, QUEUE_MAX),
     )
+    ids = [int(dict(r)["contact_id"]) for r in await cur.fetchall()]
+    # No click on the newest draft (owner 2026-11-03): a request that was approved and went out, or any
+    # unsent, unskipped, undeclined LinkedIn draft while outreach_send is auto; derive and the states decide.
+    cur = await db._db.execute(
+        "SELECT m.contact_id FROM contact_outreach m WHERE m.user_id = ? AND m.entry = 'message' "
+        "AND m.channel = 'linkedin' AND m.id = (SELECT MAX(x.id) FROM contact_outreach x "
+        "                                       WHERE x.contact_id = m.contact_id AND x.entry = 'message') "
+        "AND NOT EXISTS (SELECT 1 FROM contact_outreach s WHERE s.contact_id = m.contact_id AND s.id > m.id "
+        "                AND s.entry IN ('sent', 'reply', 'skipped', ?, ?)) "
+        "AND (? OR EXISTS (SELECT 1 FROM contact_outreach i WHERE i.contact_id = m.contact_id AND i.entry = ? "
+        "                  AND i.text = ?)) ORDER BY m.id ASC LIMIT ?",
+        (user_id, APPROVED, DECLINED, auto, RELEASED, INVITED, QUEUE_MAX),
+    )
+    ids += [c for c in (int(dict(r)["contact_id"]) for r in await cur.fetchall()) if c not in ids]
     out: list[dict[str, Any]] = []
-    for r in await cur.fetchall():
-        contact_id = int(dict(r)["contact_id"])
+    for contact_id in ids:
         base = await contacts.get_owned_contact(db, user_id, contact_id)
         if base is None:
             continue
-        task = derive(await _rows(db, contact_id), now)
+        rows = await _rows(db, contact_id)
+        task = derive(rows, now, auto)
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
+        if follow_up_held(rows, task["message_id"], now):
+            continue  # one follow-up, only once due, never after a reply
         if await contacts.over_limit_notes(db, user_id, [contact_id]):
             continue  # a stored draft over the note limit is the assistant's rewrite, never a send
         view = await contacts._full_contact_view(db, user_id, base)
+        state, invited = view.get("linkedin_state"), invite_facts(rows) is not None
+        if state == "pending" or (state == "not_connected" and invited):
+            continue  # pending: never messaged; nobody gets a second request
+        if task.get("auto") and not (state == "connected" if invited else state == "not_connected"):
+            continue  # without a click: only the message after a request, or a request without a note
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
         route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
         out.append({
@@ -328,8 +512,9 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
             "what": f"Send your LinkedIn message to {view['name']}", "url": view.get("linkedin_url") or "",
             "contact_id": contact_id, "application_id": view.get("application_id"), "name": view["name"],
             "message_id": task["message_id"], "draft_text": text, "draft_chars": len(text),
-            "linkedin_state": view.get("linkedin_state"), "why_own_browser": WHY_WORDS["default"],
-            "owner_yes": True,
+            "linkedin_state": state, "why_own_browser": WHY_WORDS["default"],
+            "owner_yes": not task.get("auto"),
+            "no_note": state != "connected" and is_after_connect(rows, task["message_id"]),
             "claim": ({"session": task["claimed_by"], "until": task["claim_until"], "actor": task["claimed_actor"]}
                       if task["state"] == "in_progress" else None),
             "browser": routing.label(route),
@@ -448,7 +633,8 @@ async def queue_tasks(
 # A LinkedIn send, or a claim Job360 wrote itself that was neither released nor followed by a sent mark: a
 # send that was never recorded still counts toward the pace.
 _SENDS = (
-    "o.user_id = ? AND ((o.entry = 'sent' AND o.channel = 'linkedin') OR (o.entry = 'send_claimed' AND NOT EXISTS "
+    "o.user_id = ? AND ((o.entry = 'sent' AND o.channel = 'linkedin') OR (o.entry = 'send_released' AND "
+    "o.text = 'invited') OR (o.entry = 'send_claimed' AND NOT EXISTS "
     "(SELECT 1 FROM contact_outreach x WHERE x.contact_id = o.contact_id AND x.id > o.id "
     "AND x.entry IN ('send_released', 'sent'))))"
 )
@@ -490,6 +676,16 @@ async def weekly_limit_until(db: JobDatabase, user_id: str, now: datetime) -> Op
     at = _when(got[0]) if got is not None and got[0] else None
     until = at + timedelta(days=7) if at is not None else None
     return until if until is not None and until > now else None
+
+
+async def invites_since(db: JobDatabase, user_id: str, since: datetime) -> int:
+    """Requests without a note the user's sessions reported (release reason ``invited``) since ``since``."""
+    cur = await db._db.execute(
+        "SELECT COUNT(*) FROM contact_outreach WHERE user_id = ? AND entry = ? AND text = ? AND recorded_at >= ?",
+        (user_id, RELEASED, INVITED, since.astimezone(timezone.utc).isoformat()),
+    )
+    got = await cur.fetchone()
+    return int(got[0]) if got is not None else 0
 
 
 _SUBMIT_MARKS = "e.event_type IN ('applied', 'submit_attempted')"
@@ -542,18 +738,21 @@ def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:
 
 
 def _next_step(task: dict[str, Any]) -> str:
-    if task["kind"] in ("linkedin_search", "profile_read"):
-        what = ("bring_job each new job you judge fits" if task["kind"] == "linkedin_search"
-                else "add_contact each person you find")
+    if task["kind"] in ("linkedin_search", "profile_read", "linkedin_check_pending"):
+        what = {"linkedin_search": "bring_job each new job you judge fits",
+                "linkedin_check_pending": "update_contact linkedin_state for each of its contact_ids",
+                }.get(task["kind"], "add_contact each person you find")
         return (f'get_recipe("own_browser") {task["kind"]}: signed in, in the user\'s own browser only, {what}; '
                 f'then own_browser_queue release (session, task_id="{task["task_id"]}", reason="done"), or reason '
                 "captcha | login_wall | other when you could not finish it")
     if task["kind"] == "application":
         return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
+    done = ("Connect, Send without a note, then own_browser_queue release reason invited" if task.get("no_note")
+            else "send the draft, then record_event outreach_sent")
     return (
         f'call check_outreach(contact_id={task["contact_id"]}, message_id={task["message_id"]}, '
-        "session=<your session>); only if it says send, open the person's LinkedIn page and send the draft, "
-        "then record_event outreach_sent. Otherwise own_browser_queue release with reason other"
+        f"session=<your session>); only if it says send, open the person's LinkedIn page, {done}. "
+        "Otherwise own_browser_queue release with reason other"
     )
 
 
@@ -575,6 +774,7 @@ async def take(
     if not label:
         raise SpineError(422, "session is needed: a short label that tells your sessions apart")
     actor = actor_for(user)
+    await stamp_take(db, user.id, now)
     win = await window(db, user.id, now)
     if win["why"] == "paused":
         _log("own_browser_take", user.id, "paused")
@@ -607,7 +807,9 @@ async def take(
         if contact_id is not None:
             free = [t for t in free if t["contact_id"] == contact_id]
             tasks = [t for t in contacts_ if t["contact_id"] == contact_id]
-        if free and await weekly_limit_until(db, user.id, now) is not None:
+        if free and (await weekly_limit_until(db, user.id, now) is not None or await invites_since(
+            db, user.id, now - timedelta(days=7)
+        ) >= settings.LINKEDIN_INVITES_PER_WEEK_MAX):
             # LinkedIn's invitation limit is live: an invite would fail again, so only people already
             # connected (a plain message, no invite) are handed out until it is over.
             free = [t for t in free if t.get("linkedin_state") == "connected"]
@@ -625,7 +827,7 @@ async def take(
                         (candidate["contact_id"], user.id),
                     )
                     rows = await _rows(db, candidate["contact_id"])
-                    state = derive(rows, now)
+                    state = derive(rows, now, not candidate["owner_yes"])
                     if state is None or state["state"] != "queued":
                         continue
                     later = backoff_until(rows, now)
@@ -712,12 +914,29 @@ async def release(
         )
         if await cur.fetchone() is None:
             raise SpineError(404, "contact not found")
-        state = derive(await _rows(db, contact_id), now)
+        state = derive(await _rows(db, contact_id), now, auto=True)  # a claim on a draft with no click too
         if state is None or state["state"] != "in_progress" or not label or (
             state["claimed_by"], state["claimed_actor"]
         ) != (label, actor_for(user)):
             _log("own_browser_release", user.id, "refused", contact_id=contact_id)
             raise SpineError(409, "you do not hold a live claim on this person")
+        if reason == INVITED:
+            from src.services.applications import contacts  # noqa: PLC0415 - contacts imports this module
+
+            rows = await _rows(db, contact_id)
+            if invite_facts(rows) is not None or await contacts._linkedin_state_now(db, user.id, contact_id) == (
+                "connected"
+            ):
+                raise SpineError(409, "a request already went to this person, or they are connected: never a second")
+            if not is_after_connect(rows, state["message_id"]):
+                raise SpineError(
+                    409, "invited is for an after_connect draft only; a note is recorded with outreach_sent"
+                )
+            await db._db.execute(
+                "INSERT INTO contact_edits (user_id, contact_id, field, value, recorded_at, recorded_by) "
+                "VALUES (?, ?, 'linkedin_state', 'pending', ?, ?)",
+                (user.id, contact_id, now.astimezone(timezone.utc).isoformat(), actor_for(user)),
+            )
         await _insert(db, user, contact_id, RELEASED, reason, now)
     _log("own_browser_release", user.id, "ok", contact_id=contact_id, reason=reason)
     return {"released": True, "task_id": task_id, "reason": reason}

@@ -40,6 +40,8 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   account (the user's own browser, a sign-in saved in Job360's browser, or an Indeed / LinkedIn style site)
   always answers ``ask`` (``ask_always_site``). Turning it off is riskier, so only the user's own web click
   applies it (owner 2026-11-03); every other submit rule still holds.
+* ``cv_auto_approve`` — ``True`` | ``False`` (default): in auto mode, a CV whose stored ``cv_reviewed`` is
+  ``strong`` for its exact id + sha clears ``cv_not_seen`` (owner 2026-11-05). Turning it on is riskier.
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -120,6 +122,7 @@ HUNT_EVERY_PATH = f"{HEAD}.hunt_every_hours"
 HUNT_EVERY_MAX = 168  # one week
 PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
 PC_ON_HOURS_PATH = f"{HEAD}.pc_on_hours"
+CV_AUTO_APPROVE_PATH = f"{HEAD}.cv_auto_approve"
 PC_ON_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SIGNED_IN_ASK_PATH = f"{HEAD}.ask_before_signed_in_submit"
 # Owner 2026-11-02 - the user's own outreach send limits: field -> (default, operator backstop setting name).
@@ -135,7 +138,7 @@ SETTING_PATHS: tuple[str, ...] = (
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
-    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, SIGNED_IN_ASK_PATH,
+    PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -392,7 +395,7 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, SIGNED_IN_ASK_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH):
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
@@ -440,6 +443,7 @@ class EffectiveSettings:
     email_sends_per_day: int = settings.EMAIL_SENDS_PER_DAY_DEFAULT
     # Owner 2026-11-03 - rule 7 (ask_always_site, a signed-in submit) applies only while this is on.
     ask_before_signed_in_submit: bool = True
+    cv_auto_approve: bool = False
 
 
 def outreach_backstop(name: str) -> int:
@@ -545,6 +549,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         pc_on_hours=_pc_on_hours(s.pc_on_hours),
         **{name: outreach_limit(name, getattr(s, name)) for name in OUTREACH_LIMITS},
         ask_before_signed_in_submit=s.ask_before_signed_in_submit is not False,
+        cv_auto_approve=s.cv_auto_approve is True,
     )
 
 
@@ -599,7 +604,7 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == INBOX_MODE_PATH:
         return raw or ""
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
         return bool(raw)
     if path == OUTREACH_SEND_PATH:
         return _outreach_send(raw)
@@ -713,6 +718,7 @@ def classify_change(
     per_day / email_...
     ask_before_signed_   on -> off (a submit through the user's own     off -> on (applies at once)
     in_submit            signed-in account may go on to auto-submit)
+    cv_auto_approve      off -> on (a reviewed CV goes unseen)          on -> off (applies at once)
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -762,7 +768,7 @@ def classify_change(
         return "safer"
     if path == INBOX_MODE_PATH:
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
         return "riskier" if (bool(after) and not bool(before)) else "safer"
     if path == OUTREACH_SEND_PATH:
         return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
@@ -820,6 +826,13 @@ def line_side(fit_score: Optional[int], line: Optional[int]) -> LineSide:
     if fit_score is None or line is None:
         return "unknown"
     return "above" if fit_score >= line else "below"
+
+
+def drops_below_line(fit_score: Optional[int], cfg: EffectiveSettings) -> bool:
+    """True when the user's own rule drops this job (owner 2026-10-19, S4 2026-11-05): ``below_line`` is
+    ``skip`` and the assistant's fit is under the user's line. No line or no score = False (rule #29). Job360
+    only compares the user's line with the assistant's number; it never scores a job (rule 4). Pure."""
+    return cfg.below_line == LINE_SKIP and line_side(fit_score, cfg.apply_min_score) == "below"
 
 
 def effective_inbox_values() -> frozenset[str]:  # pragma: no cover — documentation helper
@@ -989,6 +1002,9 @@ class SubmitFacts:
     # this click or holds this application's page, it is the user's own browser; Job360's browser counts only
     # with a saved sign-in for the form's site. An own_browser / manual label since the last kit read only adds it.
     signed_in_account: bool = False
+    # Owner 2026-11-05: the newest stored ``cv_reviewed`` of the latest CV (exact id + sha): strong | weak | none.
+    # With ``cv_auto_approve`` on, in auto mode, ``strong`` clears ``cv_not_seen`` and nothing else.
+    cv_review: str = "none"
     # Autonomy slice 3 (watch-only): ``evidence.for_application`` when ``kit.gate_facts(shadow=True)``.
     # ``may_submit`` NEVER reads it; it is not compared or hashed, so it cannot change a verdict.
     autonomy_shadow: Optional[dict[str, Any]] = field(default=None, compare=False)
@@ -1252,6 +1268,31 @@ def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
     return "brand" if any(label in brands for label in host.split(".")) else "company"
 
 
+_CV_NOT_SEEN = "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes."
+_CV_NEEDS_REVIEW = (
+    "The user has not seen the latest CV, and no review of it is stored. Have this CV reviewed now: "
+    'get_recipe("doctor"), row CV review. A FRESH reviewer that did not write the CV quotes the profile for '
+    "every CV line; then record_event cv_reviewed {artifact_id, sha256, confidence, lines, reviewer}. A strong "
+    "review clears this. If it is weak, rewrite only the weak lines once, save, and review the new version; "
+    "weak a second time waits for the user."
+)
+_CV_REVIEW_WEAK = (
+    "The newest review of this CV is weak. If it is this application's first weak review, rewrite only the "
+    "weak lines once from the profile's own words, save, and have the new version reviewed (doctor row CV "
+    "review); a rewrite is allowed only once. Otherwise it waits for the user: show the CV and get the user's "
+    "OK, then fill the form and ask yes (after two weak CV versions on an application, a new review is weak: "
+    "retry_limit)."
+)
+
+
+def _cv_not_seen_detail(cfg: EffectiveSettings, application: SubmitFacts) -> str:
+    """The ``cv_not_seen`` sentence. With ``cv_auto_approve`` on it names the review that would clear the ask
+    (none stored yet) or says a weak one waits for the user; with it off the sentence is the old one."""
+    if not cfg.cv_auto_approve:
+        return _CV_NOT_SEEN
+    return _CV_REVIEW_WEAK if application.cv_review == "weak" else _CV_NEEDS_REVIEW
+
+
 def may_submit(
     cfg: EffectiveSettings,
     application: SubmitFacts,
@@ -1344,7 +1385,8 @@ def may_submit(
        assistant's submit that Job360's browser neither clicks nor holds the page of, Job360's browser with a saved
        sign-in for the form's site, or a fill / sweep labelled ``own_browser`` / ``manual``) while
        ``ask_before_signed_in_submit`` is on -> ask ``ask_always_site`` (confirm mode already asks at rule 8)
-    9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
+    9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``; with ``cv_auto_approve`` on, a
+       stored ``strong`` review of that exact CV (``cv_review``) clears it (``cv_unsupported_claims`` stays)
     10. first application since auto-submit was turned on -> ask ``practice_run``
     10b. auto mode and the form host has no earlier applied application -> ask ``new_site_first_time``
     11. otherwise -> submit ``auto_when_sure``
@@ -1392,7 +1434,7 @@ def may_submit(
     pace = _pace_stop(cfg, counts, now)
     if pace is not None:
         return pace
-    if cfg.below_line == LINE_SKIP and line_side(application.fit_score, cfg.apply_min_score) == "below":
+    if drops_below_line(application.fit_score, cfg):
         return SubmitDecision(
             "stop", "below_score_line",
             f"This job is below your score line ({cfg.apply_min_score}) and you chose to drop those. "
@@ -1830,11 +1872,9 @@ def _first_ask(
     # signed-in account asks while the user's switch is on (owner 2026-11-03).
     if cfg.ask_before_signed_in_submit and not email and application.signed_in_account:
         return _signed_in_ask()
-    if not (application.cv_seen or application.approved):
-        return SubmitDecision(
-            "ask", "cv_not_seen",
-            "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes.",
-        )
+    reviewed = cfg.cv_auto_approve and application.cv_review == "strong"
+    if not (application.cv_seen or application.approved or reviewed):
+        return SubmitDecision("ask", "cv_not_seen", _cv_not_seen_detail(cfg, application))
     if counts.applied_since_auto_on == 0:
         return SubmitDecision(
             "ask", "practice_run",
@@ -1896,6 +1936,14 @@ class OutreachFacts:
     ``claimed_by_caller`` - the caller holds a live claim on this person (``own_browser_queue`` take, in
     either browser); ``last_linkedin_sent_at`` / ``linkedin_sent_today`` - the pace ``own_browser.take`` enforces (other
     people's sends and unreleased claims).
+
+    Connect, then message (owner 2026-11-03): ``after_connect`` - this draft is the message for after they
+    accept, so the request goes WITHOUT a note; ``invited`` - a no-note request already went to this person;
+    ``invite_owner_approved`` - the user pressed Send for that request; ``invites_this_week`` - the user's requests
+    in the last 7 days; ``unsupported_claims`` - the text names a number, years or a name the profile lacks;
+    ``sensitive`` - the text names visa, salary, age, health and the like. ``follow_up`` - this draft was saved
+    after a LinkedIn message went; ``linkedin_sent_to_person`` - LinkedIn messages already sent to them;
+    ``days_since_sent`` - whole days since the newest one.
     """
 
     message_found: bool
@@ -1920,6 +1968,15 @@ class OutreachFacts:
     invite_limit_until: Optional[datetime] = None
     last_linkedin_sent_at: Optional[datetime] = None
     linkedin_sent_today: int = 0
+    after_connect: bool = False
+    invited: bool = False
+    invite_owner_approved: bool = False
+    invites_this_week: int = 0
+    unsupported_claims: bool = False
+    sensitive: bool = False
+    follow_up: bool = False
+    linkedin_sent_to_person: int = 0
+    days_since_sent: int = 0
 
 
 @dataclass(frozen=True)
@@ -1944,12 +2001,17 @@ OUTREACH_REASONS: tuple[str, ...] = (
 )
 # The same for a LinkedIn version (:func:`_may_send_linkedin`). All stop except the last two: ask, then send.
 LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
-    "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "replied",
+    "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "follow_up_used",
+    "follow_up_not_due", "replied",
     "application_closed", "note_too_long", "linkedin_state_unknown", "linkedin_pending", "message_too_long",
-    "invite_limit_reached", "company_cap_reached", "network_hourly_cap_reached", "linkedin_daily_cap_reached",
-    "too_soon", "claimed_by_other_session",
-    "needs_owner_click", "needs_claim", "owner_clicked",
+    "invite_limit_reached", "weekly_invite_cap_reached", "already_invited", "company_cap_reached",
+    "network_hourly_cap_reached", "linkedin_daily_cap_reached", "too_soon", "claimed_by_other_session",
+    "unsupported_claims", "sensitive_topic", "needs_owner_click", "needs_claim", "owner_clicked",
 )
+# The other LinkedIn yes (owner 2026-11-03), in place of owner_clicked: connect_no_note (the user's Send on an
+# after_connect draft: the request goes without a note), auto_connect (the same request with outreach_send auto),
+# auto_after_accept (they accepted a request the user, or outreach_send auto, approved: the message goes).
+LINKEDIN_AUTO_SEND_REASONS: tuple[str, ...] = ("connect_no_note", "auto_connect", "auto_after_accept", "auto_follow_up")
 # Said on every LinkedIn answer: its counts are every channel's, not LinkedIn's own day limit.
 _LINKEDIN_COUNTS_NOTE = " (sent_today and daily_max count every channel; LinkedIn's is linkedin_sends_per_day.)"
 
@@ -1979,9 +2041,10 @@ def _kind_cap(cfg: EffectiveSettings, facts: OutreachFacts, counts: OutreachCoun
 def _may_send_linkedin(
     cfg: EffectiveSettings, facts: OutreachFacts, counts: OutreachCounts, now: datetime
 ) -> OutreachDecision:
-    """The LinkedIn half of :func:`may_send_outreach`. ``outreach_send`` never applies here: the only yes is
-    the user's click on that person's card for this exact version (``facts.owner_approved``) AND a live claim
-    the caller holds on that person (``facts.claimed_by_caller``), in either browser."""
+    """The LinkedIn half of :func:`may_send_outreach`. A yes is the user's click on that person's card for this
+    exact version (``facts.owner_approved``) or, owner 2026-11-03, a request they approved that was accepted
+    (``auto_after_accept``, fact- and topic-checked) or a no-note request under ``outreach_send`` auto
+    (``auto_connect``); always AND a live claim the caller holds on that person (``facts.claimed_by_caller``)."""
     got = _linkedin_verdict(cfg, facts, counts, now)
     return OutreachDecision(got.decision, got.reason, got.detail + _LINKEDIN_COUNTS_NOTE)
 
@@ -1996,8 +2059,14 @@ def _linkedin_verdict(
 
     if not facts.has_linkedin_url:
         return stop("no_linkedin_url", "This person has no LinkedIn link saved. Do not send.")
-    if facts.already_sent:
+    # One follow-up (owner 2026-11-03): a draft saved after the only LinkedIn message, once it is due.
+    if facts.already_sent and not facts.follow_up:
         return stop("already_sent", "A message to this person is already recorded as sent.")
+    if facts.already_sent and facts.linkedin_sent_to_person >= 2:
+        return stop("follow_up_used", "This person already got their one follow-up. Never send another.")
+    days = settings.LINKEDIN_FOLLOW_UP_DAYS
+    if facts.already_sent and facts.days_since_sent < days:
+        return stop("follow_up_not_due", f"A follow-up goes {days} days after the message with no reply. Not yet.")
     if facts.replied:
         return stop("replied", "This person already replied. Do not send; tell the user instead.")
     if facts.application_closed:
@@ -2008,7 +2077,7 @@ def _linkedin_verdict(
     note_max = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if facts.premium else settings.LINKEDIN_NOTE_MAX_CHARS
     # Fail closed (2026-11-02): a draft to anyone not known to be connected is a connection note, so an unsaved
     # state is judged by the note limit too, before it is asked for.
-    if state in ("not_connected", "unknown") and facts.text_chars > note_max:
+    if state in ("not_connected", "unknown") and facts.text_chars > note_max and not facts.after_connect:
         return stop(
             "note_too_long",
             f"A connection note is at most {note_max} characters; this draft is {facts.text_chars}. Shorten it "
@@ -2033,6 +2102,14 @@ def _linkedin_verdict(
             "invite_limit_reached",
             "LinkedIn's weekly invitation limit was reached. Send no connection note until it resets.",
         )
+    week_max = settings.LINKEDIN_INVITES_PER_WEEK_MAX
+    if state == "not_connected" and facts.invites_this_week >= week_max:
+        return stop(
+            "weekly_invite_cap_reached",
+            f"{week_max} connection requests went out in the last 7 days. Send no request until fewer have.",
+        )
+    if state == "not_connected" and facts.invited:
+        return stop("already_invited", "A connection request already went to this person. Never send a second.")
     capped = _kind_cap(cfg, facts, counts)
     if capped is not None:
         return capped
@@ -2055,7 +2132,24 @@ def _linkedin_verdict(
             "claimed_by_other_session",
             "Another session holds this person right now. Do not send; leave it to that session.",
         )
-    if not facts.owner_approved:
+    # Owner 2026-11-03: the message after an approved request, and a no-note request under outreach_send auto,
+    # go without a new Send; the first only when the text passes the fact and sensitive-topic checks.
+    auto = cfg.outreach_send == OUTREACH_SEND_AUTO
+    after_accept = state == "connected" and facts.invited and (facts.invite_owner_approved or auto)
+    auto_invite = state == "not_connected" and facts.after_connect and auto and not facts.owner_approved
+    if after_accept and facts.unsupported_claims:
+        return OutreachDecision(
+            "ask", "unsupported_claims",
+            "The draft names a number, years or a name the profile does not contain. It is not sent on its own: "
+            "fix it with true facts only, or it waits for the user's Send.",
+        )
+    if after_accept and facts.sensitive:
+        return OutreachDecision(
+            "ask", "sensitive_topic",
+            "The draft mentions visa, sponsorship, salary, age or health. It is not sent on its own: it waits "
+            "for the user's Send.",
+        )
+    if not (facts.owner_approved or after_accept or auto_invite):
         return OutreachDecision(
             "ask", "needs_owner_click",
             "The user has not pressed Send on this person's card for this draft. Do not send; it waits on Needs you.",
@@ -2065,6 +2159,22 @@ def _linkedin_verdict(
             "needs_claim",
             "Take this person first: own_browser_queue take, then check_outreach with your session.",
         )
+    no_note = ("Connect, then Send without a note (never paste the draft as a note); then own_browser_queue "
+               "release reason invited. The draft is sent once they accept.")
+    if after_accept and facts.already_sent:
+        return OutreachDecision(
+            "send", "auto_follow_up",
+            f"No reply in {days} days: paste this one follow-up on LinkedIn exactly, send, then record outreach_sent.",
+        )
+    if after_accept:
+        return OutreachDecision(
+            "send", "auto_after_accept",
+            "They accepted the request: paste the draft on LinkedIn exactly, send, then record outreach_sent.",
+        )
+    if auto_invite:
+        return OutreachDecision("send", "auto_connect", "outreach_send is auto: " + no_note)
+    if state == "not_connected" and facts.after_connect:
+        return OutreachDecision("send", "connect_no_note", "The user pressed Send: " + no_note)
     return OutreachDecision(
         "send", "owner_clicked",
         "The user pressed Send for this draft: paste it on LinkedIn exactly, send, then record outreach_sent.",
@@ -2097,9 +2207,10 @@ def may_send_outreach(
     LinkedIn (:func:`_may_send_linkedin`, after not_latest_draft): stop no_linkedin_url, already_sent, replied,
     application_closed, linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long,
     invite_limit_reached, company_cap_reached, network_hourly_cap_reached, linkedin_daily_cap_reached,
-    too_soon, claimed_by_other_session, needs_claim (the click is there but the caller holds no live claim);
-    ask needs_owner_click; SEND owner_clicked.
-    ``outreach_send`` never reaches it.
+    too_soon, claimed_by_other_session, needs_claim (the click is there but the caller holds no live claim),
+    already_invited, weekly_invite_cap_reached, follow_up_used, follow_up_not_due; ask unsupported_claims,
+    sensitive_topic, needs_owner_click; SEND
+    owner_clicked or one of ``LINKEDIN_AUTO_SEND_REASONS``.
     """
     if is_paused(cfg.paused_until, now):
         return OutreachDecision("stop", "paused", "Your assistant is paused. Do not send anything.")
@@ -2184,6 +2295,12 @@ def _applied_after(conn: Any, user_id: str, since: Optional[str]) -> int:
         (user_id, since or "", settings.SIMULATION_EVENT_TYPE, user_id),
     ).fetchone()
     return int(cnt[0]) if cnt else 0
+
+
+GRANT_COVERS_JOBS_MEANING = (
+    "Jobs a grant confirmed now would cover: all queued, still-considering jobs before your score-line "
+    "rule drops any. Not the apply queue; that is list_applications(queued=true) queue_summary.queued."
+)
 
 
 def _grant_began(conn: Any, user_id: str) -> tuple[Optional[str], Optional[int]]:
@@ -2476,18 +2593,21 @@ async def load_outreach_counts(
     db: JobDatabase, user_id: str, now: datetime, company: Optional[str] = None
 ) -> OutreachCounts:
     """Count what :func:`may_send_outreach` needs: this user's recorded ``sent``
-    marks today (the user's own day, same boundary as :func:`load_submit_counts`), split into job outreach
+    marks today, and LinkedIn requests (a ``send_released`` ``invited`` row, 2026-11-03), on the user's own day
+    (same boundary as :func:`load_submit_counts`), split into job outreach
     (the contact has an application) and network (it has none), email sends today, network sends in the last
     hour and, when ``company`` is given, JOB-outreach ``sent`` marks to that company key (contacts.company_key,
     rule #1; network contacts never count) within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
     sent_today = await count_on_user_today(
         db, user_id, now,
-        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND recorded_at >= ?",
+        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND (entry = 'sent' "
+        "OR (entry = 'send_released' AND text = 'invited')) AND recorded_at >= ?",
         (user_id,),
     )
     sends = (
         "SELECT co.recorded_at FROM contact_outreach co JOIN application_contacts ac ON ac.id = co.contact_id "
-        "WHERE co.user_id = ? AND co.entry = 'sent' AND "
+        "WHERE co.user_id = ? AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited')) "
+        "AND "
     )
     job_today = await count_on_user_today(
         db, user_id, now, sends + "ac.application_id IS NOT NULL AND co.recorded_at >= ?", (user_id,)
@@ -2503,7 +2623,9 @@ async def load_outreach_counts(
     )
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM contact_outreach co JOIN application_contacts ac ON ac.id = co.contact_id "
-        "WHERE co.user_id = ? AND co.entry = 'sent' AND ac.application_id IS NULL AND co.recorded_at >= ?",
+        "WHERE co.user_id = ? AND (co.entry = 'sent' OR (co.entry = 'send_released' AND co.text = 'invited')) "
+        "AND ac.application_id IS NULL "
+        "AND co.recorded_at >= ?",
         (user_id, (now - timedelta(hours=1)).isoformat()),
     )
     got = await cur.fetchone()
@@ -2654,6 +2776,12 @@ def build_settings_view(
         "auto_grant_scope": grant_scope or {
             "queue": {"count": 0, "hosts": [], "no_host": 0}, "granted": None, "unscoped": False,
         },
+        # The honest name for auto_grant_scope.queue.count (see models.GrantCoversJobsOut): the old key stays
+        # because the web settings view and its pinned tests read it.
+        "grant_covers_jobs": {
+            "count": int(((grant_scope or {}).get("queue") or {}).get("count") or 0),
+            "meaning": GRANT_COVERS_JOBS_MEANING,
+        },
         "paused_until": {
             "value": raw.paused_until,
             "effective": effective_path_value(PAUSED_UNTIL_PATH, raw.paused_until, when),
@@ -2664,6 +2792,7 @@ def build_settings_view(
         "hunt_every_hours": {"value": raw.hunt_every_hours, "effective": eff.hunt_every_hours},
         "people_hunt": {"value": raw.people_hunt, "effective": eff.people_hunt},
         "pc_on_hours": {"value": raw.pc_on_hours, "effective": eff.pc_on_hours},
+        "cv_auto_approve": {"value": raw.cv_auto_approve, "effective": eff.cv_auto_approve},
         **{name: {"value": getattr(raw, name), "effective": getattr(eff, name)} for name in OUTREACH_LIMITS},
         "ask_before_signed_in_submit": {
             "value": raw.ask_before_signed_in_submit, "effective": eff.ask_before_signed_in_submit,

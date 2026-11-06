@@ -470,6 +470,10 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "submit_cleared", "submit_cleared_used",
         # Owner decision 2026-11-02 - Verify approves one answer for one job (server-written).
         "answer_verified",
+        # Owner decision 2026-11-05 - a fresh reviewer's verdict on one CV, verified by Job360.
+        "cv_reviewed",
+        # Owner 2026-11-06 - a CV sent on a strong review, and the user's Wrong fact on it (server-written).
+        "cv_sent_on_review", "cv_wrong_fact",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

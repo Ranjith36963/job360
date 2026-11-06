@@ -270,6 +270,16 @@ class GrantScopeOut(BaseModel):
     unscoped: bool = False
 
 
+class GrantCoversJobsOut(BaseModel):
+    """What ``auto_grant_scope.queue.count`` really counts, named honestly. ``count`` = the jobs an
+    "Auto for a while" grant confirmed NOW would cover: every job queued and still ``considering``,
+    counted BEFORE the user's own score-line rule drops any (and at most 500). It is NOT the apply
+    queue: that is ``list_applications(queued=true)``'s ``queue_summary.queued``."""
+
+    count: int = 0
+    meaning: str = ""
+
+
 class AssistantSettingsView(BaseModel):
     """The assistant settings, as the web and MCP ``get_profile`` read them.
 
@@ -290,6 +300,7 @@ class AssistantSettingsView(BaseModel):
     auto_grant_count: SettingFieldOut
     auto_grant_until: SettingFieldOut
     auto_grant_scope: GrantScopeOut = GrantScopeOut()
+    grant_covers_jobs: GrantCoversJobsOut = GrantCoversJobsOut()
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut
@@ -304,6 +315,7 @@ class AssistantSettingsView(BaseModel):
     email_sends_per_day: SettingFieldOut
     # Owner 2026-11-03 - a submit through the user's own signed-in account always asks first (default true).
     ask_before_signed_in_submit: SettingFieldOut
+    cv_auto_approve: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""
@@ -702,6 +714,8 @@ class FormCheckOut(BaseModel):
     the form and decides."""
 
     application_id: int
+    # Memory first (owner 2026-11-05): the user's own rules, read before every value below; absent = none.
+    user_instructions: Optional[dict[str, Any]] = None
     questions_count: int
     answered: list[FormAnsweredOut]
     missing: list[FormMissingOut]

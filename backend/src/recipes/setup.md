@@ -11,7 +11,8 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
 
 0. **Resume.** `get_profile(view="full")`: read `instructions`, `fields`, `settings.setup_progress`.
    Say "N of 6 done", **resume** at `setup_progress.next`; a field already set:
-   show it, ask "still right?". All six done: jump to step 3.
+   show it, ask "still right?" (a change: the user makes it in Job360; you fill only empty fields).
+   All six done: jump to step 3.
 1. **Six rounds, in this order.** 3-5 questions a round; visa, salary and equality
    one at a time; follow up until clear. An empty preference means "don't care" - never fill one in for them.
    (1) **targets** - ask EVERY one: a. roles -> `preferences.target_job_titles`

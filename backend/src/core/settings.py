@@ -413,6 +413,14 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # only. SERVER-WRITTEN (record_event refuses it): {question, answer, edited, form_filled_event_id, key?}.
     # Read by ready.job_approvals; never part of the profile, so no other job reuses it.
     "answer_verified",
+    # Owner decision 2026-11-05: a fresh reviewer's verdict on one CV version {artifact_id, sha256, confidence,
+    # lines, reviewer}. Job360 VERIFIES it and stores the checked confidence, codes and counts, never the text
+    # (services/applications/cv_review.py).
+    "cv_reviewed",
+    # Owner 2026-11-06 (Sent on its own): a CV that went out on a strong review instead of the user's look
+    # {artifact_id, sha256, review_event_id}, and the user's Wrong fact on one {sent_event_id}. SERVER-WRITTEN
+    # (record_event refuses both; services/applications/cv_review.py, sent_alone.py).
+    "cv_sent_on_review", "cv_wrong_fact",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
@@ -468,6 +476,11 @@ INBOX_ITEMS_MAX_OPEN_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_OPEN_PER_USER", "
 INBOX_ITEMS_MAX_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_PER_USER", "2000"))  # open + resolved + dismissed
 INBOX_ITEMS_RECENT_DAYS = int(os.getenv("INBOX_ITEMS_RECENT_DAYS", "30"))  # resolved items whats_new still lists
 INBOX_ITEMS_WHATS_NEW_MAX = int(os.getenv("INBOX_ITEMS_WHATS_NEW_MAX", "100"))
+# Owner report #9/#14 (2026-11-05): whats_new shows this many inbox items per page (people first;
+# `inbox_page.next_offset` pages on) and leaves job-alert digests older than INBOX_ALERTS_STALE_DAYS
+# out unless `inbox_stale_alerts` is true. Nothing is deleted.
+INBOX_ITEMS_WHATS_NEW_PAGE = int(os.getenv("INBOX_ITEMS_WHATS_NEW_PAGE", "10"))
+INBOX_ALERTS_STALE_DAYS = int(os.getenv("INBOX_ALERTS_STALE_DAYS", "7"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)
@@ -704,7 +717,9 @@ LINKEDIN_NOTE_MAX_CHARS = 200
 LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 # What an outreach draft is (save_artifact `draft_kind`, optional, not stored): a connection_note must
 # fit the note limit above and an inmail body LinkedIn's hard limit, else the save is refused.
-OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email")
+# after_connect (owner 2026-11-03): the message sent once they accept; the connection request itself goes
+# WITHOUT a note (a free account gets about one note a month). Fits a message to a connection (400).
+OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email", "after_connect")
 LINKEDIN_INMAIL_BODY_MAX_CHARS = 1900
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 # Outreach pack #13 — the caller's own variant label on a message version / a template
@@ -736,6 +751,22 @@ EMAIL_SENDS_PER_DAY_DEFAULT = 40
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "10"))
 OUTREACH_NETWORK_MAX_PER_HOUR = int(os.getenv("OUTREACH_NETWORK_MAX_PER_HOUR", "20"))
 OUTREACH_LINKEDIN_MAX_PER_DAY = int(os.getenv("OUTREACH_LINKEDIN_MAX_PER_DAY", "100"))
+# Connection requests in any 7 days (LinkedIn allows a free account about 100 a week): a backstop no setting passes.
+LINKEDIN_INVITES_PER_WEEK_MAX = int(os.getenv("LINKEDIN_INVITES_PER_WEEK_MAX", "100"))
+# A LinkedIn message that names one of these never goes without the user's Send (check_outreach: sensitive_topic).
+OUTREACH_SENSITIVE_WORDS = (
+    "visa", "visas", "sponsor", "sponsorship", "sponsored", "salary", "salaries", "compensation", "pay", "age",
+    "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness", "immigration",
+    "citizenship", "nationality", "relocation", "permit", "sponsoring", "sponsors", "maternity", "religion",
+    "work permit", "right to work", "skilled worker",
+)
+# One LinkedIn follow-up per person, this many days after the message with no reply (owner 2026-11-03).
+LINKEDIN_FOLLOW_UP_DAYS = int(os.getenv("LINKEDIN_FOLLOW_UP_DAYS", "6"))
+# How often the user's own browser checks My Network for accepted invites while anyone is pending.
+LINKEDIN_PENDING_CHECK_HOURS = int(os.getenv("LINKEDIN_PENDING_CHECK_HOURS", "4"))
+# Owner #12 (2026-11-05): own-browser tasks wait and no PC session took, released or claimed one for longer than
+# this many hours (or ever): the queue, Needs you and whats_due say `pc_idle` (own_browser.pc_idle).
+PC_IDLE_WARN_HOURS = int(os.getenv("PC_IDLE_WARN_HOURS", "3"))
 OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))
 # Every channel together, per user per day (the email gate checks it first).
 OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "300"))
@@ -852,7 +883,7 @@ STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # a view a later slice appends (before "all") joins it automatically.
 STATS_VIEWS = (
     "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
-    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "referrals", "all",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "referrals", "today", "all",
 )
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
@@ -985,6 +1016,9 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
     # Owner 2026-11-03 - a submit through the user's own signed-in account always asks (true = default). Off: riskier.
     "assistant_settings.ask_before_signed_in_submit",
+    # Owner 2026-11-05 - a CV a separate reviewer verified as strong goes without the owner's look (true / false).
+    # On is riskier.
+    "assistant_settings.cv_auto_approve",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -1113,6 +1147,9 @@ SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "1008
 # A yes WITHOUT a fingerprint (said in chat, or stored before slice 8) is bound to the CV and the clock only,
 # so it must not outlive a changed fill or letter for days: it lapses after this many minutes (2 hours).
 SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES", "120"))
+# Owner 2026-11-02: a started submit (``submit_attempted``) with no confirmation email, no applied and no
+# "It was not sent" asks the user "did it go out?" on Needs you only after this many days (auto_applied.py).
+CONFIRM_SENT_WAIT_DAYS = int(os.getenv("CONFIRM_SENT_WAIT_DAYS", "3"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
@@ -1133,6 +1170,11 @@ KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
 KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
+# Autonomy bar (owner plan 2026-11-02): "Approve CV" / "Send" leave Needs you for one kind (essay, fixed, cv)
+# only once at least this many watch-only cases agree with the owner's own decisions at least this often,
+# with no wrong fact. Read by services/applications/agreement.py (GET /api/autonomy/agreement).
+AUTONOMY_BAR_MIN_CASES = 20
+AUTONOMY_BAR_MIN_AGREE_PCT = 95
 
 # ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
 PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))

@@ -490,6 +490,39 @@
         "title": "AgentEditOut",
         "type": "object"
       },
+      "AgreementOut": {
+        "properties": {
+          "bar": {
+            "$ref": "#/components/schemas/Bar"
+          },
+          "examples": {
+            "items": {
+              "$ref": "#/components/schemas/Disagreement"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "kinds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KindAgreement"
+            },
+            "title": "Kinds",
+            "type": "object"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kinds",
+          "pending",
+          "examples",
+          "bar"
+        ],
+        "title": "AgreementOut",
+        "type": "object"
+      },
       "AlignmentOut": {
         "description": "``GET \u2026/alignment`` (2026-09-20) \u2014 the fit picture: the agent's stored\nverdict beside which of the candidate's own skills occur in the stored\nad text. Two stored facts drawn together; nothing computed about the\ncandidate (VISION rule 4).",
         "properties": {
@@ -2790,11 +2823,21 @@
           "company_cap_days": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "cv_auto_approve": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "daily_cap": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "email_sends_per_day": {
             "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "grant_covers_jobs": {
+            "$ref": "#/components/schemas/GrantCoversJobsOut",
+            "default": {
+              "count": 0,
+              "meaning": ""
+            }
           },
           "hunt_every_hours": {
             "$ref": "#/components/schemas/SettingFieldOut"
@@ -2906,6 +2949,7 @@
           "linkedin_sends_per_day",
           "email_sends_per_day",
           "ask_before_signed_in_submit",
+          "cv_auto_approve",
           "paused",
           "practice_run"
         ],
@@ -3012,6 +3056,24 @@
           "mode"
         ],
         "title": "AutofillRequest",
+        "type": "object"
+      },
+      "Bar": {
+        "properties": {
+          "min_agree_pct": {
+            "title": "Min Agree Pct",
+            "type": "integer"
+          },
+          "min_cases": {
+            "title": "Min Cases",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_cases",
+          "min_agree_pct"
+        ],
+        "title": "Bar",
         "type": "object"
       },
       "BatchContactRowOut": {
@@ -3483,6 +3545,13 @@
             ],
             "title": "Country"
           },
+          "differs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Differs",
+            "type": "array"
+          },
           "duplicate_of": {
             "anyOf": [
               {
@@ -3539,6 +3608,34 @@
               }
             ],
             "title": "Listed People"
+          },
+          "matched_on": {
+            "anyOf": [
+              {
+                "enum": [
+                  "same_title_and_company",
+                  "same_url",
+                  "same_company_and_role",
+                  "repost"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched On"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
           },
           "queue_note": {
             "anyOf": [
@@ -4688,6 +4785,11 @@
             "title": "Id",
             "type": "integer"
           },
+          "linkedin_follow_up_due": {
+            "default": false,
+            "title": "Linkedin Follow Up Due",
+            "type": "boolean"
+          },
           "linkedin_state": {
             "anyOf": [
               {
@@ -5214,6 +5316,131 @@
         "title": "CountryPickOut",
         "type": "object"
       },
+      "CoveredAnswerOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "saved_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "web",
+                  "assistant"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved By"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "verdict": {
+            "enum": [
+              "same",
+              "different",
+              "memory_empty"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "index",
+          "question",
+          "answer",
+          "verdict"
+        ],
+        "title": "CoveredAnswerOut",
+        "type": "object"
+      },
+      "CoveredAnswersOut": {
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/CoveredAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "profile_edit_id": {
+            "title": "Profile Edit Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answers",
+          "profile_edit_id"
+        ],
+        "title": "CoveredAnswersOut",
+        "type": "object"
+      },
+      "CoveredDeleteOut": {
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "string"
+          },
+          "profile_edit_id": {
+            "title": "Profile Edit Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted",
+          "profile_edit_id"
+        ],
+        "title": "CoveredDeleteOut",
+        "type": "object"
+      },
       "CreateAskOut": {
         "properties": {
           "already_existed": {
@@ -5608,6 +5835,39 @@
           "cv"
         ],
         "title": "CvToApproveRow",
+        "type": "object"
+      },
+      "Disagreement": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "question_key": {
+            "title": "Question Key",
+            "type": "string"
+          },
+          "would_clear": {
+            "title": "Would Clear",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "application_id",
+          "kind",
+          "question_key",
+          "would_clear",
+          "owner"
+        ],
+        "title": "Disagreement",
         "type": "object"
       },
       "DismissIn": {
@@ -7365,6 +7625,18 @@
               }
             ],
             "title": "Stop For User"
+          },
+          "user_instructions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Instructions"
           }
         },
         "required": [
@@ -7571,6 +7843,23 @@
           "merged"
         ],
         "title": "GitHubResponse",
+        "type": "object"
+      },
+      "GrantCoversJobsOut": {
+        "description": "What ``auto_grant_scope.queue.count`` really counts, named honestly. ``count`` = the jobs an\n\"Auto for a while\" grant confirmed NOW would cover: every job queued and still ``considering``,\ncounted BEFORE the user's own score-line rule drops any (and at most 500). It is NOT the apply\nqueue: that is ``list_applications(queued=true)``'s ``queue_summary.queued``.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "meaning": {
+            "default": "",
+            "title": "Meaning",
+            "type": "string"
+          }
+        },
+        "title": "GrantCoversJobsOut",
         "type": "object"
       },
       "GrantListResponse": {
@@ -7908,6 +8197,11 @@
             "title": "Sender",
             "type": "string"
           },
+          "sender_kind": {
+            "default": "person",
+            "title": "Sender Kind",
+            "type": "string"
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
@@ -7943,6 +8237,65 @@
           "event_id"
         ],
         "title": "InboxItemOut",
+        "type": "object"
+      },
+      "InboxPageOut": {
+        "description": "whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/InboxSenderGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "more": {
+            "title": "More",
+            "type": "boolean"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "people": {
+            "title": "People",
+            "type": "integer"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "integer"
+          },
+          "stale_alerts_hidden": {
+            "title": "Stale Alerts Hidden",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "offset",
+          "shown",
+          "more",
+          "next_offset",
+          "people",
+          "stale_alerts_hidden",
+          "groups"
+        ],
+        "title": "InboxPageOut",
         "type": "object"
       },
       "InboxSearchOut": {
@@ -7993,6 +8346,29 @@
           "skip_message_ids"
         ],
         "title": "InboxSearchOut",
+        "type": "object"
+      },
+      "InboxSenderGroupOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          },
+          "sender_kind": {
+            "title": "Sender Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sender",
+          "sender_kind",
+          "count"
+        ],
+        "title": "InboxSenderGroupOut",
         "type": "object"
       },
       "InterviewAgenda": {
@@ -8289,6 +8665,45 @@
           "resume"
         ],
         "title": "JsonResumeResponse",
+        "type": "object"
+      },
+      "KindAgreement": {
+        "properties": {
+          "agree": {
+            "title": "Agree",
+            "type": "integer"
+          },
+          "agreement_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Pct"
+          },
+          "bar_met": {
+            "title": "Bar Met",
+            "type": "boolean"
+          },
+          "cases": {
+            "title": "Cases",
+            "type": "integer"
+          },
+          "wrong_facts": {
+            "title": "Wrong Facts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cases",
+          "agree",
+          "wrong_facts",
+          "bar_met"
+        ],
+        "title": "KindAgreement",
         "type": "object"
       },
       "KitAccountSiteOut": {
@@ -9948,6 +10363,24 @@
         "title": "MeResponse",
         "type": "object"
       },
+      "MemoryRowOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "key"
+        ],
+        "title": "MemoryRowOut",
+        "type": "object"
+      },
       "MissingToolRequest": {
         "additionalProperties": false,
         "description": "``POST /api/missing-tools`` body. ``name`` must match\n``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters.",
@@ -10196,6 +10629,16 @@
             },
             "title": "Other Ask Ids",
             "type": "array"
+          },
+          "pc_idle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PcIdleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10578,6 +11021,20 @@
             ],
             "title": "Contact Id"
           },
+          "contact_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Ids"
+          },
           "draft_chars": {
             "default": 0,
             "title": "Draft Chars",
@@ -10593,7 +11050,8 @@
               "linkedin_outreach",
               "application",
               "linkedin_search",
-              "profile_read"
+              "profile_read",
+              "linkedin_check_pending"
             ],
             "title": "Kind",
             "type": "string"
@@ -10635,6 +11093,11 @@
             "default": "",
             "title": "Name",
             "type": "string"
+          },
+          "no_note": {
+            "default": false,
+            "title": "No Note",
+            "type": "boolean"
           },
           "owner_yes": {
             "default": false,
@@ -10834,6 +11297,41 @@
         "title": "PayAdvertisedOut",
         "type": "object"
       },
+      "PcIdleOut": {
+        "description": "Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever).",
+        "properties": {
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "waiting",
+          "hours",
+          "text"
+        ],
+        "title": "PcIdleOut",
+        "type": "object"
+      },
       "PersonFullOut": {
         "description": "``list_people(contact_id=...)``'s shape \u2014 the one row's own full\nrecord (never merged with another row that happens to share an email).",
         "properties": {
@@ -10929,6 +11427,11 @@
             },
             "title": "Jobs",
             "type": "array"
+          },
+          "linkedin_follow_up_due": {
+            "default": false,
+            "title": "Linkedin Follow Up Due",
+            "type": "boolean"
           },
           "linkedin_state": {
             "anyOf": [
@@ -12097,6 +12600,16 @@
               }
             ],
             "title": "Opens At"
+          },
+          "pc_idle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PcIdleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "pc_on_hours": {
             "anyOf": [
@@ -14055,7 +14568,8 @@
               "already_pending",
               "profile_not_found",
               "other",
-              "done"
+              "done",
+              "invited"
             ],
             "title": "Reason",
             "type": "string"
@@ -14182,6 +14696,44 @@
       },
       "RememberOut": {
         "properties": {
+          "conflicts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflicts"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
+          "not_saved": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Not Saved",
+            "type": "object"
+          },
           "saved": {
             "items": {
               "type": "string"
@@ -14224,6 +14776,20 @@
       },
       "RememberRowsOut": {
         "properties": {
+          "conflicts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflicts"
+          },
           "country": {
             "anyOf": [
               {
@@ -14234,6 +14800,27 @@
               }
             ],
             "title": "Country"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/MemoryRowOut"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
+          "not_saved": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Not Saved",
+            "type": "object"
           },
           "saved": {
             "items": {
@@ -15054,8 +15641,15 @@
             "type": "string"
           },
           "application_id": {
-            "title": "Application Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
           },
           "id": {
             "title": "Id",
@@ -15097,7 +15691,6 @@
         },
         "required": [
           "id",
-          "application_id",
           "job_company",
           "job_title",
           "kind",
@@ -15110,6 +15703,14 @@
       },
       "SentOnItsOwnOut": {
         "properties": {
+          "cv_sample": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Cv Sample",
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SentItem"
@@ -17301,6 +17902,16 @@
               }
             ]
           },
+          "today": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsTodayOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "velocity": {
             "anyOf": [
               {
@@ -17747,6 +18358,87 @@
           "scored"
         ],
         "title": "StatsSkillGapsOut",
+        "type": "object"
+      },
+      "StatsTodayCountsOut": {
+        "description": "Today's counts in the user's own timezone; each is a number, never a list.",
+        "properties": {
+          "applied": {
+            "default": 0,
+            "title": "Applied",
+            "type": "integer"
+          },
+          "asks_answered": {
+            "default": 0,
+            "title": "Asks Answered",
+            "type": "integer"
+          },
+          "asks_opened": {
+            "default": 0,
+            "title": "Asks Opened",
+            "type": "integer"
+          },
+          "brought": {
+            "default": 0,
+            "title": "Brought",
+            "type": "integer"
+          },
+          "fit_judged": {
+            "default": 0,
+            "title": "Fit Judged",
+            "type": "integer"
+          },
+          "outreach_replies": {
+            "default": 0,
+            "title": "Outreach Replies",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "default": 0,
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "replies": {
+            "default": 0,
+            "title": "Replies",
+            "type": "integer"
+          }
+        },
+        "title": "StatsTodayCountsOut",
+        "type": "object"
+      },
+      "StatsTodayOut": {
+        "description": "``stats(view=\"today\")``: where the user stands. ``queue_summary`` is the block\n``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/StatsTodayCountsOut"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "queue_summary": {
+            "additionalProperties": true,
+            "title": "Queue Summary",
+            "type": "object"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "waiting_on_you": {
+            "title": "Waiting On You",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "timezone",
+          "counts",
+          "queue_summary",
+          "waiting_on_you"
+        ],
+        "title": "StatsTodayOut",
         "type": "object"
       },
       "StatsVelocityOut": {
@@ -19026,6 +19718,16 @@
             "title": "Nothing Due",
             "type": "boolean"
           },
+          "pc_idle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PcIdleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run_now": {
             "items": {
               "enum": [
@@ -19223,6 +19925,16 @@
             },
             "title": "Inbox Items",
             "type": "array"
+          },
+          "inbox_page": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxPageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "interviews": {
             "$ref": "#/components/schemas/InterviewAgenda",
@@ -21081,6 +21793,81 @@
           }
         },
         "summary": "Auto Email Check",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/auto/undo": {
+      "post": {
+        "description": "\"Undo\" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting\nclosed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;\nalso records \"It was not sent\"). A ``note`` correcting that status event. 409 when the newest status event\nis neither. Session only; no MCP twin.",
+        "operationId": "undo_auto_api_applications__application_id__auto_undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo Auto",
         "tags": [
           "applications"
         ]
@@ -23596,7 +24383,7 @@
     },
     "/api/asks/{ask_id}/answers/remember": {
       "post": {
-        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific\none for THIS job's country only, the rest global), so the next job asking them needs no owner.\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
+        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job\nasking them needs no owner. A row in Memory's families goes into Memory for the job's country\n(``memory``), or is a ``conflict`` with what Memory says, or is not saved (``not_saved`` says why).\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
         "operationId": "remember_ask_row_answers_api_asks__ask_id__answers_remember_post",
         "parameters": [
           {
@@ -25854,6 +26641,72 @@
         "summary": "Verify Email Request",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/autonomy/agreement": {
+      "get": {
+        "description": "Per kind (essay, fixed, cv): cases, agree, agreement_pct, wrong_facts, bar_met; ``pending`` = cases with\nno owner decision yet; ``examples`` = up to 5 recent disagreements (ids and codes only).",
+        "operationId": "autonomy_agreement_api_autonomy_agreement_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Autonomy Agreement",
+        "tags": [
+          "autonomy"
         ]
       }
     },
@@ -30102,6 +30955,147 @@
         ]
       }
     },
+    "/api/profile/memory-covered-answers": {
+      "get": {
+        "description": "Memory first (plan S3): the user's old saved answers that Memory's families now cover, each with what\nMemory says and a verdict, for the Needs-you card. Session only: the owner cleans these up himself.",
+        "operationId": "list_memory_covered_answers_api_profile_memory_covered_answers_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoveredAnswersOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Memory Covered Answers",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/memory-covered-answers/{answer_id}": {
+      "delete": {
+        "description": "The owner's own Delete on one listed answer: one ``remove_at`` through ``PATCH /profile`` (history and\n``profile_edit_id`` as usual), guarded by the version read with it (409 if anything wrote since). 404 when\nno listed answer has that id (already gone, or changed). Session only, no MCP twin.",
+        "operationId": "delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "answer_id",
+            "required": true,
+            "schema": {
+              "title": "Answer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoveredDeleteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Memory Covered Answer",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
     "/api/profile/preferences": {
       "post": {
         "description": "Set the caller's preferences form \u2014 one input, one dedicated route.\n\nLoads the BASE profile (``with_overlay=False``) and, after saving,\nappends a ``set_by=web`` history row for every preference the human\nactually changed \u2014 see :func:`_record_web_preference_changes`.",
@@ -30246,7 +31240,7 @@
     },
     "/api/profile/questionnaire/remember": {
       "post": {
-        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer,\nbound to ``country`` when it is country-specific (right to work, salary...), else global.\nSession only (no MCP twin): nothing is remembered without that press.",
+        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer;\none in Memory's families (right to work, salary...) goes into Memory for ``country`` (``memory``), or is a\n``conflict`` with Memory, or is not saved (``not_saved``: set it on that page).\nSession only (no MCP twin): nothing is remembered without that press.",
         "operationId": "remember_questionnaire_api_profile_questionnaire_remember_post",
         "parameters": [
           {
@@ -31446,7 +32440,7 @@
     },
     "/api/sent-on-its-own": {
       "get": {
-        "description": "Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its\nsources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything.",
+        "description": "Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its\nsources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,\nand CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check.",
         "operationId": "sent_on_its_own_route_api_sent_on_its_own_get",
         "parameters": [
           {
@@ -31512,7 +32506,7 @@
     },
     "/api/sent-on-its-own/{item_id}/wrong-fact": {
       "post": {
-        "description": "The user's \"Wrong fact\" press on one item. Autonomy step 4 records it and stops reusing that fact;\nuntil it ships there is no item to press on, so every id is 404.",
+        "description": "The user's \"Wrong fact\" press on one item. On a ``cv`` item (owner 2026-11-06) it is recorded (the item\nreads ``reported_wrong``) and automatic CV sending (``cv_auto_approve``) is turned off at once. Other kinds\narrive with autonomy step 4 (409). Another user's item, or none, is 404.",
         "operationId": "report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post",
         "parameters": [
           {
@@ -32472,6 +33466,27 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inbox_offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Inbox Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inbox_stale_alerts",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Inbox Stale Alerts",
+              "type": "boolean"
             }
           },
           {

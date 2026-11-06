@@ -36,10 +36,10 @@ steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `ma
    `provider_verified`, `pattern_guess` or `user_gave` (never guess it).
    If the user knows them, pass `relationship` and `shared` (the get_profile
    path of the job or school you share) - never guess.
-4. **Write the message yourself** - short, specific to this job, true facts
+4. **Write the message yourself** with get_recipe("write") (the shape and length of each kind), true facts
    only. The Doctor checks it first (`get_recipe("doctor")`), then save it with `save_artifact` (`contact_id`, kind `outreach`, channel
-   `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft. A LinkedIn
-   draft over 200 characters (300 with Premium) is refused unless `linkedin_state` is saved as `connected`.
+   `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft. LinkedIn, not
+   connected: `draft_kind="after_connect"` (request without a note; this message, at most 400, goes once they accept).
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `settings.outreach_send` from `get_profile` (its `effective`; the Gmail
    mode `preferences.daily_check` never allows sending).

@@ -939,8 +939,9 @@ async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: 
 
 async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: Any) -> dict[str, Any]:
     """Ask once (owner 2026-11-02): the user pressed "remember" on rows of a job's ask. Each answer is saved
-    as their approved answer under the row's key (``ask_once.remember``: a country-specific one is bound to
-    THIS job's country, any other is global); a per-job row is skipped.
+    as their approved answer under the row's key (``ask_once.remember``); a per-job row is skipped, and a
+    row in Memory's families goes into Memory for THIS job's country (``memory``), unless Memory already says
+    otherwise (``conflicts``) or the answer has no clean shape (``not_saved``, naming the page).
     The ask itself is not changed. Session only (the route). 404 / 422 write nothing."""
     from src.services.profile import ask_once  # noqa: PLC0415
 
@@ -957,13 +958,18 @@ async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answe
     country = (str((app_row or {}).get("job_country") or "").strip().upper()) or None
     rows = [{"topic": k, "question": str(by_key[k]["question"]),
              "answer": _item_text(f"answers.{k}", v, ASK_ITEM_ANSWER_MAX_CHARS)} for k, v in answers.items()]
-    saved = ask_once.remember(user_id, rows, country)
+    done = ask_once.remember(user_id, rows, country)
+    saved, memory = done["saved"], done.get("memory") or {}
     get_audit_logger().info(
         "ask_rows_remembered",
         extra={"event": "ask_rows_remembered", "user_id": user_id, "ask_id": safe_log_value(ask_id),
-               "count": len(saved)},
+               "count": len(saved), "memory": len(memory), "conflicts": len(done.get("conflicts") or {})},
     )
-    return {"saved": saved, "skipped": [k for k in answers if k not in saved], "country": country}
+    if memory:  # Answer once: the other open asks the new Memory fact answers close (as Job360)
+        from src.services.applications import memory_closes  # noqa: PLC0415 - it imports this module
+
+        await memory_closes.close_covered(db, user_id)
+    return {**done, "skipped": [k for k in answers if k not in saved and k not in memory], "country": country}
 
 
 def carried_answers(
@@ -1044,13 +1050,15 @@ def _user_only_to_clear(ask: dict[str, Any]) -> bool:
 
 
 async def withdraw_ask(
-    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False
+    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False,
+    detail: str = "",
 ) -> dict[str, Any]:
     """Take an OPEN ask back (no longer needed). 404 if not the caller's,
     409 if it is already answered or already withdrawn. ``own_only`` (an
     assistant calling, owner 2026-10-23): only an ask ``withdrawn_by`` itself
     asked (403 otherwise), and only with a ``reason`` (422 when empty). The
-    reason is stored on the ask and shown on the application's timeline."""
+    reason is stored on the ask and shown on the application's timeline; ``detail`` (Job360's own closes,
+    ``memory_closes``) replaces the "Why: <reason>" words the timeline shows."""
     clean_reason = clean_withdraw_reason(reason)
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
@@ -1078,6 +1086,8 @@ async def withdraw_ask(
             raise SpineError(409, "ask is no longer open")
         if existing["application_id"] is not None:
             shown = f"Why: {clean_reason}. Asked: {existing['question']}" if clean_reason else existing["question"]
+            if detail:
+                shown = f"{detail} Asked: {existing['question']}"
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="ask_withdrawn",
                 detail=shown[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],

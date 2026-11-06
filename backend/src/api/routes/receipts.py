@@ -22,8 +22,8 @@ from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.routes.applications import ProofOut, ReceiptAnswerOut, ReceiptFileOut
 from src.repositories.database import JobDatabase
+from src.services.applications import cv_review, submit_clearance
 from src.services.applications import kit as kit_service
-from src.services.applications import submit_clearance
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -215,6 +215,8 @@ async def create_receipt(
         open_at_submit = await kit_service.enforce_applied_rule(db, user.id, int(application["id"]), actor_for(user))
         # Autonomy A8: an assistant needs one unused check_submit `submit` (the user's click: none).
         clearance = await submit_clearance.required(db, user.id, int(application["id"]), actor_for(user))
+        # Owner 2026-11-06: a CV cleared by a strong review alone is recorded once the receipt is written.
+        cv_on_review = await cv_review.review_clearance(db, user.id, int(application["id"]), actor_for(user))
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     # The ad "as it read" is the caller's own snapshot, never the catalog row.
@@ -264,6 +266,7 @@ async def create_receipt(
                     receipt_id=receipt["id"], sent_at=receipt["sent_at"], note=body.note.strip(),
                     recorded_by=actor_for(user), open_at_submit=open_at_submit,
                 )
+                await cv_review.record_sent(db, user.id, int(application["id"]), cv_on_review, actor_for(user))
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 

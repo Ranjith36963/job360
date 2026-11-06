@@ -28,6 +28,30 @@ const CV_TEXT: Record<number, string> = {
   2: "CV VERSION TWO — the one actually sent",
 };
 
+/** A tiny real one-page PDF holding `text` (offsets computed, so pdf.js reads it without repair). */
+function pdfOf(text: string): Buffer {
+  const safe = text.replace(/[^\x20-\x7e]/g, "-").replace(/[()\\]/g, "");
+  const stream = `BT /F1 18 Tf 72 720 Td (${safe}) Tj ET`;
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  out += offsets.map((n) => `${String(n).padStart(10, "0")} 00000 n \n`).join("");
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
 function applicationSummary(status: string) {
   return {
     id: APPLICATION_ID,
@@ -216,6 +240,10 @@ async function mockBackend(page: Page) {
         }),
       })
     );
+    // The CV opens as its PDF (owner, 2026-11-03): the same bytes the download gives.
+    await page.route(`**/api/applications/${APPLICATION_ID}/artifacts/${id}/download**`, (route) =>
+      route.fulfill({ status: 200, contentType: "application/pdf", body: pdfOf(text) })
+    );
   }
 }
 
@@ -270,10 +298,15 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await expect(v1).toBeVisible();
     await expect(v2).toBeVisible();
 
-    await v1.click();
-    await expect(page.getByText(CV_TEXT[1])).toBeVisible({ timeout: 10_000 });
-    await v2.click();
-    await expect(page.getByText(CV_TEXT[2])).toBeVisible({ timeout: 10_000 });
+    // Each version opens as its real PDF, drawn in the page (owner, 2026-11-03).
+    for (const [n, version] of [[1, v1], [2, v2]] as const) {
+      await version.click();
+      const preview = page.getByTestId("cv-preview");
+      await expect(preview).toContainText(`CV version ${n}`, { timeout: 10_000 });
+      await expect(page.getByTestId("cv-preview-page-1")).toBeVisible({ timeout: 20_000 });
+      await page.keyboard.press("Escape");
+      await expect(preview).toHaveCount(0);
+    }
 
     // Six-question reorder (2026-09-20) — Fit answers "how do I compare",
     // the first question a seeker has, so it now leads; History (the old

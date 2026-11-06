@@ -194,6 +194,7 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/own-browser/run-now"): "the user's own click: opens the queue for an hour",
     ("POST", "/api/contacts/{contact_id}/own-browser-send"): "the user's own yes to one LinkedIn send",
     ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
+    ("POST", "/api/applications/{application_id}/auto/undo"): "the user's own Undo of what the AI did by itself",
     ("POST", "/api/asks/{ask_id}/answers/save"): "the user's own saved rows read as checked on Needs you",
     ("POST", "/api/asks/{ask_id}/answers/remember"): "the owner's own remember press: reused on later jobs",
     ("POST", "/api/profile/questionnaire/remember"): "the owner's own remember press on the questionnaire",
@@ -208,6 +209,9 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
         "the user's own Hide from timeline / Show in timeline (S11a)",
     ("POST", "/api/contacts/{contact_id}/duplicate"): "the user's own Duplicate of / Undo; no assistant marks (S11b)",
     ("GET", "/api/people/duplicates"): "the People page's own list of marked duplicates, for Undo (S11b)",
+    ("GET", "/api/profile/memory-covered-answers"): "the Needs-you card of old saved answers Memory covers (S3)",
+    ("DELETE", "/api/profile/memory-covered-answers/{answer_id}"):
+        "the owner's own Delete of one old saved answer; nothing deletes on its own (S3)",
 }
 
 

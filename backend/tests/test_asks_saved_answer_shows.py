@@ -29,8 +29,10 @@ async def test_the_users_saved_gender_shows_on_the_open_row(authenticated_async_
                 {"key": "gender", "question": "Gender?", "source": "guess", "answer": "Male"},
                 {"key": "city", "question": "City?", "source": "guess", "answer": "London"}]})
             assert made.status_code == 201, made.text
-            saved = await client.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "op": "upsert",
-                "value": {"question": "Gender?", "answer": "Female", "approved": True, "topic": "equality.gender"}}]})
+            # Plan S2 refuses a NEW saved answer for a Memory fact (append / upsert); a record already stored
+            # (written whole, as older saves did) still shows.
+            saved = await client.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "value": [
+                {"question": "Gender?", "answer": "Female", "approved": True, "topic": "equality.gender"}]}]})
             assert saved.status_code == 200, saved.text
             [mine] = (await client.get("/api/asks")).json()["asks"]
             assert [(q["key"], q["answer"], q["source"]) for q in mine["questions"]] == [

@@ -775,6 +775,9 @@ class AssistantSettings:
     # Job360's browser, or an Indeed / LinkedIn style site) always answers check_submit `ask` (ask_always_site).
     # On by default; only the user's own web click turns it off (an assistant's off waits).
     ask_before_signed_in_submit: bool = True
+    # Owner 2026-11-05: in auto mode, may a CV that a separate reviewer judged strong (and Job360 verified,
+    # services/applications/cv_review.py) go without the user's look? False = no (default). On is riskier.
+    cv_auto_approve: bool = False
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

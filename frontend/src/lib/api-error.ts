@@ -2,6 +2,33 @@
 // Job360 Frontend — Typed API error class
 // ---------------------------------------------------------------------------
 
+/** Any server `detail` as one readable line. FastAPI's 422 sends a LIST of
+ * `{type, loc, msg, input}`; some refusals send `{message}`. Rendering either raw
+ * crashes React (error #31), so every ApiError carries text only. */
+export function detailText(detail: unknown): string {
+  if (detail == null) return "";
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "number" || typeof detail === "boolean") return String(detail);
+  if (Array.isArray(detail)) {
+    return detail.map(detailText).filter(Boolean).join("; ");
+  }
+  if (typeof detail === "object") {
+    const o = detail as Record<string, unknown>;
+    for (const key of ["message", "msg", "detail", "reason"]) {
+      if (typeof o[key] === "string" && o[key]) {
+        const where = Array.isArray(o.loc) ? o.loc.filter((x) => x !== "body").join(".") : "";
+        return where && key === "msg" ? `${where}: ${o[key]}` : (o[key] as string);
+      }
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return "Something went wrong";
+    }
+  }
+  return String(detail);
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -10,10 +37,11 @@ export class ApiError extends Error {
 
   constructor(
     status: number,
-    detail: string,
+    rawDetail: unknown,
     code = "api_error",
     retryAfter: number | null = null
   ) {
+    const detail = detailText(rawDetail);
     super(`API error ${status}: ${detail}`);
     this.name = "ApiError";
     this.status = status;

@@ -21,7 +21,7 @@ from src.services import idempotency
 from src.services.applications import asks as asks_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import inbox_items as inbox_items_service
-from src.services.applications import plain_words
+from src.services.applications import memory_closes, plain_words
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
@@ -129,6 +129,7 @@ async def list_asks(
     try:
         if actor_for(user) == "web" and status == "open":  # the user's own page tidies old duplicates once
             await asks_service.tidy_open_asks(db, user.id)
+            await memory_closes.close_covered(db, user.id)  # old asks Memory now answers close (Memory first)
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset, exclude_test=True)
         if actor_for(user) == "web" and status == "open":
             rows = _with_saved_answers(user.id, rows)
@@ -218,21 +219,34 @@ async def save_ask_row_answers(
         raise AssertionError("unreachable")  # _raise always raises
 
 
+class MemoryRowOut(BaseModel):
+    path: str  # the update_profile path written (user_info.right_to_work)
+    key: str  # the Memory field in it (right_to_work.DE.needs_sponsorship)
+
+
 class RememberRowsOut(BaseModel):
     saved: list[str]
     skipped: list[str]
     country: Optional[str] = None
+    # Memory first (plan S2): rows in Memory's families, never saved -> why, naming the page to set it on.
+    not_saved: dict[str, str] = Field(default_factory=dict)
+    # Answer once (owner 2026-11-06): rows written into Memory -> {path, key}; rows Memory already answers
+    # differently -> "your DE page says No; this answer says Yes...". Absent when none.
+    memory: Optional[dict[str, MemoryRowOut]] = None
+    conflicts: Optional[dict[str, str]] = None
 
 
-@router.post("/asks/{ask_id}/answers/remember", response_model=RememberRowsOut, dependencies=AUTH_FIRST)
+@router.post("/asks/{ask_id}/answers/remember", response_model=RememberRowsOut, dependencies=AUTH_FIRST,
+             response_model_exclude_none=True)
 async def remember_ask_row_answers(
     ask_id: int,
     body: SaveRowAnswersRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the owner's own "remember" press
 ) -> dict[str, Any]:
-    """Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific
-    one for THIS job's country only, the rest global), so the next job asking them needs no owner.
+    """Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job
+    asking them needs no owner. A row in Memory's families goes into Memory for the job's country
+    (``memory``), or is a ``conflict`` with what Memory says, or is not saved (``not_saved`` says why).
     Only the owner's press saves for reuse: session only, no MCP twin.
     Per-job rows (how you heard, consent, essays) are skipped."""
     from src.services.profile.edits import ProfileEditError  # noqa: PLC0415

@@ -433,6 +433,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/auto/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo Auto
+         * @description "Undo" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting
+         *     closed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;
+         *     also records "It was not sent"). A ``note`` correcting that status event. 409 when the newest status event
+         *     is neither. Session only; no MCP twin.
+         */
+        post: operations["undo_auto_api_applications__application_id__auto_undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/autofill": {
         parameters: {
             query?: never;
@@ -1066,8 +1089,9 @@ export interface paths {
         put?: never;
         /**
          * Remember Ask Row Answers
-         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific
-         *     one for THIS job's country only, the rest global), so the next job asking them needs no owner.
+         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job
+         *     asking them needs no owner. A row in Memory's families goes into Memory for the job's country
+         *     (``memory``), or is a ``conflict`` with what Memory says, or is not saved (``not_saved`` says why).
          *     Only the owner's press saves for reuse: session only, no MCP twin.
          *     Per-job rows (how you heard, consent, essays) are skipped.
          */
@@ -1800,6 +1824,27 @@ export interface paths {
          *     surface the cooldown.
          */
         post: operations["verify_email_request_api_auth_verify_email_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/autonomy/agreement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Autonomy Agreement
+         * @description Per kind (essay, fixed, cv): cases, agree, agreement_pct, wrong_facts, bar_met; ``pending`` = cases with
+         *     no owner decision yet; ``examples`` = up to 5 recent disagreements (ids and codes only).
+         */
+        get: operations["autonomy_agreement_api_autonomy_agreement_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3188,6 +3233,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/memory-covered-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Memory Covered Answers
+         * @description Memory first (plan S3): the user's old saved answers that Memory's families now cover, each with what
+         *     Memory says and a verdict, for the Needs-you card. Session only: the owner cleans these up himself.
+         */
+        get: operations["list_memory_covered_answers_api_profile_memory_covered_answers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/memory-covered-answers/{answer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Memory Covered Answer
+         * @description The owner's own Delete on one listed answer: one ``remove_at`` through ``PATCH /profile`` (history and
+         *     ``profile_edit_id`` as usual), guarded by the version read with it (409 if anything wrote since). 404 when
+         *     no listed answer has that id (already gone, or changed). Session only, no MCP twin.
+         */
+        delete: operations["delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/preferences": {
         parameters: {
             query?: never;
@@ -3244,8 +3332,9 @@ export interface paths {
         put?: never;
         /**
          * Remember Questionnaire
-         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer,
-         *     bound to ``country`` when it is country-specific (right to work, salary...), else global.
+         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer;
+         *     one in Memory's families (right to work, salary...) goes into Memory for ``country`` (``memory``), or is a
+         *     ``conflict`` with Memory, or is not saved (``not_saved``: set it on that page).
          *     Session only (no MCP twin): nothing is remembered without that press.
          */
         post: operations["remember_questionnaire_api_profile_questionnaire_remember_post"];
@@ -3600,7 +3689,8 @@ export interface paths {
         /**
          * Sent On Its Own Route
          * @description Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
-         *     sources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything.
+         *     sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,
+         *     and CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check.
          */
         get: operations["sent_on_its_own_route_api_sent_on_its_own_get"];
         put?: never;
@@ -3622,8 +3712,9 @@ export interface paths {
         put?: never;
         /**
          * Report Wrong Fact Route
-         * @description The user's "Wrong fact" press on one item. Autonomy step 4 records it and stops reusing that fact;
-         *     until it ships there is no item to press on, so every id is 404.
+         * @description The user's "Wrong fact" press on one item. On a ``cv`` item (owner 2026-11-06) it is recorded (the item
+         *     reads ``reported_wrong``) and automatic CV sending (``cv_auto_approve``) is turned off at once. Other kinds
+         *     arrive with autonomy step 4 (409). Another user's item, or none, is 404.
          */
         post: operations["report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post"];
         delete?: never;
@@ -4068,6 +4159,18 @@ export interface components {
             source: string;
             /** Value */
             value?: unknown;
+        };
+        /** AgreementOut */
+        AgreementOut: {
+            bar: components["schemas"]["Bar"];
+            /** Examples */
+            examples: components["schemas"]["Disagreement"][];
+            /** Kinds */
+            kinds: {
+                [key: string]: components["schemas"]["KindAgreement"];
+            };
+            /** Pending */
+            pending: number;
         };
         /**
          * AlignmentOut
@@ -4898,8 +5001,16 @@ export interface components {
             check_every: string;
             company_cap: components["schemas"]["SettingFieldOut"];
             company_cap_days: components["schemas"]["SettingFieldOut"];
+            cv_auto_approve: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
             email_sends_per_day: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "count": 0,
+             *       "meaning": ""
+             *     }
+             */
+            grant_covers_jobs: components["schemas"]["GrantCoversJobsOut"];
             hunt_every_hours: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
@@ -4988,6 +5099,13 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /** Bar */
+        Bar: {
+            /** Min Agree Pct */
+            min_agree_pct: number;
+            /** Min Cases */
+            min_cases: number;
         };
         /** BatchContactRowOut */
         BatchContactRowOut: {
@@ -5145,6 +5263,8 @@ export interface components {
             }[];
             /** Country */
             country?: string | null;
+            /** Differs */
+            differs?: string[];
             /** Duplicate Of */
             duplicate_of?: number | null;
             /** Employer Published At */
@@ -5157,6 +5277,10 @@ export interface components {
             known_people?: components["schemas"]["KnownPeopleOut"];
             /** Listed People */
             listed_people?: components["schemas"]["ListedPersonOut"][] | null;
+            /** Matched On */
+            matched_on?: ("same_title_and_company" | "same_url" | "same_company_and_role" | "repost") | null;
+            /** Next */
+            next?: string | null;
             /** Queue Note */
             queue_note?: string | null;
             /** Queued */
@@ -5641,6 +5765,11 @@ export interface components {
             found_via?: string | null;
             /** Id */
             id: number;
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */
@@ -5790,6 +5919,44 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** CoveredAnswerOut */
+        CoveredAnswerOut: {
+            /** Answer */
+            answer: string;
+            /** Country */
+            country?: string | null;
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Memory */
+            memory?: string | null;
+            /** Question */
+            question: string;
+            /** Saved By */
+            saved_by?: ("web" | "assistant") | null;
+            /** Topic */
+            topic?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "same" | "different" | "memory_empty";
+        };
+        /** CoveredAnswersOut */
+        CoveredAnswersOut: {
+            /** Answers */
+            answers: components["schemas"]["CoveredAnswerOut"][];
+            /** Profile Edit Id */
+            profile_edit_id: number;
+        };
+        /** CoveredDeleteOut */
+        CoveredDeleteOut: {
+            /** Deleted */
+            deleted: string;
+            /** Profile Edit Id */
+            profile_edit_id: number;
+        };
         /** CreateAskOut */
         CreateAskOut: {
             /**
@@ -5935,6 +6102,19 @@ export interface components {
             job_company: string;
             /** Job Title */
             job_title: string;
+        };
+        /** Disagreement */
+        Disagreement: {
+            /** Application Id */
+            application_id: number;
+            /** Kind */
+            kind: string;
+            /** Owner */
+            owner: string;
+            /** Question Key */
+            question_key: string;
+            /** Would Clear */
+            would_clear: boolean;
         };
         /** DismissIn */
         DismissIn: {
@@ -6710,6 +6890,10 @@ export interface components {
             questions_count: number;
             /** Stop For User */
             stop_for_user?: boolean | null;
+            /** User Instructions */
+            user_instructions?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * FormCheckRequest
@@ -6785,6 +6969,25 @@ export interface components {
             merged: boolean;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * GrantCoversJobsOut
+         * @description What ``auto_grant_scope.queue.count`` really counts, named honestly. ``count`` = the jobs an
+         *     "Auto for a while" grant confirmed NOW would cover: every job queued and still ``considering``,
+         *     counted BEFORE the user's own score-line rule drops any (and at most 500). It is NOT the apply
+         *     queue: that is ``list_applications(queued=true)``'s ``queue_summary.queued``.
+         */
+        GrantCoversJobsOut: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Meaning
+             * @default
+             */
+            meaning: string;
         };
         /** GrantListResponse */
         GrantListResponse: {
@@ -6939,10 +7142,37 @@ export interface components {
             resolved_by: string | null;
             /** Sender */
             sender: string;
+            /**
+             * Sender Kind
+             * @default person
+             */
+            sender_kind: string;
             /** Subject */
             subject: string;
             /** Thread Id */
             thread_id: string | null;
+        };
+        /**
+         * InboxPageOut
+         * @description whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``.
+         */
+        InboxPageOut: {
+            /** Groups */
+            groups: components["schemas"]["InboxSenderGroupOut"][];
+            /** More */
+            more: boolean;
+            /** Next Offset */
+            next_offset: number | null;
+            /** Offset */
+            offset: number;
+            /** People */
+            people: number;
+            /** Shown */
+            shown: number;
+            /** Stale Alerts Hidden */
+            stale_alerts_hidden: number;
+            /** Total */
+            total: number;
         };
         /** InboxSearchOut */
         InboxSearchOut: {
@@ -6958,6 +7188,15 @@ export interface components {
             gmail_after: string;
             /** Skip Message Ids */
             skip_message_ids: string[];
+        };
+        /** InboxSenderGroupOut */
+        InboxSenderGroupOut: {
+            /** Count */
+            count: number;
+            /** Sender */
+            sender: string;
+            /** Sender Kind */
+            sender_kind: string;
         };
         /**
          * InterviewAgenda
@@ -7082,6 +7321,19 @@ export interface components {
             resume: {
                 [key: string]: unknown;
             };
+        };
+        /** KindAgreement */
+        KindAgreement: {
+            /** Agree */
+            agree: number;
+            /** Agreement Pct */
+            agreement_pct?: number | null;
+            /** Bar Met */
+            bar_met: boolean;
+            /** Cases */
+            cases: number;
+            /** Wrong Facts */
+            wrong_facts: number;
         };
         /** KitAccountSiteOut */
         KitAccountSiteOut: {
@@ -7739,6 +7991,13 @@ export interface components {
              */
             timezone: string;
         };
+        /** MemoryRowOut */
+        MemoryRowOut: {
+            /** Key */
+            key: string;
+            /** Path */
+            path: string;
+        };
         /**
          * MissingToolRequest
          * @description ``POST /api/missing-tools`` body. ``name`` must match
@@ -7848,6 +8107,7 @@ export interface components {
              * @default []
              */
             other_ask_ids: number[];
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
         };
         /**
          * NextStepOut
@@ -8013,6 +8273,8 @@ export interface components {
             claim?: components["schemas"]["TaskClaimOut"] | null;
             /** Contact Id */
             contact_id?: number | null;
+            /** Contact Ids */
+            contact_ids?: number[] | null;
             /**
              * Draft Chars
              * @default 0
@@ -8027,7 +8289,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read";
+            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read" | "linkedin_check_pending";
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Max People */
@@ -8039,6 +8301,11 @@ export interface components {
              * @default
              */
             name: string;
+            /**
+             * No Note
+             * @default false
+             */
+            no_note: boolean;
             /**
              * Owner Yes
              * @default false
@@ -8124,6 +8391,20 @@ export interface components {
             period?: string | null;
         };
         /**
+         * PcIdleOut
+         * @description Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever).
+         */
+        PcIdleOut: {
+            /** Hours */
+            hours: number;
+            /** Since */
+            since?: string | null;
+            /** Text */
+            text: string;
+            /** Waiting */
+            waiting: number;
+        };
+        /**
          * PersonFullOut
          * @description ``list_people(contact_id=...)``'s shape — the one row's own full
          *     record (never merged with another row that happens to share an email).
@@ -8158,6 +8439,11 @@ export interface components {
             id: number;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */
@@ -8681,6 +8967,7 @@ export interface components {
             open_now: boolean;
             /** Opens At */
             opens_at?: string | null;
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
             /** Pc On Hours */
             pc_on_hours?: {
                 [key: string]: unknown;
@@ -9388,7 +9675,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done";
+            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done" | "invited";
             /** Session */
             session: string;
             /** Task Id */
@@ -9422,6 +9709,20 @@ export interface components {
         };
         /** RememberOut */
         RememberOut: {
+            /** Conflicts */
+            conflicts?: {
+                [key: string]: string;
+            } | null;
+            /** Memory */
+            memory?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            } | null;
+            /** Not Saved */
+            not_saved?: {
+                [key: string]: string;
+            };
             /** Saved */
             saved: string[];
         };
@@ -9434,8 +9735,20 @@ export interface components {
         };
         /** RememberRowsOut */
         RememberRowsOut: {
+            /** Conflicts */
+            conflicts?: {
+                [key: string]: string;
+            } | null;
             /** Country */
             country?: string | null;
+            /** Memory */
+            memory?: {
+                [key: string]: components["schemas"]["MemoryRowOut"];
+            } | null;
+            /** Not Saved */
+            not_saved?: {
+                [key: string]: string;
+            };
             /** Saved */
             saved: string[];
             /** Skipped */
@@ -9670,7 +9983,7 @@ export interface components {
             /** Answer */
             answer: string;
             /** Application Id */
-            application_id: number;
+            application_id?: number | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -9696,6 +10009,11 @@ export interface components {
         };
         /** SentOnItsOwnOut */
         SentOnItsOwnOut: {
+            /**
+             * Cv Sample
+             * @default []
+             */
+            cv_sample: number[];
             /** Items */
             items: components["schemas"]["SentItem"][];
         };
@@ -10398,6 +10716,7 @@ export interface components {
             since: string | null;
             sites?: components["schemas"]["StatsSitesOut"] | null;
             skill_gaps?: components["schemas"]["StatsSkillGapsOut"] | null;
+            today?: components["schemas"]["StatsTodayOut"] | null;
             velocity?: components["schemas"]["StatsVelocityOut"] | null;
         };
         /** StatsRoleGroupOut */
@@ -10538,6 +10857,70 @@ export interface components {
             truncated?: boolean | null;
             /** Truncated Hint */
             truncated_hint?: string | null;
+        };
+        /**
+         * StatsTodayCountsOut
+         * @description Today's counts in the user's own timezone; each is a number, never a list.
+         */
+        StatsTodayCountsOut: {
+            /**
+             * Applied
+             * @default 0
+             */
+            applied: number;
+            /**
+             * Asks Answered
+             * @default 0
+             */
+            asks_answered: number;
+            /**
+             * Asks Opened
+             * @default 0
+             */
+            asks_opened: number;
+            /**
+             * Brought
+             * @default 0
+             */
+            brought: number;
+            /**
+             * Fit Judged
+             * @default 0
+             */
+            fit_judged: number;
+            /**
+             * Outreach Replies
+             * @default 0
+             */
+            outreach_replies: number;
+            /**
+             * Outreach Sent
+             * @default 0
+             */
+            outreach_sent: number;
+            /**
+             * Replies
+             * @default 0
+             */
+            replies: number;
+        };
+        /**
+         * StatsTodayOut
+         * @description ``stats(view="today")``: where the user stands. ``queue_summary`` is the block
+         *     ``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports.
+         */
+        StatsTodayOut: {
+            counts: components["schemas"]["StatsTodayCountsOut"];
+            /** Date */
+            date: string;
+            /** Queue Summary */
+            queue_summary: {
+                [key: string]: unknown;
+            };
+            /** Timezone */
+            timezone: string;
+            /** Waiting On You */
+            waiting_on_you: number;
         };
         /** StatsVelocityOut */
         StatsVelocityOut: {
@@ -10995,6 +11378,7 @@ export interface components {
             };
             /** Nothing Due */
             nothing_due: boolean;
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
             /** Run Now */
             run_now?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Running */
@@ -11063,6 +11447,7 @@ export interface components {
             events: components["schemas"]["WhatsNewEventOut"][];
             /** Inbox Items */
             inbox_items?: components["schemas"]["InboxItemOut"][];
+            inbox_page?: components["schemas"]["InboxPageOut"] | null;
             /**
              * @default {
              *       "just_passed": [],
@@ -11824,6 +12209,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoEmailCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_auto_api_applications__application_id__auto_undo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */
@@ -14183,6 +14603,39 @@ export interface operations {
             };
         };
     };
+    autonomy_agreement_api_autonomy_agreement_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     browser_action_api_browser_post: {
         parameters: {
             query?: never;
@@ -16325,6 +16778,74 @@ export interface operations {
             };
         };
     };
+    list_memory_covered_answers_api_profile_memory_covered_answers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveredAnswersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                answer_id: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveredDeleteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upsert_preferences_api_profile_preferences_post: {
         parameters: {
             query?: never;
@@ -17424,6 +17945,8 @@ export interface operations {
                 since?: string | null;
                 after_id?: number | null;
                 limit?: number;
+                inbox_offset?: number;
+                inbox_stale_alerts?: boolean;
             };
             header?: {
                 authorization?: string | null;

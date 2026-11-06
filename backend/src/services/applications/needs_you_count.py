@@ -23,6 +23,7 @@ and people are left out. Nothing is judged by its words: a real "Simulation Engi
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.core import settings
@@ -181,7 +182,11 @@ async def needs_you_count(db: JobDatabase, user_id: str) -> dict[str, Any]:
     )
     # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
     answer_once = ask_once.open_questions(user_id)
+    # Owner #12: one line for the jobs on the user's PC when no session in their own browser worked the queue.
+    from src.services.applications import own_browser  # noqa: PLC0415 - own_browser -> contacts -> this package
+
+    pc_idle = await own_browser.pc_idle(db, user_id, datetime.now(timezone.utc), first["by_actor"]["your_pc"])
     return {
         "n": jobs + other + (1 if answer_once else 0), "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
-        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first,
+        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first, "pc_idle": pc_idle,
     }

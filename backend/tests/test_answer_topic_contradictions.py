@@ -34,8 +34,9 @@ def test_two_topics_differing_only_in_case_with_the_same_answer_are_one_match():
     got = find_answer(records, topic="sponsorship.Gb.yes_no", country="GB")
     assert got is not None and got["answer"] == "Yes"
     assert conflicts(records, country="GB") == []
+    # Memory first (owner 2026-11-05, S1): a sponsorship question takes Memory's GB page, never a saved answer.
     answered, missing = _kit_missing(records, "GB")
-    assert [a["value"] for a in answered] == ["Yes"] and missing == []
+    assert answered == [] and len(missing) == 1 and "your GB page" in missing[0]["why"]
 
 
 def test_opposite_answers_in_two_cases_give_no_match_and_the_kit_shows_it_missing():
@@ -43,7 +44,7 @@ def test_opposite_answers_in_two_cases_give_no_match_and_the_kit_shows_it_missin
     assert find_answer(records, topic="sponsorship.GB.yes_no", country="GB") is None
     assert find_answer(records, topic="sponsorship.gb.yes_no", country="GB") is None
     answered, missing = _kit_missing(records, "GB")
-    assert answered == [] and len(missing) == 1 and "ambiguous" in missing[0]["why"]
+    assert answered == [] and len(missing) == 1 and "your GB page" in missing[0]["why"]  # Memory first (S1)
     assert conflicts(records, country="GB") == [
         {"topic": "sponsorship.GB.yes_no", "question": Q, "values": ["Yes", "No"]}]
 
@@ -86,7 +87,7 @@ def test_a_write_never_rewrites_or_merges_saved_twins():
 
 
 @pytest.mark.asyncio
-async def test_answer_once_shows_a_conflict_row_and_remembering_one_value_removes_it(
+async def test_answer_once_shows_a_conflict_row_and_a_press_on_it_saves_nothing(
     authenticated_async_context, fixture_user_id
 ):
     from src.services.profile import edits as profile_edits
@@ -107,19 +108,30 @@ async def test_answer_once_shows_a_conflict_row_and_remembering_one_value_remove
         gb = (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]
         row = next(q for q in gb if q["conflict"])
         assert (row["topic"], row["conflict"], row["answer"]) == ("sponsorship.GB.yes_no", ["Yes", "No"], None)
+        # Memory first (owner 2026-11-05, plan S2): sponsorship is Memory's, so a press saves no answer; the
+        # stored twins are left for the owner's clean-up (S3), never deleted here.
+        # owner 2026-11-06: answer once writes Memory (refines S2)
+        # GB's Memory holds no sponsorship fact yet, so the press fills it.
         resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
             {"topic": row["topic"], "question": row["question"], "answer": "No"}]})
-        assert resp.status_code == 200, resp.text
-        gb = (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]
-        assert not any(q["conflict"] for q in gb)
+        assert resp.status_code == 200 and resp.json()["saved"] == [], resp.text
+        assert resp.json()["memory"]["sponsorship.GB.yes_no"]["key"] == "right_to_work.GB.needs_sponsorship"
+        gb_page = [{"country": "GB", "work_authorization": "citizen", "needs_sponsorship": False}]
+        assert load_profile(fixture_user_id).user_info.right_to_work["countries"] == gb_page
+        # Now Memory is set: a press with another value is a conflict and writes nothing.
+        resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
+            {"topic": row["topic"], "question": row["question"], "answer": "Yes"}]})
+        assert resp.status_code == 200 and resp.json()["saved"] == [] and "memory" not in resp.json(), resp.text
+        assert resp.json()["conflicts"]["sponsorship.GB.yes_no"].startswith("your GB page says No; this answer says Yes")
+        assert load_profile(fixture_user_id).user_info.right_to_work["countries"] == gb_page
     mine = [r for r in load_profile(fixture_user_id).user_info.answers if "sponsorship" in str(r.get("topic"))]
-    assert [(r["topic"], r["answer"]) for r in mine] == [("sponsorship.GB.yes_no", "No")]
+    assert [(r["topic"], r["answer"]) for r in mine] == [("sponsorship.GB.yes_no", "Yes"), ("sponsorship.gb.yes_no", "No")]
 
 
 # ── Verifier seams (2026-11-03): twins worded differently, and a narrower answer over a broader one ──
 
 VISA_Q = "Do you need a visa?"
-PAY_Q = "What is your expected salary?"
+PAY_Q = "Which interview slot suits you?"  # outside Memory: saved answers still resolve it
 
 
 def _profile(records: list[dict[str, Any]]) -> Any:
@@ -151,8 +163,10 @@ def test_twins_worded_differently_are_missing_from_the_kit_as_ambiguous():
     records = _twins_worded_differently()
     answers, missing = kit.compute_answers(_profile(records), [], "GB", None)
     assert [i["value"] for i in answers["approved_text"]] == []
-    ambiguous = [m for m in missing if "ambiguous" in m["why"]]
-    assert [m["key"] for m in ambiguous] == ["sponsorship.GB.yes_no"]
+    # Memory first (S1): saved sponsorship answers are not the kit's, so they no longer block it as ambiguous;
+    # the kit asks for the GB page's fact instead.
+    assert [m for m in missing if "ambiguous" in m["why"]] == []
+    assert "right_to_work.GB.needs_sponsorship" in [m["key"] for m in missing]
 
 
 @pytest.mark.parametrize("key", [Q, VISA_Q, "sponsorship.GB.yes_no", "sponsorship.gb.yes_no", None])
@@ -160,7 +174,7 @@ def test_twins_worded_differently_are_missing_from_the_kit_as_ambiguous():
 def test_twins_worded_differently_give_no_answer_on_the_form_by_any_key(key, question):
     form = _real_form(_twins_worded_differently(), "GB", [{"question": question, "key": key}])
     assert form["answered"] == []
-    assert len(form["missing"]) == 1 and "ambiguous" in form["missing"][0]["why"]
+    assert len(form["missing"]) == 1 and "ask the user" in form["missing"][0]["why"]  # Memory first (S1)
 
 
 @pytest.mark.parametrize("question,typed", [(Q, "Yes"), (VISA_Q, "No"), (Q, "No"), (VISA_Q, "Yes")])
@@ -174,7 +188,7 @@ def test_twins_worded_differently_are_never_verified_on_the_ready_card(question,
 
 
 def _pay(answer: str, **extra: Any) -> dict[str, Any]:
-    return {"question": PAY_Q, "answer": answer, "approved": True, "topic": "salary.expected", **extra}
+    return {"question": PAY_Q, "answer": answer, "approved": True, "topic": "form.interview_slot", **extra}
 
 
 _NARROWER = {
@@ -193,15 +207,15 @@ def test_a_narrower_answer_wins_over_a_broader_one_everywhere(case):
     records, company = _NARROWER[case]
     ck = kit.normalized_company_key(company) if company else None
     assert conflicts(records, country="GB") == [] and conflicts(records, country="GB", company_key=ck) == []
-    rec, note = resolve_answer(records, topic="salary.expected", company_key=ck, country="GB")
+    rec, note = resolve_answer(records, topic="form.interview_slot", company_key=ck, country="GB")
     assert note is None and rec is not None and rec["answer"] == "60000"
     answers, missing = kit.compute_answers(_profile(records), [], "GB", ck)
     assert [i["value"] for i in answers["approved_text"]] == ["60000"]
     assert not [m for m in missing if "ambiguous" in m["why"]]
-    for key in (PAY_Q, "salary.expected", None):
+    for key in (PAY_Q, "form.interview_slot", None):
         form = _real_form(records, "GB", [{"question": PAY_Q, "key": key}], ck)
         assert [a["value"] for a in form["answered"]] == ["60000"], (key, form["missing"])
-    for key in (None, "salary.expected"):
+    for key in (None, "form.interview_slot"):
         got = ready._approved_record(_profile(records), PAY_Q, ck, key, "GB")
         assert got is not None and got["answer"] == "60000"
         assert _ready_verifies(records, PAY_Q, "60000", key, "GB", ck)

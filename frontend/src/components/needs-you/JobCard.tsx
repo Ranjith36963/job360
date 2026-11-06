@@ -13,6 +13,7 @@ import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { CvPreview } from "@/components/applications/CvPreview";
 import { FormHandoff } from "@/components/applications/FormHandoff";
 import { AlreadyAppliedRow } from "./AlreadyAppliedRow";
 import { AskQuestions } from "./AskQuestions";
@@ -79,6 +80,7 @@ export function JobCard({
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
+  const [viewCv, setViewCv] = useState(false);
   const structured = ready ? [] : card.asks.filter((a) => a.kind === "structured");
   // Each question is shown once, however many open asks listed it; its answer as it stands and
   // whether the user checked it, per merged row.
@@ -148,8 +150,8 @@ export function JobCard({
 
   const [remembered, setRemembered] = useState<Set<string>>(new Set());
 
-  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; the server
-   *  binds a country-specific one (right to work, salary) to this job's country, the rest are
+  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; a Memory
+   *  question (right to work, salary...) goes into Memory for this job's country (2026-11-06), the rest are
    *  global. A stored fact left unchanged is not saved again. */
   async function rememberRows(values: Map<string, string>) {
     for (const { ask } of structured) {
@@ -158,7 +160,10 @@ export function JobCard({
         const text = values.get(k.rowId);
         return m && text && !(isStoredSource(m.q.source) && text === m.q.answer.trim());
       });
-      if (given.length) await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+      if (!given.length) continue;
+      const done = await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+      // Answer once: a Memory fact already set to another value is never overwritten; say where to change it.
+      for (const why of Object.values(done?.conflicts ?? {})) toast.error(`Not saved to Memory: ${why}`);
     }
     setRemembered((prev) => new Set([...prev, ...values.keys()]));
   }
@@ -397,9 +402,9 @@ export function JobCard({
             <p className="text-sm">CV version {card.cv.version}, not approved yet</p>
           </div>
           <div className="flex gap-2">
-            <Link href={appLink(card.applicationId)} className={btn}>
+            <button type="button" className={btn} data-testid={`cv-view-${card.applicationId}`} onClick={() => setViewCv(true)}>
               View CV
-            </Link>
+            </button>
             <button type="button" className={btn} onClick={() => void downloadCv(card, card.cv!)}>
               PDF
             </button>
@@ -408,6 +413,10 @@ export function JobCard({
               Approve CV
             </button>
           </div>
+          {viewCv && (
+            <CvPreview applicationId={card.applicationId} artifactId={card.cv.artifactId}
+              title={`CV version ${card.cv.version}`} open onOpenChange={setViewCv} />
+          )}
         </section>
       )}
 

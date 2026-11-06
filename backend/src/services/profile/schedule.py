@@ -316,6 +316,12 @@ async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
     return any(k.startswith(RUNNING) and now - at < window for k, at in (await load_stamps(db, user_id)).items())
 
 
+async def claim_live(db: JobDatabase, user_id: str, duty: str, now: datetime) -> bool:
+    """True while a run holds ``duty`` itself (taken less than ``DUTY_CLAIM_MINUTES`` before ``now``)."""
+    at = (await load_stamps(db, user_id)).get(RUNNING + duty)
+    return at is not None and now - at < timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+
+
 def reach_key(application_id: int) -> str:
     """The stamp slot for one application the people hunt has worked."""
     return f"reach:{application_id}"
@@ -449,7 +455,8 @@ def status(f: DueFacts, answer: dict[str, Any], runs: dict[str, dict[str, Any]])
 
 
 async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
-    """Applications in the batch queue that are still ``considering`` (as the batch list shows it)."""
+    """Applications in the batch queue that are still ``considering`` (as the batch list shows it), less the
+    ones the user's own rule drops (below the line with ``below_line`` skip, S4): no duty, no CV for them."""
     from src.services.applications import spine  # noqa: PLC0415 - spine imports the profile package
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
 
@@ -463,7 +470,9 @@ async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
         f"AND NOT {test_sql}",
         (user_id, *queued, *test_params),
     )
-    return [int(dict(r)["id"]) for r in await cur.fetchall()]
+    ids = [int(dict(r)["id"]) for r in await cur.fetchall()]
+    dropped = await spine.below_line_dropped(db, user_id, ids)
+    return [i for i in ids if i not in dropped]
 
 
 async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
@@ -476,9 +485,7 @@ async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
 
     waiting = await queue_preflight._open_ask_apps(db, user_id, ids)
     waiting |= {a["application_id"] for a in await ready.cv_to_approve(db, user_id)} & set(ids)
-    for app_id in set(ids) - waiting:
-        if await blocked.open_block(db, user_id, app_id) is not None:
-            waiting.add(app_id)
+    waiting |= set(await blocked.open_blocks(db, user_id, sorted(set(ids) - waiting)))  # one query
     return len(waiting)
 
 

@@ -54,11 +54,13 @@ from src.services.applications import asks as asks_service
 from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
+from src.services.applications import cv_review as cv_review_service
 from src.services.applications import diff as diff_service
 from src.services.applications import (
     duplicates,
     hiding,
     interview_payloads,
+    memory_closes,
     outcome_suggestions,
     plain_words,
     process_log,
@@ -742,6 +744,8 @@ class ContactOut(BaseModel):
     own_browser_task: Optional[OwnBrowserTaskOut] = None
     # Null = nothing to rewrite. Set: the assistant's job ("rewrite needed"), not the user's; never sendable.
     note_rewrite: Optional[NoteRewriteOut] = None
+    # One LinkedIn follow-up is due (6 days after the only message, no reply, no newer draft): the assistant drafts it.
+    linkedin_follow_up_due: bool = False
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -788,6 +792,8 @@ class InboxItemOut(BaseModel):
     resolved_by: Optional[str]
     resolved_at: Optional[str]
     event_id: Optional[int]  # the event recorded with this message id on application_id (None = not yet)
+    # Owner report #14: person (wrote to the user) | alert (job alert / newsletter) | automated (no-reply).
+    sender_kind: str = "person"
 
 
 class AskQuestionOut(BaseModel):
@@ -1270,6 +1276,25 @@ class WhatsNewApplicationOut(BaseModel):
     last_event_at: Optional[str]
 
 
+class InboxSenderGroupOut(BaseModel):
+    sender: str
+    sender_kind: str
+    count: int
+
+
+class InboxPageOut(BaseModel):
+    """whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``."""
+
+    total: int
+    offset: int
+    shown: int
+    more: bool
+    next_offset: Optional[int]
+    people: int  # open items from a person
+    stale_alerts_hidden: int  # job alerts older than INBOX_ALERTS_STALE_DAYS left out (inbox_stale_alerts=true)
+    groups: list[InboxSenderGroupOut]
+
+
 class WhatsNewResponse(BaseModel):
     now: str
     since: str
@@ -1284,8 +1309,10 @@ class WhatsNewResponse(BaseModel):
     proof_missing: list[ProofMissingOut]
     # Gap 10 - interviews in the next 7 days, and the last 3 days' with no outcome recorded yet.
     interviews: InterviewAgenda = InterviewAgenda()
-    # Feature 10 - unmatched mail: every open item + items resolved in the last INBOX_ITEMS_RECENT_DAYS.
+    # Feature 10 - unmatched mail: open items + items resolved in the last INBOX_ITEMS_RECENT_DAYS,
+    # one page (owner report #9/#14): people first, then by sender, then resolved.
     inbox_items: list[InboxItemOut] = Field(default_factory=list)
+    inbox_page: Optional[InboxPageOut] = None
 
 
 class ExportArtifactOut(BaseModel):
@@ -2220,6 +2247,30 @@ class StatsReferralsOut(BaseModel):
     note: str
 
 
+class StatsTodayCountsOut(BaseModel):
+    """Today's counts in the user's own timezone; each is a number, never a list."""
+
+    brought: int = 0
+    fit_judged: int = 0
+    applied: int = 0  # receipts sent today
+    asks_opened: int = 0
+    asks_answered: int = 0
+    outreach_sent: int = 0
+    outreach_replies: int = 0
+    replies: int = 0  # application replies (`replied` events)
+
+
+class StatsTodayOut(BaseModel):
+    """``stats(view="today")``: where the user stands. ``queue_summary`` is the block
+    ``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports."""
+
+    date: str
+    timezone: str
+    counts: StatsTodayCountsOut
+    queue_summary: dict[str, Any]
+    waiting_on_you: int
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -2252,6 +2303,7 @@ class StatsResponse(BaseModel):
     skill_gaps: Optional[StatsSkillGapsOut] = None
     sites: Optional[StatsSitesOut] = None
     referrals: Optional[StatsReferralsOut] = None
+    today: Optional[StatsTodayOut] = None
     computed_at: str
 
 
@@ -3042,6 +3094,19 @@ async def outreach_check(
         verdict = settings_rules.OutreachDecision(
             "ask", "unsupported_numbers", f"The draft states a number your profile does not support. {unsupported}"
         )
+    # The Doctor's code checks hold for every channel (owner 2026-11-05): an email gets the LinkedIn message's
+    # name check and sensitive-topic check too. LinkedIn reads them inside the gate.
+    if verdict.decision == "send" and facts.channel == "email" and facts.unsupported_claims:
+        verdict = settings_rules.OutreachDecision(
+            "ask", "unsupported_claims",
+            "The email names something the profile lacks. Fix it from the profile, or save a Gmail draft and ask_user.",
+        )
+    if verdict.decision == "send" and facts.channel == "email" and facts.sensitive:
+        verdict = settings_rules.OutreachDecision(
+            "ask", "sensitive_topic",
+            "The email raises visa, salary, health or another private topic: the user's to raise. Save a Gmail "
+            "draft and ask_user.",
+        )
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",
@@ -3204,7 +3269,11 @@ async def save_fit(
             archetype=body.archetype, remote_policy=body.remote_policy, team_size=body.team_size, via=body.via,
         )
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
-        return {**saved, "line": settings_rules.line_block(body.score, cfg)}
+        line = settings_rules.line_block(body.score, cfg)
+        # S4 (owner 2026-11-05): below the line with below_line skip = off the batch queue, recorded as skipped.
+        if await spine.unqueue_below_line(db, user.id, application_id, body.score, cfg):
+            line["next"] += " Job360 took it off your batch queue (recorded as skipped; the score is kept)."
+        return {**saved, "line": line}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
@@ -3662,6 +3731,28 @@ async def resolve_blocked(
     return await _controls(db, user, application_id)
 
 
+@router.post(
+    "/applications/{application_id}/auto/undo", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def undo_auto(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Undo" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting
+    closed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;
+    also records "It was not sent"). A ``note`` correcting that status event. 409 when the newest status event
+    is neither. Session only; no MCP twin."""
+    from src.services.applications import auto_close  # noqa: PLC0415
+
+    try:
+        await auto_close.undo(db, user, application_id)
+    except SpineError as exc:
+        _raise(exc)
+    return await _controls(db, user, application_id)
+
+
 def _submitted_refused(user: CurrentUser, application_id: int, status: int, reason: str) -> HTTPException:
     get_audit_logger().warning(
         "blocked_submitted_refused",
@@ -3811,6 +3902,8 @@ async def submit_check(
             db, user.id, now, application_id, window_days=cfg.company_cap_days
         )
         hold = await kit_service.live_hold(db, user, application_id, now, label)
+        # Memory first: an old ask on this job that Memory now answers closes before it is counted.
+        await memory_closes.close_covered(db, user.id, application_id)
         facts = await kit_service.gate_facts(
             db, user.id, app_row, email_verified=email_verification_satisfied(user),
             other_session_hold=kit_service.hold_fact(hold), shadow=True,
@@ -3960,6 +4053,10 @@ async def _record_event(
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
         if body.event_type == ready_service.JOB_APPROVAL_EVENT:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the web Verify), not by a caller")
+        if body.event_type in cv_review_service.SERVER_ONLY_EVENTS:
+            raise SpineError(
+                422, f"{body.event_type} is written by Job360 itself (the receipt / Wrong fact), not by a caller",
+            )
         if body.event_type == evidence_service.EVENT_TYPE or body.event_type in submit_clearance.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (check_submit), not by a caller")
         if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
@@ -3984,7 +4081,8 @@ async def _record_event(
         else:
             payload = spine.validate_payload(
                 body.payload,
-                max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
+                max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES
+                if body.event_type in ("form_filled", cv_review_service.EVENT_TYPE) else None,
             )
         payload = spine.validate_outcome_payload(body.event_type, payload)
         payload = spine.validate_auto_email_payload(body.event_type, payload)
@@ -4021,6 +4119,12 @@ async def _record_event(
             payload = which_browser.stamp(
                 await kit_service.check_kit_event(db, user, application_id, body.event_type, payload), browser
             )
+        if body.event_type == cv_review_service.EVENT_TYPE:
+            # Owner 2026-11-05: Job360 verifies the reviewer's evidence and stores the CHECKED confidence (M5: the
+            # MCP record_event tool calls this route function, so it inherits the check).
+            if body.corrects_event_id is not None or source is not None:
+                raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
+            payload = await cv_review_service.check(db, user, application_id, payload)
         if body.event_type in outcome_suggestions.EVENT_TYPES:
             # Feature 9: a suggestion never moves status; checks + dedupe live in the service,
             # in the ROUTE function, so the MCP record_event tool inherits them (M5).
@@ -4047,6 +4151,7 @@ async def _record_event(
         # G338: `submit_attempted` is a claim - the row lock, the 409 checks and the append are
         # one transaction, so of two sessions that both passed check_submit only one may click.
         clearance: Optional[int] = None
+        cv_on_review: Optional[dict[str, Any]] = None
         if body.event_type == "applied":
             # Owner rule 2026-10-31: an assistant cannot record applied with items open (409); the user's
             # own click is stamped with what was open.
@@ -4056,6 +4161,7 @@ async def _record_event(
             # Autonomy A8: an assistant's first `applied` spends one check_submit `submit` (a repeat is a note).
             if not await kit_service.already_applied(db, user.id, application_id):
                 clearance = await submit_clearance.required(db, user.id, application_id, actor_for(user))
+            cv_on_review = await cv_review_service.review_clearance(db, user.id, application_id, actor_for(user))
         claim: contextlib.AbstractAsyncContextManager[Any] = (
             kit_service.submit_claim(db, user, application_id)
             if body.event_type == "submit_attempted"
@@ -4076,6 +4182,7 @@ async def _record_event(
                     db, user.id, application_id, actor_for(user), clearance,
                     {"applied_event_id": int(result["event_id"])},
                 )
+            await cv_review_service.record_sent(db, user.id, application_id, cv_on_review, actor_for(user))
         if source:
             # Feature 10: this message was waiting as an unmatched inbox item - it now has its application.
             await inbox_items_service.resolve_by_event(
@@ -4123,6 +4230,14 @@ async def _record_event(
         stored_type = str(result.get("event_type") or body.event_type)
         missing = await spine.missing_applied_warnings(db, application_id, stored_type)
         warnings = [*result.get("warnings", []), *missing, *([hold_warning] if hold_warning else [])]
+        if body.event_type == "note" and source and not result.get("already_existed"):
+            from src.services.applications import auto_applied  # noqa: PLC0415
+
+            # Owner 2026-11-02: an employer's confirmation email marks the job sent by itself when it is proven.
+            if auto_applied.is_confirmation(detail) and (sent := await auto_applied.apply_if_proven(
+                db, user, application_id, int(result["event_id"]), source,
+            )):
+                result, warnings = {**result, "status": "applied"}, [*warnings, sent]
         return {**result, "warnings": warnings}
     except SpineError as exc:
         _raise(exc)
@@ -4288,7 +4403,10 @@ async def record_application_receipt(
             db, user.id, application_id, actor_for(user), cv_artifact_id=body.cv_artifact_id,
             channel=body.channel,
         )
-        return await spine.record_receipt(
+        cv_on_review = await cv_review_service.review_clearance(
+            db, user.id, application_id, actor_for(user), cv_artifact_id=body.cv_artifact_id, channel=body.channel,
+        )
+        receipt = await spine.record_receipt(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             open_at_submit=open_at_submit,
             channel=body.channel, note=body.note, confirmation=body.confirmation,
@@ -4299,6 +4417,8 @@ async def record_application_receipt(
             recipient=body.recipient, gmail_message_id=body.gmail_message_id,
             browser=which_browser.resolve(user.id, application_id, body.browser) if body.browser else None,
         )
+        await cv_review_service.record_sent(db, user.id, application_id, cv_on_review, actor_for(user))
+        return receipt
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     except SpineError as exc:
@@ -4311,7 +4431,12 @@ async def whats_new(
     since: Optional[str] = Query(None),
     after_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
+    inbox_offset: int = Query(0, ge=0),
+    inbox_stale_alerts: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    return await spine.whats_new(db, user.id, since=since, after_id=after_id, limit=limit)
+    return await spine.whats_new(
+        db, user.id, since=since, after_id=after_id, limit=limit,
+        inbox_offset=inbox_offset, inbox_stale_alerts=inbox_stale_alerts,
+    )
