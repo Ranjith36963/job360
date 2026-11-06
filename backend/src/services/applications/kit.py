@@ -52,7 +52,7 @@ from src.services.profile.answer_match import (
     superseded,
     topic_key,
 )
-from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question, not_own_link
+from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question, own_link_label
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -3027,66 +3027,99 @@ def _memory_answer(
     return {**item, "value": mapped}, ""
 
 
-# Sponsorship polarity (live run 2026-11-06): "Are you eligible to work in the UK WITHOUT requiring
-# sponsorship?" asks the opposite of needs_sponsorship, so its answer is the negation. Read word by word (no
-# regex on caller text). No negation = the question asks whether sponsorship is needed (as-is); one "without"
-# after an eligibility word, and no need-verb before it = inverted; anything else is unclear: a gap.
-_NEGATORS = frozenset({"not", "no", "never", "nor", "neither", "without", "cannot", "unable", "ineligible",
-                       "unauthorised", "unauthorized", "none"})
-_CONTRACTED = frozenset({"don", "doesn", "didn", "won", "can", "isn", "aren", "wouldn", "shouldn", "couldn"})
-_ELIGIBLE_WORDS = frozenset({"eligible", "authorised", "authorized", "allowed", "entitled", "permitted", "able",
-                             "legally", "can", "could", "right"})
-_NEED_WORDS = frozenset({"need", "needs", "needed", "needing", "require", "requires", "required", "requiring",
-                         "want", "sponsor"})
-# Words that turn "need sponsorship" round without a "not": "free of any need", "exempt from", "independently".
-_FREE_WORDS = frozenset({"free", "exempt", "independent", "independently", "without"})
-# Words that make a sentence a question about the user ("Are you...", "Will you..."): with no need-verb such a
-# question cannot be read as "do you need sponsorship". A bare label ("Visa sponsorship (UK)") has none.
-_ASKING_WORDS = frozenset({"are", "is", "am", "do", "does", "did", "can", "could", "will", "would", "shall",
-                           "should", "have", "has", "may", "you", "your"})
+# Sponsorship polarity (live run 2026-11-06, two checker rounds): "Are you eligible to work in the UK WITHOUT
+# requiring sponsorship?" asks the opposite of needs_sponsorship. ALLOW-lists only: the normalised question
+# (:func:`form_words`) must be one of the fixed wordings below - as-is (_SPONSOR_DIRECT, plus the catalog's own
+# text), negated (_SPONSOR_INVERTED); anything else is a gap. Compared whole, never with a regex on caller text.
+CTRY = "xcountryx"  # the job's own country, wherever the form names it (:func:`form_words`)
+_TWO_LETTER_PLACES = frozenset({"uk", "us", "gb"})  # other 2-letter codes are words ("in", "is", "pa")
+_DROPPED = (("now", "or", "will", "you", "in", "the", "future"), ("now", "or", "in", "the", "future"))
+
+
+def _letter_words(text: str) -> list[str]:
+    """Runs of letters, casefolded (NFKC first); everything else separates words."""
+    words, cur = [], []
+    for ch in unicodedata.normalize("NFKC", str(text or "")).casefold():
+        if ch.isalpha():
+            cur.append(ch)
+        elif cur:
+            words.append("".join(cur))
+            cur = []
+    return words + (["".join(cur)] if cur else [])
+
+
+def form_words(text: str, country: Optional[str]) -> list[str]:
+    """A form question as letters-only words: the job's country (its name or code, "the UK") as :data:`CTRY`,
+    "now or in the future" / "now or will you in the future" dropped, and a trailing "yes no" dropped."""
+    from src.services.profile.countries import to_iso2  # noqa: PLC0415
+
+    raw = _letter_words(text)
+    words: list[str] = []
+    i = 0
+    while i < len(raw):
+        for n in (3, 2, 1):
+            span = " ".join(raw[i:i + n])
+            if i + n <= len(raw) and country and (n > 1 or len(span) > 2 or span in _TWO_LETTER_PLACES) \
+                    and to_iso2(span, strict=True) == country:
+                if words and words[-1] == "the":
+                    words.pop()
+                words.append(CTRY)
+                i += n
+                break
+        else:
+            words.append(raw[i])
+            i += 1
+    for drop in _DROPPED:
+        j = 0
+        while j + len(drop) <= len(words):
+            if tuple(words[j:j + len(drop)]) == drop:
+                del words[j:j + len(drop)]
+            else:
+                j += 1
+    if words[-3:] == ["yes", "or", "no"]:
+        del words[-3:]
+    elif words[-2:] == ["yes", "no"]:
+        del words[-2:]
+    return words
+
+
+def _wordings(*parts: tuple[str, ...]) -> frozenset[str]:
+    """Every wording made by picking one option from each part (an option may be "")."""
+    out = [""]
+    for options in parts:
+        out = [f"{a} {b}" for a in out for b in options]
+    return frozenset(" ".join(w.split()) for w in out)
+
+
+_FOR = ("", f"to work in {CTRY}", f"in {CTRY}", "for this role", "for this position", "for this job",
+        "for this remote role")
+_SPONSOR_DIRECT = frozenset({
+    "sponsorship", "visa sponsorship", "sponsorship required", "sponsorship needed", "visa sponsorship required",
+    f"visa sponsorship {CTRY}", f"sponsorship required for {CTRY}",
+    # Greenhouse's standard US wording ("... for employment visa status (e.g. H-1B visa status)?").
+    "will you require sponsorship for employment visa status e g h b visa status",
+}) | _wordings(("do", "will", "would"), ("you",), ("need", "require"), ("", "visa"), ("sponsorship",), _FOR)
+_SPONSOR_INVERTED = _wordings(
+    ("are you eligible to", "are you authorised to", "are you authorized to", "can you"),
+    ("work", "live and work"), (f"in {CTRY} without",), ("", "requiring", "needing"), ("", "visa", "employer"),
+    ("sponsorship",),
+)
 POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
                 "clear: ask the user, never guess")
 
 
-def _either_or(words: list[str]) -> bool:
-    """An "or" that offers two readings: not "now or in the future" / "now or will you in the future", not
-    "yes or no"."""
-    for i, w in enumerate(words):
-        if w != "or":
-            continue
-        prev, nxt = words[i - 1] if i else "", words[i + 1] if i + 1 < len(words) else ""
-        if (prev == "now" and nxt in ("in", "will")) or (prev == "yes" and nxt == "no"):
-            continue
-        return True
-    return False
+def _sponsorship_reading(text: str, country: Optional[str], keyed: bool = False) -> Optional[str]:
+    """``"direct"``, ``"inverted"`` or ``None`` (a gap): the normalised wording is on one allow-list. A run that
+    named the kit key with a placeholder for a question (no word of three letters) keeps the key's reading."""
+    from src.services.profile import common_questions  # noqa: PLC0415
 
-
-def _sponsorship_reading(text: str) -> Optional[str]:
-    """``"direct"``, ``"inverted"`` or ``None`` (unclear) for a sponsorship question. Direct: a need-verb and no
-    negation or free/exempt word (or a bare label with neither). Inverted: one "without", after an eligibility
-    word, with a need-verb only as the word "without" governs ("without requiring"). Either/or = unclear."""
-    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
-
-    words = normalize_question(text).split()
-    if _either_or(words):
-        return None
-    negs = []
-    for i, w in enumerate(words):
-        if w == "no" and "yes" in words[max(0, i - 2):i]:
-            continue  # the "Yes/No" a label carries, not a negation
-        if w in _NEGATORS or (w == "t" and i > 0 and words[i - 1] in _CONTRACTED):
-            negs.append(i)
-    seen = set(words)
-    needs = [i for i, w in enumerate(words) if w in _NEED_WORDS]
-    if not negs and not seen & _FREE_WORDS:
-        if needs or not seen & (_ASKING_WORDS | _ELIGIBLE_WORDS):
-            return "direct"
-        return None
-    if len(negs) == 1 and words[negs[0]] == "without" and not (seen - {"without"}) & _FREE_WORDS:
-        at = negs[0]
-        if set(words[:at]) & _ELIGIBLE_WORDS and all(i == at + 1 for i in needs):
-            return "inverted"
-    return None
+    words = form_words(text, country)
+    said = " ".join(words)
+    catalog = {" ".join(form_words(str(q["question"]).replace("{country}", CTRY), country))
+               for q in common_questions.catalog() if str(q.get("kit_key") or "").endswith(".needs_sponsorship")}
+    if said in _SPONSOR_DIRECT or said in catalog or (keyed and not any(len(w) > 2 for w in words)):
+        return "direct"
+    return "inverted" if said in _SPONSOR_INVERTED else None
 
 
 def _yes_no(value: Any) -> Optional[str]:
@@ -3095,9 +3128,11 @@ def _yes_no(value: Any) -> Optional[str]:
     return {"yes": "Yes", "no": "No"}.get(str(value).strip().casefold())
 
 
-def _sponsorship_polarity(item: dict[str, Any], text: str) -> tuple[Optional[dict[str, Any]], str]:
+def _sponsorship_polarity(
+    item: dict[str, Any], text: str, country: Optional[str], keyed: bool,
+) -> tuple[Optional[dict[str, Any]], str]:
     """The ``needs_sponsorship`` answer read for THIS wording: as-is, negated, or a gap (:data:`POLARITY_WHY`)."""
-    reading = _sponsorship_reading(text)
+    reading = _sponsorship_reading(text, country, keyed)
     if reading == "direct":
         return item, ""
     said = _yes_no(item["value"])
@@ -3128,6 +3163,10 @@ _PERIOD_WORDS = {
     "annually": "year", "year": "year", "yearly": "year", "yr": "year",
 }
 _SAVED_PERIOD = {"year": "year", "annual": "year", "yearly": "year", "month": "month", "monthly": "month"}
+_PLAIN_PAY_WORDS = frozenset({
+    "salary", "pay", "compensation", "desired", "expected", "expectation", "expectations", "your", "what", "is",
+    "are", "annual", "annually", "yearly", "per", "year", "annum", "pa", "gross", "base", "in", "range",
+})
 _NOT_BASE_PAY = frozenset({"equity", "bonus", "bonuses", "total", "ote", "k", "thousand", "thousands", "commission",
                            "stock", "options", "lakh", "lakhs", "lpa"})
 
@@ -3139,7 +3178,7 @@ def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
     from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
 
     words = set(normalize_question(text).split())
-    odd =sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
+    odd = sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
     if odd:
         return f"the form asks for more than the saved base pay range ({', '.join(odd)}): ask the user"
     asked_periods = {_PERIOD_WORDS[w] for w in words if w in _PERIOD_WORDS}
@@ -3161,11 +3200,18 @@ def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
     asked += [codes for sym, codes in _CURRENCY_SYMBOLS.items() if sym in text]
     asked += [_DOLLARS for w in ("dollar", "dollars") if w in words]
     have = str(saved.get("currency") or "").upper() if isinstance(saved, dict) else ""
-    if not asked or (have and all(have in codes for codes in asked)):
-        return ""
-    want = ", ".join(sorted(set().union(*asked)))
-    return (f"the form asks for pay in {want}; Memory holds {have or 'no currency'} for {country or 'this job'} "
-            "and Job360 never converts: ask the user")
+    if asked and not (have and all(have in codes for codes in asked)):
+        want = ", ".join(sorted(set().union(*asked)))
+        return (f"the form asks for pay in {want}; Memory holds {have or 'no currency'} for "
+                f"{country or 'this job'} and Job360 never converts: ask the user")
+    # ALLOW-list (checker round 2): beside the pay word, only words of a plain expected-pay question.
+    allowed = _PLAIN_PAY_WORDS | {CTRY} | {w for w, codes in _CURRENCY_WORDS.items() if have in codes}
+    allowed |= {"dollar", "dollars"} if have in _DOLLARS else set()
+    allowed |= {"month", "monthly"} if have_period == "month" else set()
+    extra = sorted({w for w in form_words(text, country) if w not in allowed})
+    if extra:
+        return (f"the form asks more than a plain expected pay range ({', '.join(extra)}): ask the user")
+    return ""
 
 
 def form_check(
@@ -3221,6 +3267,8 @@ def form_check(
         matched_by = "key"
         why = ""
         family, template = memory_question(key, text)
+        if family and template is None and _sponsorship_reading(text, country) is not None:
+            template = "right_to_work.{cc}.needs_sponsorship"  # an allow-listed sponsorship wording names the fact
         own = by_key.get(key) if key is not None else None
         if own is not None and (not family or own.get("source") != "approved_text"):
             item = own  # the run named a kit item: Memory's own key (or, outside Memory, a saved answer's)
@@ -3261,10 +3309,12 @@ def form_check(
         if not family and _contradicted(item):
             item, why = None, AMBIGUOUS
         if item is not None and str(item["key"]) in ("contact.linkedin_url", "contact.github_url") \
-                and not_own_link(text):
-            item, why = None, "this asks for someone else's link or a handle, not your own URL: ask the user"
+                and not own_link_label(text):
+            item, why = None, ("not a plain ask for your own link (maybe someone else's link, a handle or another "
+                               "page on the site): ask the user")
         if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
-            item, why = _sponsorship_polarity(item, text)  # "eligible ... WITHOUT sponsorship" = the negation
+            # "eligible ... WITHOUT sponsorship" = the negation; only allow-listed wordings are answered
+            item, why = _sponsorship_polarity(item, text, country, key is not None)
         pay = str(item["key"] if item is not None else template or "").startswith("salary.")
         if pay:
             sensitive = True

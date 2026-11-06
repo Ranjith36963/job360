@@ -83,25 +83,22 @@ _LINK_SITES = {"linkedin": "contact.linkedin_url", "github": "contact.github_url
 _LINK_WORDS = frozenset({"url", "link", "profile", "page", "address"})
 _OWN_LINK_WORDS = frozenset({"your", "my", "to", "a", "the", "please", "share", "provide", "enter", "add", "paste",
                              "what", "is", "public", "full", "optional"})
-# Someone else's link, or a handle where a full URL is not wanted: never the user's saved URL (a gap).
-NOT_OWN_LINK_WORDS = frozenset({"referrer", "referred", "reference", "manager", "supervisor", "company", "employer",
-                                "recruiter", "colleague", "friend", "team", "username", "handle"})
 
 
 def _contact_link(words: set[str]) -> Optional[str]:
-    """The contact URL key a label asking for the user's own link names (:data:`_LINK_SITES`), else ``None``."""
+    """The contact URL key a label asking for the user's own link names (:data:`_LINK_SITES`), else ``None``.
+    Anything off the allow-list (a referrer's link, a username, a LinkedIn post or certificate) is ``None``."""
     sites = {_LINK_SITES[w] for w in words if w in _LINK_SITES}
     if len(sites) != 1 or words - set(_LINK_SITES) - _LINK_WORDS - _OWN_LINK_WORDS:
         return None
     return next(iter(sites)) if len(words) == 1 or words & _LINK_WORDS else None
 
 
-def not_own_link(question: str) -> bool:
-    """True when a question about a LinkedIn / GitHub link asks for someone else's, or for a handle."""
+def own_link_label(question: str) -> bool:
+    """True when the question is an allow-listed ask for the user's own LinkedIn or GitHub link."""
     from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
 
-    words = set(normalize_question(question).split())
-    return bool(words & set(_LINK_SITES)) and bool(words & NOT_OWN_LINK_WORDS)
+    return _contact_link(set(normalize_question(question).split())) is not None
 
 
 def _signals(words: set[str]) -> set[str]:
@@ -139,8 +136,8 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
 
     k = (key or "").strip()
     words = set(normalize_question(question).split())
-    if not k and not_own_link(question):
-        return False, None  # a referrer's LinkedIn, a GitHub username: never the user's saved URL
+    if not k and words & set(_LINK_SITES) and _contact_link(words) is None:
+        return False, None  # names the site but is no allow-listed ask for the user's own link (catalog too)
     if words & _PAY_WORDS:
         words.add("salary")  # "Desired pay" names the salary field (:data:`_PAY_WORDS`)
     rows = [q for q in common_questions.catalog() if q.get("kit_key")]

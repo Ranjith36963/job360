@@ -215,3 +215,61 @@ def test_free_or_either_or_sponsorship_wordings_are_a_gap(question):
     answered, missing = _one(_profile(False), question)
     assert answered is None, answered
     assert "polarity" in missing["why"]
+
+
+# ── Checker round 2 (head 52c309299): allow-lists, not deny-lists ──
+
+@pytest.mark.parametrize("question", [
+    "Sponsorship unnecessary", "Sponsorship irrelevant", "Sponsorship waived", "Sponsorship nil",
+    "Sponsorship unneeded", "Sponsorship N/A", "Zero sponsorship", "Require sponsorship? Unnecessary",
+    "Does the role need sponsorship?", "Can the company sponsor you?", "Would you like us to sponsor you?",
+    "Are you willing to require sponsorship?",
+])
+def test_sponsorship_wordings_off_the_allow_list_are_a_gap(question):
+    for needs in (False, True):
+        answered, missing = _one(_profile(needs), question)
+        assert answered is None, (question, needs, answered)
+        assert missing is not None
+
+
+@pytest.mark.parametrize("question,expected", [
+    ("Sponsorship required", "No"), ("Visa sponsorship (UK)", "No"),
+    ("Do you need visa sponsorship to work in the United Kingdom?", "No"),
+    ("Are you authorised to work in the UK without needing visa sponsorship?", "Yes"),
+])
+def test_allow_listed_sponsorship_wordings_are_answered(question, expected):
+    answered, missing = _one(_profile(False), question)
+    assert missing is None, missing
+    assert answered["value"] == expected
+
+
+@pytest.mark.parametrize("question", [
+    "Desired pay fortnightly", "Desired biweekly pay", "Desired pay per 4 weeks", "Desired pay per h",
+    "Expected salary in lacs", "Expected salary in millions", "Desired pay in cents", "Desired pay in pence",
+    "Expected salary incl. benefits", "Expected salary including pension", "Expected compensation package",
+    "Desired pay net of tax",
+])
+def test_pay_wordings_off_the_allow_list_are_a_gap(question):
+    answered, missing = _one(_profile(), question)
+    assert answered is None, answered
+    assert "ask the user" in missing["why"]
+
+
+@pytest.mark.parametrize("question", [
+    "Expected gross base salary range", "What is your expected annual salary in the UK?", "Salary (GBP pa)",
+])
+def test_allow_listed_pay_wordings_are_answered(question):
+    answered, missing = _one(_profile(), question)
+    assert missing is None, missing
+    assert answered["value"] == "40000-45000 GBP year"
+
+
+@pytest.mark.parametrize("question", [
+    "LinkedIn Recommendation", "LinkedIn Learning certificate", "LinkedIn post", "LinkedIn Group",
+    "LinkedIn job posting", "LinkedIn Premium profile URL",
+])
+def test_other_linkedin_things_are_never_the_users_profile_url(question):
+    for extra in ({}, {"key": "contact.linkedin_url"}):
+        answered, missing = _one(_profile(), question, **extra)
+        assert answered is None, (question, extra, answered)
+        assert missing is not None
