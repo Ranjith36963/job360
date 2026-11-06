@@ -2997,7 +2997,7 @@ _ONSITE_YES_NO = {"yes": "Yes", "no": "No"}
 # Plain own-name / own-phone labels (:func:`ask_once.contact_label`): a run naming one of these keys for any
 # other label ("Referrer first name", "Emergency contact phone") gets a gap, never the user's own value.
 _OWN_CONTACT_KEYS = frozenset({"contact.legal_first_name", "contact.legal_last_name", "contact.preferred_name",
-                               "contact.phone", DIAL_CODE})
+                               "contact.phone", "contact.email", DIAL_CODE})
 
 
 # Real country calling codes (ITU E.164) for the countries Job360 users apply in. The saved number's prefix must
@@ -3014,9 +3014,10 @@ _CALLING_CODES = {
 
 def _dial_code(phone: Optional[dict[str, Any]], residence: Optional[dict[str, Any]] = None
                ) -> Optional[dict[str, Any]]:
-    """The saved number's own dial prefix ("+44 7700 900123" -> "+44") as a kit item, else ``None``: the
-    number must start with "+" and 1-3 digits followed by a separator, the digits a real calling code
-    (:data:`_CALLING_CODES`) and, with a saved residence country on that list, that country's. Never guessed."""
+    """The saved number's own dial prefix ("+44 7700 900123" -> "+44") as a kit item, else ``None``. With a
+    saved residence country on :data:`_CALLING_CODES`, the number must start "+" and exactly that country's code
+    ("+447442564327", residence GB -> "+44"; no separator needed, the country settles the split). With none,
+    it must start "+" and 1-3 digits followed by a separator, the digits a real calling code. Never guessed."""
     from src.services.profile.countries import to_iso2  # noqa: PLC0415
 
     if phone is None or not isinstance(phone.get("value"), str):
@@ -3024,6 +3025,13 @@ def _dial_code(phone: Optional[dict[str, Any]], residence: Optional[dict[str, An
     number = phone["value"].strip()
     if not number.startswith("+"):
         return None
+    home = to_iso2(str(residence.get("value") or ""), strict=True) if residence is not None else None
+    if home in _CALLING_CODES:
+        code = _CALLING_CODES[home]
+        after = number[1 + len(code):]
+        if number[1:1 + len(code)] != code or not after or not (after[0].isdigit() or after[0] in " -.("):
+            return None  # the number's prefix is not the residence country's own: ask, never pick one
+        return {**phone, "key": DIAL_CODE, "value": f"+{code}"}
     digits = ""
     for ch in number[1:]:
         if not ch.isdigit():
@@ -3032,9 +3040,6 @@ def _dial_code(phone: Optional[dict[str, Any]], residence: Optional[dict[str, An
     rest = number[1 + len(digits):]
     if not 1 <= len(digits) <= 3 or not rest or rest[0] not in " -.(" or digits not in _CALLING_CODES.values():
         return None
-    home = to_iso2(str(residence.get("value") or ""), strict=True) if residence is not None else None
-    if home in _CALLING_CODES and _CALLING_CODES[home] != digits:
-        return None  # the number's prefix is not the residence country's own: ask, never pick one
     return {**phone, "key": DIAL_CODE, "value": f"+{digits}"}
 
 
@@ -3196,14 +3201,40 @@ def _tokens(text: str, separators: str = "") -> list[str]:
     return out
 
 
+# Zema's live wording (PC browser 2026-11-06): "(for example, H-1B or another employment visa status)". Only this
+# exact closing phrase is allowed after the visa names; nothing looser.
+_ANOTHER_VISA = ("or", "another", "employment", "visa", "status")
+# A form may shorten the job company ("Zema Global" for "Zema Global Data Corporation"): the words it drops must
+# all be corporate filler, never a word that names another business ("Acme" for "Acme Robotics Solutions").
+_COMPANY_FILLER = frozenset({
+    "data", "corporation", "corp", "company", "co", "group", "holdings", "technologies", "technology", "tech",
+    "solutions", "systems", "services", "international", "global", "labs", "software", "digital", "ai", "inc",
+    "ltd", "llc", "plc", "gmbh", "limited",
+})
+
+
+def _same_company(said: str, company_key: str) -> bool:
+    """True when the form's company (rule-1 key, as words) is the job's, or a LEADING prefix of it - at least two
+    words, or one of four letters or more - with every dropped job word in :data:`_COMPANY_FILLER`."""
+    form, job = normalized_company_key(said).split(), company_key.split()
+    if not form or len(form) > len(job) or job[:len(form)] != form:
+        return False
+    if form == job:
+        return True
+    long_enough = len(form) >= 2 or len(form[0]) >= 4
+    return long_enough and all(w in _COMPANY_FILLER for w in job[len(form):])
+
+
 def _visa_example(inside: str) -> bool:
     """True for "for example, H-1B, TN or E-3 visa status": an example head, then only :data:`_VISA_NAMES` (at
-    least one) and :data:`_EXAMPLE_JOINERS`."""
+    least one) and :data:`_EXAMPLE_JOINERS`, optionally closed by exactly :data:`_ANOTHER_VISA` (Zema, live)."""
     low = [t.casefold() for t in _tokens(inside, ",/")]
     head = next((h for h in _EXAMPLE_HEADS if tuple(low[:len(h)]) == h), None)
     if head is None:
         return False
     rest = [t.replace("-", "") for t in low[len(head):]]
+    if tuple(rest[-len(_ANOTHER_VISA):]) == _ANOTHER_VISA:
+        rest = rest[:-len(_ANOTHER_VISA)]
     named, i = False, 0
     while i < len(rest):
         if rest[i:i + 2] == ["green", "card"]:
@@ -3238,7 +3269,7 @@ def _employer_sponsorship(text: str, country: Optional[str], company_key: Option
     if j is None or j == i + 1 or tuple(form_words(" ".join(toks[:i + 1]), country)) != _EMPLOYER_HEAD:
         return False
     return (" ".join(form_words(" ".join(toks[j:]), country)) in _EMPLOYER_TAILS
-            and normalized_company_key(" ".join(toks[i + 1:j])) == company_key)
+            and _same_company(" ".join(toks[i + 1:j]), company_key))
 
 
 POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
