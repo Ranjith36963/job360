@@ -249,7 +249,7 @@ async def report_wrong_fact_route(
         raise HTTPException(status_code=409, detail="Reporting a wrong fact arrives with autonomy step 4.")
     await sent_alone.report_cv_wrong_fact(db, user.id, item)
     get_audit_logger().info("cv_wrong_fact", extra={
-        "event": "cv_wrong_fact", "user_id": safe_log_value(user.id), "item_id": item_id,
-        "application_id": item["application_id"], "cv_auto_approve": False, "result": "ok",
+        "event": "cv_wrong_fact", "user_id": safe_log_value(user.id), "item_id": safe_log_value(item_id),
+        "application_id": safe_log_value(item["application_id"]), "cv_auto_approve": False, "result": "ok",
     })
     return Response(status_code=204)
