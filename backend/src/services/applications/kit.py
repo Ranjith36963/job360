@@ -52,7 +52,7 @@ from src.services.profile.answer_match import (
     superseded,
     topic_key,
 )
-from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question, own_link_label
+from src.services.profile.ask_once import DIAL_CODE, MEMORY_BLOCKS, contact_label, memory_question, own_link_label
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -2994,6 +2994,31 @@ _AUTH_YES_NO = {"citizen": "Yes", "permanent_resident": "Yes", "visa": "Yes", "n
 _ONSITE_YES_NO = {"yes": "Yes", "no": "No"}
 
 
+# Plain own-name / own-phone labels (:func:`ask_once.contact_label`): a run naming one of these keys for any
+# other label ("Referrer first name", "Emergency contact phone") gets a gap, never the user's own value.
+_OWN_CONTACT_KEYS = frozenset({"contact.legal_first_name", "contact.legal_last_name", "contact.preferred_name",
+                               "contact.phone", DIAL_CODE})
+
+
+def _dial_code(phone: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """The saved number's own dial prefix ("+44 7700 900123" -> "+44") as a kit item, else ``None``: the
+    number must start with "+" and 1-3 digits followed by a separator. Never looked up, never guessed."""
+    if phone is None or not isinstance(phone.get("value"), str):
+        return None
+    number = phone["value"].strip()
+    if not number.startswith("+"):
+        return None
+    digits = ""
+    for ch in number[1:]:
+        if not ch.isdigit():
+            break
+        digits += ch
+    rest = number[1 + len(digits):]
+    if not 1 <= len(digits) <= 3 or not rest or rest[0] not in " -.(":
+        return None
+    return {**phone, "key": DIAL_CODE, "value": f"+{digits}"}
+
+
 def _memory_answer(
     by_key: dict[str, dict[str, Any]], template: Optional[str], country: Optional[str],
 ) -> tuple[Optional[dict[str, Any]], str]:
@@ -3106,7 +3131,7 @@ def _wordings(*parts: tuple[str, ...]) -> frozenset[str]:
 
 
 _FOR = ("", f"to work in {CTRY}", f"in {CTRY}", "for this role", "for this position", "for this job",
-        "for this remote role")
+        "for this remote role", "for employment")
 _SPONSOR_DIRECT = frozenset({
     "sponsorship", "visa sponsorship", "sponsorship required", "sponsorship needed", "visa sponsorship required",
     f"visa sponsorship {CTRY}", f"sponsorship required for {CTRY}",
@@ -3118,6 +3143,43 @@ _SPONSOR_INVERTED = _wordings(
     ("work", "live and work"), (f"in {CTRY} without",), ("", "requiring", "needing"), ("", "visa", "employer"),
     ("sponsorship",),
 )
+# Greenhouse's employer wording (PC browser 2026-11-06): "Will you now or in the future require sponsorship from
+# <company> to obtain, maintain or extend employment based work authorization (for example, H-1B ...)". In THIS
+# shape only, the company's name and one closing "(for example ...)" are noise; anything else stays a gap.
+_EMPLOYER_HEAD = ("will", "you", "require", "sponsorship", "from")
+_EMPLOYER_TAILS = frozenset({
+    f"to {verbs} employment based work {auth}"
+    for verbs in ("obtain maintain or extend", "obtain maintain and or extend", "obtain or maintain or extend")
+    for auth in ("authorization", "authorisation")
+})
+_EXAMPLE_HEADS = (("for", "example"), ("e", "g"), ("eg",), ("such", "as"), ("including",))
+_NEGATIONS = frozenset({"not", "no", "never", "without", "nor", "if", "yes", "unless"})
+_NOT_A_NAME = _NEGATIONS | {"or", "and", "you"}
+
+
+def _employer_sponsorship(text: str, country: Optional[str]) -> bool:
+    """True for :data:`_EMPLOYER_HEAD` + a company name (1-6 words) + one of :data:`_EMPLOYER_TAILS`, then
+    nothing but an optional closing parenthetical that starts with an example word (:data:`_EXAMPLE_HEADS`)."""
+    main = str(text or "").strip().rstrip("?.! ").strip()
+    if main.endswith(")"):
+        cut = main.rfind("(")
+        if cut <= 0:
+            return False
+        example = [w.casefold() for w in _letter_runs(main[cut + 1:-1])]  # visa names ("TN") are no places here
+        if not any(tuple(example[:len(h)]) == h for h in _EXAMPLE_HEADS) or set(example) & _NEGATIONS:
+            return False
+        main = main[:cut]
+    words = form_words(main, country)
+    if tuple(words[:len(_EMPLOYER_HEAD)]) != _EMPLOYER_HEAD:
+        return False
+    rest = words[len(_EMPLOYER_HEAD):]
+    for size in range(1, 7):
+        name, tail = rest[:size], " ".join(rest[size:])
+        if tail in _EMPLOYER_TAILS:
+            return len(name) == size and not set(name) & _NOT_A_NAME
+    return False
+
+
 POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
                 "clear: ask the user, never guess")
 
@@ -3127,6 +3189,8 @@ def _sponsorship_reading(text: str, country: Optional[str], keyed: bool = False)
     named the kit key with a placeholder for a question (no word of three letters) keeps the key's reading."""
     from src.services.profile import answer_to_memory, common_questions  # noqa: PLC0415
 
+    if _employer_sponsorship(text, country):
+        return "direct"  # its "(for example, H-1B, TN ...)" names visas, not places: checked before FOREIGN
     words = form_words(text, country)
     if words == [FOREIGN]:
         return None  # names another country than the job's: never read as this job's sponsorship question
@@ -3190,6 +3254,38 @@ _NOT_BASE_PAY = frozenset({"equity", "bonus", "bonuses", "total", "ote", "k", "t
                            "stock", "options", "lakh", "lakhs", "lpa"})
 
 
+# Base pay spelled out (PC browser 2026-11-06): "Desired Base Salary (Please Include the Amount and Currency.
+# Excluding Bonus, Commission, and Benefits)". An excluding phrase followed only by these words says the figure
+# IS the base range, so the clause is dropped; "including / incl. / plus / with" them stays a gap.
+_PAY_NOISE = ("please", "include", "the", "amount", "and", "currency")
+_EXCLUDING = (("excluding",), ("excl",), ("not", "including"))
+_EXCLUDED = frozenset({"bonus", "bonuses", "commission", "commissions", "benefits", "equity"})
+
+
+def _drop_pay_noise(words: list[str]) -> list[str]:
+    """``words`` without :data:`_PAY_NOISE` and without each excluding clause (:data:`_EXCLUDING` then only
+    :data:`_EXCLUDED` words joined by "and" / "or"). A clause excluding nothing on the list is kept."""
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        if tuple(words[i:i + len(_PAY_NOISE)]) == _PAY_NOISE:
+            i += len(_PAY_NOISE)
+            continue
+        head = next((h for h in _EXCLUDING if tuple(words[i:i + len(h)]) == h), None)
+        if head is not None:
+            j = i + len(head)
+            while j < len(words) and (words[j] in _EXCLUDED or words[j] in ("and", "or")):
+                j += 1
+            while j > i + len(head) and words[j - 1] in ("and", "or"):
+                j -= 1  # a trailing "and" belongs to what follows
+            if any(w in _EXCLUDED for w in words[i + len(head):j]):
+                i = j
+                continue
+        out.append(words[i])
+        i += 1
+    return out
+
+
 def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
     """Why a salary answer cannot be sent to this wording, else ``""``: another currency, another period (none
     named = a year), or not the base range (equity, bonus, total, k, a day rate). A plain value (no record) is
@@ -3198,7 +3294,7 @@ def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
 
     if form_words(text, country) == [FOREIGN]:
         return "the form asks about pay in another country than this job's: ask the user"
-    words = set(normalize_question(text).split())
+    words = set(_drop_pay_noise(normalize_question(text).split()))
     odd = sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
     if odd:
         return f"the form asks for more than the saved base pay range ({', '.join(odd)}): ask the user"
@@ -3229,7 +3325,7 @@ def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
     allowed = _PLAIN_PAY_WORDS | {CTRY} | {w for w, codes in _CURRENCY_WORDS.items() if have in codes}
     allowed |= {"dollar", "dollars"} if have in _DOLLARS else set()
     allowed |= {"month", "monthly"} if have_period == "month" else set()
-    extra = sorted({w for w in form_words(text, country) if w not in allowed})
+    extra = sorted({w for w in _drop_pay_noise(form_words(text, country)) if w not in allowed})
     if extra:
         return (f"the form asks more than a plain expected pay range ({', '.join(extra)}): ask the user")
     return ""
@@ -3269,6 +3365,9 @@ def form_check(
 
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
+    dial = _dial_code(by_key.get("contact.phone"))
+    if dial is not None:
+        by_key[DIAL_CODE] = dial
     answers_by_user = any(i.get("by_user") for i in answers.get("approved_text", []))
     approved = {
         _norm_question(i["key"]): i for i in answers.get("approved_text", [])
@@ -3288,6 +3387,8 @@ def form_check(
         matched_by = "key"
         why = ""
         family, template = memory_question(key, text)
+        if key is None and contact_label(text) == DIAL_CODE:
+            family, template = True, DIAL_CODE  # "Country code": only the saved number's own "+44", never a guess
         if family and template is None and _sponsorship_reading(text, country) is not None:
             template = "right_to_work.{cc}.needs_sponsorship"  # an allow-listed sponsorship wording names the fact
         own = by_key.get(key) if key is not None else None
@@ -3333,6 +3434,9 @@ def form_check(
                 and not own_link_label(text):
             item, why = None, ("not a plain ask for your own link (maybe someone else's link, a handle or another "
                                "page on the site): ask the user")
+        if item is not None and str(item["key"]) in _OWN_CONTACT_KEYS and contact_label(text) != str(item["key"]):
+            item, why = None, ("not a plain ask for your own name or phone (maybe someone else's, or a field the "
+                               "saved one does not answer): ask the user")
         if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
             # "eligible ... WITHOUT sponsorship" = the negation; only allow-listed wordings are answered
             item, why = _sponsorship_polarity(item, text, country, key is not None)
