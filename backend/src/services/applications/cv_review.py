@@ -163,17 +163,68 @@ def _label(text: str) -> str:
     return "".join(c for c in text.strip() if c.isalnum() or c in " ._-")[:REVIEWER_MAX]
 
 
-async def review_state(db: JobDatabase, user_id: str, application_id: int, cv_id: Optional[int], cv_sha: str) -> str:
-    """``strong`` / ``weak``: the newest stored review of exactly this CV (id + sha); ``none`` without one."""
+async def newest_review(
+    db: JobDatabase, user_id: str, application_id: int, cv_id: Optional[int], cv_sha: str,
+) -> Optional[dict[str, Any]]:
+    """The newest stored ``cv_reviewed`` event of exactly this CV (id + sha), or ``None``."""
     from src.services.applications import kit  # noqa: PLC0415 - kit imports this module lazily
 
     if cv_id is None:
-        return NONE
+        return None
     for ev in await kit._events(db, user_id, application_id, (EVENT_TYPE,)):
         p = ev["payload"]
         if p.get("artifact_id") == cv_id and p.get("sha256") == cv_sha:
-            return STRONG if p.get("confidence") == STRONG else WEAK
-    return NONE
+            return ev
+    return None
+
+
+async def review_state(db: JobDatabase, user_id: str, application_id: int, cv_id: Optional[int], cv_sha: str) -> str:
+    """``strong`` / ``weak``: the newest stored review of exactly this CV (id + sha); ``none`` without one."""
+    ev = await newest_review(db, user_id, application_id, cv_id, cv_sha)
+    if ev is None:
+        return NONE
+    return STRONG if ev["payload"].get("confidence") == STRONG else WEAK
+
+
+# Owner 2026-11-06, the safety net before autonomy: a CV that went out on a strong review instead of the user's
+# look is recorded once, right after an assistant's first ``applied`` is written, and listed on Sent on its own
+# (services/applications/sent_alone.py). The user's Wrong fact on it is recorded too. Both SERVER-WRITTEN.
+SENT_EVENT, WRONG_FACT_EVENT = "cv_sent_on_review", "cv_wrong_fact"
+SERVER_ONLY_EVENTS = frozenset({SENT_EVENT, WRONG_FACT_EVENT})
+
+
+async def review_clearance(
+    db: JobDatabase, user_id: str, application_id: int, actor: str, *, cv_artifact_id: Optional[int] = None,
+    channel: str = "",
+) -> Optional[dict[str, Any]]:
+    """Read BEFORE an assistant's first ``applied`` is written: the :data:`SENT_EVENT` payload to record once it
+    is, when the CV the receipt freezes was cleared by a strong review alone (no ``cv_seen`` / ``submit_approved``
+    of it), else ``None``. The user's own web click and a repeat ``applied`` never count."""
+    from src.services.applications import kit  # noqa: PLC0415 - kit imports this module lazily
+
+    if actor == "web" or await kit.already_applied(db, user_id, application_id):
+        return None
+    who, review = await kit.cv_cleared_by(db, user_id, application_id, cv_artifact_id, channel)
+    if who != "review" or review is None:
+        return None
+    p = review["payload"]
+    return {"artifact_id": p.get("artifact_id"), "sha256": p.get("sha256"), "review_event_id": int(review["id"])}
+
+
+async def record_sent(
+    db: JobDatabase, user_id: str, application_id: int, clearance: Optional[dict[str, Any]], actor: str,
+) -> None:
+    """Append the :data:`SENT_EVENT` that :func:`review_clearance` found (nothing when it found none)."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    from src.services.applications import spine  # noqa: PLC0415
+
+    if clearance is None:
+        return
+    await spine.append_event(
+        db, user_id=user_id, application_id=application_id, event_type=SENT_EVENT, payload=dict(clearance),
+        occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=actor,
+    )
 
 
 async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]) -> dict[str, Any]:

@@ -417,6 +417,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # lines, reviewer}. Job360 VERIFIES it and stores the checked confidence, codes and counts, never the text
     # (services/applications/cv_review.py).
     "cv_reviewed",
+    # Owner 2026-11-06 (Sent on its own): a CV that went out on a strong review instead of the user's look
+    # {artifact_id, sha256, review_event_id}, and the user's Wrong fact on one {sent_event_id}. SERVER-WRITTEN
+    # (record_event refuses both; services/applications/cv_review.py, sent_alone.py).
+    "cv_sent_on_review", "cv_wrong_fact",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
