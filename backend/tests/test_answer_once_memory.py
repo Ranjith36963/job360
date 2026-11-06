@@ -1,0 +1,208 @@
+"""Answer once (owner 2026-11-06): a Memory question answered on Needs you is saved into that country's Memory.
+
+The user's own "remember" press on a job's ask writes a Memory-family row (sponsorship, salary...) into Memory
+for THAT job's country, in the field's real shape; a different value already in Memory is a conflict (nothing
+written); an unclear answer and a per-job row are not saved; an assistant (bearer token, MCP answer_ask)
+never writes Memory. Real HTTP doors and VALUE asserts (rule #21). Helpers are local to this module.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+SPONSOR = {"key": "sponsorship.de.yes_no", "question": "Do you need sponsorship to work in Germany?"}
+PAY = {"key": "salary.de", "question": "What are your salary expectations?"}
+
+
+def _agent(token: str) -> AsyncClient:
+    from src.api.main import app
+
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                       headers={"Authorization": f"Bearer {token}"})
+
+
+async def _token(web: AsyncClient) -> str:
+    resp = await web.post("/api/tokens", json={"name": "apply-routine"})
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()["token"])
+
+
+async def _bring(web: AsyncClient, company: str, country: str = "DE") -> int:
+    resp = await web.post("/api/jobs/bring", json={
+        "title": "Data Engineer", "company": company, "location": "Berlin", "country": country,
+        "apply_url": f"https://{company.lower()}.example/jobs/1", "description": "Build the pipelines. " * 8})
+    assert resp.status_code == 200, resp.text
+    return int(resp.json()["application_id"])
+
+
+async def _ask(agent: AsyncClient, app_id: int, *rows: dict[str, str]) -> int:
+    qs = [{**r, "answer": "", "source": "not_known"} for r in rows]
+    resp = await agent.post("/api/asks", json={"application_id": app_id, "question": "Form answers",
+                                               "kind": "question", "questions": qs})
+    assert resp.status_code == 201, resp.text
+    return int(resp.json()["id"])
+
+
+async def _remember(web: AsyncClient, ask_id: int, answers: dict[str, str]) -> dict[str, Any]:
+    resp = await web.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": answers})
+    assert resp.status_code == 200, resp.text
+    return dict(resp.json())
+
+
+def _profile(user_id: str) -> Any:
+    from src.services.profile.storage import load_profile
+
+    return load_profile(user_id)
+
+
+def _de_rtw(user_id: str) -> Any:
+    p = _profile(user_id)
+    rows = ((p.user_info.right_to_work or {}).get("countries") or []) if p else []
+    return next((r for r in rows if r.get("country") == "DE"), None)
+
+
+def _de_salary(user_id: str) -> Any:
+    p = _profile(user_id)
+    return next((r for r in (p.preferences.salary_by_country or []) if r.get("country") == "DE"), None) if p else None
+
+
+async def _status(web: AsyncClient, ask_id: int) -> str:
+    resp = await web.get("/api/asks", params={"status": "all"})
+    return next(a["status"] for a in resp.json()["asks"] if a["id"] == ask_id)
+
+
+@pytest.mark.asyncio
+async def test_a_sponsorship_no_on_one_de_job_goes_to_de_memory_and_closes_the_other_de_ask(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as web:
+        first, second = await _bring(web, "Acme"), await _bring(web, "Initech")
+        async with _agent(await _token(web)) as agent:
+            ask_one, ask_two = await _ask(agent, first, SPONSOR), await _ask(agent, second, SPONSOR)
+        body = await _remember(web, ask_one, {SPONSOR["key"]: "No"})
+        assert body["memory"] == {SPONSOR["key"]: {"path": "user_info.right_to_work",
+                                                   "key": "right_to_work.DE.needs_sponsorship"}}
+        assert (body["saved"], body["not_saved"], body["skipped"], "conflicts" in body) == ([], {}, [], False)
+        assert _de_rtw(fixture_user_id) == {"country": "DE", "needs_sponsorship": False}
+        assert not any(r.get("topic") == SPONSOR["key"] for r in _profile(fixture_user_id).user_info.answers or [])
+        assert await _status(web, ask_two) == "withdrawn", "the second DE job's same ask is closed by Memory"
+        assert await _status(web, ask_one) == "withdrawn", "the answered row's own ask is now Memory's too"
+        third = await _bring(web, "Globex")
+        async with _agent(await _token(web)) as agent:
+            ask_three = await _ask(agent, third, SPONSOR)
+        again = await _remember(web, ask_three, {SPONSOR["key"]: "no"})
+        assert again["memory"][SPONSOR["key"]]["key"] == "right_to_work.DE.needs_sponsorship", "same value: no-op"
+        assert _de_rtw(fixture_user_id) == {"country": "DE", "needs_sponsorship": False}
+
+
+@pytest.mark.asyncio
+async def test_a_salary_range_goes_to_de_salary_in_its_own_currency(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, PAY)
+        body = await _remember(web, ask_id, {PAY["key"]: "50000-60000 EUR"})
+        assert body["memory"][PAY["key"]] == {"path": "preferences.salary_by_country", "key": "salary.DE"}
+    assert _de_salary(fixture_user_id) == {"country": "DE", "min": 50000, "max": 60000, "currency": "EUR",
+                                          "period": "year"}
+
+
+@pytest.mark.asyncio
+async def test_a_different_value_already_in_memory_is_a_conflict_and_nothing_is_written(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as web:
+        resp = await web.patch("/api/profile", json={"edits": [{"path": "user_info.right_to_work", "value": {
+            "countries": [{"country": "DE", "work_authorization": "visa", "needs_sponsorship": False}]}}]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, SPONSOR)
+        body = await _remember(web, ask_id, {SPONSOR["key"]: "Yes"})
+    assert "memory" not in body and body["not_saved"] == {}
+    assert body["conflicts"][SPONSOR["key"]].startswith("your DE page says No; this answer says Yes")
+    assert _de_rtw(fixture_user_id) == {"country": "DE", "work_authorization": "visa", "needs_sponsorship": False}
+
+
+@pytest.mark.asyncio
+async def test_an_unclear_answer_is_not_saved_and_names_the_page(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, SPONSOR, PAY)
+        body = await _remember(web, ask_id, {SPONSOR["key"]: "yes, but only from May", PAY["key"]: "at least 50k EUR"})
+    assert "memory" not in body and "conflicts" not in body
+    assert "your DE page" in body["not_saved"][SPONSOR["key"]] and "your DE page" in body["not_saved"][PAY["key"]]
+    assert (_de_rtw(fixture_user_id), _de_salary(fixture_user_id)) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_small_range_with_no_period_is_not_saved_and_names_the_page(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner 2026-11-06: no period word reads as a year only from 10000 up; "4000-4500 GBP" could be a month."""
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, PAY)
+        body = await _remember(web, ask_id, {PAY["key"]: "4000-4500 GBP"})
+    assert "memory" not in body and "conflicts" not in body
+    assert "your DE page" in body["not_saved"][PAY["key"]]
+    assert _de_salary(fixture_user_id) is None
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_answering_never_writes_memory(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, SPONSOR)
+            refused = await agent.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {SPONSOR["key"]: "No"}})
+            assert refused.status_code == 403, refused.text
+            answered = await agent.post(f"/api/asks/{ask_id}/answer", json={"answers": {SPONSOR["key"]: "No"}})
+            assert answered.status_code == 200, answered.text
+    assert _de_rtw(fixture_user_id) is None
+
+
+def test_no_mcp_tool_reaches_a_remember_door():
+    """MCP ``answer_ask`` calls ``asks_route.answer_ask`` (the bearer door above); no tool calls a remember."""
+    from pathlib import Path
+
+    from src.api import mcp_server
+
+    text = Path(mcp_server.__file__).read_text(encoding="utf-8")
+    assert "asks_route.answer_ask(" in text
+    assert [w for w in ("remember_ask_row_answers", "remember_questionnaire", "ask_once.remember") if w in text] == []
+
+
+@pytest.mark.asyncio
+async def test_a_per_job_row_is_never_saved(authenticated_async_context, fixture_user_id):
+    heard = {"key": "how_heard", "question": "How did you hear about us?"}
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, heard, SPONSOR)
+        body = await _remember(web, ask_id, {"how_heard": "LinkedIn", SPONSOR["key"]: "No"})
+    assert body["skipped"] == ["how_heard"] and list(body["memory"]) == [SPONSOR["key"]]
+    assert not any(r.get("topic") == "how_heard" for r in _profile(fixture_user_id).user_info.answers or [])
+
+
+def test_shapes_are_converted_or_refused_never_guessed():
+    from src.services.profile.answer_to_memory import convert, salary, yes_no
+
+    assert [yes_no(t) for t in ("No", "yes", "No, I do not need it", "No preference", "Yes, but only in May")] == [
+        False, True, False, None, None]
+    assert salary("€55k per year", "DE") == {"country": "DE", "min": 55000, "max": 55000, "currency": "EUR",
+                                             "period": "year"}
+    assert salary("4000 to 4500 GBP / month", "GB")["period"] == "month"
+    assert [salary(t, "DE") for t in ("50000+ EUR", "$60000", "60000-50000 EUR", "50.000 EUR", "50000",
+                                      "4000-4500 GBP")] == [None] * 6
+    assert salary("10000 EUR", "DE")["period"] == "year" and salary("9999 EUR", "DE") is None
+    rel = "logistics.{cc}.willing_to_relocate"
+    assert convert(rel, "Willing to relocate?", "Yes", "DE") is True
+    assert convert("logistics.{cc}.travel_ok_pct", "Travel?", "25%", "DE") == 25
+    assert convert("right_to_work.{cc}.onsite", "On site?", "Only if sponsored", "DE") == "only_if_sponsored"
+    assert convert("right_to_work.{cc}.work_authorization", "Allowed to work?", "Yes", "DE") is None
+    assert convert("salary.{cc}", "Minimum salary you would accept", "50000 EUR", "DE") is None, "a floor"

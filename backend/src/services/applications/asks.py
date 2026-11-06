@@ -940,7 +940,8 @@ async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: 
 async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: Any) -> dict[str, Any]:
     """Ask once (owner 2026-11-02): the user pressed "remember" on rows of a job's ask. Each answer is saved
     as their approved answer under the row's key (``ask_once.remember``); a per-job row is skipped, and a
-    row in Memory's families is never saved (``not_saved``: the user sets it on THIS job's country page).
+    row in Memory's families goes into Memory for THIS job's country (``memory``), unless Memory already says
+    otherwise (``conflicts``) or the answer has no clean shape (``not_saved``, naming the page).
     The ask itself is not changed. Session only (the route). 404 / 422 write nothing."""
     from src.services.profile import ask_once  # noqa: PLC0415
 
@@ -958,14 +959,17 @@ async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answe
     rows = [{"topic": k, "question": str(by_key[k]["question"]),
              "answer": _item_text(f"answers.{k}", v, ASK_ITEM_ANSWER_MAX_CHARS)} for k, v in answers.items()]
     done = ask_once.remember(user_id, rows, country)
-    saved = done["saved"]
+    saved, memory = done["saved"], done.get("memory") or {}
     get_audit_logger().info(
         "ask_rows_remembered",
         extra={"event": "ask_rows_remembered", "user_id": user_id, "ask_id": safe_log_value(ask_id),
-               "count": len(saved)},
+               "count": len(saved), "memory": len(memory), "conflicts": len(done.get("conflicts") or {})},
     )
-    return {"saved": saved, "skipped": [k for k in answers if k not in saved], "country": country,
-            "not_saved": done["not_saved"]}
+    if memory:  # Answer once: the other open asks the new Memory fact answers close (as Job360)
+        from src.services.applications import memory_closes  # noqa: PLC0415 - it imports this module
+
+        await memory_closes.close_covered(db, user_id)
+    return {**done, "skipped": [k for k in answers if k not in saved and k not in memory], "country": country}
 
 
 def carried_answers(

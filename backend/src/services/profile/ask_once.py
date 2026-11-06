@@ -4,9 +4,10 @@ Remember ONLY on the owner's press: an answer to a standard (not per-job) form q
 approved ``user_info.answers`` record bound to its key AND the job's country, only when the owner presses
 "remember" on Needs you ("OK all and remember", or a row's own Remember). Nothing else saves for reuse.
 Memory first (owner 2026-11-05, plan S2): a question in Memory's families (:func:`memory_question`: right
-to work, sponsorship, salary, notice, relocation, on-site, location, equality, contact) is NEVER saved: the
-user sets it once on their country page (or Memory) in Job360, and nothing here writes Memory. Every other
-answer (an essay, how you heard) is saved globally. A saved record is what ``answer_match`` /
+to work, sponsorship, salary, notice, relocation, on-site, location, equality, contact) is NEVER saved as an
+answer. Answer once (owner 2026-11-06): the press writes it into Memory for the job's country instead
+(``answer_to_memory``; a different value already there is a conflict, an unclear answer names the page).
+Every other answer (an essay, how you heard) is saved globally. A saved record is what ``answer_match`` /
 ``ready._approved_record`` already read as the user's word, so the next job asking it needs no owner.
 
 The questionnaire: up to :data:`PER_COUNTRY` common questions per country the user works in, picked
@@ -147,43 +148,67 @@ def memory_note(topic: str, question: str, country: Optional[str]) -> Optional[s
 
 
 def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -> dict[str, Any]:
-    """Save each ``{topic, question, answer}`` as the user's approved answer (the user's own web press: the
-    caller is a session-only route); ``country`` is the job's, named in a Memory row's reason.
-    Upserts on topic. A row in Memory's families is never saved (:func:`memory_note`, plan S2): it is in
-    ``not_saved`` with the page to set it on; Memory itself is not written. Every country-specific row
-    (:func:`is_country_specific`) is in Memory's families, so what is saved is global. A per-job row is
-    skipped. Returns ``{saved: [topic], not_saved: {topic: why}}``. All-or-nothing: a bad value writes
-    nothing (422)."""
+    """Save each ``{topic, question, answer}`` the user pressed "remember" on (the user's own web press: the
+    caller is a session-only route); ``country`` is the job's. A per-job row is skipped.
+    Answer once (owner 2026-11-06, refining plan S2): a row in Memory's families is written into MEMORY, at
+    its field for ``country`` (``answer_to_memory.plan``: converted to the field's shape, never overwriting a
+    different value), never kept as a saved answer. Every other row is saved globally as an approved
+    answer, upserted on topic. Returns ``{saved: [topic], not_saved: {topic: why}}`` plus, when any,
+    ``memory: {topic: {path, key}}`` and ``conflicts: {topic: sentence}``. One write for everything; a bad
+    value of a saved answer writes nothing (422)."""
+    from src.services.profile import answer_to_memory, user_info  # noqa: PLC0415
     from src.services.profile import edits as profile_edits  # noqa: PLC0415
-    from src.services.profile import user_info  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
 
     not_saved: dict[str, str] = {}
+    memory: dict[str, dict[str, str]] = {}
+    conflicts: dict[str, str] = {}
     keep = []
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    working: dict[str, Any] = {}
     for r in rows:
-        if not str(r.get("answer") or "").strip() or not reusable(r["topic"], r["question"]):
+        answer = str(r.get("answer") or "").strip()
+        if not answer or not reusable(r["topic"], r["question"]):
             continue
         note = memory_note(r["topic"], r["question"], country)
-        if note:
-            not_saved[r["topic"]] = note
-        else:
+        if not note:
             keep.append(r)
-    if not keep:
-        return {"saved": [], "not_saved": not_saved}
-    loaded, _ = load_profile_with_overlay(user_id)
-    records = [dict(r) for r in (loaded or UserProfile()).user_info.answers or [] if isinstance(r, dict)]
-    for r in keep:
-        new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"]}
-        records = user_info.upsert_answer(records, new)
-    value = profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, records)
-    if load_profile(user_id, with_overlay=False) is None:
-        save_profile(UserProfile(), user_id, source_action="agent_edit")
-    profile_edits.record_edits(
-        user_id, profile_edits.WEB_ACTOR, [(user_info.USER_INFO_ANSWERS_PATH, value)],
-        enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
-    )
-    return {"saved": [r["topic"] for r in keep], "not_saved": not_saved}
+            continue
+        template = memory_question(r["topic"], r["question"])[1]
+        outcome, detail = answer_to_memory.plan(profile, overlay, working, template, r["question"], answer, country)
+        if outcome == "write":
+            memory[r["topic"]] = {"path": detail[0], "key": detail[2]}
+        elif outcome == "same":
+            memory[r["topic"]] = {"path": common_questions.save_path({"kit_key": template}), "key": detail}
+        elif outcome == "conflict":
+            conflicts[r["topic"]] = detail
+        else:
+            not_saved[r["topic"]] = note
+    edits: list[tuple[str, Any]] = list(working.items())
+    if keep:
+        records = [dict(r) for r in profile.user_info.answers or [] if isinstance(r, dict)]
+        for r in keep:
+            new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"]}
+            records = user_info.upsert_answer(records, new)
+        edits.append((user_info.USER_INFO_ANSWERS_PATH,
+                      profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, records)))
+    if edits:
+        from src.services.applications.kit import edit_is_sensitive  # noqa: PLC0415
+
+        if load_profile(user_id, with_overlay=False) is None:
+            save_profile(UserProfile(), user_id, source_action="agent_edit")
+        profile_edits.record_edits(
+            user_id, profile_edits.WEB_ACTOR, edits, enforce_rate_limit=False,
+            source=profile_edits.SOURCE_USER_SAID, consent_paths=[p for p, v in edits if edit_is_sensitive(p, v)],
+        )
+    out: dict[str, Any] = {"saved": [r["topic"] for r in keep], "not_saved": not_saved}
+    if memory:
+        out["memory"] = memory
+    if conflicts:
+        out["conflicts"] = conflicts
+    return out
 
 
 def _key(row: dict[str, Any]) -> str:
