@@ -29,7 +29,7 @@ def _profile(needs_sponsorship: Optional[bool] = False, salary: Optional[list[di
     return UserProfile(
         user_info=UserInfo(contact={"linkedin_url": LINKEDIN}, right_to_work={"countries": [gb]}),
         preferences=UserPreferences(salary_by_country=salary if salary is not None else [
-            {"country": "GB", "min": 40000, "max": 45000, "currency": "GBP", "period": "annual"}]),
+            {"country": "GB", "min": 40000, "max": 45000, "currency": "GBP", "period": "year"}]),
         cv_data=CVData(links=[GITHUB]),
     )
 
@@ -59,6 +59,7 @@ LIVE_Q = ("Are you eligible to live and work in the UK without requiring employe
     ("Will you now or in the future require sponsorship?", False, "No"),
     ("Will you now or in the future require sponsorship?", True, "Yes"),
     ("Do you require visa sponsorship? Yes/No", False, "No"),
+    ("Do you now, or will you in the future, require sponsorship to work in the UK?", False, "No"),
 ])
 def test_sponsorship_answer_follows_the_questions_polarity(question, needs, expected):
     answered, missing = _one(_profile(needs), question)
@@ -128,18 +129,18 @@ def test_a_question_that_only_mentions_a_site_is_not_its_link(question):
 def test_pay_wordings_take_the_job_countrys_saved_range(question):
     answered, missing = _one(_profile(), question)
     assert missing is None, missing
-    assert (answered["key"], answered["value"]) == ("salary.GB", "40000-45000 GBP annual")
+    assert (answered["key"], answered["value"]) == ("salary.GB", "40000-45000 GBP year")
 
 
 def test_desired_pay_is_a_knockout_like_expected_salary():
     out = _form(_profile(), [{"question": "Desired Pay"}, {"question": "Expected salary"}])
     assert [(k["question"], k["value"]) for k in out["knockouts"]] == [
-        ("Desired Pay", "40000-45000 GBP annual"), ("Expected salary", "40000-45000 GBP annual")]
+        ("Desired Pay", "40000-45000 GBP year"), ("Expected salary", "40000-45000 GBP year")]
 
 
 def test_desired_pay_with_no_salary_record_for_the_jobs_country_still_stops():
     profile = _profile(salary=[{"country": "IN", "min": 2000000, "max": 2500000, "currency": "INR",
-                                "period": "annual"}])
+                                "period": "year"}])
     answered, missing = _one(profile, "Desired Pay")
     assert answered is None and missing["required"] is True
     assert "salary.GB is not in Memory" in missing["why"]
@@ -154,4 +155,63 @@ def test_desired_pay_asked_in_another_currency_still_stops(question):
 
 def test_desired_pay_in_the_saved_currency_is_answered():
     answered, missing = _one(_profile(), "Desired pay (GBP, £)")
-    assert missing is None and answered["value"] == "40000-45000 GBP annual"
+    assert missing is None and answered["value"] == "40000-45000 GBP year"
+
+
+# ── Checker round 2026-11-06: pay period and scale, links for someone else, polarity ──
+
+@pytest.mark.parametrize("question", [
+    "Desired pay per hour", "Desired hourly pay", "Desired weekly pay", "Desired daily pay",
+    "Desired pay per month", "Desired pay (monthly)", "Desired pay (k)", "Desired pay in thousands",
+    "Expected compensation including equity", "Desired total compensation incl. bonus",
+    "Salary expectation per week", "Hourly rate expectation salary", "Expected salary day rate",
+])
+def test_pay_in_another_period_or_scale_is_a_gap(question):
+    answered, missing = _one(_profile(), question)
+    assert answered is None, answered
+    assert "ask the user" in missing["why"]
+
+
+@pytest.mark.parametrize("question", ["Desired pay per year", "Expected annual salary", "Salary per annum"])
+def test_pay_naming_the_saved_yearly_period_is_answered(question):
+    answered, missing = _one(_profile(), question)
+    assert missing is None, missing
+    assert answered["value"] == "40000-45000 GBP year"
+
+
+def test_a_monthly_record_answers_only_a_monthly_wording():
+    profile = _profile(salary=[{"country": "GB", "min": 3500, "max": 4000, "currency": "GBP", "period": "month"}])
+    answered, missing = _one(profile, "Desired pay per month")
+    assert missing is None and answered["value"] == "3500-4000 GBP month"
+    for question in ("Desired pay", "Expected salary", "Desired pay per year"):
+        answered, missing = _one(profile, question)
+        assert answered is None and "never converts" in missing["why"], question
+
+
+@pytest.mark.parametrize("question", [
+    "Referrer LinkedIn URL", "LinkedIn Profile URL of referrer", "LinkedIn profile of your manager",
+    "Company LinkedIn page", "LinkedIn username", "GitHub username", "Recruiter LinkedIn URL",
+])
+def test_someone_elses_link_or_a_handle_is_never_the_users_url(question):
+    answered, missing = _one(_profile(), question)
+    assert answered is None, answered
+    assert missing is not None
+
+
+@pytest.mark.parametrize("question,key", [
+    ("Referrer LinkedIn URL", "contact.linkedin_url"), ("GitHub username", "contact.github_url")])
+def test_naming_the_kit_key_does_not_send_the_users_url_to_someone_elses_link(question, key):
+    answered, missing = _one(_profile(), question, key=key)
+    assert answered is None and "someone else's link" in missing["why"]
+
+
+@pytest.mark.parametrize("question", [
+    "Are you free of any need for sponsorship?",
+    "Are you eligible to work without sponsorship, or will you require it?",
+    "Are you exempt from needing visa sponsorship?",
+    "Can you work independently of sponsorship?",
+])
+def test_free_or_either_or_sponsorship_wordings_are_a_gap(question):
+    answered, missing = _one(_profile(False), question)
+    assert answered is None, answered
+    assert "polarity" in missing["why"]

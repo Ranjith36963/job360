@@ -76,22 +76,32 @@ MEMORY_BLOCKS = ("contact", "right_to_work", "logistics", "salary", "languages",
 # Pay words a form uses for the salary it expects ("Desired Pay", "Desired compensation"; live run 2026-11-06):
 # read as "salary", so they name the salary rows (the job country's range) and nothing else.
 _PAY_WORDS = frozenset({"pay", "compensation"})
-# Contact links (live run 2026-11-06): a SHORT label asking for the user's link on ONE site ("Link to your
-# LinkedIn profile"). A question that only mentions the site (how you heard, where you found the job, or two
-# sites at once) is not its link.
+# Contact links (live run 2026-11-06): a label asking for the USER'S OWN link on ONE site ("Link to your
+# LinkedIn profile"). ALLOW-list: every word is the site, a link word or one of the user's own phrasing words;
+# anything else (how you heard, two sites, a referrer's link) is not the user's link.
 _LINK_SITES = {"linkedin": "contact.linkedin_url", "github": "contact.github_url"}
-_LINK_WORDS = frozenset({"url", "link", "profile", "page", "address", "handle", "username"})
-_NOT_A_LINK = frozenset({"hear", "heard", "find", "found", "source", "referred", "referral", "or", "and",
-                         "website", "portfolio", "job", "role", "apply", "applied", "advert"})
-_LINK_MAX_WORDS = 8
+_LINK_WORDS = frozenset({"url", "link", "profile", "page", "address"})
+_OWN_LINK_WORDS = frozenset({"your", "my", "to", "a", "the", "please", "share", "provide", "enter", "add", "paste",
+                             "what", "is", "public", "full", "optional"})
+# Someone else's link, or a handle where a full URL is not wanted: never the user's saved URL (a gap).
+NOT_OWN_LINK_WORDS = frozenset({"referrer", "referred", "reference", "manager", "supervisor", "company", "employer",
+                                "recruiter", "colleague", "friend", "team", "username", "handle"})
 
 
 def _contact_link(words: set[str]) -> Optional[str]:
-    """The contact URL key a short link label asks for (:data:`_LINK_SITES`), else ``None``."""
+    """The contact URL key a label asking for the user's own link names (:data:`_LINK_SITES`), else ``None``."""
     sites = {_LINK_SITES[w] for w in words if w in _LINK_SITES}
-    if len(sites) != 1 or len(words) > _LINK_MAX_WORDS or words & _NOT_A_LINK:
+    if len(sites) != 1 or words - set(_LINK_SITES) - _LINK_WORDS - _OWN_LINK_WORDS:
         return None
     return next(iter(sites)) if len(words) == 1 or words & _LINK_WORDS else None
+
+
+def not_own_link(question: str) -> bool:
+    """True when a question about a LinkedIn / GitHub link asks for someone else's, or for a handle."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    words = set(normalize_question(question).split())
+    return bool(words & set(_LINK_SITES)) and bool(words & NOT_OWN_LINK_WORDS)
 
 
 def _signals(words: set[str]) -> set[str]:
@@ -129,6 +139,8 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
 
     k = (key or "").strip()
     words = set(normalize_question(question).split())
+    if not k and not_own_link(question):
+        return False, None  # a referrer's LinkedIn, a GitHub username: never the user's saved URL
     if words & _PAY_WORDS:
         words.add("salary")  # "Desired pay" names the salary field (:data:`_PAY_WORDS`)
     rows = [q for q in common_questions.catalog() if q.get("kit_key")]

@@ -52,7 +52,7 @@ from src.services.profile.answer_match import (
     superseded,
     topic_key,
 )
-from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question
+from src.services.profile.ask_once import MEMORY_BLOCKS, memory_question, not_own_link
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -3036,27 +3036,55 @@ _NEGATORS = frozenset({"not", "no", "never", "nor", "neither", "without", "canno
 _CONTRACTED = frozenset({"don", "doesn", "didn", "won", "can", "isn", "aren", "wouldn", "shouldn", "couldn"})
 _ELIGIBLE_WORDS = frozenset({"eligible", "authorised", "authorized", "allowed", "entitled", "permitted", "able",
                              "legally", "can", "could", "right"})
-_NEED_WORDS = frozenset({"need", "needs", "require", "requires", "required", "requiring", "want"})
+_NEED_WORDS = frozenset({"need", "needs", "needed", "needing", "require", "requires", "required", "requiring",
+                         "want", "sponsor"})
+# Words that turn "need sponsorship" round without a "not": "free of any need", "exempt from", "independently".
+_FREE_WORDS = frozenset({"free", "exempt", "independent", "independently", "without"})
+# Words that make a sentence a question about the user ("Are you...", "Will you..."): with no need-verb such a
+# question cannot be read as "do you need sponsorship". A bare label ("Visa sponsorship (UK)") has none.
+_ASKING_WORDS = frozenset({"are", "is", "am", "do", "does", "did", "can", "could", "will", "would", "shall",
+                           "should", "have", "has", "may", "you", "your"})
 POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
                 "clear: ask the user, never guess")
 
 
+def _either_or(words: list[str]) -> bool:
+    """An "or" that offers two readings: not "now or in the future" / "now or will you in the future", not
+    "yes or no"."""
+    for i, w in enumerate(words):
+        if w != "or":
+            continue
+        prev, nxt = words[i - 1] if i else "", words[i + 1] if i + 1 < len(words) else ""
+        if (prev == "now" and nxt in ("in", "will")) or (prev == "yes" and nxt == "no"):
+            continue
+        return True
+    return False
+
+
 def _sponsorship_reading(text: str) -> Optional[str]:
-    """``"direct"``, ``"inverted"`` or ``None`` (unclear) for a sponsorship question (see above)."""
+    """``"direct"``, ``"inverted"`` or ``None`` (unclear) for a sponsorship question. Direct: a need-verb and no
+    negation or free/exempt word (or a bare label with neither). Inverted: one "without", after an eligibility
+    word, with a need-verb only as the word "without" governs ("without requiring"). Either/or = unclear."""
     from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
 
     words = normalize_question(text).split()
+    if _either_or(words):
+        return None
     negs = []
     for i, w in enumerate(words):
         if w == "no" and "yes" in words[max(0, i - 2):i]:
             continue  # the "Yes/No" a label carries, not a negation
         if w in _NEGATORS or (w == "t" and i > 0 and words[i - 1] in _CONTRACTED):
             negs.append(i)
-    if not negs:
-        return "direct"
-    if len(negs) == 1 and words[negs[0]] == "without":
-        before = set(words[:negs[0]])
-        if before & _ELIGIBLE_WORDS and not before & _NEED_WORDS:
+    seen = set(words)
+    needs = [i for i, w in enumerate(words) if w in _NEED_WORDS]
+    if not negs and not seen & _FREE_WORDS:
+        if needs or not seen & (_ASKING_WORDS | _ELIGIBLE_WORDS):
+            return "direct"
+        return None
+    if len(negs) == 1 and words[negs[0]] == "without" and not (seen - {"without"}) & _FREE_WORDS:
+        at = negs[0]
+        if set(words[:at]) & _ELIGIBLE_WORDS and all(i == at + 1 for i in needs):
             return "inverted"
     return None
 
@@ -3092,11 +3120,43 @@ _DOLLARS = frozenset({"USD", "CAD", "AUD", "SGD", "NZD", "HKD"})
 _CURRENCY_SYMBOLS = {"£": frozenset({"GBP"}), "€": frozenset({"EUR"}), "₹": frozenset({"INR"}), "$": _DOLLARS}
 
 
-def _currency_gap(text: str, saved: Any, country: Optional[str]) -> str:
-    """Why a salary answer cannot be sent to this wording (another currency than the saved one), else ``""``."""
+# Pay period and scale (checker, 2026-11-06): a period word must name the saved period; with none, only a yearly
+# figure answers. Equity, bonus, totals, "k" / thousands and day rates are never the saved base range: a gap.
+_PERIOD_WORDS = {
+    "hour": "hour", "hourly": "hour", "hr": "hour", "day": "day", "daily": "day", "week": "week",
+    "weekly": "week", "month": "month", "monthly": "month", "annum": "year", "annual": "year",
+    "annually": "year", "year": "year", "yearly": "year", "yr": "year",
+}
+_SAVED_PERIOD = {"year": "year", "annual": "year", "yearly": "year", "month": "month", "monthly": "month"}
+_NOT_BASE_PAY = frozenset({"equity", "bonus", "bonuses", "total", "ote", "k", "thousand", "thousands", "commission",
+                           "stock", "options", "lakh", "lakhs", "lpa"})
+
+
+def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
+    """Why a salary answer cannot be sent to this wording, else ``""``: another currency, another period (none
+    named = a year), or not the base range (equity, bonus, total, k, a day rate). A plain value (no record) is
+    sent only to a wording naming no period."""
     from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
 
     words = set(normalize_question(text).split())
+    odd =sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
+    if odd:
+        return f"the form asks for more than the saved base pay range ({', '.join(odd)}): ask the user"
+    asked_periods = {_PERIOD_WORDS[w] for w in words if w in _PERIOD_WORDS}
+    have_period = None
+    if isinstance(saved, dict):
+        have_period = _SAVED_PERIOD.get(str(saved.get("period") or "").strip().casefold())
+    if have_period is None:
+        # A saved record with no known period answers nothing; a plain value only a wording naming no period.
+        wrong_period = isinstance(saved, dict) or bool(asked_periods)
+    elif asked_periods:
+        wrong_period = asked_periods != {have_period}
+    else:
+        wrong_period = have_period != "year"
+    if wrong_period:
+        per = ", ".join(sorted(asked_periods)) or "a year (no period named)"
+        return (f"the form asks for pay per {per}; Memory holds pay per {have_period or 'an unknown period'} "
+                "and Job360 never converts: ask the user")
     asked = [_CURRENCY_WORDS[w] for w in words if w in _CURRENCY_WORDS]
     asked += [codes for sym, codes in _CURRENCY_SYMBOLS.items() if sym in text]
     asked += [_DOLLARS for w in ("dollar", "dollars") if w in words]
@@ -3200,12 +3260,15 @@ def form_check(
                 why = "no saved answer for this question"
         if not family and _contradicted(item):
             item, why = None, AMBIGUOUS
+        if item is not None and str(item["key"]) in ("contact.linkedin_url", "contact.github_url") \
+                and not_own_link(text):
+            item, why = None, "this asks for someone else's link or a handle, not your own URL: ask the user"
         if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
             item, why = _sponsorship_polarity(item, text)  # "eligible ... WITHOUT sponsorship" = the negation
         pay = str(item["key"] if item is not None else template or "").startswith("salary.")
         if pay:
             sensitive = True
-            gap = _currency_gap(text, by_key.get(str(item["key"]), item)["value"], country) if item else ""
+            gap = _pay_gap(text,by_key.get(str(item["key"]), item)["value"], country) if item else ""
             if gap:
                 item, why = None, gap
         # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
