@@ -135,3 +135,26 @@ def test_install_is_idempotent():
     from logging.handlers import QueueHandler
 
     assert sum(isinstance(h, QueueHandler) for h in logger.handlers) == 1
+
+
+def test_flush_returns_only_after_the_last_queued_row_is_written(audit_db, monkeypatch):
+    """``flush`` waited for an EMPTY queue plus 50 ms. The listener takes a record off the queue BEFORE it writes
+    it, so a write slower than 50 ms (CI's per-row connect) was still running: the reader missed the row (#1498,
+    test_api_changes [400]). It must wait until every queued record has been handled (``unfinished_tasks``)."""
+    import time
+
+    real_write = _DBAuditHandler._write
+
+    def slow_write(self, row):
+        time.sleep(0.3)  # a slow CI connect
+        real_write(self, row)
+
+    monkeypatch.setattr(_DBAuditHandler, "_write", slow_write)
+    logger = logging.getLogger(f"job360.audit-flush-{uuid.uuid4().hex}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    audit_trail.install_db_audit_trail(logger)
+    uid = uuid.uuid4().hex
+    logger.info("flush_probe", extra={"event": "flush_probe", "user_id": uid})
+    audit_trail.flush()
+    assert [r["event"] for r in _rows(audit_db, "user_id = ?", (uid,))] == ["flush_probe"]

@@ -10,7 +10,7 @@ async def test_the_log_is_empty_until_anything_is_sent_on_its_own(authenticated_
     async with authenticated_async_context() as client:
         resp = await client.get("/api/sent-on-its-own")
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"items": []}
+        assert resp.json() == {"items": [], "cv_sample": []}
         assert (await client.get("/api/needs-you-count")).json()["n"] == 0, "a log never counts as a to-do"
 
 

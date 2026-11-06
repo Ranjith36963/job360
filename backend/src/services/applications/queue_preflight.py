@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import kit, ready, spine
-from src.services.browser_agent import routing
+from src.services.browser_agent import learned, routing
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -108,13 +108,29 @@ async def _filled_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int
     return {int(r[0]) for r in await cur.fetchall()}
 
 
+async def _sent_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
+    """Applications whose NEWEST send decision is the owner's yes (``submit_approved``): they pressed Send."""
+    if not ids:
+        return set()
+    cur = await db._db.execute(
+        f"SELECT a.id FROM applications a WHERE a.user_id = ? AND a.id IN ({_marks(ids)}) "  # noqa: S608
+        "AND (SELECT e.event_type FROM application_events e WHERE e.user_id = a.user_id "
+        "AND e.application_id = a.id AND e.event_type IN ('submit_approved', 'submit_declined') "
+        "ORDER BY e.id DESC LIMIT 1) = 'submit_approved'",
+        [user_id, *ids],
+    )
+    return {int(r[0]) for r in await cur.fetchall()}
+
+
 async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tuple[list[int], set[int]]:
-    """The order the assistant works the queue (2026-10-30): rows not waiting on the owner first, unfilled
-    before already-filled, then rows with an OPEN ask to the owner last; first in first out inside each group
-    (a stable sort of ``fifo_ids``). Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
+    """The order the assistant works the queue (2026-10-30): jobs the owner pressed Send on FIRST (2026-11-02;
+    their yes is ready to submit), then rows not waiting on the owner, unfilled before already-filled, then rows
+    with an OPEN ask to the owner last; first in first out inside each group (a stable sort of ``fifo_ids``).
+    Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
     waiting = await _open_ask_apps(db, user_id, fifo_ids)
     filled = await _filled_apps(db, user_id, fifo_ids)
-    return sorted(fifo_ids, key=lambda i: (i in waiting, i in filled)), waiting
+    sent = await _sent_apps(db, user_id, fifo_ids)
+    return sorted(fifo_ids, key=lambda i: (i not in sent, i in waiting, i in filled)), waiting
 
 
 async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
@@ -147,7 +163,8 @@ async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
 async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     """Queued rows still missing their tailored CV (owner 2026-11-01), oldest queued first. Writing a CV needs
     neither the owner nor a browser, so an open ask, a site block or the owner's own browser does not excuse
-    it; only another session's live hold and a closed posting do. Scoped by ``user_id``; read-only.
+    it; only another session's live hold, a closed posting and a site saying the user already applied do.
+    Scoped by ``user_id``; read-only.
     ``[{"id", "company"}]``."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
@@ -159,7 +176,7 @@ async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     skip = await _with_kind(db, user_id, ids, "cv")
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    skip |= {i for i, p in blocks.items() if p.get("reason") == "posting_closed"}
+    skip |= {i for i, p in blocks.items() if p.get("reason") in ("posting_closed", blocked_service.ALREADY_APPLIED)}
     todo = [i for i in ids if i not in skip]
     if not todo:
         return []
@@ -276,8 +293,9 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     (``routing.label``). The route of its apply link (``routing.browser_for``, the link Ready to send uses);
     when Job360's own browser wrote the open block (``by: browser``) the block's reason moves it to the
     user's own browser (the same mapping Needs you shows, ``routing.JOB360_FAILURES``), and a one-time code
-    is the user's alone. Two queries for the whole queue (links, then open blocks), never N+1; scoped by
-    ``user_id``. Read-only."""
+    is the user's alone. A link on a host where Job360's browser was blocked twice for THIS user
+    (``learned.blocked_hosts``) starts in the user's own browser. A fixed number of queries for the whole
+    queue (links, open blocks, learned hosts), never N+1; scoped by ``user_id``. Read-only."""
     ids = sorted(set(queued_ids))
     if not ids:
         return {}
@@ -287,19 +305,22 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     )
     urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     blocks = await blocked_service.open_blocks(db, user_id, ids)
-    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {})) for app_id in ids}
+    hosts = await learned.blocked_hosts(db, user_id)
+    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {}), hosts) for app_id in ids}
 
 
-def route_label(url: str, block: dict[str, Any]) -> dict[str, str]:
+def route_label(url: str, block: dict[str, Any], hosts: frozenset[str] = frozenset()) -> dict[str, str]:
     """The browser (``routing.label``) that runs one queued application: its apply link plus its open block's
-    payload (``{}`` = none). Pure; ``queue_browsers`` and ``blockers`` share it."""
+    payload (``{}`` = none) and the user's learned blocked ``hosts`` (``learned.blocked_hosts``). The label
+    carries the plain reason ("Job360's browser was blocked twice on <site>"). Pure; ``queue_browsers`` and
+    ``blockers`` share it."""
     reason = str(block.get("reason") or "")
     by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
     return routing.label(routing.browser_for(
         url=url, queue_kind="application",
         job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
-        page_stop="otp_needed" if reason == "otp_needed" else "",
-    ))
+        page_stop="otp_needed" if reason == "otp_needed" else "", route=learned.route_for(url, hosts),
+    ), site=routing.site_of(url)[1])
 
 
 async def queue_summary(
@@ -331,7 +352,7 @@ async def queue_summary(
         int(r["application_id"])
         for r in await ready.ready_rows(db, user_id, limit=settings.READY_TO_SEND_MAX)
     } & in_queue
-    blocked_ids = {a for a in in_queue if await blocked_service.open_block(db, user_id, a) is not None}
+    blocked_ids = set(await blocked_service.open_blocks(db, user_id, sorted(in_queue)))  # one query, not one per job
     asked_ids = (await _open_ask_apps(db, user_id, sorted(in_queue))) - blocked_ids
     return {
         "queued": len(in_queue),

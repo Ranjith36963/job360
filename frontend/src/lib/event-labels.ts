@@ -125,6 +125,16 @@ export const EVENT_LABEL: Record<string, string> = {
   process_log: "Assistant's work log",
   // Autonomy slice 3 (2026-11-02): watch-only check of what autonomy would clear (work log, by type).
   autonomy_shadow: "Autonomy check (watch-only)",
+  // Autonomy A8 (2026-11-02): check_submit's single-use submit clearance and its use by a receipt.
+  submit_cleared: "Submit check passed",
+  submit_cleared_used: "Submit check used by the receipt",
+  // Owner decision 2026-11-02: Verify / Edit on the Ready card approves an answer for this job only.
+  answer_verified: "Answer approved for this job",
+  // Owner decision 2026-11-05: a fresh reviewer's verdict on one CV version, checked by Job360.
+  cv_reviewed: "CV checked by a second reviewer",
+  // Owner 2026-11-06: Sent on its own - a CV that went on a strong review, and the user's Wrong fact on it.
+  cv_sent_on_review: "CV sent after a strong review",
+  cv_wrong_fact: "Wrong fact reported on a CV",
 };
 
 function relayedWords(payload: unknown): boolean {

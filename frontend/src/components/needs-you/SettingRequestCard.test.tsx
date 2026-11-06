@@ -16,6 +16,7 @@ vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   // Ask once: the Questionnaire card reads this; no countries = nothing to answer, so it hides itself.
   getQuestionnaire: async () => ({ countries: [] }),
+  getCoveredAnswers: async () => ({ answers: [], profile_edit_id: 0 }),
   rememberQuestionnaire: vi.fn().mockResolvedValue({ saved: [] }),
   getSentOnItsOwn: async () => ({ items: [] }),
   rememberAskAnswers: vi.fn().mockResolvedValue({ saved: [], skipped: [] }),
@@ -108,6 +109,15 @@ describe("describeSettingRequest", () => {
     expect(on.title).toBe("People hunt");
     expect(on.change).toMatch(/you still send every message/);
     expect(describeSettingRequest("assistant_settings.people_hunt", false).change).toBe("Stop the people hunt");
+  });
+
+  it("cv auto approve: on reads in plain words; off says you look at every CV", () => {
+    const on = describeSettingRequest("assistant_settings.cv_auto_approve", true);
+    expect(on.title).toBe("Send reviewed CVs without asking me");
+    expect(on.change).toBe("Let your assistant send CVs that pass both checks without asking you first");
+    expect(describeSettingRequest("assistant_settings.cv_auto_approve", false).change).toBe(
+      "Ask me to look at every CV before it goes",
+    );
   });
 
   it("standing instructions: shows every line, so a note is never confirmed blind", () => {

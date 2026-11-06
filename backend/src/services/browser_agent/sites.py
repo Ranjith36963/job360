@@ -52,6 +52,7 @@ SITES: tuple[Site, ...] = (
         "Many pages (form_step says which): fill one, read every value back, then Save and Continue.",
         "Errors show only after Save: fix every field marked invalid, then Save again. Still stuck after 2 "
         "Saves: stop and record blocked.",
+        "The start window takes 3-8 s to appear: wait and look again before deciding the page is empty.",
         "Dates are separate Month and Year boxes: type the real numbers.",
         "Work and school entries: Add one, fill it, then Add the next (the new one is the last on the page).",
         "A sign-in or create-account page is Needs you (account_needed); never make an account.",
@@ -178,6 +179,68 @@ _HONEYPOT = re.compile(
     r"|do ?n['o\u2019]?t fill\b.*\bif you(?:['\u2019]re| are) (?:a )?human\b",
     re.IGNORECASE,
 )
+
+
+# Job-ad pages of applicant systems whose form lives behind the ad's opener button (seen live 2026-11-02):
+# Oracle HCM's /hcmUI/CandidateExperience/<lang>/sites/<site>/job/<id> (the apply flow is /job/<id>/apply/...)
+# and BambooHR's /careers/<id> (the form is drawn on the same page by "Apply for This Job"). Host suffix and
+# path segments compared exactly, never a substring of the URL.
+_ORACLE_SUFFIX = ".oraclecloud.com"
+_BAMBOO_SUFFIX = ".bamboohr.com"
+
+
+def job_ad_page(url: str) -> bool:
+    """The address is a known applicant system's job-ad page (``_ORACLE_SUFFIX`` / ``_BAMBOO_SUFFIX``)."""
+    try:
+        parts = urlsplit((url or "").strip())
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = _host(url)
+    segs = [s for s in parts.path.lower().split("/") if s]
+    if host.endswith(_ORACLE_SUFFIX):
+        return (
+            len(segs) == 7 and segs[:2] == ["hcmui", "candidateexperience"] and segs[3] == "sites"
+            and segs[5] == "job" and segs[6].isdigit()
+        )
+    if host.endswith(_BAMBOO_SUFFIX):
+        return len(segs) == 2 and segs[0] == "careers" and segs[1].isdigit()
+    return False
+
+
+# The site saying this user already applied (2026-11-02: Axmed's form said "You already have an application
+# for this role", and the job was tried six more times). Whole phrases, read word by word (no regex over page
+# text). A phrase after "if" / "whether" / "unless" / "once" / "when" is a help line ("If you have already
+# applied, sign in"), not the site's answer.
+ALREADY_APPLIED_PHRASES: tuple[tuple[str, ...], ...] = (
+    ("you", "have", "already", "applied", "for", "this"),
+    ("you", "have", "already", "applied", "to", "this"),
+    ("youve", "already", "applied", "for", "this"),
+    ("youve", "already", "applied", "to", "this"),
+    ("you", "already", "applied", "for", "this"),
+    ("you", "already", "applied", "to", "this"),
+    ("you", "already", "have", "an", "application", "for", "this"),
+    ("you", "have", "already", "submitted", "an", "application", "for", "this"),
+    ("you", "have", "already", "applied", "for", "the", "job"),
+    ("you", "have", "already", "applied", "for", "the", "position"),
+)
+_NOT_AN_ANSWER = frozenset({"if", "whether", "unless", "once", "when"})
+
+
+def already_applied_said(text: str) -> bool:
+    """The page text says the user already applied for this job (``ALREADY_APPLIED_PHRASES``)."""
+    from src.services.browser_agent.safety import label_words  # noqa: PLC0415 - safety imports nothing back
+
+    words = label_words(text)
+    starts: dict[str, list[tuple[str, ...]]] = {}
+    for p in ALREADY_APPLIED_PHRASES:
+        starts.setdefault(p[0], []).append(p)
+    for i, w in enumerate(words):
+        for phrase in starts.get(w, ()):
+            if words[i:i + len(phrase)] == phrase and not _NOT_AN_ANSWER & set(words[max(0, i - 2):i]):
+                return True
+    return False
 
 
 def looks_like_application(elements: Sequence[dict[str, Any]]) -> bool:

@@ -675,11 +675,13 @@ async def test_two_actors_both_show_in_the_path_history(authenticated_async_cont
         token = await _mint_token(client, name="claude-code")
         assert (await _patch(client, {"path": CONTACT, "value": {"preferred_name": "web Ada"}})).status_code == 200
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, {"path": CONTACT, "value": {"preferred_name": "agent Ada"}})).status_code == 200
+        # S2b: an assistant fills only an empty field; it never changes the user's preferred_name.
+        filled = {"preferred_name": "web Ada", "legal_first_name": "Ada"}
+        assert (await _patch(agent, {"path": CONTACT, "value": filled})).status_code == 200
     async with authenticated_async_context() as client:
         rows = (await client.get("/api/profile/edits/history", params={"path": CONTACT})).json()["rows"]
     assert [r["set_by"] for r in rows] == ["token:claude-code", "web"]
-    assert rows[0]["value"] == {"preferred_name": "agent Ada"}
+    assert rows[0]["value"] == filled
     assert rows[1]["value"] == {"preferred_name": "web Ada"}
     assert all(r["set_at"] for r in rows)
 
@@ -835,7 +837,10 @@ async def test_clear_preferences_keeps_the_memory_and_clears_salary(authenticate
         )).status_code == 200
     async with _bearer_client(token) as agent:
         # "ask" (not "auto"): S2 holds an assistant's "auto" as a waiting request.
-        assert (await _patch(agent, *ALL_EDITS, {"path": "preferences.daily_check", "value": "ask"})).status_code == 200
+        # S2b: the assistant keeps the user's DE salary row and only adds AE (a set row is the user's to change).
+        salary = next(e for e in ALL_EDITS if e["path"] == SALARY)
+        edits_ = [e for e in ALL_EDITS if e["path"] != SALARY] + [{**salary, "value": [record, *salary["value"]]}]
+        assert (await _patch(agent, *edits_, {"path": "preferences.daily_check", "value": "ask"})).status_code == 200
     async with authenticated_async_context() as client:
         assert (await client.post("/api/profile/edits/keep", json={"path": EQ})).status_code == 200
         resp = await client.post("/api/profile/clear", data={"section": "preferences"})
@@ -967,17 +972,18 @@ async def test_take_back_of_an_assistant_memory_edit_falls_back_to_the_base(
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
-        save_user_info(fixture_user_id, UserInfo(contact={"preferred_name": "Base Ada"}), "test")
-    async with _bearer_client(token) as agent:
-        assert (await _patch(agent, {"path": CONTACT, "value": {"preferred_name": "Agent Ada"}})).status_code == 200
+        save_user_info(fixture_user_id, UserInfo(contact={"legal_first_name": "Base"}), "test")
+    async with _bearer_client(token) as agent:  # S2b: the assistant fills the empty preferred_name only
+        agent_value = {"legal_first_name": "Base", "preferred_name": "Agent Ada"}
+        assert (await _patch(agent, {"path": CONTACT, "value": agent_value})).status_code == 200
     async with authenticated_async_context() as client:
         body = await _get(client)
-        assert body["user_info"]["contact"] == {"preferred_name": "Agent Ada"}
+        assert body["user_info"]["contact"] == agent_value
         edit = next(e for e in body["agent_edits"] if e["path"] == CONTACT)
-        assert edit["previous_value"] == {"preferred_name": "Base Ada"}
+        assert edit["previous_value"] == {"legal_first_name": "Base"}
         resp = await client.post("/api/profile/edits/take-back", json={"path": CONTACT})
         assert resp.status_code == 200, resp.text
-        assert resp.json()["user_info"]["contact"] == {"preferred_name": "Base Ada"}
+        assert resp.json()["user_info"]["contact"] == {"legal_first_name": "Base"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1157,20 +1163,21 @@ def _ans(question: str, answer: str, **kw: Any) -> dict[str, Any]:
 
 
 def test_resolve_ops_append_upsert_remove_at_give_the_whole_list():
-    saved = [_ans("Notice?", "1 month", topic="notice"), _ans("Why us?", "Mission", company="Acme")]
+    # Outside Memory's families (plan S2 refuses a new saved answer for a Memory fact: see test_memory_first).
+    saved = [_ans("Referee?", "1 month", topic="referee"), _ans("Why us?", "Mission", company="Acme")]
     current = {ANSWERS: saved, NOTES: ["a", "b", "c"]}
 
     [(path, value)] = edits.resolve_ops([(ANSWERS, "append", _ans("New?", "x"), None)], current)
     assert path == ANSWERS and value == [*saved, _ans("New?", "x")]
     # upsert by topic (+ same company): replaced in place, not duplicated
-    notice = _ans("Notice period?", "2 months", topic="notice")
+    notice = _ans("Referee name?", "2 months", topic="referee")
     [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", notice, None)], current)
     assert [r["answer"] for r in value] == ["2 months", "Mission"]
     # upsert by question + company (no topic): replaced; no match = appended
     [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans(" why  US? ", "People", company="ACME"), None)], current)
     assert [r["answer"] for r in value] == ["1 month", "People"]
-    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans("Salary?", "Ask", topic="salary"), None)], current)
-    assert len(value) == 3 and value[-1]["topic"] == "salary"
+    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans("Hobby?", "Ask", topic="hobby"), None)], current)
+    assert len(value) == 3 and value[-1]["topic"] == "hobby"
     [(_, value)] = edits.resolve_ops([(NOTES, "remove_at", None, 1)], current)
     assert value == ["a", "c"]
     # several ops on one path collapse into ONE pair, in call order; a `set` passes through untouched
@@ -1255,22 +1262,23 @@ async def test_patch_item_ops_write_the_resulting_full_list_append_only(
 
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        saved = [_ans("Notice?", "1 month", topic="notice", approved=True), _ans("Why us?", "Mission")]
+        # Outside Memory's families (plan S2 refuses a new saved answer for a Memory fact).
+        saved = [_ans("Referee?", "1 month", topic="referee", approved=True), _ans("Why us?", "Mission")]
         assert (await _patch(client, {"path": ANSWERS, "value": saved})).status_code == 200
-        resp = await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("Visa?", "No")})
+        resp = await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("Portfolio?", "No")})
         assert resp.status_code == 200, resp.text
         answers = (await _get(client))["user_info"]["answers"]
-        assert [a["question"] for a in answers] == ["Notice?", "Why us?", "Visa?"]
+        assert [a["question"] for a in answers] == ["Referee?", "Why us?", "Portfolio?"]
         resp = await _patch(
-            client, {"path": ANSWERS, "op": "upsert", "value": _ans("Notice period?", "2 months", topic="notice")}
+            client, {"path": ANSWERS, "op": "upsert", "value": _ans("Referee name?", "2 months", topic="referee")}
         )
         assert resp.status_code == 200, resp.text
         answers = (await _get(client))["user_info"]["answers"]
         assert [(a["question"], a["answer"]) for a in answers] == [
-            ("Notice period?", "2 months"), ("Why us?", "Mission"), ("Visa?", "No")
+            ("Referee name?", "2 months"), ("Why us?", "Mission"), ("Portfolio?", "No")
         ]
         assert (await _patch(client, {"path": ANSWERS, "op": "remove_at", "index": 1})).status_code == 200
-        assert [a["question"] for a in (await _get(client))["user_info"]["answers"]] == ["Notice period?", "Visa?"]
+        assert [a["question"] for a in (await _get(client))["user_info"]["answers"]] == ["Referee name?", "Portfolio?"]
         # history: one new row per call, each holding the WHOLE list, nothing rewritten
         history = path_history(fixture_user_id, ANSWERS, 10)
         assert [len(row["value"]) for row in history] == [2, 3, 3, 2]

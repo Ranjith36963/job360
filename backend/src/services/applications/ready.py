@@ -16,8 +16,8 @@ from src.core import settings
 from src.services.applications import hiding, kit, spine
 from src.services.applications.kit import _json
 from src.services.applications.test_marker import TEST_APP_SQL
+from src.services.profile import country_pages, user_info
 from src.services.profile import edits as profile_edits
-from src.services.profile import user_info
 from src.services.profile.edits import is_assistant_actor
 from src.services.profile.regions import region_of
 
@@ -152,7 +152,7 @@ async def newest_cv_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) ->
 
 
 async def answer_flags_for(
-    user_id: str, fills: dict[int, dict[str, Any]]
+    db: JobDatabase, user_id: str, fills: dict[int, dict[str, Any]]
 ) -> dict[int, list[dict[str, Any]]]:
     """The card's flags (:func:`_answer_rows`, the SAME reading as the card) for many fills at once, one profile
     load for all. ``fills``: ``{application_id: {job_country, job_company, filled_at, answers}}``."""
@@ -166,6 +166,7 @@ async def answer_flags_for(
     loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
     profile = loaded or UserProfile()
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    approvals = await job_approvals_many(db, user_id, list(fills))
     out: dict[int, list[dict[str, Any]]] = {}
     for app_id, f in fills.items():
         country = (str(f.get("job_country") or "").strip().upper()) or None
@@ -176,7 +177,8 @@ async def answer_flags_for(
             if isinstance(a, dict) and "question" in a and ("answer" in a or a.get("redacted"))
         ]
         company = _company_key(str(f.get("job_company") or ""))
-        out[app_id] = _answer_rows(typed, have, saved, profile, company, f["filled_at"], country)[1]
+        mine = with_job_approvals(profile, approvals.get(app_id, []))
+        out[app_id] = _answer_rows(typed, have, saved, mine, company, f["filled_at"], country)[1]
     return out
 
 
@@ -284,30 +286,46 @@ def _approved_record(
     country: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """The user's approved answer RECORD to ``question`` (or one of its other wordings), for this
-    company or any company; the last one in the list wins. None when there is none.
-    ``topic`` (the key the fill named) wins over the wording, as check_form matches it: a
-    "Current location" saved on an India form is not the answer on a UK form that typed the
-    international topic (application 107, 2026-10-20). ``country`` = the job's: an answer bound to
-    another country (``answer_match.fits_country``) is not this job's (ask once, owner 2026-11-02)."""
-    from src.services.profile.answer_match import fits_country  # noqa: PLC0415
+    company or any company, resolved exactly as the kit and check_form resolve it
+    (:func:`answer_match.resolve_answer`): ``topic`` (the key the fill named) before the wording, as
+    check_form matches it - a "Current location" saved on an India form is not the answer on a UK form
+    that typed the international topic (application 107, 2026-10-20); this company's own answer before
+    the general one, and one bound to the job's ``country`` before one bound to none (ask once, owner
+    2026-11-02); an answer bound to another country (``answer_match.fits_country``) is not this job's.
+    None when there is none, when the matches disagree, or when the matched record's topic has saved
+    answers that disagree (``answer_match.conflicting_topics``) however it was worded (2026-11-03).
+    The user's own Verify / Edit on THIS application (``job_only``, :func:`with_job_approvals`) comes
+    first, by topic or wording: it is their word for this job, so no saved answer outranks it and a
+    consent.* / certify.* row (never REUSED from memory) still verifies for the job it was given on."""
+    from src.services.profile.answer_match import (  # noqa: PLC0415
+        conflicting_topics,
+        normalize_question,
+        resolve_answer,
+        topic_key,
+    )
 
-    q = _norm(question)
-    by_topic: Optional[dict[str, Any]] = None
-    hit: Optional[dict[str, Any]] = None
-    for rec in kit._records(profile.user_info.answers):
-        if rec.get("approved") is not True or not kit._present(rec.get("answer")):
-            continue
-        scoped = str(rec.get("company") or "").strip()
-        if scoped and kit.normalized_company_key(scoped) != company_key:
-            continue
-        if not fits_country(rec, country):
-            continue
-        if topic and str(rec.get("topic") or "") == topic:
-            by_topic = rec
-        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
-        if q in {_norm(w) for w in wordings if isinstance(w, str)}:
-            hit = rec
-    return by_topic if by_topic is not None else hit
+    records: list[dict[str, Any]] = [
+        rec for rec in kit._records(profile.user_info.answers)
+        if rec.get("approved") is True and kit._present(rec.get("answer"))
+    ]
+    want_q, want_topic = normalize_question(question), topic_key(topic) if topic else ""
+    job_only: list[dict[str, Any]] = [r for r in records if r.get("job_only")]
+    for job in reversed(job_only):  # the newest Verify wins
+        by_topic = bool(want_topic) and topic_key(job.get("topic")) == want_topic
+        # "???" has no wording: then only the exact same text is the same question ("!!!" is not).
+        same_text = str(job["question"]).strip() == str(question or "").strip()
+        by_words = normalize_question(job["question"]) == want_q if want_q else same_text
+        if by_topic or by_words:
+            hit: dict[str, Any] = job
+            return hit
+    records = [r for r in records if not r.get("job_only")]
+    rec, note = resolve_answer(records, topic=topic or None, question=question, company_key=company_key,
+                               country=country)
+    if rec is None or note:
+        return None  # nothing saved, or two saved answers disagree: never pick one (the user is asked)
+    if topic_key(rec.get("topic")) in conflicting_topics(records, country=country, company_key=company_key):
+        return None
+    return rec
 
 
 def _approved_for(
@@ -317,6 +335,62 @@ def _approved_for(
     """The answer text of :func:`_approved_record`; None when there is none."""
     rec = _approved_record(profile, question, company_key, topic, country)
     return None if rec is None else str(rec["answer"])
+
+
+JOB_APPROVAL_EVENT = "answer_verified"
+
+
+async def job_approvals(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:
+    """The owner's Verify / Edit of answers on THIS application (owner decision 2026-11-02 "A": job only),
+    as approved-answer records, oldest first so the newest wins. Read from the server-written
+    ``answer_verified`` events; they live on the application and are never part of the profile, so no
+    other application, kit or ``answer_match`` ever reads them (reuse is the "remember" press only)."""
+    return _approval_records(await kit._events(db, user_id, application_id, (JOB_APPROVAL_EVENT,)))
+
+
+async def job_approvals_many(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+    """:func:`job_approvals` for many applications in ONE query (the Needs you count reads every row)."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT id, application_id, payload, recorded_at FROM application_events "  # noqa: S608
+        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({marks}) ORDER BY id DESC",
+        (user_id, JOB_APPROVAL_EVENT, *app_ids),
+    )
+    by_app: dict[int, list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        d = dict(r)
+        d["payload"] = kit._json(d.get("payload"))
+        by_app.setdefault(int(d["application_id"]), []).append(d)
+    return {i: _approval_records(evs) for i, evs in by_app.items()}
+
+
+def _approval_records(newest_first: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``answer_verified`` events (newest first) as approved-answer records, oldest first so the newest wins."""
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for ev in reversed(newest_first):
+        p = ev["payload"]
+        question, answer = str(p.get("question") or ""), str(p.get("answer") or "")
+        if not question.strip() or not answer.strip():
+            continue
+        key = str(p.get("key") or "")
+        out.pop((_norm(question), key), None)  # a newer word for the same question goes last
+        out[(_norm(question), key)] = {
+            "question": question, "answer": answer, "approved": True, "job_only": True,
+            "recorded_at": ev["recorded_at"], **({"topic": key} if key else {}),
+        }
+    return list(out.values())
+
+
+def with_job_approvals(profile: Any, records: list[dict[str, Any]]) -> Any:
+    """A copy of ``profile`` that also holds this application's own approvals (never written back)."""
+    if not records:
+        return profile
+    from dataclasses import replace  # noqa: PLC0415
+
+    answers = [*kit._records(profile.user_info.answers), *records]
+    return replace(profile, user_info=replace(profile.user_info, answers=answers))
 
 
 def _when(value: Any) -> Optional[datetime]:
@@ -363,12 +437,16 @@ def _user_check(
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed; ``changed_reason`` says whose act made it differ (see OWNER_EDIT)."""
     rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None, country)
+    if rec is not None and not rec.get("job_only") and a.get("source") == "memory" and str(a.get("key")) in have:
+        rec = None  # Memory first (owner 2026-11-05): a saved answer never overrides a Memory answer
     if rec is not None:
         word = str(rec["answer"])
         if _typed_is(a, word):
             return True, None, None
         by_list = saved.get(user_info.USER_INFO_ANSWERS_PATH, (None, None))[0]
-        if (by_list and not is_assistant_actor(str(by_list))
+        if rec.get("job_only") and _after_fill(rec.get("recorded_at"), filled_at):
+            reason = OWNER_EDIT  # the owner's own web Edit on this job's card
+        elif (by_list and not is_assistant_actor(str(by_list))
                 and _after_fill(rec.get("recorded_at"), filled_at)):
             reason = OWNER_EDIT
         elif str(rec.get("company") or "").strip():
@@ -379,7 +457,10 @@ def _user_check(
     key = str(a.get("key") or "")
     path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
     by, at = saved.get(path, (None, None)) if a["source"] == "memory" and path and key in have else (None, None)
-    if not by or is_assistant_actor(str(by)):
+    # Country pages: a drafted country row is a guess, whoever saved the block last; an unmarked row in a
+    # block that carries draft marks is the user's own (country_pages.key_is_users).
+    owned = country_pages.key_is_users(profile.user_info.right_to_work, key) if by else None
+    if owned is False or (owned is None and (not by or is_assistant_actor(str(by)))):
         return False, None, None
     text = _memory_text(profile, key)
     if text is not None and not _typed_is(a, text):
@@ -495,8 +576,9 @@ async def _unverified_flags(
     blocks, _missing = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    mine = with_job_approvals(profile, await job_approvals(db, user_id, int(app_row["id"])))
     _answers, flags = _answer_rows(
-        rows, have, saved, profile, _company_key(str(app_row.get("job_company") or "")), country=country)
+        rows, have, saved, mine, _company_key(str(app_row.get("job_company") or "")), country=country)
     return flags
 
 
@@ -716,6 +798,7 @@ async def refill_keeps_answers(
     profile = loaded or UserProfile()
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
     company_key = _company_key(str(app_row.get("job_company") or ""))
+    profile = with_job_approvals(profile, await job_approvals(db, user_id, int(app_row["id"])))
     for a in changed:
         word = _users_word(profile, saved, a, company_key, _job_country(app_row))
         if word is None or _norm(word) != _norm(a["answer"]):
@@ -745,8 +828,9 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     blocks, _ = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
+    mine = with_job_approvals(profile, await job_approvals(db, user_id, int(app_row["id"])))
     answers, _ = _answer_rows(
-        typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")), country=country)
+        typed, have, saved, mine, _company_key(str(app_row.get("job_company") or "")), country=country)
     # A CV / letter file field is not typed text: the file sent is the CV gates' (cv_not_seen,
     # document_uploaded), so a saved label like "CV v1, artifact 128" is never demanded in it.
     pending = [{"question": a["question"], "answer": str(a["changed_to"])}
@@ -809,7 +893,8 @@ async def ready_cards(
             flags.append(_flag("no_answers", "Your assistant did not list the answers it typed"))
             typed = []
         answers, answer_flags = _answer_rows(
-            typed, have, saved, profile, _company_key(r["job_company"] or ""), r["filled_at"], country
+            typed, have, saved, with_job_approvals(profile, await job_approvals(db, user_id, app_id)),
+            _company_key(r["job_company"] or ""), r["filled_at"], country,
         )
         flags += answer_flags + _missing_flags(profile, missing, country)
         cv = await _doc(db, user_id, app_id, "cv")
@@ -858,11 +943,13 @@ def _with_approved(
     """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
     to the same question (unscoped, or scoped to this company) on the same topic. A same-worded
     answer saved for another topic (another country's right to work) is kept."""
+    from src.services.profile.answer_match import topic_key  # noqa: PLC0415
+
     q = _norm(question)
     keep = [
         dict(r) for r in kit._records(profile.user_info.answers)
         if not (_norm(r.get("question") or "") == q
-                and str(r.get("topic") or "").strip() == topic
+                and topic_key(r.get("topic")) == topic_key(topic)
                 and (not str(r.get("company") or "").strip()
                      or kit.normalized_company_key(str(r["company"])) == company_key))
     ]
@@ -887,7 +974,8 @@ def answer_edits(
         path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
         value = _path_value(profile, path) if path else None
         if kit._present(value):
-            out.append((path, value))  # the same value, now saved by the user
+            # The same value, now saved by the user; verifying a drafted country's fact confirms that row.
+            out.append((path, country_pages.confirm_row(value, key) if path == country_pages.RTW_PATH else value))
     if not sensitive or not out:
         # A written answer is for this employer only: a why-this-company essay is never reused elsewhere.
         scoped = company if answer["source"] == "written" else ""
@@ -903,7 +991,7 @@ async def confirm_answer(
     """Verify (``new_text`` None) or Edit one answer on a ready card; returns the paths
     written. Raises ``ProfileEditError`` 404 / 409 / 422 and writes nothing on a refusal."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
     cards = await ready_cards(db, user_id, limit=1, application_id=application_id)
     if not cards:
@@ -925,13 +1013,22 @@ async def confirm_answer(
         )
     loaded, _ = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
-    writes = answer_edits(profile, answer, text, edited=new_text is not None,
-                          company_key=_company_key(card["job_company"]), company=card["job_company"])
-    for path, value in writes:
-        profile_edits.validate_edit(path, value)  # all-or-nothing: a bad value writes nothing
-    if load_profile(user_id, with_overlay=False) is None:
-        save_profile(UserProfile(), user_id, source_action="agent_edit")
-    profile_edits.record_edits(
-        user_id, actor, writes, enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
+    # Dry run only: a bad value (an email that is not one, an over-long answer) still refuses with a 422,
+    # but NOTHING is written to the profile - this answer is approved for THIS job only (owner 2026-11-02).
+    # Checked on its own, not merged into the remembered answers it never joins: a remembered "Yes" to the
+    # same question must not refuse the user's "No" for this job as "the same question appears twice".
+    from dataclasses import replace  # noqa: PLC0415
+
+    alone = replace(profile, user_info=replace(profile.user_info, answers=[]))
+    for path, value in answer_edits(alone, answer, text, edited=new_text is not None,
+                                    company_key=_company_key(card["job_company"]), company=card["job_company"]):
+        profile_edits.validate_edit(path, value)
+    await spine.append_event(
+        db, user_id=user_id, application_id=application_id, event_type=JOB_APPROVAL_EVENT,
+        occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=actor,
+        payload={
+            "question": str(answer["question"]), "answer": text, "edited": new_text is not None,
+            "form_filled_event_id": form_filled_event_id, **({"key": str(answer["key"])} if answer.get("key") else {}),
+        },
     )
-    return [path for path, _ in writes]
+    return [JOB_APPROVAL_EVENT]

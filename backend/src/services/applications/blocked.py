@@ -22,7 +22,7 @@ import re
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import asks as asks_service
-from src.services.applications import event_examples, spine
+from src.services.applications import event_examples, spine, which_browser
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.services.browser_agent import routing
@@ -34,6 +34,10 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
 
 BLOCKED_EVENT_TYPES = frozenset({"blocked", "unblocked"})
+ALREADY_APPLIED = "already_applied_on_site"
+# The one plain question Needs you shows for it; the web's "I applied" (the job leaves `considering`) closes it
+# (asks.tidy_open_asks).
+ALREADY_APPLIED_QUESTION = asks_service.ALREADY_APPLIED_QUESTION
 # Closed set, with the plain words the user reads.
 BLOCKED_REASONS: dict[str, str] = {
     "captcha": "a CAPTCHA",
@@ -52,11 +56,25 @@ BLOCKED_REASONS: dict[str, str] = {
     "assessment_required": "a timed test or video step",
     "manual_only": "a form that cannot be filled for you",
     "site_limit_reached": "the site's own daily application limit",
+    # 2026-11-02 (Axmed, app 336, tried six more times): the site says the user already applied. The job leaves
+    # the queue, is never retried, and Needs you asks the user one question (ALREADY_APPLIED_QUESTION).
+    ALREADY_APPLIED: "the site saying you already applied",
     "other": "a problem",
 }
-UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped"})
-NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked"})
-BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
+# Owner 2026-11-03 (app 116): ``own_browser`` = the user's own browser opened the page and it loaded clean (no
+# CAPTCHA, no sign-in wall). Any block reason, CAPTCHA and sign-in included (a different browser got through),
+# but only a block Job360's own browser recorded (:func:`job360_wrote`). It clears the block alone: check_submit's
+# other gates still decide. Stored with ``browser: own_browser`` (``which_browser``).
+OWN_BROWSER = which_browser.OWN
+UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped", OWN_BROWSER})
+# The blocks a clean load in another browser can clear: getting in, never what the site said (already applied,
+# ID or payment asked, a closed posting, a test, a code, its own limit): those still need the user.
+OWN_BROWSER_CLEARS = frozenset({"captcha", "bot_check", "login_needed", "account_creation", "site_error"})
+NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked", ALREADY_APPLIED})
+BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail", "evidence"})
+# Owner 2026-11-03: what proves a posting closed, read off the job's OWN page (never an email). Only with
+# ``posting_closed``; such a block on the ad's own site closes the application by itself (auto_close.py).
+CLOSED_EVIDENCE = frozenset({"page_says_closed", "http_404", "http_410"})
 # Written only by Job360's own browser (``record_browser_block``), never accepted from a caller: the
 # CAPTCHA hold and "Finish it here" trust a block only when it carries this (review of #1176).
 BY_KEY, BY_BROWSER = "by", "browser"
@@ -104,13 +122,14 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
     if event_type == "unblocked":
         if not set(payload) <= UNBLOCKED_KEYS or payload.get("resolution") not in UNBLOCK_RESOLUTIONS:
             problems.append(
-                'unblocked needs payload {"resolution": "retried" | "user_did_it" | "skipped"} and an optional '
-                f'"note" (why, plain text, at most {NOTE_MAX_CHARS} characters), nothing else'
+                'unblocked needs payload {"resolution": "retried" | "user_did_it" | "skipped" | "own_browser"} and '
+                f'an optional "note" (why, plain text, at most {NOTE_MAX_CHARS} characters), nothing else'
             )
         note = event_examples.collect(problems, _plain, "note", payload.get("note"), NOTE_MAX_CHARS)
         if problems:
             raise event_examples.refusal(event_type, problems)
-        return {"resolution": payload["resolution"], **({"note": note} if note else {}), "assistant": actor}
+        own = {which_browser.KEY: OWN_BROWSER} if payload["resolution"] == OWN_BROWSER else {}
+        return {"resolution": payload["resolution"], **({"note": note} if note else {}), "assistant": actor, **own}
     if BY_KEY in payload:
         problems.append(f'"{BY_KEY}" is written by Job360 itself (its own browser), never by a caller')
     unknown = set(payload) - BLOCKED_KEYS - {BY_KEY}
@@ -122,9 +141,13 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
     step = event_examples.collect(problems, _plain, "step", payload.get("step"), STEP_MAX_CHARS)
     page_host = event_examples.collect(problems, _page_host, payload.get("page_host"))
     text = event_examples.collect(problems, _plain, "detail", payload.get("detail"), DETAIL_MAX_CHARS)
+    evidence = payload.get("evidence")
+    if evidence is not None and (reason != "posting_closed" or evidence not in CLOSED_EVIDENCE):
+        problems.append("evidence goes only with posting_closed and is one of: " + ", ".join(sorted(CLOSED_EVIDENCE)))
     if problems:
         raise event_examples.refusal(event_type, problems)
-    return {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
+    stored = {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
+    return {**stored, "evidence": evidence} if evidence is not None else stored
 
 
 _USER_TODO: dict[str, str] = {
@@ -165,6 +188,8 @@ def ask_question(stored: dict[str, Any]) -> str:
     # Owner 2026-10-29: no step name in the words the user reads ("at open_form"); it stays in the payload.
     host = stored.get("page_host") or "the job site"
     reason = stored["reason"]
+    if reason == ALREADY_APPLIED:
+        return ALREADY_APPLIED_QUESTION
     return f"Your assistant got stuck: {BLOCKED_REASONS[reason]} on {host}. " + _USER_TODO.get(
         reason, "Check the form on {host} and finish it or tell your assistant what to do."
     ).format(host=host)
@@ -211,6 +236,12 @@ async def _open_block_event(db: JobDatabase, user_id: str, application_id: int) 
     if p.get("reason") == "upload_failed" and await _uploaded_after(db, user_id, application_id, int(events[0]["id"])):
         return None
     return events[0]
+
+
+def job360_wrote(block_payload: dict[str, Any]) -> bool:
+    """Job360's own browser recorded this block: ``by: browser`` (only ``record_browser_block`` writes it) or
+    ``browser: job360`` (a caller's ``job360`` is refused unless Job360's browser has a page open for them)."""
+    return block_payload.get(BY_KEY) == BY_BROWSER or block_payload.get(which_browser.KEY) == which_browser.JOB360
 
 
 async def browser_captcha_open(db: JobDatabase, user_id: str, application_id: int) -> bool:
@@ -437,8 +468,21 @@ async def before_append(
         if stored["resolution"] == "retried" and events[0]["payload"].get("reason") in NEVER_RETRIED:
             _log(user, application_id, event_type, stored, "refused")
             raise SpineError(
-                422, "a CAPTCHA, bot check, safety block or ID/payment request is never retried by the assistant; "
-                "the user resolves it (user_did_it) or it is skipped"
+                422, "a CAPTCHA, bot check, safety block, ID/payment request or a site saying you already applied is "
+                "never retried by the assistant; the user resolves it (user_did_it) or it is skipped"
+            )
+        if stored["resolution"] == OWN_BROWSER and (events[0]["payload"] or {}).get("reason") not in OWN_BROWSER_CLEARS:
+            _log(user, application_id, event_type, stored, "refused")
+            raise SpineError(
+                422, "unblocked own_browser clears only a CAPTCHA, bot check, sign-in or sign-up wall or site error; "
+                "what the site itself said (already applied, ID or payment, a closed posting...) needs the user",
+            )
+        if stored["resolution"] == OWN_BROWSER and not job360_wrote(events[0]["payload"]):
+            _log(user, application_id, event_type, stored, "refused")
+            raise SpineError(
+                422, "unblocked own_browser clears only a block Job360's browser recorded (the user's own browser "
+                "then loaded the page clean); this block was not Job360's browser's: the user resolves it "
+                "(user_did_it) or it is skipped",
             )
         return stored
     open_ids = await _open_ask_ids(db, user.id, _ask_ids(events, stored["reason"]))
@@ -493,6 +537,12 @@ async def record(
         await db._db.execute(
             "SELECT id FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
         )
+        proven = event_type == "blocked" and bool(stored.get("evidence"))
+        if proven:
+            from src.services.applications import auto_close  # noqa: PLC0415 - auto_close records `unblocked` here
+
+            # Read before this block opens (or merges into) an ask: an older ask to the owner keeps the job his.
+            asked_before = await auto_close.has_open_ask(db, user.id, application_id)
         stored = await before_append(db, user, application_id, event_type, stored)
         result = await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=event_type,
@@ -501,7 +551,26 @@ async def record(
             payload=stored, occurred_at=occurred_at, recorded_by=actor_for(user), follow_up_on=follow_up_on,
         )
         await after_append(db, user, application_id, event_type, stored)
+        if event_type == "blocked" and stored["reason"] == ALREADY_APPLIED:
+            await _leave_queue(db, user, application_id)
+        if proven:
+            closed = await auto_close.close_if_proven(
+                db, user, application_id, int(result["event_id"]), stored, asked_before=asked_before,
+            )
+            if closed is not None:
+                result = {**result, "status": "withdrawn", "warnings": [*result.get("warnings", []), closed]}
     return result
+
+
+async def _leave_queue(db: JobDatabase, user: CurrentUser, application_id: int) -> None:
+    """The site says the user already applied: the job leaves the batch queue (``unqueued`` {reason: blocked}).
+    ``queue_preflight.back_to_queue`` never puts it back (not in ``RETRY_AFTER_CLEARED``). Not queued: nothing."""
+    if application_id not in await spine.queued_at_by_app(db, user.id, [application_id]):
+        return
+    await spine.append_event(
+        db, user_id=user.id, application_id=application_id, event_type="unqueued", payload={"reason": "blocked"},
+        occurred_at=spine.parse_occurred_at(None), recorded_by=actor_for(user),
+    )
 
 
 def _site(value: Any) -> str:
@@ -542,7 +611,7 @@ async def record_browser_block(
     with ``by: browser``, the one key a caller can never write (``check_payload`` refuses it)."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise SpineError(404, "application not found")
-    stored = {**check_payload(user, "blocked", payload, ""), BY_KEY: BY_BROWSER}
+    stored = {**check_payload(user, "blocked", payload, ""), BY_KEY: BY_BROWSER, "browser": "job360"}
     return await record(db, user, application_id, "blocked", stored, occurred_at=spine.parse_occurred_at(None))
 
 

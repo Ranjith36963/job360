@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
+from src.api.routes.own_browser import PcIdleOut
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications.authorship import actor_for
@@ -77,6 +78,9 @@ class WhatsDueOut(BaseModel):
     held_by_running: list[Duty] = Field(default_factory=list)
     expected_every_hours: int
     checked_at: str
+    # Owner #12: own-browser tasks wait and no session in the user's own browser worked them for over
+    # PC_IDLE_WARN_HOURS (or ever): tell the user to start their PC browser session. A scheduled run never works them.
+    pc_idle: Optional[PcIdleOut] = None
 
 
 class MarkDoneIn(BaseModel):
@@ -176,6 +180,10 @@ async def whats_due(
             from src.services.applications.inbox import search_plan  # noqa: PLC0415 - profile <-> spine cycle
 
             item["search"] = await search_plan(db, user.id)
+    from src.services.applications import own_browser  # noqa: PLC0415 - profile <-> spine cycle
+
+    waiting = len(await own_browser.queue_tasks(db, user, now))
+    answer["pc_idle"] = await own_browser.pc_idle(db, user.id, now, waiting)
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 
@@ -184,6 +192,7 @@ async def whats_due(
 # then stopped with failed/needs_user. A partial or failed batch stop with no outside blocker (rate
 # limit, network, sign-in, plan, tool) is the same early stop.
 _NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
+BATCH_NOT_CLAIMED = 'You did not claim the batch: call whats_due(duties=["batch"]) first. Nothing was recorded.'
 
 
 async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
@@ -240,9 +249,13 @@ async def mark_done(
         raise HTTPException(status_code=422, detail="a failed run needs a reason (one of the closed list)")
     if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
         raise HTTPException(status_code=404, detail="application not found")
+    now = datetime.now(timezone.utc)
+    # S5 (prod, 4 runs): a run closed a batch it never claimed (a plain whats_due, or none), pushing the next
+    # batch back. Only an assistant's whats_due(duties=["batch"]) claims, so only an assistant is refused.
+    if body.duty == "batch" and actor_for(user) != "web" and not await schedule.claim_live(db, user.id, "batch", now):
+        raise HTTPException(status_code=409, detail=BATCH_NOT_CLAIMED)
     if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
         await _refuse_early_batch_stop(db, user)
-    now = datetime.now(timezone.utc)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
     _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "")
     failures = int((await schedule.load_runs(db, user.id)).get(body.duty, {}).get("failures") or 0)

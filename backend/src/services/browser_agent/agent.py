@@ -64,8 +64,10 @@ from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blo
 from src.services.browser_agent.sites import (
     MIN_LABELLED_FIELDS,
     account_step,
+    already_applied_said,
     greenhouse_embed_url,
     is_honeypot,
+    job_ad_page,
     looks_like_application,
     outcome_for,
     site_for,
@@ -238,6 +240,9 @@ class Session:
     # the route stores them as that job's replayable fill script and drops them from the answer.
     record: bool = False
     steps: list[dict[str, Any]] = field(default_factory=list)
+    # Each tab's latest main-document response as (status, headers, requested url), so look can report an error
+    # page (429, 4xx, 5xx) the way open does. Cleared when the tab starts a new navigation.
+    doc_status: dict[Any, tuple[int, dict[str, str], str]] = field(default_factory=dict)
 
 
 def _held(s: Session, now: float) -> bool:
@@ -469,8 +474,16 @@ class BrowserPool:
                 # The tab moves on: its refusal (by tab or by address) is over.
                 s.blocked_tabs.pop(frame.page, None)
                 s.blocked_urls.pop(frame.page.url, None)
+                s.doc_status.pop(frame.page, None)
 
         def _on_response(response: Any) -> None:
+            try:
+                if response.request.is_navigation_request():
+                    doc = _main_frame(response)
+                    if doc is not None:
+                        s.doc_status[doc.page] = (int(response.status), dict(response.headers), response.url)
+            except Exception:  # noqa: BLE001 - a response with no frame yet: no transport fact
+                pass
             # Only the proxy's own 403 holds its per-process mark: a site cannot send it.
             reason = _REFUSAL.get(response.headers.get(BLOCK_HEADER, "")) if response.status == 403 else None
             if reason is None:
@@ -1047,7 +1060,33 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
         if blocker.from_text:
             out[STOP_KEY] = outcomes.TEXT_STOP
+    elif (error := _http_error(s, page)) is not None:
+        # The document's own response was an error (429, 4xx, 5xx): never an "ok" read, whatever the body says.
+        # A 403 stays a page here: only the proxy's own refusal is a refusal (_refusal), and a site's 403 is
+        # a bot wall the open route reads from ``transport``, which is attached below for it too.
+        out.update(status="error", reason="http_error", detail=f"The site answered this page with HTTP {error}.")
+    elif not s.submitted_on[1] and already_applied_said(text):
+        # The site says the user already applied (never after this browser's own submit: that is the
+        # confirmation path). The job leaves the queue and waits on the user's one question (blocked.py).
+        out.update(status="needs_you", reason=ALREADY_APPLIED, detail=ALREADY_APPLIED_DETAIL)
+    doc = getattr(s, "doc_status", {}).get(page)
+    if doc is not None and doc[0] >= 400:  # the same transport facts open reports
+        out["transport"] = outcomes.transport_of(doc[0], doc[1], doc[2], str(page.url or ""))
     return out
+
+
+def _http_error(s: Session, page: Any) -> Optional[int]:
+    """The error status of this tab's current document that look reports as an error, or None: 400 or more,
+    except 403 (a site's 403 is a page, see look; its transport still carries the status)."""
+    doc = getattr(s, "doc_status", {}).get(page)
+    return doc[0] if doc is not None and doc[0] >= 400 and doc[0] != 403 else None
+
+
+ALREADY_APPLIED = "already_applied"
+ALREADY_APPLIED_DETAIL = (
+    "This site says you already applied for this job. Job360's browser stops here and never tries it again: "
+    "the user says whether to mark it applied."
+)
 
 
 CAPTCHA_DETAIL = (
@@ -1210,6 +1249,26 @@ def _opener_allowed(s: Optional[Session]) -> bool:
     return _page_key(url) not in s.typed_on and not _signed_in_for(s, url)
 
 
+def _known_ad(s: Optional[Session], facts: dict[str, Any]) -> bool:
+    """The page is a known applicant system's job ad (``sites.job_ad_page``: Oracle HCM's job page, BambooHR's
+    careers page), the server's own facts allow an opener (nothing put into a field of this page, no saved
+    sign-in for the site), and the page asks for nothing: no visible required field, no visible field holding a
+    value but a link to the same site. A chat widget's file box or a cookie banner's ticks do not count here
+    (2026-11-02: Oracle's job page carries a hidden chat file box and a hidden "Copy Link" box). A fact missing
+    reads as a form (the safe side)."""
+    if not _opener_allowed(s) or s is None:
+        return False
+    try:
+        url = str(_live_page(s).url or "")
+    except BrowserError:
+        return False
+    fields_shown = facts.get("fields_shown")
+    return (
+        job_ad_page(url) and facts.get("required_shown") is False and facts.get("shown_filled") is False
+        and isinstance(fields_shown, int) and fields_shown < MIN_LABELLED_FIELDS
+    )
+
+
 async def _kind(loc: Any, s: Optional[Session] = None) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
     # Still the job ad. The server decides (_opener_allowed: nothing typed on this page, no saved sign-in for
@@ -1227,12 +1286,13 @@ async def _kind(loc: Any, s: Optional[Session] = None) -> str:
     # A saved sign-in may reach this site (or that is not known): every apply-verb button is the final submit,
     # so only check_submit's `submit` lets it through (owner decision on #1227).
     site_knows_user = _site_knows_user(s)
+    known_ad = _known_ad(s, facts)
 
     def kind_of(name: str) -> str:
         return control_kind(
             facts.get("tag", ""), facts.get("type", ""), name, facts.get("autocomplete", ""),
             bool(facts.get("in_form")), facts.get("role", ""), answers,
-            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad, site_knows_user,
+            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad, site_knows_user, known_ad,
         )
 
     kind = kind_of(str(facts.get("name") or ""))

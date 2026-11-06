@@ -3,10 +3,12 @@
 Remember ONLY on the owner's press: an answer to a standard (not per-job) form question is saved as an
 approved ``user_info.answers`` record bound to its key AND the job's country, only when the owner presses
 "remember" on Needs you ("OK all and remember", or a row's own Remember). Nothing else saves for reuse.
-Only a country-specific question (:func:`is_country_specific`: right to work, sponsorship, salary,
-relocation, on-site) is bound to the job's country; every other answer (phone, notice period) is global.
-A saved record is what ``answer_match`` / ``ready._approved_record`` already read as the user's word, so
-the next job in that country asking it needs no owner; another country still asks (``fits_country``).
+Memory first (owner 2026-11-05, plan S2): a question in Memory's families (:func:`memory_question`: right
+to work, sponsorship, salary, notice, relocation, on-site, location, equality, contact) is NEVER saved as an
+answer. Answer once (owner 2026-11-06): the press writes it into Memory for the job's country instead
+(``answer_to_memory``; a different value already there is a conflict, an unclear answer names the page).
+Every other answer (an essay, how you heard) is saved globally. A saved record is what ``answer_match`` /
+``ready._approved_record`` already read as the user's word, so the next job asking it needs no owner.
 
 The questionnaire: up to :data:`PER_COUNTRY` common questions per country the user works in, picked
 from ``common_questions`` rows that are guessed (to verify) or not known, most-guessed first.
@@ -67,42 +69,227 @@ def is_country_specific(key: str, question: str) -> bool:
     return bool(words & COUNTRY_WORDS) or {"right", "work"} <= words or {"on", "site"} <= words
 
 
-def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -> list[str]:
-    """Save each ``{topic, question, answer}`` as the user's approved answer (the user's own web press: the
-    caller is a session-only route): bound to ``country`` when :func:`is_country_specific`, else global.
-    Upserts on topic + country. Returns the topics saved; a per-job row is skipped, and so is a
-    country-specific one when the job's country is unknown (it must never become global). All-or-nothing:
-    a bad value writes nothing (422)."""
+# Memory first (owner 2026-11-05, plan S1): the kit blocks Memory holds. A form question in one of them is
+# answered from Memory (the country page, its region's, ANY), never from a saved answer.
+MEMORY_BLOCKS = ("contact", "right_to_work", "logistics", "salary", "languages", "equality")
+
+
+# Pay words a form uses for the salary it expects ("Desired Pay", "Desired compensation"; live run 2026-11-06):
+# read as "salary", so they name the salary rows (the job country's range) and nothing else.
+_PAY_WORDS = frozenset({"pay", "compensation"})
+# Contact links (live run 2026-11-06): a label asking for the USER'S OWN link on ONE site ("Link to your
+# LinkedIn profile"). ALLOW-list: every word is the site, a link word or one of the user's own phrasing words;
+# anything else (how you heard, two sites, a referrer's link) is not the user's link.
+_LINK_SITES = {"linkedin": "contact.linkedin_url", "github": "contact.github_url"}
+_LINK_WORDS = frozenset({"url", "link", "profile", "page", "address"})
+_OWN_LINK_WORDS = frozenset({"your", "my", "to", "a", "the", "please", "share", "provide", "enter", "add", "paste",
+                             "what", "is", "public", "full", "optional"})
+
+
+def _contact_link(words: set[str]) -> Optional[str]:
+    """The contact URL key a label asking for the user's own link names (:data:`_LINK_SITES`), else ``None``.
+    Anything off the allow-list (a referrer's link, a username, a LinkedIn post or certificate) is ``None``."""
+    sites = {_LINK_SITES[w] for w in words if w in _LINK_SITES}
+    if len(sites) != 1 or words - set(_LINK_SITES) - _LINK_WORDS - _OWN_LINK_WORDS:
+        return None
+    return next(iter(sites)) if len(words) == 1 or words & _LINK_WORDS else None
+
+
+# Names and phone (PC browser, live forms 2026-11-06): a PLAIN label asking for the user's own name or phone.
+# ALLOW-list: every word is a core word of ONE field or a filler word; anything else ("Referrer first name",
+# "Emergency contact phone", "First and last name") is not the user's own field. Word sets, no regex.
+DIAL_CODE = "contact.phone_dial_code"  # derived from the saved number's own "+44" prefix, never a stored field
+_FILLER = frozenset({"your", "please", "enter", "provide", "optional", "required"})
+_NAME_CORE = {"first": "contact.legal_first_name", "given": "contact.legal_first_name",
+              "forename": "contact.legal_first_name", "last": "contact.legal_last_name",
+              "family": "contact.legal_last_name", "surname": "contact.legal_last_name"}
+_NAME_EXTRA = frozenset({"name", "legal"})
+_PHONE_CORE = frozenset({"phone", "mobile", "telephone", "cell"})
+_PHONE_EXTRA = frozenset({"number", "no"})
+_DIAL_CORE = frozenset({"dial", "dialing", "dialling", "calling"})
+
+
+def _contact_label(words: list[str]) -> Optional[str]:
+    """The contact key a plain own-name / own-phone label names (:data:`DIAL_CODE` for a dial or country code),
+    else ``None``. ``words`` is the normalised label, split."""
+    seen = set(words) - _FILLER
+    if not seen:
+        return None
+    # A bare "Country code" can be an address field: a dial code label also names dialling, calling or a phone.
+    if "code" in seen and seen & (_DIAL_CORE | {"phone"}) and seen <= _DIAL_CORE | {"country", "code", "phone"}:
+        return DIAL_CODE
+    if seen & _PHONE_CORE and seen <= _PHONE_CORE | _PHONE_EXTRA:
+        return "contact.phone"
+    if "preferred" in seen:
+        rest = seen - {"preferred"}
+        return "contact.preferred_name" if rest in ({"name"}, {"first", "name"}) else None
+    keys = {_NAME_CORE[w] for w in seen if w in _NAME_CORE}
+    if len(keys) != 1 or not seen <= set(_NAME_CORE) | _NAME_EXTRA:
+        return None
+    # "First name" / "Legal last name" need "name"; "Surname" / "Forename" are names on their own.
+    return next(iter(keys)) if "name" in seen or seen & {"surname", "forename"} else None
+
+
+def contact_label(question: str) -> Optional[str]:
+    """:func:`_contact_label` over a form question's own text."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    return _contact_label(normalize_question(question).split())
+
+
+def own_link_label(question: str) -> bool:
+    """True when the question is an allow-listed ask for the user's own LinkedIn or GitHub link."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    return _contact_link(set(normalize_question(question).split())) is not None
+
+
+def _signals(words: set[str]) -> set[str]:
+    """The :data:`COUNTRY_WORDS` in ``words`` by their first four letters (sponsor / sponsorship are one);
+    "right to work" counts as "authorization", "on site" as "onsite" (:func:`is_country_specific`) and a
+    :data:`_PAY_WORDS` word as "salary"."""
+    out = {"sala" if w in _PAY_WORDS else w[:4] for w in words if w in COUNTRY_WORDS}
+    if {"right", "work"} <= words:
+        out.add("authorization"[:4])
+    if {"on", "site"} <= words:
+        out.add("onsite"[:4])
+    return out
+
+
+def _field_words(kit_key: str) -> set[str]:
+    """``right_to_work.{cc}.needs_sponsorship`` -> {needs, sponsorship}; ``salary.{cc}`` -> {salary}."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    parts = [p for p in kit_key.split(".") if p != "{cc}"]
+    return set(normalize_question(parts[-1]).split())
+
+
+def _is_kit_key(template: str, key: str) -> bool:
+    """``key`` is the catalog kit key ``template`` for some place (``right_to_work.GB.onsite``)."""
+    want, got = template.split("."), key.split(".")
+    return len(want) == len(got) and all(w == g or w == "{cc}" and g.isupper() for w, g in zip(want, got))
+
+
+def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[str]]:
+    """``(in_memory_family, kit_key)`` for a form question. In a family when ``key`` is a catalog Memory key,
+    when :func:`is_country_specific`, or when the wording is a catalog Memory row's (or names its field). The
+    kit key (``right_to_work.{cc}.needs_sponsorship``) is the ONE catalog row whose own field word the
+    question names and whose words cover the question's; none or several = ``None`` (never a guess)."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    k = (key or "").strip()
+    words = set(normalize_question(question).split())
+    if not k and words & set(_LINK_SITES) and _contact_link(words) is None:
+        return False, None  # names the site but is no allow-listed ask for the user's own link (catalog too)
+    label = None if k else _contact_label(normalize_question(question).split())
+    if label is not None and label != DIAL_CODE:
+        return True, label  # a plain own-name / own-phone label (the dial code is read in kit.form_check)
+    if words & _PAY_WORDS:
+        words.add("salary")  # "Desired pay" names the salary field (:data:`_PAY_WORDS`)
+    rows = [q for q in common_questions.catalog() if q.get("kit_key")]
+    # A catalog row's own wording, or (for a field named in two words or more: notice_period) all its words.
+    exact = [q["kit_key"] for q in rows if "{cc}" not in q["kit_key"] and (
+        normalize_question(q["question"]) == normalize_question(question)
+        or len(_field_words(q["kit_key"])) > 1 and _field_words(q["kit_key"]) <= words)]
+    named = [q["kit_key"] for q in rows if _is_kit_key(q["kit_key"], k)]
+    if named:
+        return True, named[0]
+    link = None if k else _contact_link(words)
+    if link:
+        return True, link
+    family = is_country_specific(k, question) or bool(exact)
+    if not family:
+        return False, None
+    if exact:
+        return True, (exact[0] if len(set(exact)) == 1 else None)
+    asked = _signals(words | set(normalize_question(k).split()))
+    hits = []
+    for q in rows:
+        own = _signals(_field_words(q["kit_key"]))
+        if own & asked and asked <= own | _signals(set(normalize_question(q["question"]).split())):
+            hits.append(q["kit_key"])
+    full = [h for h in hits if _field_words(h) <= words]
+    most = max((len(_field_words(h)) for h in full), default=0)
+    picked = [h for h in full if len(_field_words(h)) == most] if full else hits
+    return True, (picked[0] if len(picked) == 1 else None)
+
+
+def memory_note(topic: str, question: str, country: Optional[str]) -> Optional[str]:
+    """Why a row in Memory's families (:func:`memory_question`) is never kept as a saved answer (owner
+    2026-11-05, plan S2): Memory and the country pages are set by the user in Job360 itself, so the reason
+    names the page to set it on. ``None`` for a row outside Memory's families."""
+    family, template = memory_question(topic, question)
+    if not family:
+        return None
+    where = common_questions.save_path({"kit_key": template}) if template else "Memory"
+    per_country = template is None or "{cc}" in template
+    page = f"your {country} page" if per_country and country else "your Memory page"
+    return (f"a Memory fact ({where}), never kept as a saved answer: the user sets it on {page} "
+            "in Job360 (Memory)")
+
+
+def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -> dict[str, Any]:
+    """Save each ``{topic, question, answer}`` the user pressed "remember" on (the user's own web press: the
+    caller is a session-only route); ``country`` is the job's. A per-job row is skipped.
+    Answer once (owner 2026-11-06, refining plan S2): a row in Memory's families is written into MEMORY, at
+    its field for ``country`` (``answer_to_memory.plan``: converted to the field's shape, never overwriting a
+    different value), never kept as a saved answer. Every other row is saved globally as an approved
+    answer, upserted on topic. Returns ``{saved: [topic], not_saved: {topic: why}}`` plus, when any,
+    ``memory: {topic: {path, key}}`` and ``conflicts: {topic: sentence}``. One write for everything; a bad
+    value of a saved answer writes nothing (422)."""
+    from src.services.profile import answer_to_memory, user_info  # noqa: PLC0415
     from src.services.profile import edits as profile_edits  # noqa: PLC0415
-    from src.services.profile import user_info  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
 
-    keep = [
-        r for r in rows if str(r.get("answer") or "").strip() and reusable(r["topic"], r["question"])
-        and (country or not is_country_specific(r["topic"], r["question"]))
-    ]
-    if not keep:
-        return []
-    loaded, _ = load_profile_with_overlay(user_id)
-    records = [dict(r) for r in (loaded or UserProfile()).user_info.answers or [] if isinstance(r, dict)]
-    for r in keep:
-        new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"],
-               **({"country": country.upper()}
-                  if country and is_country_specific(r["topic"], r["question"]) else {})}
-        at = user_info.answer_upsert_index(records, new)
-        if at is None:
-            records.append(new)
+    not_saved: dict[str, str] = {}
+    memory: dict[str, dict[str, str]] = {}
+    conflicts: dict[str, str] = {}
+    keep = []
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    working: dict[str, Any] = {}
+    for r in rows:
+        answer = str(r.get("answer") or "").strip()
+        if not answer or not reusable(r["topic"], r["question"]):
+            continue
+        note = memory_note(r["topic"], r["question"], country)
+        if not note:
+            keep.append(r)
+            continue
+        template = memory_question(r["topic"], r["question"])[1]
+        outcome, detail = answer_to_memory.plan(profile, overlay, working, template, r["question"], answer, country)
+        if outcome == "write":
+            memory[r["topic"]] = {"path": detail[0], "key": detail[2]}
+        elif outcome == "same":
+            memory[r["topic"]] = {"path": common_questions.save_path({"kit_key": template}), "key": detail}
+        elif outcome == "conflict":
+            conflicts[r["topic"]] = detail
         else:
-            records[at] = new
-    value = profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, records)
-    if load_profile(user_id, with_overlay=False) is None:
-        save_profile(UserProfile(), user_id, source_action="agent_edit")
-    profile_edits.record_edits(
-        user_id, profile_edits.WEB_ACTOR, [(user_info.USER_INFO_ANSWERS_PATH, value)],
-        enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
-    )
-    return [r["topic"] for r in keep]
+            not_saved[r["topic"]] = note
+    edits: list[tuple[str, Any]] = list(working.items())
+    if keep:
+        records = [dict(r) for r in profile.user_info.answers or [] if isinstance(r, dict)]
+        for r in keep:
+            new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"]}
+            records = user_info.upsert_answer(records, new)
+        edits.append((user_info.USER_INFO_ANSWERS_PATH,
+                      profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, records)))
+    if edits:
+        from src.services.applications.kit import edit_is_sensitive  # noqa: PLC0415
+
+        if load_profile(user_id, with_overlay=False) is None:
+            save_profile(UserProfile(), user_id, source_action="agent_edit")
+        profile_edits.record_edits(
+            user_id, profile_edits.WEB_ACTOR, edits, enforce_rate_limit=False,
+            source=profile_edits.SOURCE_USER_SAID, consent_paths=[p for p, v in edits if edit_is_sensitive(p, v)],
+        )
+    out: dict[str, Any] = {"saved": [r["topic"] for r in keep], "not_saved": not_saved}
+    if memory:
+        out["memory"] = memory
+    if conflicts:
+        out["conflicts"] = conflicts
+    return out
 
 
 def _key(row: dict[str, Any]) -> str:
@@ -110,12 +297,22 @@ def _key(row: dict[str, Any]) -> str:
     return str(row.get("topic") or row.get("kit_key") or row["id"])
 
 
+def _conflict_row(c: dict[str, Any], cc: str) -> dict[str, Any]:
+    """A questionnaire row for a saved topic whose answers disagree (the same shape as a catalog row)."""
+    return {
+        "id": f"conflict.{c['topic']}", "group": "work", "question": c["question"], "country": cc,
+        "kit_key": None, "topic": c["topic"], "answer": None, "source": None, "state": "missing",
+        "verified": False, "label": "guessed", "seen": 0, "per_job": False, "save_to": "user_info.answers",
+        "set_by": None, "set_at": None, "guess_source": None, "sensitive": False,
+    }
+
+
 def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """``[{country, questions}]``: per saved country, up to :data:`PER_COUNTRY` rows still guessed or not
     known (``summary()``'s to_verify + missing), guessed first, then by how many forms ask it. A row the
     user already remembered is done: a global one for every country, a country-specific one
     (:func:`is_country_specific`) for its country only (``fits_country``). Read-only."""
-    from src.services.profile.answer_match import find_answer  # noqa: PLC0415
+    from src.services.profile.answer_match import conflicts, find_answer, topic_key  # noqa: PLC0415
 
     rows = [r for r in common_questions.common_questions(profile, overlay) if not r["per_job"]]
     saved = getattr(getattr(profile, "user_info", None), "answers", None) or []
@@ -128,6 +325,13 @@ def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str,
             and find_answer(saved, topic=_key(r), country=cc) is None
         ]
         todo.sort(key=lambda r: (r["label"] != "guessed", -int(r["seen"])))
+        # Two saved answers to one topic that disagree (case-insensitive): asked, never picked. Shown first.
+        for c in reversed(conflicts(saved, country=cc)):
+            row = next((r for r in todo if topic_key(r["topic"]) == topic_key(c["topic"])), None)
+            if row is None:
+                row = _conflict_row(c, cc)
+                todo.insert(0, row)
+            row["conflict"] = c["values"]
         out.append({"country": cc, "questions": todo[:PER_COUNTRY]})
     return out
 

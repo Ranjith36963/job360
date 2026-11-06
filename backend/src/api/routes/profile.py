@@ -13,7 +13,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional, cast
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import CurrentUser, require_session_user, require_user
@@ -571,7 +571,7 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
         settings_rules.WEEKLY_CAP_PATH, settings_rules.MIN_GAP_PATH, settings_rules.APPLY_HOURS_PATH,
         settings_rules.AUTO_GRANT_COUNT_PATH, settings_rules.AUTO_GRANT_UNTIL_PATH,
         settings_rules.HUNT_EVERY_PATH, settings_rules.PEOPLE_HUNT_PATH,
-        settings_rules.PC_ON_HOURS_PATH,
+        settings_rules.PC_ON_HOURS_PATH, *settings_rules.OUTREACH_LIMIT_PATHS, settings_rules.CV_AUTO_APPROVE_PATH,
     }
 )
 
@@ -594,6 +594,37 @@ def _remember_split(
         else:
             refused.add(path)
     return consent, refused
+
+
+def _stamp_country_drafts(
+    user_id: str, actor: str, pairs: list[tuple[str, Any]], remembered: set[str]
+) -> tuple[list[tuple[str, Any]], dict[str, bool]]:
+    """Country pages: the draft marks on a ``user_info.right_to_work`` write, set from the WRITER
+    (``country_pages.stamp``; an assistant edit sent with ``remember: true`` is the user's answer).
+    Returns the pairs and ``{path: stored consent carried}`` for an assistant's drafts-only write
+    (``country_pages.drafts_only``); ``{}`` otherwise."""
+    from src.services.profile import country_pages  # noqa: PLC0415
+
+    if not any(p == country_pages.RTW_PATH and v is not None for p, v in pairs):
+        return pairs, {}
+    stored = (load_profile(user_id) or UserProfile()).user_info.right_to_work or {}
+    newest = next((r for r in profile_edits.current_overlay(user_id) if r["path"] == country_pages.RTW_PATH), None)
+    web = actor == profile_edits.WEB_ACTOR
+    by = str(newest["set_by"]) if newest else ""
+    users = newest is None or profile_edits.is_confirmed(by, str(newest.get("source") or ""))
+    users = users or country_pages.row_mode(stored)
+    out: list[tuple[str, Any]] = []
+    drafts: dict[str, bool] = {}
+    for path, value in pairs:
+        if path == country_pages.RTW_PATH and value is not None:
+            value = country_pages.stamp(
+                profile_edits.validate_edit(path, value), stored, by_web=web, stored_users=users,
+                remembered=path in remembered)
+            if not web and country_pages.drafts_only(value, stored):
+                drafts[path] = newest is None or not profile_edits.is_assistant_actor(by) or bool(
+                    newest.get("remember_consent_at"))
+        out.append((path, value))
+    return out, drafts
 
 
 def _remember_line(path: str) -> str:
@@ -945,7 +976,27 @@ async def update_profile(
     with profile_edits.user_edit_lock(user.id):
         resp = _apply_profile_edits(body, user)
     await _ignite_schedule_change(user, resp)
+    await _close_asks_memory_answers(user.id, [e.path for e in resp.applied])
     return resp
+
+
+async def _close_asks_memory_answers(user_id: str, paths: list[str]) -> None:
+    """Memory first (owner 2026-11-05): after a Memory save, the user's open asks that Memory now answers
+    for their job's country close (``memory_closes``, as Job360). The save already landed, so a failure
+    here is logged, never turned into an error for the save."""
+    from src.services.applications import memory_closes  # noqa: PLC0415
+
+    if not memory_closes.MEMORY_PATHS.intersection(paths):
+        return
+    import contextlib  # noqa: PLC0415
+
+    from src.api.dependencies import get_request_db  # noqa: PLC0415
+
+    try:
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            await memory_closes.close_covered(db, user_id)
+    except Exception:  # noqa: BLE001 - the Memory save stands; the next kit or Needs-you read retries
+        logger.warning("memory_closes_failed", exc_info=True)
 
 
 # Ignition (owner 2026-10-24): a schedule change the user SAVED on the website starts that duty once.
@@ -1064,13 +1115,18 @@ def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> Updat
     # S2 — a RISKIER setting change from an assistant is held, not written. The
     # hourly budget for held requests is checked HERE, before any write of the
     # call, so a 429 changes nothing.
+    pairs, drafts = _stamp_country_drafts(user.id, actor, pairs, {e.path for e in body.edits if e.remember})
     write_now, hold, risk = _split_gated(user.id, actor, pairs)
     write_now, hold = _hold_notes(user.id, actor, write_now, hold)
     _refuse_avoid_list_removal(user.id, actor, pairs)
     # Weak spot #6 wave 2 - permission to fill is not permission to remember (answer-memory
     # SKILL.md L151; job-apply-store.py L503-507: "sensitive answer value requires explicit
     # remember consent"). An assistant's sensitive value without remember:true is NOT written.
-    consent_paths, no_consent = _remember_split(actor, write_now, {e.path for e in body.edits if e.remember})
+    # Country pages: a drafts-only right_to_work write remembers nothing new as the user's - it keeps
+    # the consent the stored value had and needs no remember (its drafted rows read as guesses).
+    remembered = {e.path for e in body.edits if e.remember}
+    consent_paths, no_consent = _remember_split(actor, [(p, v) for p, v in write_now if p not in drafts], remembered)
+    consent_paths |= {p for p, carried in drafts.items() if carried or p in remembered}
     if no_consent:
         write_now = [(p, v) for p, v in write_now if p not in no_consent]
     # Owner decision 2026-10-10 - checks that need the state AFTER this batch:
@@ -1177,6 +1233,58 @@ def _editable_path_or_422(path: str) -> str:
             detail=f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}",
         )
     return path
+
+
+class CountryPickOut(BaseModel):
+    """One effective value and where it came from: the country's own row, its region's, or ANY."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    from_: str = Field(alias="from")
+    value: dict[str, Any]
+
+
+class CountryInstructionsOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    from_: str = Field(alias="from")
+    lines: list[str]
+
+
+class CountryPageOut(BaseModel):
+    """Country pages (owner 2026-11-02): one place per country. Unset = absent (rule #29)."""
+
+    country: str
+    region_fallback: Optional[str] = None
+    instructions: Optional[CountryInstructionsOut] = None
+    right_to_work: Optional[CountryPickOut] = None
+    salary: Optional[CountryPickOut] = None
+    logistics: Optional[CountryPickOut] = None
+    answers: Optional[list[dict[str, Any]]] = None
+    # Only for a place with its own right-to-work row: an assistant created it and the user has not
+    # confirmed it yet (its facts are guesses); `to_confirm` = its facts still to answer once.
+    assistant_drafted: Optional[bool] = None
+    confirmed: Optional[bool] = None
+    to_confirm: Optional[list[str]] = None
+
+
+@router.get("/profile/countries/{place}", response_model=CountryPageOut, response_model_exclude_none=True)
+async def get_country_page(
+    place: str = Path(..., max_length=40),
+    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+) -> dict[str, Any]:
+    """One country's (or region's) page: the user's instructions, right to work, salary, logistics and
+    that country's saved answers, each effective value labelled with where it came from. 404 when the
+    user has no profile; 422 when ``place`` is no country, region or ANY. Read-only, scoped by user (#12)."""
+    from src.services.profile import country_pages  # noqa: PLC0415
+
+    profile, overlay = load_profile_with_overlay(user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile found")
+    page = country_pages.country_page(
+        profile, place, country_pages.path_confirmed(overlay), country_pages.answers_by_user(overlay)
+    )
+    if page is None:
+        raise HTTPException(status_code=422, detail="place must be an ISO alpha-2 country, a region or ANY")
+    return page
 
 
 @router.get("/profile/edits/history", response_model=ProfileEditHistoryResponse)
@@ -1307,6 +1415,7 @@ async def keep_edit(
             "actor": safe_log_value(actor_for(user)),
         },
     )
+    await _close_asks_memory_answers(user.id, [path])
     return load_profile_response(user.id)[1]
 
 

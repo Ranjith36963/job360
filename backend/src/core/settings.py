@@ -406,12 +406,29 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # Autonomy slice 3 (2026-11-02, watch-only): what autonomy WOULD clear, one per check_submit. SERVER-WRITTEN
     # (record_event refuses it), verdict codes only, never answer text (services/applications/evidence.py).
     "autonomy_shadow",
+    # Autonomy A8 (2026-11-02): check_submit's `submit` = one single-use clearance an assistant's receipt
+    # needs; `submit_cleared_used` spends it. SERVER-WRITTEN (services/applications/submit_clearance.py).
+    "submit_cleared", "submit_cleared_used",
+    # Owner decision 2026-11-02 "A": Verify / Edit of one answer on the Ready card approves it for THAT job
+    # only. SERVER-WRITTEN (record_event refuses it): {question, answer, edited, form_filled_event_id, key?}.
+    # Read by ready.job_approvals; never part of the profile, so no other job reuses it.
+    "answer_verified",
+    # Owner decision 2026-11-05: a fresh reviewer's verdict on one CV version {artifact_id, sha256, confidence,
+    # lines, reviewer}. Job360 VERIFIES it and stores the checked confidence, codes and counts, never the text
+    # (services/applications/cv_review.py).
+    "cv_reviewed",
+    # Owner 2026-11-06 (Sent on its own): a CV that went out on a strong review instead of the user's look
+    # {artifact_id, sha256, review_event_id}, and the user's Wrong fact on one {sent_event_id}. SERVER-WRITTEN
+    # (record_event refuses both; services/applications/cv_review.py, sent_alone.py).
+    "cv_sent_on_review", "cv_wrong_fact",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
 # Read-side only: every row stays, and the export keeps them. A `process_log` that corrects an
 # assistant's own note moves that note into the log the same way (process_log.py).
-APPLICATION_PROCESS_EVENT_TYPES = ("process_log", "kit_read", "ask_withdrawn", "autonomy_shadow")
+APPLICATION_PROCESS_EVENT_TYPES = (
+    "process_log", "kit_read", "ask_withdrawn", "autonomy_shadow", "submit_cleared", "submit_cleared_used",
+)
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
 APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())
@@ -459,6 +476,11 @@ INBOX_ITEMS_MAX_OPEN_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_OPEN_PER_USER", "
 INBOX_ITEMS_MAX_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_PER_USER", "2000"))  # open + resolved + dismissed
 INBOX_ITEMS_RECENT_DAYS = int(os.getenv("INBOX_ITEMS_RECENT_DAYS", "30"))  # resolved items whats_new still lists
 INBOX_ITEMS_WHATS_NEW_MAX = int(os.getenv("INBOX_ITEMS_WHATS_NEW_MAX", "100"))
+# Owner report #9/#14 (2026-11-05): whats_new shows this many inbox items per page (people first;
+# `inbox_page.next_offset` pages on) and leaves job-alert digests older than INBOX_ALERTS_STALE_DAYS
+# out unless `inbox_stale_alerts` is true. Nothing is deleted.
+INBOX_ITEMS_WHATS_NEW_PAGE = int(os.getenv("INBOX_ITEMS_WHATS_NEW_PAGE", "10"))
+INBOX_ALERTS_STALE_DAYS = int(os.getenv("INBOX_ALERTS_STALE_DAYS", "7"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)
@@ -695,7 +717,9 @@ LINKEDIN_NOTE_MAX_CHARS = 200
 LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 # What an outreach draft is (save_artifact `draft_kind`, optional, not stored): a connection_note must
 # fit the note limit above and an inmail body LinkedIn's hard limit, else the save is refused.
-OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email")
+# after_connect (owner 2026-11-03): the message sent once they accept; the connection request itself goes
+# WITHOUT a note (a free account gets about one note a month). Fits a message to a connection (400).
+OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email", "after_connect")
 LINKEDIN_INMAIL_BODY_MAX_CHARS = 1900
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 # Outreach pack #13 — the caller's own variant label on a message version / a template
@@ -711,13 +735,40 @@ OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_M
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
 OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 — per USER
-# The outreach SEND gate (check_outreach, feature 10). Operator ceilings, not user
-# settings: OUTREACH_MAX_PER_HOUR above throttles WRITES; these cap SENDS. Only
-# recorded `sent` marks count. Day = the user's own today (as for check_submit).
-OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "10"))
-# At most this many sends to people at the same (lower-cased) job_company within
-# the window, so one company is never carpet-bombed.
-OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
+# The outreach SEND gate (check_outreach, feature 10). OUTREACH_MAX_PER_HOUR above throttles WRITES; these cap
+# SENDS. Only recorded `sent` marks count. Day = the user's own today (as for check_submit). Owner 2026-11-02: two
+# kinds of send - JOB outreach (a contact linked to an application) and NETWORK (no application). The limits are
+# the user's own assistant_settings (defaults below); the *_MAX values are operator BACKSTOPS above them that no
+# stored setting can pass, so a typo can never send thousands.
+OUTREACH_PER_COMPANY_DEFAULT = 5  # job-outreach sends per company within OUTREACH_COMPANY_WINDOW_DAYS
+NETWORK_PER_HOUR_DEFAULT = 5  # network sends per rolling hour
+LINKEDIN_SENDS_PER_DAY_DEFAULT = 20
+# Easy Apply submits a day through the own-browser queue. 0 = no Job360 cap (owner, 2026-11-03): LinkedIn's own
+# Easy Apply limit decides, and the user's browser stops when LinkedIn shows it.
+EASY_APPLY_DAILY_MAX = int(os.getenv("EASY_APPLY_DAILY_MAX", "0"))
+EMAIL_SENDS_PER_DAY_DEFAULT = 40
+OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "10"))
+OUTREACH_NETWORK_MAX_PER_HOUR = int(os.getenv("OUTREACH_NETWORK_MAX_PER_HOUR", "20"))
+OUTREACH_LINKEDIN_MAX_PER_DAY = int(os.getenv("OUTREACH_LINKEDIN_MAX_PER_DAY", "100"))
+# Connection requests in any 7 days (LinkedIn allows a free account about 100 a week): a backstop no setting passes.
+LINKEDIN_INVITES_PER_WEEK_MAX = int(os.getenv("LINKEDIN_INVITES_PER_WEEK_MAX", "100"))
+# A LinkedIn message that names one of these never goes without the user's Send (check_outreach: sensitive_topic).
+OUTREACH_SENSITIVE_WORDS = (
+    "visa", "visas", "sponsor", "sponsorship", "sponsored", "salary", "salaries", "compensation", "pay", "age",
+    "aged", "health", "medical", "disability", "disabled", "pregnant", "pregnancy", "illness", "immigration",
+    "citizenship", "nationality", "relocation", "permit", "sponsoring", "sponsors", "maternity", "religion",
+    "work permit", "right to work", "skilled worker",
+)
+# One LinkedIn follow-up per person, this many days after the message with no reply (owner 2026-11-03).
+LINKEDIN_FOLLOW_UP_DAYS = int(os.getenv("LINKEDIN_FOLLOW_UP_DAYS", "6"))
+# How often the user's own browser checks My Network for accepted invites while anyone is pending.
+LINKEDIN_PENDING_CHECK_HOURS = int(os.getenv("LINKEDIN_PENDING_CHECK_HOURS", "4"))
+# Owner #12 (2026-11-05): own-browser tasks wait and no PC session took, released or claimed one for longer than
+# this many hours (or ever): the queue, Needs you and whats_due say `pc_idle` (own_browser.pc_idle).
+PC_IDLE_WARN_HOURS = int(os.getenv("PC_IDLE_WARN_HOURS", "3"))
+OUTREACH_EMAIL_MAX_PER_DAY = int(os.getenv("OUTREACH_EMAIL_MAX_PER_DAY", "200"))
+# Every channel together, per user per day (the email gate checks it first).
+OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "300"))
 OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
 # Outreach pack #5/#6 (2026-10-20): contact ledger entries beyond message/sent/reply. Stored
 # only — Job360 sends nothing, and these never count as sends (check_outreach reads `sent`).
@@ -831,7 +882,7 @@ STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # a view a later slice appends (before "all") joins it automatically.
 STATS_VIEWS = (
     "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
-    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "referrals", "all",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "referrals", "today", "all",
 )
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
@@ -959,6 +1010,12 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.people_hunt",
     # Owner 2026-10-25 - when the user's PC is on: {days, from, to}; null = any time. Always safer.
     "assistant_settings.pc_on_hours",
+    # Owner 2026-11-02 - the user's own outreach send limits (whole numbers; null = the default). Raising is riskier.
+    "assistant_settings.outreach_per_company", "assistant_settings.network_per_hour",
+    "assistant_settings.linkedin_sends_per_day", "assistant_settings.email_sends_per_day",
+    # Owner 2026-11-05 - a CV a separate reviewer verified as strong goes without the owner's look (true / false).
+    # On is riskier.
+    "assistant_settings.cv_auto_approve",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -1018,7 +1075,8 @@ SCHEDULE_DUTY_RECIPES: dict[str, str] = {
 }
 # Owner 2026-10-24 - the PEOPLE hunt (duty `reach`): open applications (considering/applied) brought or
 # applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
-# first, at most REACH_MAX_PER_RUN per run. Sends stay capped by check_outreach (OUTREACH_COMPANY_MAX).
+# first, at most REACH_MAX_PER_RUN per run, up to 5 people each. Sends stay capped by check_outreach
+# (assistant_settings.outreach_per_company).
 REACH_WINDOW_DAYS = 14
 # Owner 2026-10-25 - one run per duty at a time: a duty `whats_due` lists to an assistant is that run's for
 # DUTY_CLAIM_MINUTES (another run, an hourly tick or a Run now, is not given it); mark_done frees it sooner.
@@ -1029,12 +1087,19 @@ DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "30"))
 # (was 25), so the hourly hunt keeps filling the queue from every board instead of stopping at 25.
 HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "1000"))
 REACH_MAX_PER_RUN = 5
+# Owner 2026-11-03: "5 people for one job". An application stays on the people hunt until the assistant has
+# added REACH_TARGET_PEOPLE people to it; a run that worked it holds it back REACH_RETRY_HOURS, and after
+# REACH_MAX_ATTEMPTS runs it is left alone (no more people could be proven), so it cannot loop forever.
+REACH_TARGET_PEOPLE = 5
+REACH_RETRY_HOURS = 24
+REACH_MAX_ATTEMPTS = 3
 # Owner 2026-10-31 - the NETWORK hunt (duty `network`): while `people_hunt` is on, once every
 # NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
 # (not one job) and stores them as cold contacts. Job360 only says it is due and how many; the assistant
 # finds and judges them (VISION rule 4: Job360 never sources or ranks).
-NETWORK_EVERY_HOURS = 24
-NETWORK_MAX_PER_RUN = 10
+# Owner 2026-11-02: 5 new people an hour (about 100 a day), was 10 once a day.
+NETWORK_EVERY_HOURS = 1
+NETWORK_MAX_PER_RUN = 5
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and
@@ -1072,7 +1137,15 @@ CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
 # Gap roadmap slice 8: the user's Send yes (``submit_approved``) counts for this many minutes
 # after it was recorded; an older yes is ``approval_stale`` (expired) and check_submit asks again.
-SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "120"))
+# Owner 2026-11-02: 7 days (was 2 hours). The yes is really bound to what it was given for (CV, letter,
+# fill, form page, profile edit, email recipient: the fingerprint); the clock is only a backstop.
+SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "10080"))
+# A yes WITHOUT a fingerprint (said in chat, or stored before slice 8) is bound to the CV and the clock only,
+# so it must not outlive a changed fill or letter for days: it lapses after this many minutes (2 hours).
+SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES", "120"))
+# Owner 2026-11-02: a started submit (``submit_attempted``) with no confirmation email, no applied and no
+# "It was not sent" asks the user "did it go out?" on Needs you only after this many days (auto_applied.py).
+CONFIRM_SENT_WAIT_DAYS = int(os.getenv("CONFIRM_SENT_WAIT_DAYS", "3"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
@@ -1093,6 +1166,11 @@ KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
 KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
+# Autonomy bar (owner plan 2026-11-02): "Approve CV" / "Send" leave Needs you for one kind (essay, fixed, cv)
+# only once at least this many watch-only cases agree with the owner's own decisions at least this often,
+# with no wrong fact. Read by services/applications/agreement.py (GET /api/autonomy/agreement).
+AUTONOMY_BAR_MIN_CASES = 20
+AUTONOMY_BAR_MIN_AGREE_PCT = 95
 
 # ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
 PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))

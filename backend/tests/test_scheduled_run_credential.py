@@ -177,7 +177,8 @@ async def test_a_scheduled_token_still_does_run_work(authenticated_async_context
 async def test_the_remember_paths_refuse_a_scheduled_token(authenticated_async_context):
     async with authenticated_async_context() as client:
         _, _, chat, runs = await _setup(client)
-        approved = {"question": "Notice period?", "answer": "1 month", "approved": True}
+        # Not a Memory fact (since #1507 an upsert of one is refused 422 before any approval check).
+        approved = {"question": "Why do you want this job?", "answer": "1 month", "approved": True}
         assert (await _patch(client, {"path": ANSWERS, "value": [approved]})).status_code == 200
         ask = await client.post("/api/asks", json={"question": "Which start date suits you?"})
         assert ask.status_code == 201, ask.text
@@ -191,7 +192,7 @@ async def test_the_remember_paths_refuse_a_scheduled_token(authenticated_async_c
         for record in (
             {"question": "Willing to relocate?", "answer": "No", "approved": True},
             {**approved, "answer": "3 months"},
-            {**approved, "topic": "notice.GB"},
+            {**approved, "topic": "why_this_job.GB"},
         ):
             sent = await _patch(agent, {"path": ANSWERS, "value": [approved, record]
                                         if record["question"] != approved["question"] else [record]})

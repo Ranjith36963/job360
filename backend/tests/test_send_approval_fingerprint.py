@@ -227,7 +227,7 @@ async def test_the_yes_expires_and_so_does_a_legacy_yes_without_a_fingerprint(
              (old, app_id))
 
     ttl = settings.SUBMIT_APPROVAL_TTL_MINUTES
-    assert ttl == 120
+    assert ttl == 10080  # 7 days (owner 2026-11-02)
     async with authenticated_async_context() as client:
         app_id, _ = await _approved_app(client, fixture_user_id)
         backdate(app_id, ttl - 5)
@@ -235,7 +235,7 @@ async def test_the_yes_expires_and_so_does_a_legacy_yes_without_a_fingerprint(
         backdate(app_id, ttl + 1)
         verdict = await _check(client, app_id)
         _stale(verdict, "expired")
-        assert f"older than {ttl} minutes" in verdict["detail"]
+        assert "older than 7 days" in verdict["detail"]
         token = await _token(client)
         detail = (await client.get(f"/api/applications/{app_id}")).json()
         cv = [e for e in detail["events"] if e["event_type"] == "submit_approved"][-1]["payload"]
@@ -245,8 +245,8 @@ async def test_the_yes_expires_and_so_does_a_legacy_yes_without_a_fingerprint(
         await _event(agent, app_id, "submit_approved", legacy)
         await _fill(agent, app_id, [{**NOTICE, "answer": "3 months"}])
         assert (await _check(agent, app_id))["reason"] == "user_approved", "not bound to the fill"
-        backdate(app_id, ttl + 1)
-        _stale(await _check(agent, app_id), "expired")
+        backdate(app_id, settings.SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES + 1)
+        _stale(await _check(agent, app_id), "expired_chat")
 
 
 @pytest.mark.asyncio

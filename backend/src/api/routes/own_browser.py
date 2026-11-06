@@ -26,6 +26,7 @@ router = APIRouter(tags=["own-browser"])
 Why = Literal["any_time", "pc_on_hours", "run_now", "closed", "paused"]
 Reason = Literal[
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
+    "done", "invited",
 ]
 
 
@@ -42,7 +43,7 @@ class TaskBrowserOut(BaseModel):
 
 class OwnBrowserTaskItemOut(BaseModel):
     task_id: str
-    kind: Literal["linkedin_outreach", "application"]
+    kind: Literal["linkedin_outreach", "application", "linkedin_search", "profile_read", "linkedin_check_pending"]
     what: str
     url: str = ""
     contact_id: Optional[int] = None
@@ -57,6 +58,22 @@ class OwnBrowserTaskItemOut(BaseModel):
     owner_yes: bool = False
     claim: Optional[TaskClaimOut] = None
     browser: TaskBrowserOut
+    # Only on `profile_read` (owner 2026-11-03): the applications that still need people (up to 5 each), and how
+    # many new people for the user's network.
+    application_ids: Optional[list[int]] = None
+    max_people: Optional[int] = None
+    # Owner 2026-11-03: a person whose request goes WITHOUT a note (Connect, Send without a note, release invited);
+    # on `linkedin_check_pending`, the people whose request is still pending.
+    no_note: bool = False
+    contact_ids: Optional[list[int]] = None
+
+
+class PcIdleOut(BaseModel):
+    """Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever)."""
+    since: Optional[str] = None  # the newest take / release / claim by a PC session; None = never
+    waiting: int
+    hours: int
+    text: str
 
 
 class QueueOut(BaseModel):
@@ -67,6 +84,8 @@ class QueueOut(BaseModel):
     run_now_until: Optional[str] = None
     count: int
     tasks: list[OwnBrowserTaskItemOut]
+    # Owner #12: `open_now` says the queue MAY run, never that a PC session is working it; this says none is.
+    pc_idle: Optional[PcIdleOut] = None
 
 
 class TakeIn(BaseModel):
@@ -96,6 +115,11 @@ class ReleaseOut(BaseModel):
     released: bool
     task_id: str
     reason: str
+    # Only for a hunt or people task: how it closed, and the jobs brought / people added since the claim.
+    outcome: Optional[Literal["done", "failed"]] = None
+    count: Optional[int] = None
+    summary: Optional[str] = None
+    failures_in_row: Optional[int] = None
 
 
 class RunNowOut(BaseModel):
@@ -133,11 +157,13 @@ async def queue(
         label = own_browser.session_label(session) if session else None
         win = await own_browser.window(db, user.id, now)
         tasks = await own_browser.queue_tasks(db, user, now, label)
+        idle = await own_browser.pc_idle(db, user.id, now, len(tasks))
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
     own_browser.log_read(user.id, len(tasks))
-    return QueueOut(**win, count=len(tasks), tasks=[OwnBrowserTaskItemOut(**t) for t in tasks])
+    return QueueOut(**win, count=len(tasks), tasks=[OwnBrowserTaskItemOut(**t) for t in tasks],
+                    pc_idle=PcIdleOut(**idle) if idle else None)
 
 
 @router.post("/own-browser/take", response_model=TakeOut, dependencies=AUTH_FIRST)
@@ -155,13 +181,16 @@ async def take(
     return TakeOut(**got)
 
 
-@router.post("/own-browser/release", response_model=ReleaseOut, dependencies=AUTH_FIRST)
+@router.post(
+    "/own-browser/release", response_model=ReleaseOut, response_model_exclude_none=True, dependencies=AUTH_FIRST
+)
 async def release(
     body: ReleaseIn,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> ReleaseOut:
-    """Give a claimed person back (409 unless this session holds the live claim)."""
+    """Give a claimed person back, or close a hunt or people task: ``done`` answers the count, any other reason
+    records it failed (409 unless this session holds the live claim)."""
     try:
         got = await own_browser.release(
             db, user, body.session, body.task_id, body.reason, datetime.now(timezone.utc)

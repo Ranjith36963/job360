@@ -194,7 +194,10 @@ async def test_easy_apply_waits_in_the_own_browser_queue_and_other_jobs_do_not(a
 
 
 @pytest.mark.asyncio
-async def test_easy_apply_stops_at_ten_a_day_and_other_applications_still_go(authenticated_async_context):
+async def test_easy_apply_stops_at_the_operator_cap_and_other_applications_still_go(
+    authenticated_async_context, monkeypatch
+):
+    monkeypatch.setattr(own_browser, "EASY_APPLY_DAILY_MAX", 10)  # an operator cap; the default is none
     user_id = authenticated_async_context.fixture_user_id
     async with authenticated_async_context() as client:
         done = [await _bring(client, n, f"https://www.linkedin.com/jobs/view/{n}") for n in range(10)]
@@ -231,8 +234,12 @@ async def test_easy_apply_stops_at_ten_a_day_and_other_applications_still_go(aut
 
 
 @pytest.mark.asyncio
-async def test_an_unnamed_link_is_listed_as_link_unclear_and_never_counts_toward_the_cap(authenticated_async_context):
+async def test_an_unnamed_link_is_listed_as_link_unclear_and_never_counts_toward_the_cap(
+    authenticated_async_context, monkeypatch
+):
     from datetime import datetime, timezone
+
+    monkeypatch.setattr(own_browser, "EASY_APPLY_DAILY_MAX", 10)  # an operator cap; the default is none
 
     user_id = authenticated_async_context.fixture_user_id
     unclear = {"kind": "own_browser", "reason": "link_unclear",
@@ -259,6 +266,27 @@ async def test_an_unnamed_link_is_listed_as_link_unclear_and_never_counts_toward
             got = await _take(agent)  # real Easy Apply is capped at 10, the unclear link is still handed out
             assert got["status"] == "task" and got["task"]["application_id"] == odd, got
             assert got["task"]["browser"] == unclear
+
+
+@pytest.mark.asyncio
+async def test_easy_apply_has_no_job360_day_cap_by_default(authenticated_async_context):
+    # Owner, 2026-11-03: LinkedIn's own Easy Apply limit decides; Job360 keeps handing Easy Apply out.
+    assert own_browser.EASY_APPLY_DAILY_MAX == 0
+    user_id = authenticated_async_context.fixture_user_id
+    async with authenticated_async_context() as client:
+        done = [await _bring(client, n, f"https://www.linkedin.com/jobs/view/{n}") for n in range(12)]
+        async with browser_routes._db() as db:  # noqa: SLF001
+            for app_id in done:
+                await spine.append_event(
+                    db, user_id=user_id, application_id=app_id, event_type="applied", payload={},
+                    occurred_at=spine.parse_occurred_at(None), recorded_by="web",
+                )
+            await db._db.commit()  # noqa: SLF001
+        easy = await _bring(client, 40, "https://www.linkedin.com/jobs/view/40")
+        await _event(client, easy, "queued")
+        async with await _agent(client) as agent:
+            got = await _take(agent)
+            assert got["status"] == "task" and got["task"]["application_id"] == easy, got
 
 
 @pytest.mark.asyncio
@@ -289,5 +317,28 @@ def test_the_recipes_send_linkedin_to_the_own_browser_and_company_forms_to_job36
     assert "a scheduled cloud run skips linkedin" in hunt
     assert "easy apply runs only in the user's own browser" in apply and "same `check_submit` rule" in apply
     assert "`update_job` `apply_url` = that form, fill it in job360's browser" in apply
-    assert "it waits in the own-browser queue (10 a day), stop" in apply
+    assert "it waits in the own-browser queue (no job360 day cap; stop at linkedin's own easy apply limit), stop" in apply
     assert "linkedin.com (easy apply) runs only in the user's own browser" in batch
+
+
+@pytest.mark.asyncio
+async def test_an_application_just_let_go_is_not_handed_straight_back(authenticated_async_context):
+    # pc-1523, 2026-11-03: take returned the same application right after the run recorded hold_released.
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 50, "https://www.linkedin.com/jobs/view/50")
+        await _event(client, app_id, "queued")
+        async with await _agent(client) as agent:
+            got = await _take(agent)
+            assert got["status"] == "task" and got["task"]["application_id"] == app_id, got
+            await _event(client, app_id, "hold_released", {"reason": "stopped"})
+            assert (await _take(agent))["status"] == "empty"
+            from datetime import datetime, timedelta, timezone
+
+            async with browser_routes._db() as db:  # noqa: SLF001
+                await db._db.execute(  # noqa: SLF001
+                    "UPDATE application_events SET recorded_at = ? WHERE application_id = ? AND event_type = 'hold_released'",
+                    ((datetime.now(timezone.utc) - timedelta(minutes=61)).isoformat(), app_id),
+                )
+                await db._db.commit()  # noqa: SLF001
+            again = await _take(agent)
+            assert again["status"] == "task" and again["task"]["application_id"] == app_id, again

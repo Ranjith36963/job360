@@ -77,7 +77,9 @@ SHAPES: dict[str, dict[str, Any]] = {
             "visa_type and note = one short line. work_authorization citizen / permanent_resident cannot go with "
             "needs_sponsorship true, and needs_sponsorship cannot go with needs_sponsorship false. "
             "remote_priority / onsite_priority / contract_priority = the user's own job priority for that place "
-            "(off = never search it); set only what the user chose"
+            "(off = never search it); set only what the user chose. instructions = up to 5 short lines in the "
+            "user's own words for that place (a country without its own uses its region's, then ANY's). "
+            "set_by is Job360's: a row you add or change is a draft (guesses) until the user confirms it"
         ),
     },
     "user_info.logistics": {
@@ -193,9 +195,22 @@ SHAPES: dict[str, dict[str, Any]] = {
         "example": True,
         "note": "find people to reach for new applications on the schedule; never sends. On needs the user's OK",
     },
+    _settings.CV_AUTO_APPROVE_PATH: {
+        "example": False,
+        "note": "a CV the reviewer judged strong (and Job360 verified) skips the user's look in auto mode. "
+        "On needs the user's OK",
+    },
     _settings.PC_ON_HOURS_PATH: {
         "example": {"days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "18:00"},
         "note": "when the user's PC is on, in their timezone; null = any time. A from later than to runs overnight",
+    },
+    **{
+        path: {
+            "example": _settings.OUTREACH_LIMITS[name][0],
+            "note": "the user's own outreach send limit, a whole number; null = the default. Raising it needs the "
+            "user's OK",
+        }
+        for path, name in _settings.OUTREACH_LIMIT_PATHS.items()
     },
     _settings.HUNT_EVERY_PATH: {
         "example": 6, "note": "hunt every N hours, 1-168; null or 0 = off. Turning it on needs the user's OK",

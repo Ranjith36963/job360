@@ -296,6 +296,17 @@ async def supersede(
 
 
 TIDY_ACTOR = "system"
+# blocked.py's one question for a site saying the user already applied (reason already_applied_on_site). Once the
+# job is no longer `considering` (the user's "I applied"), the page closes it on load (tidy_open_asks).
+ALREADY_APPLIED_QUESTION = "The site says you already applied. Mark it applied?"
+ALREADY_APPLIED_CLOSED = "you marked it applied"
+
+
+def answered_by_applying(ask: dict[str, Any], app_status: Any) -> bool:
+    """The "already applied?" ask on a job that is no longer ``considering``: the user's "I applied" answered it."""
+    return str(ask.get("question") or "") == ALREADY_APPLIED_QUESTION and app_status not in (None, "considering")
+
+
 SUPERSEDED_DETAIL = "Replaced by a newer question."
 # A row that asks the user to paste the form's own question: the assistant reads the form itself (owner 2026-10-25).
 _PASTE_RE = re.compile(r"\bpaste\b", re.IGNORECASE)
@@ -324,6 +335,7 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
         return 0
     groups: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
     closed_job: list[dict[str, Any]] = []
+    applied_job: list[dict[str, Any]] = []
     for r in rows:
         ask = await _get_ask(db, user_id, int(r["id"]))
         if ask is None:
@@ -331,13 +343,16 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
         if r["app_status"] in APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
             closed_job.append(ask)
             continue
+        if answered_by_applying(ask, r["app_status"]):
+            applied_job.append(ask)
+            continue
         family = "question" if ask["kind"] in QUESTION_FAMILY else "blocker"
         side = "web" if ask["asked_by"] == "web" else "assistant"
         groups.setdefault((int(ask["application_id"]), family, side), []).append(ask)
     dupes = {k: v for k, v in groups.items() if len(v) > 1}
     pasted = [a for (_app, fam, _side), v in groups.items() if fam == "question"
               for a in v[-1:] if any(_PASTE_RE.search(str(q["question"])) for q in _rows_of_all(v))]
-    if not dupes and not closed_job and not pasted:
+    if not dupes and not closed_job and not pasted and not applied_job:
         return 0
     now = datetime.now(timezone.utc).isoformat()
     closed = 0
@@ -364,6 +379,12 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
                 (now, int(ask["id"]), user_id),
             )
             closed += 1
+    for ask in applied_job:
+        try:
+            await withdraw_ask(db, user_id, int(ask["id"]), TIDY_ACTOR, ALREADY_APPLIED_CLOSED)
+            closed += 1
+        except SpineError:  # answered or withdrawn in between
+            continue
     get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed})
     return closed
 
@@ -918,8 +939,9 @@ async def save_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: 
 
 async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answers: Any) -> dict[str, Any]:
     """Ask once (owner 2026-11-02): the user pressed "remember" on rows of a job's ask. Each answer is saved
-    as their approved answer under the row's key (``ask_once.remember``: a country-specific one is bound to
-    THIS job's country, any other is global); a per-job row is skipped.
+    as their approved answer under the row's key (``ask_once.remember``); a per-job row is skipped, and a
+    row in Memory's families goes into Memory for THIS job's country (``memory``), unless Memory already says
+    otherwise (``conflicts``) or the answer has no clean shape (``not_saved``, naming the page).
     The ask itself is not changed. Session only (the route). 404 / 422 write nothing."""
     from src.services.profile import ask_once  # noqa: PLC0415
 
@@ -936,13 +958,18 @@ async def remember_row_answers(db: JobDatabase, user_id: str, ask_id: int, answe
     country = (str((app_row or {}).get("job_country") or "").strip().upper()) or None
     rows = [{"topic": k, "question": str(by_key[k]["question"]),
              "answer": _item_text(f"answers.{k}", v, ASK_ITEM_ANSWER_MAX_CHARS)} for k, v in answers.items()]
-    saved = ask_once.remember(user_id, rows, country)
+    done = ask_once.remember(user_id, rows, country)
+    saved, memory = done["saved"], done.get("memory") or {}
     get_audit_logger().info(
         "ask_rows_remembered",
         extra={"event": "ask_rows_remembered", "user_id": user_id, "ask_id": safe_log_value(ask_id),
-               "count": len(saved)},
+               "count": len(saved), "memory": len(memory), "conflicts": len(done.get("conflicts") or {})},
     )
-    return {"saved": saved, "skipped": [k for k in answers if k not in saved], "country": country}
+    if memory:  # Answer once: the other open asks the new Memory fact answers close (as Job360)
+        from src.services.applications import memory_closes  # noqa: PLC0415 - it imports this module
+
+        await memory_closes.close_covered(db, user_id)
+    return {**done, "skipped": [k for k in answers if k not in saved and k not in memory], "country": country}
 
 
 def carried_answers(
@@ -1014,18 +1041,24 @@ def _user_only_to_clear(ask: dict[str, Any]) -> bool:
         return False
     if ask.get("kind") in BLOCKER_FAMILY:
         return True
+    # The site said the user already applied (blocked already_applied_on_site): only the user answers whether
+    # it is true, like a CAPTCHA. The ask has no kind and no keyed questions, so it is matched by its question.
+    if str(ask.get("question") or "") == ALREADY_APPLIED_QUESTION:
+        return True
     keys = [str(q.get("key", "")) for q in ask.get("questions") or [] if isinstance(q, dict)]
     return any(not k.startswith(("said_", "earlier_", "doctor_repeat_")) for k in keys)
 
 
 async def withdraw_ask(
-    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False
+    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False,
+    detail: str = "",
 ) -> dict[str, Any]:
     """Take an OPEN ask back (no longer needed). 404 if not the caller's,
     409 if it is already answered or already withdrawn. ``own_only`` (an
     assistant calling, owner 2026-10-23): only an ask ``withdrawn_by`` itself
     asked (403 otherwise), and only with a ``reason`` (422 when empty). The
-    reason is stored on the ask and shown on the application's timeline."""
+    reason is stored on the ask and shown on the application's timeline; ``detail`` (Job360's own closes,
+    ``memory_closes``) replaces the "Why: <reason>" words the timeline shows."""
     clean_reason = clean_withdraw_reason(reason)
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
@@ -1053,6 +1086,8 @@ async def withdraw_ask(
             raise SpineError(409, "ask is no longer open")
         if existing["application_id"] is not None:
             shown = f"Why: {clean_reason}. Asked: {existing['question']}" if clean_reason else existing["question"]
+            if detail:
+                shown = f"{detail} Asked: {existing['question']}"
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="ask_withdrawn",
                 detail=shown[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],

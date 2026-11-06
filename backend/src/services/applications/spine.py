@@ -1756,6 +1756,22 @@ async def frozen_cv_id(
     return int(latest["id"]) if latest else None
 
 
+async def _submit_browser(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The ``browser`` named on the newest ``submit_attempted`` after the last ``applied`` (None: none named)."""
+    from src.services.applications import which_browser  # noqa: PLC0415 - which_browser imports spine
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+        "AND event_type = 'submit_attempted' AND id > COALESCE((SELECT MAX(id) FROM application_events "
+        "WHERE user_id = ? AND application_id = ? AND event_type = 'applied'), 0) ORDER BY id DESC LIMIT 1",
+        (user_id, application_id, user_id, application_id),
+    )
+    row = await cur.fetchone()
+    raw = dict(row)["payload"] if row is not None else None
+    found = which_browser.read(json.loads(raw) if isinstance(raw, str) else raw)
+    return None if found == which_browser.UNKNOWN else found
+
+
 async def record_receipt(
     db: JobDatabase,
     *,
@@ -1775,6 +1791,7 @@ async def record_receipt(
     recipient: str = "",
     gmail_message_id: str = "",
     open_at_submit: Optional[list[str]] = None,
+    browser: Optional[str] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1826,6 +1843,8 @@ async def record_receipt(
         idem_body["recipient"] = recipient
     if gmail_message_id:
         idem_body["gmail_message_id"] = gmail_message_id
+    if browser:
+        idem_body["browser"] = browser
     from src.services.applications import email_channel  # noqa: PLC0415 - email_channel imports spine
 
     recipient = email_channel.clean_recipient(recipient)
@@ -1857,6 +1876,12 @@ async def record_receipt(
         replay = await _receipt_replay(db, user_id, request_id, idem_body)
         if replay is not None:
             return replay
+    # Autonomy A8: an assistant's receipt spends one unused check_submit `submit` (the user's web click: none).
+    from src.services.applications import submit_clearance  # noqa: PLC0415 - submit_clearance imports spine
+
+    clearance = await submit_clearance.required(db, user_id, application_id, recorded_by)
+    if browser is None:  # owner 2026-11-03: not said = the browser of the click since the last applied
+        browser = await _submit_browser(db, user_id, application_id)
 
     # The referrer must be the caller's own contact linked to THIS application. One message for
     # unknown, foreign and other-job contacts, so it is no existence oracle. (Not via contacts:
@@ -2035,12 +2060,17 @@ async def record_receipt(
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
+            if clearance is not None:  # locks the row; a receipt racing for the same clearance is 409
+                await submit_clearance.use(
+                    db, user_id, application_id, recorded_by, clearance, {"receipt_id": receipt_id}
+                )
             event = await append_event(
                 db, user_id=user_id, application_id=application_id, event_type="applied",
                 payload={
                     "receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate,
                     # Owner rule 2026-10-31: the user's own Mark Applied with items open stamps them.
                     **({"open_at_submit": list(open_at_submit)} if open_at_submit else {}),
+                    **({"browser": browser} if browser else {}),
                 },
                 occurred_at=sent_at, recorded_by=recorded_by,
             )
@@ -2056,6 +2086,7 @@ async def record_receipt(
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
                 "possible_duplicate": possible_duplicate, "answers_from": answers_from, "files": files,
                 "recipient": recipient, "gmail_message_id": gmail_message_id,
+                "browser": browser or "unknown",
                 "already_existed": False,
                 "referred_by_contact_id": referred_by_contact_id,
             }
@@ -2200,7 +2231,10 @@ async def queue_if_open(
     db: JobDatabase, user_id: str, application_id: int, *, recorded_by: str
 ) -> tuple[bool, Optional[str]]:
     """``bring_job queue=true`` (owner ask 2026-10-18): append a ``queued`` event when the application
-    is open (``considering``, no receipt) and not on the queue yet. ``(in_batch_now, note)``."""
+    is open (``considering``, no receipt) and not on the queue yet. ``(in_batch_now, note)``. A job whose
+    stored fit the user's own rule drops (:func:`below_line_dropped`) is never queued (S4)."""
+    if application_id in await below_line_dropped(db, user_id, [application_id]):
+        return False, "below your score line, and below the line you drop jobs"
     if application_id in await queued_at_by_app(db, user_id, [application_id]):
         return True, "already queued"
     row = await get_owned_application(db, user_id, application_id)
@@ -2215,6 +2249,52 @@ async def queue_if_open(
         occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=recorded_by,
     )
     return True, None
+
+
+async def below_line_dropped(db: JobDatabase, user_id: str, ids: list[int], cfg: Any = None) -> set[int]:
+    """Memory first S4 (owner 2026-11-05): which of ``ids`` the user's own rule drops, read now: ``below_line``
+    ``skip`` and the assistant's stored fit under ``apply_min_score`` (``drops_below_line``). The open queue
+    leaves them out, so an old row queued before its fit landed is never worked and gets no CV; nothing is
+    rewritten. No line, another switch or no score = none (rule #29). ``cfg`` = the caller's effective settings
+    (read here when not given). Scoped by ``user_id``; one query."""
+    import asyncio  # noqa: PLC0415
+
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
+
+    if not ids:
+        return set()
+    if cfg is None:
+        profile = await asyncio.to_thread(load_profile, user_id)
+        cfg = settings_rules.effective((profile or UserProfile()).assistant_settings)
+    if cfg.below_line != settings_rules.LINE_SKIP or cfg.apply_min_score is None:
+        return set()
+    cur = await db._db.execute(
+        f"SELECT id, fit_score FROM applications WHERE user_id = ? AND id IN ({','.join('?' for _ in ids)})",  # noqa: S608
+        [user_id, *ids],
+    )
+    return {int(r[0]) for r in await cur.fetchall() if settings_rules.drops_below_line(r[1], cfg)}
+
+
+async def unqueue_below_line(
+    db: JobDatabase, user_id: str, application_id: int, score: Optional[int], cfg: Any,
+) -> bool:
+    """After ``save_fit`` (S4): a queued job whose new fit the user's rule drops leaves the queue, recorded as
+    skipped by Job360 (an ``unqueued`` {reason: other}; the status stays ``considering`` and the fit slot keeps
+    the score, so the history is honest). True when it was taken off."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine
+
+    if not settings_rules.drops_below_line(score, cfg):
+        return False
+    if application_id not in await queued_at_by_app(db, user_id, [application_id]):
+        return False
+    await append_event(
+        db, user_id=user_id, application_id=application_id, event_type="unqueued",
+        occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by="system", payload={"reason": "other"},
+        detail=f"Skipped: fit {score} is below your score line ({cfg.apply_min_score}) and you drop those jobs.",
+    )
+    return True
 
 
 async def queued_at_by_app(
@@ -2250,6 +2330,31 @@ async def queued_at_by_app(
         else:
             queued.pop(int(row["application_id"]), None)
     return queued
+
+
+async def open_queue(db: JobDatabase, user_id: str, profile: Any = None) -> tuple[list[int], dict[int, str]]:
+    """The user's WHOLE open batch queue, the one reading ``list_applications(queued=true)`` and the stats
+    ``today`` view share: ``(ids first in first out, {id: queued_at})``. Queued, still ``considering``, and
+    not dropped by the user's own score-line rule (S4, ``below_line_dropped``). ``profile`` = the caller's
+    loaded profile (``None`` = defaults). Scoped by ``user_id`` (rule #12)."""
+    queued_at: dict[int, str] = {}
+    all_queued = await queued_at_by_app(db, user_id)
+    if not all_queued:
+        return [], queued_at
+    qcur = await db._db.execute(
+        f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' "  # noqa: S608 - placeholders, not values
+        f"AND id IN ({','.join('?' for _ in all_queued)})",
+        [user_id, *all_queued],
+    )
+    queued_at = {int(q[0]): all_queued[int(q[0])] for q in await qcur.fetchall()}
+    # S4: a row the user's own rule drops (below the line, below_line skip) is not in the queue.
+    from src.services.profile import assistant_settings as _line_rules  # noqa: PLC0415 - profile <-> spine
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+
+    cfg = _line_rules.effective((profile or UserProfile()).assistant_settings)
+    for app_id in await below_line_dropped(db, user_id, list(queued_at), cfg):
+        queued_at.pop(app_id, None)
+    return sorted(queued_at, key=lambda i: (queued_at[i], i)), queued_at
 
 
 # ── R11 — get_application / list_applications ────────────────────────────────
@@ -2823,17 +2928,7 @@ async def list_applications(
         params.append(user_id)
     # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
     # Two queries for the page (events, then the status of the queued ids), never N+1.
-    queue_order: list[int] = []
-    queued_at: dict[int, str] = {}
-    all_queued = await queued_at_by_app(db, user_id)
-    if all_queued:
-        qcur = await db._db.execute(
-            f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' "  # noqa: S608 - placeholders, not values
-            f"AND id IN ({','.join('?' for _ in all_queued)})",
-            [user_id, *all_queued],
-        )
-        queued_at = {int(q[0]): all_queued[int(q[0])] for q in await qcur.fetchall()}
-        queue_order = sorted(queued_at, key=lambda i: (queued_at[i], i))
+    queue_order, queued_at = await open_queue(db, user_id, _profile)
     queue_position = {app_id: pos for pos, app_id in enumerate(queue_order, start=1)}
     if queued:
         if queue_order:
@@ -3040,6 +3135,8 @@ async def whats_new(
     since: Optional[str] = None,
     after_id: Optional[int] = None,
     limit: int = 50,
+    inbox_offset: int = 0,
+    inbox_stale_alerts: bool = False,
 ) -> dict[str, Any]:
     """R9 — what changed across ALL of the caller's applications since a
     cursor. Paged and ordered by ``recorded_at`` (when Job360 learned it),
@@ -3149,11 +3246,13 @@ async def whats_new(
     # Feature 10 - unmatched mail, likewise carried whatever `since` says.
     from src.services.applications.inbox_items import for_whats_new  # noqa: PLC0415
 
+    # Owner report #9/#14: one page, people first, stale job alerts left out unless asked for.
+    inbox = await for_whats_new(db, user_id, offset=inbox_offset, stale_alerts=inbox_stale_alerts)
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
         "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
-        "inbox_items": await for_whats_new(db, user_id),
+        "inbox_items": inbox["items"], "inbox_page": inbox["page"],
     }
 
 

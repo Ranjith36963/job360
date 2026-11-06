@@ -40,6 +40,7 @@ from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, req
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.services.applications import spine as applications_spine
+from src.services.applications import which_browser
 from src.services.browser_agent import agent as browser_agent
 from src.services.browser_agent import outcome as browser_outcome
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -98,9 +99,12 @@ def _gate_and_files(
     async def _mark() -> None:
         try:
             async with _db() as db:
-                await applications_route.record_event(
-                    application_id, applications_route.RecordEventRequest(event_type="submit_attempted"), db, user
-                )
+                mark = applications_route.RecordEventRequest(event_type="submit_attempted")
+                said = which_browser.SERVER_SAYS.set(which_browser.JOB360)  # this click is Job360's browser's
+                try:
+                    await applications_route.record_event(application_id, mark, db, user)
+                finally:
+                    which_browser.SERVER_SAYS.reset(said)
         except HTTPException as exc:
             if exc.status_code != 409:
                 raise
@@ -269,7 +273,10 @@ def _guest_read(body: BrowserActionRequest) -> bool:
 
 
 # Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).
-_BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check"}
+_BLOCKED_REASON = {
+    "captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check",
+    browser_agent.ALREADY_APPLIED: "already_applied_on_site",
+}
 
 
 def _open_outcome(result: dict[str, Any], stop_source: str) -> str:
@@ -321,6 +328,10 @@ HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."
 )
+# The site said the user already applied: no browser can help, only the user's answer (blocked.py).
+ALREADY_APPLIED_DETAIL = (
+    "The site says you already applied for this job. Job360's browser stopped and will not try again."
+)
 # A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
 CAPTCHA_DETAIL = (
     "The site asked for a human check. Your filled form is kept open for 30 minutes: press Finish it here, "
@@ -369,9 +380,12 @@ async def _hand_off(
         ):
             return False
         # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
-        payload: dict[str, Any] = {
-            "reason": reason, "step": "Job360 browser", "detail": CAPTCHA_DETAIL if held else HAND_OFF_DETAIL,
-        }
+        detail = HAND_OFF_DETAIL
+        if held:
+            detail = CAPTCHA_DETAIL
+        elif reason == "already_applied_on_site":
+            detail = ALREADY_APPLIED_DETAIL
+        payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": detail}
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
             payload["page_host"] = host
@@ -490,7 +504,7 @@ async def _record_refill(
 ) -> None:
     """``form_filled`` {by: refill}: the newest fill's own record when every step held (the same answers, so the
     user's yes stays good), else that record without its answers (a form the user has not seen: the yes is stale)."""
-    payload = {**(last_fill or {}), "form_url": form_url, "by": by}
+    payload = {**(last_fill or {}), "form_url": form_url, "by": by, "browser": "job360"}  # Job360's own browser
     payload.setdefault("fields_count", int(done["steps_ok"]))
     if done["steps_failed"]:
         payload.pop("answers", None)

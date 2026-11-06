@@ -81,8 +81,26 @@ export const WEEKLY_CAP_MAX = 2000;
 export const MIN_GAP_MAX = 240;
 export const GRANT_COUNT_MAX = 100;
 export const GRANT_MAX_DAYS = 7;
+/** Owner 2026-11-02: the four outreach limits. Server maxes (core/settings.py); the server re-checks every save. */
+export const P_OUTREACH_PER_COMPANY = "assistant_settings.outreach_per_company";
+export const P_NETWORK_PER_HOUR = "assistant_settings.network_per_hour";
+export const P_LINKEDIN_PER_DAY = "assistant_settings.linkedin_sends_per_day";
+export const P_EMAIL_PER_DAY = "assistant_settings.email_sends_per_day";
+export const OUTREACH_LIMITS = [
+  { path: P_OUTREACH_PER_COMPANY, key: "outreach_per_company", testid: "outreach-per-company", title: "People per company you applied to", max: 10, sub: "Job outreach: at most this many people at a company you applied to." },
+  { path: P_NETWORK_PER_HOUR, key: "network_per_hour", testid: "network-per-hour", title: "New network people per hour", max: 20, sub: "Network: people with no job. At most this many new people an hour." },
+  { path: P_LINKEDIN_PER_DAY, key: "linkedin_sends_per_day", testid: "linkedin-per-day", title: "LinkedIn sends per day", max: 100, sub: "Every LinkedIn send, job outreach and network together." },
+  { path: P_EMAIL_PER_DAY, key: "email_sends_per_day", testid: "email-per-day", title: "Emails per day", max: 200, sub: "Every outreach email, job outreach and network together." },
+] as const;
+export const LINKEDIN_LIMIT_NOTE =
+  "LinkedIn restricts accounts that send too many connection requests; about 100 a week is a common limit.";
 export const P_AUTO_EMAILS = "assistant_settings.auto_employer_emails";
 export const P_OUTREACH_SEND = "assistant_settings.outreach_send";
+/** A CV that passed the code check and a second AI reviewer (strong) goes without the user's look. Off unless the user says. */
+export const P_CV_AUTO_APPROVE = "assistant_settings.cv_auto_approve";
+export const CV_AUTO_APPROVE_LABEL = "Send reviewed CVs without asking me";
+export const CV_AUTO_APPROVE_HELP =
+  "A CV goes on its own only when the code check and a second AI reviewer both pass it (strong). Anything weak still waits for you. Works only when automatic submit is on.";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Owner 2026-10-23: hunt for jobs every N hours (1-168); empty or 0 = off. */
@@ -91,7 +109,7 @@ export const HUNT_EVERY_MAX = 168;
 /** Owner 2026-10-24: may the user's scheduled task find people to reach for new applications. */
 export const P_PEOPLE_HUNT = "assistant_settings.people_hunt";
 export const PEOPLE_HUNT_HELP =
-  "From its own scheduled task, your assistant finds up to 2 people for each new application and writes the messages. You send them yourself.";
+  "From its own scheduled task, your assistant finds up to 5 people for each new application and writes the messages. You send them yourself.";
 /** Owner 2026-10-25: when the user's PC is on, {days, from, to}; empty = any time. */
 export const P_PC_ON = "assistant_settings.pc_on_hours";
 export const PC_ON_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -99,9 +117,10 @@ export const PC_ON_HELP =
   "When your computer is usually on. Your assistant uses its own browser only then, for tasks Job360's browser could not finish. Blank = any time.";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
-  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND,
+  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE,
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
   P_PEOPLE_HUNT, P_PC_ON,
+  P_OUTREACH_PER_COMPANY, P_NETWORK_PER_HOUR, P_LINKEDIN_PER_DAY, P_EMAIL_PER_DAY,
 ] as const;
 /** Owner 2026-10-28: "I have LinkedIn Premium" (300-character connection notes, not 200). Off unless the user says. */
 export const P_LINKEDIN_PREMIUM = "preferences.linkedin_premium";
@@ -120,6 +139,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_CAP]: "Daily limit",
   [P_AUTO_EMAILS]: "Automatic employer emails",
   [P_OUTREACH_SEND]: "Automatic outreach emails",
+  [P_CV_AUTO_APPROVE]: CV_AUTO_APPROVE_LABEL,
   [P_COMPANY_CAP]: "Applications per company",
   [P_COMPANY_DAYS]: "Days for the company limit",
   [P_WEEKLY_CAP]: "Weekly limit",
@@ -133,6 +153,10 @@ const KEY_LABEL: Record<string, string> = {
   [P_PEOPLE_HUNT]: "People hunt",
   [P_PC_ON]: "My PC-on time",
   [P_LINKEDIN_PREMIUM]: "LinkedIn Premium",
+  [P_OUTREACH_PER_COMPANY]: "People per company you applied to",
+  [P_NETWORK_PER_HOUR]: "New network people per hour",
+  [P_LINKEDIN_PER_DAY]: "LinkedIn sends per day",
+  [P_EMAIL_PER_DAY]: "Emails per day",
 };
 
 /** "auto"/"scheduled" -> auto, "declined" -> paused (Off); anything else as stored. */
@@ -177,7 +201,7 @@ export function pcOnText(v: unknown): string {
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
-  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM) return v === true ? "on" : "off";
+  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM || path === P_CV_AUTO_APPROVE) return v === true ? "on" : "off";
   if (path === P_OUTREACH_SEND) return v === "auto" ? "on" : "off";
   if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
   if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;

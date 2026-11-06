@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.auth_deps import CurrentUser
 from src.api.routes import browser as browser_routes
+from src.api.routes import own_browser as own_browser_routes
 from src.core import settings
 from src.repositories import pgsync
 from src.services.applications import blocked as blocked_service
@@ -86,6 +87,21 @@ def _sql(sql: str, params: tuple[Any, ...] = ()) -> None:
     conn.execute(sql, params)
     conn.commit()
     conn.close()
+
+
+def _same_day_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """Freeze the take route's clock at least 10 minutes into the current UTC day (the test user has
+    UTC timezone by default, so their day is UTC) and return it."""
+    real = datetime.now(timezone.utc)
+    frozen = max(real, real.replace(hour=0, minute=10, second=0, microsecond=0))
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return frozen if tz is not None else frozen.replace(tzinfo=None)
+
+    monkeypatch.setattr(own_browser_routes, "datetime", _Frozen)
+    return frozen
 
 
 async def _mark(client: AsyncClient, contact_id: int, entry: str, channel: str = "linkedin"):
@@ -303,7 +319,9 @@ async def test_run_now_is_not_a_scheduled_duty(authenticated_async_context):
 
 
 @pytest.mark.asyncio
-async def test_linkedin_sends_are_two_minutes_apart_and_ten_a_day(authenticated_async_context):
+async def test_linkedin_sends_are_two_minutes_apart_and_the_users_day_default_twenty(
+    authenticated_async_context, monkeypatch
+):
     async with authenticated_async_context() as client:
         first, m1 = await _person(client, 0)
         second, m2 = await _person(client, 1)
@@ -312,9 +330,12 @@ async def test_linkedin_sends_are_two_minutes_apart_and_ten_a_day(authenticated_
         async with await _agent(client) as agent:
             wait = await _take(agent)
             assert wait["status"] == "wait" and 0 < wait["wait_seconds"] <= own_browser.LINKEDIN_MIN_GAP_SECONDS
-            long_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+            # One clock for the rest: the take sees ``now`` and every send is 5 minutes before it, on the
+            # SAME user day (a run just past midnight once backdated them into yesterday).
+            now = _same_day_clock(monkeypatch)
+            long_ago = (now - timedelta(minutes=5)).isoformat()
             _sql("UPDATE contact_outreach SET recorded_at = ? WHERE entry = 'sent'", (long_ago,))
-            for n in range(2, 11):  # nine more sent today: ten in all
+            for n in range(2, settings.LINKEDIN_SENDS_PER_DAY_DEFAULT + 1):  # the rest of the default day of 20
                 other, _ = await _person(client, n)
                 await _mark(client, other, "sent")
             _sql("UPDATE contact_outreach SET recorded_at = ? WHERE entry = 'sent'", (long_ago,))
@@ -420,6 +441,7 @@ async def test_a_claim_belongs_to_the_actor_as_well_as_the_label(authenticated_a
 @pytest.mark.asyncio
 async def test_an_unrecorded_send_still_counts_toward_the_gap(authenticated_async_context, monkeypatch):
     """A claim Job360 wrote itself that nobody released or marked sent is a send nobody recorded: it counts."""
+    monkeypatch.setattr(own_browser, "RELEASE_BACKOFF_MINUTES", 0)  # this test is about the pace, not the backoff
     monkeypatch.setattr(own_browser, "CLAIM_MINUTES", 0)  # claims expire at once, so only the pace can stop a take
     async with authenticated_async_context() as client:
         contact_id, message_id = await _person(client)
@@ -438,7 +460,7 @@ async def test_an_unrecorded_send_still_counts_toward_the_gap(authenticated_asyn
 async def test_unrecorded_sends_count_toward_the_day(authenticated_async_context, monkeypatch):
     monkeypatch.setattr(own_browser, "CLAIM_MINUTES", 0)
     monkeypatch.setattr(own_browser, "LINKEDIN_MIN_GAP_SECONDS", 0)
-    monkeypatch.setattr(own_browser, "LINKEDIN_DAILY_MAX", 2)
+    monkeypatch.setattr(settings, "OUTREACH_LINKEDIN_MAX_PER_DAY", 2)  # the operator backstop under the user's 20
     async with authenticated_async_context() as client:
         contact_id, message_id = await _person(client)
         await _click(client, contact_id, message_id)
@@ -450,8 +472,8 @@ async def test_unrecorded_sends_count_toward_the_day(authenticated_async_context
 @pytest.mark.asyncio
 async def test_a_looping_take_and_release_can_never_block_the_users_click(authenticated_async_context, monkeypatch):
     monkeypatch.setattr(own_browser, "ROWS_PER_CONTACT_MAX", 3)
+    monkeypatch.setattr(own_browser, "RELEASE_BACKOFF_MINUTES", 0)  # this test is about the row cap, not the backoff
     monkeypatch.setattr(own_browser, "LINKEDIN_MIN_GAP_SECONDS", 0)
-    monkeypatch.setattr(own_browser, "LINKEDIN_DAILY_MAX", 1000)
     async with authenticated_async_context() as client:
         contact_id, message_id = await _person(client)
         await _click(client, contact_id, message_id)

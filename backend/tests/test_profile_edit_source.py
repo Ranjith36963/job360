@@ -112,7 +112,7 @@ async def test_get_profile_unconfirmed_absent_when_none(authenticated_async_cont
             assert update is not None
             await update.fn([_edit("user_said")])
             said = await tool.fn()
-            await update.fn([_edit(None, {"notice_period": "2 months"})])
+            await update.fn([_edit(None, {**NOTICE, "start_on_site_abroad": True})])  # S2b: fills an empty field
             inferred = await tool.fn()
         finally:
             mcp_server._current_user.set(None)

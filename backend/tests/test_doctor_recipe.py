@@ -76,7 +76,8 @@ def test_apply_batch_and_rules_point_to_second_look():
     assert "## doctor (every draft, judgment and action)" in _recipe("rules")
 
 
-_KINDS = ["Fit and bring", "Still open", "Form answers", "Applied proof", "Email match", "People", "Profile writes",
+_KINDS = ["Fit and bring", "Still open", "Form answers", "Applied proof", "Email match", "People", "CV review",
+          "Profile writes",
           "Facts and rounds", "Lessons"]
 
 
@@ -216,7 +217,7 @@ async def test_the_doctor_not_proven_fit_is_left_unscored(authenticated_async_co
 _POINTER_RECIPES = ("hunt", "research", "apply", "batch", "forms", "reach", "daily", "feedback", "prep", "debrief",
                     "review", "own_browser", "setup", "rules")
 _ROWS_NAMED = {"hunt": {"Fit and bring"}, "research": {"Still open", "Facts and rounds"},
-               "apply": {"Applied proof", "Still open", "Form answers"}, "batch": {"Applied proof"},
+               "apply": {"Applied proof", "Still open", "Form answers", "CV review"}, "batch": {"Applied proof"},
                "forms": {"Form answers"}, "reach": {"People"}, "daily": {"Email match"},
                "feedback": {"Email match", "Lessons"}, "debrief": {"Facts and rounds"},
                "review": {"Facts and rounds", "Lessons"}, "setup": {"Profile writes"}}

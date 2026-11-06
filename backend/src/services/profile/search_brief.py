@@ -21,11 +21,12 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from src.services.profile import job_priority
-from src.services.profile.answer_match import resolve_answer
+from src.services.profile.country_pages import is_drafted
 from src.services.profile.regions import is_region, place_name
-from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES, USER_INFO_ANSWERS_PATH
+from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES
 
 RIGHT_TO_WORK_PATH = "user_info.right_to_work"
+LOGISTICS_PATH = "user_info.logistics"
 _NO_SPONSORSHIP_AUTH = ("citizen", "permanent_resident")
 WHERE_TO_SEARCH_ASK = (
     "Where should I search? Name each country (or say 'every other country'), and for each one: "
@@ -82,33 +83,28 @@ def work_from_question(residence: str, country: str) -> str:
     return f"You live in {residence}. Would you work from {country} for a remote job there?"
 
 
-_YES = frozenset({"yes", "y", "true"})
-_NO = frozenset({"no", "n", "false"})
-
-
-def work_from_topic(country: str) -> str:
-    """The fixed topic of the work-from-country gap; an answer saved with it closes the gap."""
-    return f"work_from.{country}"
-
-
-def _approved_answer(answers: Any, question: str, topic: str = "") -> tuple[str, Optional[str]]:
-    """``(reply, note)``: the user's approved answer for the gap (its ``topic``, else the
-    question wording or an alias), lower-cased; ``""`` when none or ambiguous (note says why)."""
-    rec, note = resolve_answer(answers, topic=topic or None, question=question)
-    return (str(rec.get("answer") or "").strip().lower().rstrip(".!") if rec else ""), note
+def _relocate(logistics: Any, country: str) -> Optional[bool]:
+    """Memory's ``user_info.logistics`` answer for ``country``: ``willing_to_relocate`` (true / false), else None."""
+    rows = logistics.get("countries") if isinstance(logistics, dict) else None
+    for rec in rows or []:
+        if isinstance(rec, dict) and rec.get("country") == country and isinstance(rec.get("willing_to_relocate"), bool):
+            return bool(rec["willing_to_relocate"])
+    return None
 
 
 def build_search_brief(
-    right_to_work: Any, residence_country: Any = None, answers: Any = None,
+    right_to_work: Any, residence_country: Any = None, logistics: Any = None,
 ) -> dict[str, Any]:
     """``{"rows": [...], "work_from": [...], "residence_country": ..., "gaps": [...]}``
     from the stored ``user_info.right_to_work`` value.
 
-    ``residence_country`` (``user_info.contact``) and ``answers``
-    (``user_info.answers``) catch a remote job in a country the user does not
-    live in: an ad that lets you work from IN means working from IN. For each
-    ``work_from`` country other than where they live, ask once; an approved
-    "no" drops that country from ``work_from``; no approved answer = a gap.
+    Memory first (owner 2026-11-05, plan S4): the brief reads only Memory and the user's own
+    instructions, never a saved form answer. ``residence_country`` (``user_info.contact``) and
+    ``logistics`` (``user_info.logistics``) catch a remote job in a country the user does not
+    live in: an ad that lets you work from IN means moving to IN. For each ``work_from`` country
+    other than where they live, Memory's ``willing_to_relocate`` for it decides: false drops it
+    from ``work_from``; not set = a gap to save on that country's Memory row. A row carries the
+    country page's own ``instructions`` when the user wrote some.
 
     A row = one place the user said they would work (``remote_ok`` true, or
     ``onsite`` yes / only_if_sponsored); real countries first, ``ANY`` last.
@@ -119,7 +115,10 @@ def build_search_brief(
     a place; a record with one of the two gets the other asked.
     """
     records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
-    records = [r for r in (records or []) if isinstance(r, dict) and isinstance(r.get("country"), str)]
+    # A row an assistant drafted is a guess (country_pages): never a place to search or a work_from country.
+    records = [
+        r for r in (records or []) if isinstance(r, dict) and isinstance(r.get("country"), str) and not is_drafted(r)
+    ]
     # Countries first, then regions, then ANY: the more specific line is read first.
     records.sort(key=lambda r: (r["country"] == ANY_COUNTRY, is_region(r["country"])))
     work_from = [
@@ -137,15 +136,13 @@ def build_search_brief(
         for country in list(work_from):
             if country == residence or country not in remote_countries:
                 continue
-            question = work_from_question(residence, country)
-            topic = work_from_topic(country)
-            reply, note = _approved_answer(answers, question, topic)
-            if reply in _NO:
+            moves = _relocate(logistics, country)
+            if moves is False:
                 work_from.remove(country)
-            elif reply not in _YES:  # no answer, or an unclear one: ask again, never infer consent
+            elif moves is None:  # not in Memory: ask once, never infer consent
                 gaps.append({
-                    "path": USER_INFO_ANSWERS_PATH, "country": country, "ask": question, "topic": topic,
-                    **({"note": note} if note else {}),
+                    "path": LOGISTICS_PATH, "country": country, "ask": work_from_question(residence, country),
+                    "field": "willing_to_relocate",
                 })
     for rec in records:
         country, remote, onsite = rec["country"], rec.get("remote_ok"), rec.get("onsite")
@@ -198,6 +195,8 @@ def build_search_brief(
             "country": country, "remote_ok": remote is True, "onsite": onsite or "",
             "contract_ok": rec.get("contract_ok") if isinstance(rec.get("contract_ok"), bool) else None,
             "needs_sponsorship": needs, "counts_if": counts_if, "priority": priorities,
+            # The user's own instructions for this place (country page), first in what the assistant reads.
+            **({"instructions": rec["instructions"]} if rec.get("instructions") else {}),
         })
     if not rows:
         gaps.append({"path": RIGHT_TO_WORK_PATH, "country": None, "ask": WHERE_TO_SEARCH_ASK})

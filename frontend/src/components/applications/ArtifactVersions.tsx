@@ -5,6 +5,7 @@ import { downloadApplicationArtifact, getApplicationArtifact, getArtifactDiff, s
 import type { TailorFormat } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { CopyButton } from "@/components/applications/CopyButton";
+import { CvPreview } from "@/components/applications/CvPreview";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
 import { formatDate } from "@/lib/format-date";
@@ -95,6 +96,7 @@ export function ArtifactVersions({
   onChanged?: () => void | Promise<void>;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<ApplicationArtifact | null>(null);
   const [texts, setTexts] = useState<Record<number, string>>({});
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [compareId, setCompareId] = useState<number | null>(null);
@@ -112,6 +114,11 @@ export function ArtifactVersions({
 
   const open = useCallback(
     async (artifact: ApplicationArtifact) => {
+      // A CV or cover letter opens as the real PDF, every page (owner, 2026-11-03); other kinds show text.
+      if (artifact.kind === "cv" || artifact.kind === "cover_letter") {
+        setViewing(artifact);
+        return;
+      }
       if (openId === artifact.id) {
         setOpenId(null);
         return;
@@ -259,7 +266,7 @@ export function ArtifactVersions({
               return (
                 <div key={artifact.id} data-testid="artifact-version" className="border-t border-border py-2.5 first:border-t-0">
                   <div className="flex w-full items-center justify-between gap-3 text-sm">
-                    <button type="button" onClick={() => void open(artifact)} className="min-w-0 flex-1 text-left">
+                    <button type="button" data-testid="artifact-open" onClick={() => void open(artifact)} className="min-w-0 flex-1 text-left">
                       <span data-testid="artifact-version-label" className="font-mono tabular-nums">
                         v{artifact.version_no}
                       </span>
@@ -311,6 +318,14 @@ export function ArtifactVersions({
                           onChanged={onControls}
                         />
                       )}
+                      <button
+                        type="button"
+                        data-testid="artifact-view"
+                        onClick={() => setViewing(artifact)}
+                        className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        View
+                      </button>
                       {downloadingId === artifact.id ? (
                         <span data-testid="artifact-downloading" className="text-xs text-muted-foreground">
                           Downloading…
@@ -371,6 +386,15 @@ export function ArtifactVersions({
           </div>
         </div>
       ))}
+      {viewing && (
+        <CvPreview
+          applicationId={applicationId}
+          artifactId={viewing.id}
+          title={`${viewing.kind === "cv" ? "CV" : "Cover letter"} version ${viewing.version_no}`}
+          open
+          onOpenChange={(o) => !o && setViewing(null)}
+        />
+      )}
     </div>
   );
 }

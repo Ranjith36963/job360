@@ -39,13 +39,21 @@ from urllib.parse import urlsplit
 
 from src.core import settings
 from src.services.applications import blocked as blocked_service
-from src.services.applications import email_channel, event_examples, spine
+from src.services.applications import cv_review, email_channel, event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application, classify_host
 from src.services.applications.spine import SpineError
 from src.services.auth import run_credential
 from src.services.profile import assistant_settings as settings_rules
-from src.services.profile.answer_match import fits_country
+from src.services.profile import country_pages
+from src.services.profile.answer_match import (
+    AMBIGUOUS,
+    conflicting_topics,
+    fits_country,
+    superseded,
+    topic_key,
+)
+from src.services.profile.ask_once import DIAL_CODE, MEMORY_BLOCKS, contact_label, memory_question, own_link_label
 from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.services.profile.regions import region_of
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -479,28 +487,34 @@ async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: in
     }
 
 
-def _approval_age_over(recorded_at: Any, now: datetime) -> bool:
+def _approval_age_over(recorded_at: Any, now: datetime, payload: Any = None) -> bool:
+    """True once the yes is older than its clock: ``SUBMIT_APPROVAL_TTL_MINUTES`` for a yes with a
+    ``fingerprint`` (or when ``payload`` is not given), ``SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES`` for one without."""
     at = recorded_at if isinstance(recorded_at, datetime) else datetime.fromisoformat(str(recorded_at))
     at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-    return now - at > timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES)
+    unbound = isinstance(payload, dict) and not isinstance(payload.get("fingerprint"), dict)
+    minutes = settings.SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES if unbound else settings.SUBMIT_APPROVAL_TTL_MINUTES
+    return now - at > timedelta(minutes=minutes)
 
 
 async def approval_stale(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
 ) -> Optional[str]:
     """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
-    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    part that no longer does: ``expired`` (a yes with a fingerprint older than ``SUBMIT_APPROVAL_TTL_MINUTES``,
+    7 days by default), ``expired_chat`` (a yes without one, older than
+    ``SUBMIT_APPROVAL_TTL_UNBOUND_MINUTES``, 2 hours),
     ``cover_letter``, ``form_fill``, ``form_page``, ``profile`` or (slice 31) ``email``: the newest
     ``email_drafted`` has another recipient or
     attachment than the draft the yes was given on. A yes without a ``fingerprint``
-    (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
+    (a chat yes, or one from before slice 8) is bound to the CV and the time only, so it lapses sooner. A part that was
     unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
     only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
-    if _approval_age_over(event["recorded_at"], now):
-        return "expired"
     stamp = event["payload"].get("fingerprint")
     if not isinstance(stamp, dict):
-        return None
+        return "expired_chat" if _approval_age_over(event["recorded_at"], now, event["payload"]) else None
+    if _approval_age_over(event["recorded_at"], now, event["payload"]):
+        return "expired"
     application_id = int(app_row["id"])
     now_fp = await approval_fingerprint(db, user_id, application_id)
     for key in ("cover_letter_id", "cover_letter_sha256"):
@@ -859,6 +873,9 @@ async def gate_facts(
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
+        cv_review=await cv_review.review_state(
+            db, user_id, application_id, cv["artifact_id"] if cv else None, cv["sha256"] if cv else ""
+        ),
         has_cv=cv is not None,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
@@ -941,18 +958,39 @@ async def _cv_not_approved(
     """The CV the receipt would freeze has neither a ``cv_seen`` nor a ``submit_approved`` matching its id and
     text. Staleness and the approval TTL never count here (auto mode asks ``cv_not_seen`` first, so a seen
     CV is the user's yes). No CV at all counts as not approved (owner 2026-11-01): an assistant may not record
-    it; the user marks it applied themselves."""
+    it; the user marks it applied themselves. With ``cv_auto_approve`` on, a stored ``strong`` ``cv_reviewed`` of
+    that exact CV counts as approved too (owner 2026-11-05: the gate cleared ``cv_not_seen`` on it)."""
+    return (await cv_cleared_by(db, user_id, application_id, cv_artifact_id, channel))[0] is None
+
+
+async def cv_cleared_by(
+    db: JobDatabase, user_id: str, application_id: int, cv_artifact_id: Optional[int], channel: str = "",
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """Who cleared the CV the receipt would freeze (:func:`_cv_not_approved`'s rule): ``"user"`` (a matching
+    ``cv_seen`` / ``submit_approved``), ``"review"`` with that strong ``cv_reviewed`` event (``cv_auto_approve``
+    on), ``"bad_id"`` (the receipt route reports it), or ``None``: nobody, so not approved."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
     frozen = await spine.frozen_cv_id(db, user_id, application_id, cv_artifact_id, channel)
     if frozen is None:
-        return True
+        return None, None
     art = await spine.get_artifact(db, user_id, application_id, frozen)
     if art is None or art["kind"] != "cv":
-        return False  # the receipt route reports a bad id itself
+        return "bad_id", None  # the receipt route reports a bad id itself
     sha = sha256_text(art["text"])
-    return not any(
+    if any(
         cv_mark_matches(ev, frozen, sha)
         for ev in await _events(db, user_id, application_id, ("cv_seen", "submit_approved"))
-    )
+    ):
+        return "user", None
+    cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if not cfg.cv_auto_approve:
+        return None, None
+    review = await cv_review.newest_review(db, user_id, application_id, frozen, sha)
+    if review is None or review["payload"].get("confidence") != cv_review.STRONG:
+        return None, None
+    return "review", review
 
 
 async def open_rule_items(
@@ -998,6 +1036,8 @@ async def _already_applied(db: JobDatabase, user_id: str, application_id: int) -
     )
     return await cur.fetchone() is not None
 
+
+already_applied = _already_applied  # public name for the record_event route (submit_clearance, A8)
 
 CONFIRMATION_NOTE_PREFIX = "submission confirmed"
 
@@ -1071,8 +1111,8 @@ async def enforce_applied_rule(
     get_audit_logger().warning("submit_rule_refused", extra={"event": "submit_rule_refused", **base, "status": 409})
     words = "; ".join(f"{c} ({OPEN_RULE_WORDS[c]})" for c in codes)
     msg = f"submit_rule_open: do not record this as applied while it is open: {words}. Clear them first."
-    msg += (" If the employer emailed a confirmation, record it as proof (note with the email source) and the "
-            "user confirms on Needs you.")
+    msg += (" If the employer emailed a confirmation, record it as proof (note with the email source): Job360 "
+            "marks it applied when that email proves it, else the user confirms on Needs you.")
     if await submit_unconfirmed(db, user_id, application_id):
         msg += " If the user already pressed Submit in the browser, ask them to press Mark Applied on Job360."
     raise spine.SpineError(409, msg)
@@ -2169,9 +2209,7 @@ def compute_answers(
     # Review of #1261: an assistant can save an answer with approved: true itself. A private question is
     # filled without the user's click only when the USER wrote the answers list last (web), never the
     # assistant - approved_text items carry ``by_user`` for that check.
-    answers_by_user = not any(
-        str(r["path"]) == "user_info.answers" and is_assistant_actor(str(r.get("set_by") or "")) for r in overlay
-    )
+    answers_by_user = country_pages.answers_by_user(overlay)
     current = [""]
 
     def when(path: str) -> Optional[str]:
@@ -2216,11 +2254,25 @@ def compute_answers(
 
     at = when("user_info.right_to_work")
     rtw = info.right_to_work or {}
+    # Country pages: a drafted row (an assistant created or changed it) is a guess; with draft marks in
+    # the value an unmarked row is the user's own. A fact the user remembered for that country wins.
+    marked = country_pages.row_mode(rtw)
     for rec in _records(rtw.get("countries")):
         cc = str(rec.get("country") or "").upper()
+        drafted = country_pages.is_drafted(rec)
+        current[0] = "" if marked and not drafted else "user_info.right_to_work"
+        # Only the user's own approved answer replaces a guess: an assistant's approved: true is still a guess.
+        done = country_pages.remembered_answers(info.answers, cc) if drafted and answers_by_user else {}
         for k, v in rec.items():
-            if k != "country" and _present(v) and cc:
-                out["right_to_work"].append(_mk(f"right_to_work.{cc}.{k}", v, "memory", at))
+            key = f"right_to_work.{cc}.{k}"
+            if k in country_pages.ROW_META or not _present(v) or not cc:
+                continue
+            if key in done:  # the user's own answer for this country replaces the guess
+                out["right_to_work"].append(_mk(key, done[key]["answer"], "approved_text",
+                                                done[key].get("recorded_at"), by_user=answers_by_user))
+            else:
+                out["right_to_work"].append(_mk(key, v, "memory", at, **({"confirmed": False} if drafted else {})))
+    current[0] = "user_info.right_to_work"
     for k in ("citizenship", "sanctions_country_citizen"):
         if _present(rtw.get(k)):
             out["right_to_work"].append(_mk(f"right_to_work.{k}", rtw[k], "memory", at))
@@ -2259,6 +2311,11 @@ def compute_answers(
         if _present(v):
             out["equality"].append(_mk(f"equality.{k}", v, "memory", at, label=EQUALITY_LABEL))
 
+    # Two saved answers to one topic that disagree at one scope (the GB twins "Yes" and "No", 2026-11-03):
+    # neither rides in the kit, however each is worded; the topic is listed in `missing` as ambiguous. A
+    # broader answer a narrower one overrides (bound to this country, or this company's own) is left out.
+    bad = conflicting_topics(info.answers, country=country, company_key=company_key)
+    ambiguous: dict[str, str] = {}
     for rec in _records(info.answers):
         if rec.get("approved") is True and _present(rec.get("answer")) and _present(rec.get("question")):
             scoped = str(rec.get("company") or "").strip()
@@ -2266,6 +2323,13 @@ def compute_answers(
                 continue  # given for ONE employer; this kit is for another (or an unknown) one
             if not fits_country(rec, country):
                 continue  # a sponsorship / right-to-work answer for another country (owner, 2026-10-26)
+            if memory_question(str(rec.get("topic") or ""), str(rec["question"]))[0]:
+                continue  # Memory first (owner 2026-11-05): Memory's families come from Memory, never a saved answer
+            if topic_key(rec.get("topic")) in bad:
+                ambiguous.setdefault(topic_key(rec.get("topic")), str(rec["topic"]))
+                continue
+            if superseded(rec, info.answers, country=country, company_key=company_key):
+                continue
             out["approved_text"].append(
                 _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),
                     by_user=answers_by_user,
@@ -2299,9 +2363,11 @@ def compute_answers(
         region = region_of(country)
         for via in ([region] if region else []) + ["ANY"]:
             via_items = [i for i in out["right_to_work"] if i["key"].startswith(f"right_to_work.{via}.")]
-            if via_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
-                for item in via_items:
-                    field = item["key"].rsplit(".", 1)[1]
+            # Field by field (S1): the country's own page wins where it says something; a field it leaves
+            # empty is read from the region's page, then ANY's.
+            for item in via_items:
+                field = item["key"].rsplit(".", 1)[1]
+                if f"right_to_work.{country}.{field}" not in have:
                     out["right_to_work"].append(
                         _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
                               applies_via=via, **({"confirmed": False} if item.get("confirmed") is False else {}))
@@ -2321,7 +2387,7 @@ def compute_answers(
         for item in items:
             if _is_sensitive(block, str(item["key"])) and consented.get(_SENSITIVE_PATH.get(block, "")):
                 item["remembered_at"] = consented[_SENSITIVE_PATH[block]]  # the user's OK to remember
-    missing: list[dict[str, str]] = []
+    missing: list[dict[str, str]] = [{"key": topic, "why": AMBIGUOUS} for topic in ambiguous.values()]
     for path in dropped:
         missing.append({
             "key": path,
@@ -2687,6 +2753,10 @@ async def build_kit(
             429, f"too many kit reads this hour (KIT_READS_MAX_PER_HOUR = {settings.KIT_READS_MAX_PER_HOUR})"
         )
 
+    from src.services.applications import memory_closes  # noqa: PLC0415 - it imports kit
+
+    # Memory first: an old ask on this job that Memory now answers closes before the kit is read.
+    await memory_closes.close_covered(db, user.id, application_id)
     profile, country, answers, missing = await _application_answers(db, user, app_row, job_country_only=True)
     missing = kit_missing(missing)
     answers_omitted = 0
@@ -2797,6 +2867,14 @@ async def build_kit(
         "last_fill": await last_fill(db, user.id, application_id),
         "instructions": list(KIT_INSTRUCTIONS),
     }
+    # Country pages (owner 2026-11-02): the user's own instructions for this job's country (else its
+    # region's, else ANY's) - follow them on this application. Absent when none (rule #29).
+    told = country_pages.instructions_for(profile.user_info.right_to_work, country)
+    if told:
+        out["country_instructions"] = {"country": country, **told}
+        out["instructions"].append(
+            f"country_instructions: the user's own rules for jobs in {country}; follow them on this application."
+        )
     if answers_omitted:
         out["answers_omitted"] = answers_omitted
         out["instructions"].append(
@@ -2825,6 +2903,10 @@ FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these va
 FORM_NEXT_CONFIRM = (
     " Confirm every `needs_confirmation` answer with the user in that same message, and raise each one with "
     "ask_user so it shows on Needs you: the user checks it there before anything is sent."
+)
+FORM_NEXT_INSTRUCTIONS = (
+    "Instructions first: `user_instructions` are the user's own rules; where a line speaks to a question it "
+    "wins over the value below (Memory, then Profile). "
 )
 FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
@@ -2912,10 +2994,416 @@ def is_document_question(text: str) -> bool:
     return bool(_CV_FILE_RE.search(low) or _LETTER_FILE_RE.search(low))
 
 
+# Memory first (owner 2026-11-05, plan S1): a work-authorization status read as a yes/no answer. A status
+# outside this closed set (models.VALID_WORK_AUTH_STATUSES) is no yes/no: a gap, never a guess.
+_AUTH_YES_NO = {"citizen": "Yes", "permanent_resident": "Yes", "visa": "Yes", "needs_sponsorship": "No"}
+_ONSITE_YES_NO = {"yes": "Yes", "no": "No"}
+
+
+# Plain own-name / own-phone labels (:func:`ask_once.contact_label`): a run naming one of these keys for any
+# other label ("Referrer first name", "Emergency contact phone") gets a gap, never the user's own value.
+_OWN_CONTACT_KEYS = frozenset({"contact.legal_first_name", "contact.legal_last_name", "contact.preferred_name",
+                               "contact.phone", DIAL_CODE})
+
+
+# Real country calling codes (ITU E.164) for the countries Job360 users apply in. The saved number's prefix must
+# be one of these, and the residence country's own when that country is saved and listed here.
+_CALLING_CODES = {
+    "GB": "44", "IE": "353", "US": "1", "CA": "1", "IN": "91", "AU": "61", "NZ": "64", "DE": "49", "FR": "33",
+    "NL": "31", "BE": "32", "ES": "34", "PT": "351", "IT": "39", "CH": "41", "AT": "43", "SE": "46", "NO": "47",
+    "DK": "45", "FI": "358", "PL": "48", "CZ": "420", "RO": "40", "GR": "30", "AE": "971", "SA": "966",
+    "QA": "974", "KW": "965", "BH": "973", "OM": "968", "SG": "65", "MY": "60", "HK": "852", "JP": "81",
+    "KR": "82", "CN": "86", "PK": "92", "LK": "94", "BD": "880", "NG": "234", "KE": "254", "ZA": "27",
+    "EG": "20", "IL": "972", "BR": "55", "MX": "52", "PH": "63", "ID": "62", "TH": "66", "VN": "84",
+}
+
+
+def _dial_code(phone: Optional[dict[str, Any]], residence: Optional[dict[str, Any]] = None
+               ) -> Optional[dict[str, Any]]:
+    """The saved number's own dial prefix ("+44 7700 900123" -> "+44") as a kit item, else ``None``: the
+    number must start with "+" and 1-3 digits followed by a separator, the digits a real calling code
+    (:data:`_CALLING_CODES`) and, with a saved residence country on that list, that country's. Never guessed."""
+    from src.services.profile.countries import to_iso2  # noqa: PLC0415
+
+    if phone is None or not isinstance(phone.get("value"), str):
+        return None
+    number = phone["value"].strip()
+    if not number.startswith("+"):
+        return None
+    digits = ""
+    for ch in number[1:]:
+        if not ch.isdigit():
+            break
+        digits += ch
+    rest = number[1 + len(digits):]
+    if not 1 <= len(digits) <= 3 or not rest or rest[0] not in " -.(" or digits not in _CALLING_CODES.values():
+        return None
+    home = to_iso2(str(residence.get("value") or ""), strict=True) if residence is not None else None
+    if home in _CALLING_CODES and _CALLING_CODES[home] != digits:
+        return None  # the number's prefix is not the residence country's own: ask, never pick one
+    return {**phone, "key": DIAL_CODE, "value": f"+{digits}"}
+
+
+def _memory_answer(
+    by_key: dict[str, dict[str, Any]], template: Optional[str], country: Optional[str],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """``(item, why)`` for a question in Memory's families (:func:`ask_once.memory_question`): the kit's Memory
+    item for the job's country (compute_answers already falls back to the region's page, then ANY's), read
+    as the form's answer (true = "Yes"). Never a saved answer; no item = a gap naming the page to fill."""
+    from src.services.profile.common_questions import _shown  # noqa: PLC0415
+
+    page = f"your {country} page" if country else "the country page"
+    if template is None:
+        return None, ("a Memory question (right to work, sponsorship, salary, location...) that matches no single "
+                      f"Memory fact: ask the user, then add the answer on {page}")
+    if "{cc}" in template and not country:
+        return None, "the job's country is not set, so Memory cannot answer this"
+    key = template.replace("{cc}", country or "")
+    item = by_key.get(key)
+    if item is None or item.get("source") not in ("memory", "profile", "approved_text"):
+        return None, (f"{key} is not in Memory: ask the user once, then add it on {page} "
+                      "(or its region's page); a saved form answer is not used")
+    value, field = item["value"], key.rsplit(".", 1)[-1]
+    if field == "work_authorization":
+        mapped: Any = _AUTH_YES_NO.get(str(value))
+    elif field == "onsite":
+        mapped = _ONSITE_YES_NO.get(str(value))
+    elif isinstance(value, bool):
+        mapped = "Yes" if value else "No"
+    else:
+        mapped = _shown(value) if isinstance(value, (dict, list)) else value
+    if mapped is None:
+        return None, f"Memory says {key} = {value}, which is no yes/no answer: ask the user"
+    return {**item, "value": mapped}, ""
+
+
+# Sponsorship polarity (live run 2026-11-06, two checker rounds): "Are you eligible to work in the UK WITHOUT
+# requiring sponsorship?" asks the opposite of needs_sponsorship. ALLOW-lists only: the normalised question
+# (:func:`form_words`) must be one of the fixed wordings below - as-is (_SPONSOR_DIRECT, plus the catalog's own
+# text), negated (_SPONSOR_INVERTED); anything else is a gap. Compared whole, never with a regex on caller text.
+CTRY = "xcountryx"  # the job's own country, wherever the form names it (:func:`form_words`)
+_TWO_LETTER_PLACES = frozenset({"uk", "us", "gb"})  # other lowercase 2-letter codes are words ("in", "is", "pa")
+# An UPPERCASE 2-letter country code that is not the job's own ("Expected salary in IN" on a GB job) names
+# another country: :func:`form_words` returns only this word, which is on no allow-list, so the question is a gap.
+FOREIGN = "xforeignx"
+_DROPPED = (("now", "or", "will", "you", "in", "the", "future"), ("now", "or", "in", "the", "future"))
+
+
+def _letter_runs(text: str) -> list[str]:
+    """Runs of letters as written (NFKC first, capitals kept); everything else separates words."""
+    words, cur = [], []
+    for ch in unicodedata.normalize("NFKC", str(text or "")):
+        if ch.isalpha():
+            cur.append(ch)
+        elif cur:
+            words.append("".join(cur))
+            cur = []
+    return words + (["".join(cur)] if cur else [])
+
+
+def form_words(text: str, country: Optional[str]) -> list[str]:
+    """A form question as letters-only words: the job's country (its name or code, "the UK") as :data:`CTRY`,
+    "now or in the future" / "now or will you in the future" dropped, and a trailing "yes no" dropped.
+    An UPPERCASE 2-letter country code ("IN", "IS") is read from the original text: the job's own code is
+    :data:`CTRY`, any other makes the whole question ``[FOREIGN]`` (a gap)."""
+    from src.services.profile.countries import to_iso2  # noqa: PLC0415
+
+    cased = _letter_runs(text)
+    raw = [w.casefold() for w in cased]
+    words: list[str] = []
+    i = 0
+    while i < len(raw):
+        if len(cased[i]) == 2 and cased[i].isupper() and (code := to_iso2(cased[i], strict=True)):
+            if code != (country or "").upper():
+                return [FOREIGN]
+            if words and words[-1] == "the":
+                words.pop()
+            words.append(CTRY)
+            i += 1
+            continue
+        for n in (3, 2, 1):
+            span = " ".join(raw[i:i + n])
+            if i + n <= len(raw) and country and (n > 1 or len(span) > 2 or span in _TWO_LETTER_PLACES) \
+                    and to_iso2(span, strict=True) == country:
+                if words and words[-1] == "the":
+                    words.pop()
+                words.append(CTRY)
+                i += n
+                break
+        else:
+            words.append(raw[i])
+            i += 1
+    for drop in _DROPPED:
+        j = 0
+        while j + len(drop) <= len(words):
+            if tuple(words[j:j + len(drop)]) == drop:
+                del words[j:j + len(drop)]
+            else:
+                j += 1
+    if words[-3:] == ["yes", "or", "no"]:
+        del words[-3:]
+    elif words[-2:] == ["yes", "no"]:
+        del words[-2:]
+    return words
+
+
+def _wordings(*parts: tuple[str, ...]) -> frozenset[str]:
+    """Every wording made by picking one option from each part (an option may be "")."""
+    out = [""]
+    for options in parts:
+        out = [f"{a} {b}" for a in out for b in options]
+    return frozenset(" ".join(w.split()) for w in out)
+
+
+_FOR = ("", f"to work in {CTRY}", f"in {CTRY}", "for this role", "for this position", "for this job",
+        "for this remote role", "for employment")
+_SPONSOR_DIRECT = frozenset({
+    "sponsorship", "visa sponsorship", "sponsorship required", "sponsorship needed", "visa sponsorship required",
+    f"visa sponsorship {CTRY}", f"sponsorship required for {CTRY}",
+    # Greenhouse's standard US wording ("... for employment visa status (e.g. H-1B visa status)?").
+    "will you require sponsorship for employment visa status e g h b visa status",
+}) | _wordings(("do", "will", "would"), ("you",), ("need", "require"), ("", "visa"), ("sponsorship",), _FOR)
+_SPONSOR_INVERTED = _wordings(
+    ("are you eligible to", "are you authorised to", "are you authorized to", "can you"),
+    ("work", "live and work"), (f"in {CTRY} without",), ("", "requiring", "needing"), ("", "visa", "employer"),
+    ("sponsorship",),
+)
+# Greenhouse's employer wording (PC browser 2026-11-06): "Will you now or in the future require sponsorship from
+# <company> to obtain, maintain or extend employment based work authorization (for example, H-1B ...)". In THIS
+# shape only, the company's name and one closing "(for example ...)" are noise; anything else stays a gap.
+_EMPLOYER_HEAD = ("will", "you", "require", "sponsorship", "from")
+_EMPLOYER_TAILS = frozenset({
+    f"to {verbs} employment based work {auth}"
+    for verbs in ("obtain maintain or extend", "obtain maintain and or extend", "obtain or maintain or extend")
+    for auth in ("authorization", "authorisation")
+})
+_EXAMPLE_HEADS = (("for", "example"), ("e.g",), ("eg",), ("e", "g"), ("such", "as"), ("including",))
+# CLOSED lists (checker round 3): an example token is one of these visa names (casefolded, hyphens dropped) or a
+# joiner; anything else ("NO", "USA", "none", "citizens") is a gap. The company must be THIS job's own (rule-1
+# key: :func:`normalized_company_key`, which drops punctuation and Ltd / Inc / GmbH / Corp suffixes).
+_VISA_NAMES = frozenset({"h1b", "h1b1", "h2b", "o1", "l1", "l1a", "l1b", "tn", "e3", "f1", "j1", "opt", "cpt",
+                         "stem", "ead", "gc", "e2", "tps", "daca"})  # plus "green card", two words
+_EXAMPLE_JOINERS = frozenset({"or", "status", "visa", "etc"})
+_EDGE_PUNCT = ".,;:!?\"'()[]…"
+
+
+def _tokens(text: str, separators: str = "") -> list[str]:
+    """Whitespace (and ``separators``) split ``text`` as written, each token stripped of :data:`_EDGE_PUNCT`."""
+    out: list[str] = []
+    cur: list[str] = []
+    for ch in str(text or "") + " ":
+        if ch.isspace() or ch in separators:
+            tok = "".join(cur).strip(_EDGE_PUNCT)
+            if tok:
+                out.append(tok)
+            cur = []
+        else:
+            cur.append(ch)
+    return out
+
+
+def _visa_example(inside: str) -> bool:
+    """True for "for example, H-1B, TN or E-3 visa status": an example head, then only :data:`_VISA_NAMES` (at
+    least one) and :data:`_EXAMPLE_JOINERS`."""
+    low = [t.casefold() for t in _tokens(inside, ",/")]
+    head = next((h for h in _EXAMPLE_HEADS if tuple(low[:len(h)]) == h), None)
+    if head is None:
+        return False
+    rest = [t.replace("-", "") for t in low[len(head):]]
+    named, i = False, 0
+    while i < len(rest):
+        if rest[i:i + 2] == ["green", "card"]:
+            named, i = True, i + 2
+        elif rest[i] in _VISA_NAMES:
+            named, i = True, i + 1
+        elif rest[i] in _EXAMPLE_JOINERS:
+            i += 1
+        else:
+            return False
+    return named
+
+
+def _employer_sponsorship(text: str, country: Optional[str], company_key: Optional[str]) -> bool:
+    """True for :data:`_EMPLOYER_HEAD` + THIS job's own company (``company_key``, the rule-1 key) + one of
+    :data:`_EMPLOYER_TAILS`, then nothing but an optional closing visa example (:func:`_visa_example`).
+    The "unknown" placeholder (a job brought with no company) is no company: never matched."""
+    if not company_key or company_key == "unknown":
+        return False
+    main = str(text or "").strip().rstrip("?.! ").strip()
+    if main.endswith(")"):
+        cut = main.rfind("(")
+        if cut <= 0 or not _visa_example(main[cut + 1:-1]):
+            return False
+        main = main[:cut]
+    toks = _tokens(main)
+    low = [t.casefold() for t in toks]
+    if "from" not in low:
+        return False
+    i = low.index("from")
+    j = next((k for k in range(i + 1, len(low) - 1) if low[k] == "to" and low[k + 1] == "obtain"), None)
+    if j is None or j == i + 1 or tuple(form_words(" ".join(toks[:i + 1]), country)) != _EMPLOYER_HEAD:
+        return False
+    return (" ".join(form_words(" ".join(toks[j:]), country)) in _EMPLOYER_TAILS
+            and normalized_company_key(" ".join(toks[i + 1:j])) == company_key)
+
+
+POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
+                "clear: ask the user, never guess")
+
+
+def _sponsorship_reading(
+    text: str, country: Optional[str], keyed: bool = False, company_key: Optional[str] = None,
+) -> Optional[str]:
+    """``"direct"``, ``"inverted"`` or ``None`` (a gap): the normalised wording is on one allow-list. A run that
+    named the kit key with a placeholder for a question (no word of three letters) keeps the key's reading."""
+    from src.services.profile import answer_to_memory, common_questions  # noqa: PLC0415
+
+    if _employer_sponsorship(text, country, company_key):
+        return "direct"  # its "(for example, H-1B, TN ...)" names visas, not places: checked before FOREIGN
+    words = form_words(text, country)
+    if words == [FOREIGN]:
+        return None  # names another country than the job's: never read as this job's sponsorship question
+    said = " ".join(words)
+    catalog = {" ".join(form_words(str(q["question"]).replace("{country}", CTRY), country))
+               for q in common_questions.catalog() if str(q.get("kit_key") or "").endswith(".needs_sponsorship")}
+    if said in _SPONSOR_DIRECT or said in catalog or (keyed and not any(len(w) > 2 for w in words)):
+        return "direct"
+    # Answer once (#1526): the wordings it stores needs_sponsorship from are all as-is ones; read them the same.
+    if answer_to_memory.exact("needs_sponsorship", "right_to_work.{cc}.needs_sponsorship", text, country):
+        return "direct"
+    return "inverted" if said in _SPONSOR_INVERTED else None
+
+
+def _yes_no(value: Any) -> Optional[str]:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    return {"yes": "Yes", "no": "No"}.get(str(value).strip().casefold())
+
+
+def _sponsorship_polarity(
+    item: dict[str, Any], text: str, country: Optional[str], keyed: bool, company_key: Optional[str] = None,
+) -> tuple[Optional[dict[str, Any]], str]:
+    """The ``needs_sponsorship`` answer read for THIS wording: as-is, negated, or a gap (:data:`POLARITY_WHY`)."""
+    reading = _sponsorship_reading(text, country, keyed, company_key)
+    if reading == "direct":
+        return item, ""
+    said = _yes_no(item["value"])
+    if reading == "inverted" and said is not None:
+        return {**item, "value": "No" if said == "Yes" else "Yes", "polarity": "inverted"}, ""
+    return None, POLARITY_WHY
+
+
+# Pay asked in a currency (live run 2026-11-06): Job360 never converts, so a salary answer whose saved currency
+# is not the one the form asks for is a gap. Codes chosen not to collide with English words; "$" is any dollar.
+_CURRENCY_WORDS: dict[str, frozenset[str]] = {
+    **{c: frozenset({c.upper()}) for c in (
+        "gbp", "usd", "eur", "inr", "aed", "cad", "aud", "sgd", "chf", "sek", "nok", "dkk", "pln", "jpy", "cny",
+        "hkd", "nzd", "zar", "sar", "qar", "myr", "brl", "mxn", "ils", "czk", "huf", "ron", "kwd", "bhd", "omr",
+        "egp", "ngn", "kes", "pkr", "lkr", "bdt", "idr", "thb", "krw", "twd")},
+    "pounds": frozenset({"GBP"}), "sterling": frozenset({"GBP"}), "euro": frozenset({"EUR"}),
+    "euros": frozenset({"EUR"}), "rupees": frozenset({"INR", "PKR", "LKR", "NPR"}),
+}
+_DOLLARS = frozenset({"USD", "CAD", "AUD", "SGD", "NZD", "HKD"})
+_CURRENCY_SYMBOLS = {"£": frozenset({"GBP"}), "€": frozenset({"EUR"}), "₹": frozenset({"INR"}), "$": _DOLLARS}
+
+
+# Pay period and scale (checker, 2026-11-06): a period word must name the saved period; with none, only a yearly
+# figure answers. Equity, bonus, totals, "k" / thousands and day rates are never the saved base range: a gap.
+_PERIOD_WORDS = {
+    "hour": "hour", "hourly": "hour", "hr": "hour", "day": "day", "daily": "day", "week": "week",
+    "weekly": "week", "month": "month", "monthly": "month", "annum": "year", "annual": "year",
+    "annually": "year", "year": "year", "yearly": "year", "yr": "year",
+}
+_SAVED_PERIOD = {"year": "year", "annual": "year", "yearly": "year", "month": "month", "monthly": "month"}
+_PLAIN_PAY_WORDS = frozenset({
+    "salary", "pay", "compensation", "desired", "expected", "expectation", "expectations", "your", "what", "is",
+    "are", "annual", "annually", "yearly", "per", "year", "annum", "pa", "gross", "base", "in", "range",
+})
+_NOT_BASE_PAY = frozenset({"equity", "bonus", "bonuses", "total", "ote", "k", "thousand", "thousands", "commission",
+                           "stock", "options", "lakh", "lakhs", "lpa"})
+
+
+# Base pay spelled out (PC browser 2026-11-06): "Desired Base Salary (Please Include the Amount and Currency.
+# Excluding Bonus, Commission, and Benefits)". An excluding phrase followed only by these words says the figure
+# IS the base range, so the clause is dropped; "including / incl. / plus / with" them stays a gap.
+_PAY_NOISE = ("please", "include", "the", "amount", "and", "currency")
+_EXCLUDING = (("excluding",), ("excl",), ("not", "including"))
+_EXCLUDED = frozenset({"bonus", "bonuses", "commission", "commissions", "benefits", "equity"})
+
+
+def _drop_pay_noise(words: list[str]) -> list[str]:
+    """``words`` without :data:`_PAY_NOISE` and without each excluding clause (:data:`_EXCLUDING` then only
+    :data:`_EXCLUDED` words joined by "and" / "or"). A clause excluding nothing on the list is kept."""
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        if tuple(words[i:i + len(_PAY_NOISE)]) == _PAY_NOISE:
+            i += len(_PAY_NOISE)
+            continue
+        head = next((h for h in _EXCLUDING if tuple(words[i:i + len(h)]) == h), None)
+        if head is not None:
+            j = i + len(head)
+            while j < len(words) and (words[j] in _EXCLUDED or words[j] in ("and", "or")):
+                j += 1
+            while j > i + len(head) and words[j - 1] in ("and", "or"):
+                j -= 1  # a trailing "and" belongs to what follows
+            if any(w in _EXCLUDED for w in words[i + len(head):j]):
+                i = j
+                continue
+        out.append(words[i])
+        i += 1
+    return out
+
+
+def _pay_gap(text: str, saved: Any, country: Optional[str]) -> str:
+    """Why a salary answer cannot be sent to this wording, else ``""``: another currency, another period (none
+    named = a year), or not the base range (equity, bonus, total, k, a day rate). A plain value (no record) is
+    sent only to a wording naming no period."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    if form_words(text, country) == [FOREIGN]:
+        return "the form asks about pay in another country than this job's: ask the user"
+    words = set(_drop_pay_noise(normalize_question(text).split()))
+    odd = sorted(words & _NOT_BASE_PAY) + (["day rate"] if "rate" in words and "day" in words else [])
+    if odd:
+        return f"the form asks for more than the saved base pay range ({', '.join(odd)}): ask the user"
+    asked_periods = {_PERIOD_WORDS[w] for w in words if w in _PERIOD_WORDS}
+    have_period = None
+    if isinstance(saved, dict):
+        have_period = _SAVED_PERIOD.get(str(saved.get("period") or "").strip().casefold())
+    if have_period is None:
+        # A saved record with no known period answers nothing; a plain value only a wording naming no period.
+        wrong_period = isinstance(saved, dict) or bool(asked_periods)
+    elif asked_periods:
+        wrong_period = asked_periods != {have_period}
+    else:
+        wrong_period = have_period != "year"
+    if wrong_period:
+        per = ", ".join(sorted(asked_periods)) or "a year (no period named)"
+        return (f"the form asks for pay per {per}; Memory holds pay per {have_period or 'an unknown period'} "
+                "and Job360 never converts: ask the user")
+    asked = [_CURRENCY_WORDS[w] for w in words if w in _CURRENCY_WORDS]
+    asked += [codes for sym, codes in _CURRENCY_SYMBOLS.items() if sym in text]
+    asked += [_DOLLARS for w in ("dollar", "dollars") if w in words]
+    have = str(saved.get("currency") or "").upper() if isinstance(saved, dict) else ""
+    if asked and not (have and all(have in codes for codes in asked)):
+        want = ", ".join(sorted(set().union(*asked)))
+        return (f"the form asks for pay in {want}; Memory holds {have or 'no currency'} for "
+                f"{country or 'this job'} and Job360 never converts: ask the user")
+    # ALLOW-list (checker round 2): beside the pay word, only words of a plain expected-pay question.
+    allowed = _PLAIN_PAY_WORDS | {CTRY} | {w for w, codes in _CURRENCY_WORDS.items() if have in codes}
+    allowed |= {"dollar", "dollars"} if have in _DOLLARS else set()
+    allowed |= {"month", "monthly"} if have_period == "month" else set()
+    extra = sorted({w for w in _drop_pay_noise(form_words(text, country)) if w not in allowed})
+    if extra:
+        return (f"the form asks more than a plain expected pay range ({', '.join(extra)}): ask the user")
+    return ""
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
-    country: Optional[str] = None,
+    country: Optional[str] = None, instructions: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
@@ -2931,11 +3419,24 @@ def form_check(
     A ``file`` question for the CV or the cover letter is answered by the application's newest saved
     artifact of that kind (``documents``: kind -> artifact row), source ``artifact``, even when a saved
     answer matched; none saved = the saved answer, else a gap.
+    Memory first (owner 2026-11-05): a question in Memory's families (:func:`ask_once.memory_question`) is
+    answered from Memory only (:func:`_memory_answer`), never from a saved answer. ``instructions`` (the
+    user's own rules, :func:`user_instructions`) come first in the result and win wherever they speak.
     Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
+    # A topic whose saved answers disagree (conflicting_topics) is never answered, however the question
+    # matched it: by the item key, the question wording or the topic (fail closed, 2026-11-03).
+    bad = conflicting_topics(records, country=country, company_key=company_key)
+
+    def _contradicted(found: Optional[dict[str, Any]]) -> bool:
+        return found is not None and topic_key(found.get("topic")) in bad
+
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
+    dial = _dial_code(by_key.get("contact.phone"), by_key.get("contact.residence_country"))
+    if dial is not None:
+        by_key[DIAL_CODE] = dial
     answers_by_user = any(i.get("by_user") for i in answers.get("approved_text", []))
     approved = {
         _norm_question(i["key"]): i for i in answers.get("approved_text", [])
@@ -2954,30 +3455,66 @@ def form_check(
         item: Optional[dict[str, Any]] = None
         matched_by = "key"
         why = ""
-        if key is not None:
+        family, template = memory_question(key, text)
+        if key is None and contact_label(text) == DIAL_CODE:
+            family, template = True, DIAL_CODE  # "Country code": only the saved number's own "+44", never a guess
+        if family and template is None and _sponsorship_reading(text, country, company_key=company_key) is not None:
+            template = "right_to_work.{cc}.needs_sponsorship"  # an allow-listed sponsorship wording names the fact
+        own = by_key.get(key) if key is not None else None
+        if own is not None and (not family or own.get("source") != "approved_text"):
+            item = own  # the run named a kit item: Memory's own key (or, outside Memory, a saved answer's)
+        elif family:
+            # Memory first (owner 2026-11-05): Memory's families never take a saved answer, and saved
+            # answers that disagree no longer block them.
+            if key is not None and key.split(".", 1)[0] in MEMORY_BLOCKS and template is None:
+                why = f"key '{key}' is not in this application's kit"  # no Memory fact by that name
+            else:
+                item, why = _memory_answer(by_key, template, country)
+            matched_by = "key" if key is not None else "wording"
+        elif key is not None:
             item = by_key.get(key)
             if item is None:
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
             if item is None:
                 rec, note = resolve_answer(records, topic=key, company_key=company_key, country=country)
-                if note:
-                    why = note
+                if note or _contradicted(rec):
+                    why = note or AMBIGUOUS
                 elif rec is not None:
                     item = _record_item(rec, answers_by_user)
                     matched_by = "topic"
             if item is None and not why:
-                why = f"key '{key}' is not in this application's kit"
+                # A key that is a contradicted question's wording: the kit left it out as ambiguous.
+                rec, note = resolve_answer(records, question=key, company_key=company_key, country=country)
+                why = AMBIGUOUS if note or _contradicted(rec) else f"key '{key}' is not in this application's kit"
         else:
             rec, note = resolve_answer(records, question=text, company_key=company_key, country=country)
             matched_by = "wording"
-            if note:
-                why = note
+            if note or _contradicted(rec):
+                why = note or AMBIGUOUS
             elif rec is not None:
                 item = _record_item(rec, answers_by_user)
             else:
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
                 why = "no saved answer for this question"
+        if not family and _contradicted(item):
+            item, why = None, AMBIGUOUS
+        if item is not None and str(item["key"]) in ("contact.linkedin_url", "contact.github_url") \
+                and not own_link_label(text):
+            item, why = None, ("not a plain ask for your own link (maybe someone else's link, a handle or another "
+                               "page on the site): ask the user")
+        if item is not None and str(item["key"]) in _OWN_CONTACT_KEYS and contact_label(text) != str(item["key"]):
+            item, why = None, ("not a plain ask for your own name or phone (maybe someone else's, or a field the "
+                               "saved one does not answer): ask the user")
+        if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
+            # "eligible ... WITHOUT sponsorship" = the negation; only allow-listed wordings are answered
+            item, why = _sponsorship_polarity(item, text, country, key is not None, company_key)
+        pay = str(item["key"] if item is not None else template or "").startswith("salary.")
+        if pay:
+            sensitive = True
+            gap = _pay_gap(text,by_key.get(str(item["key"]), item)["value"], country) if item else ""
+            if gap:
+                item, why = None, gap
         # A CV / letter FILE field takes THIS application's tailored document even over a matched saved
         # answer (production 2026-10-30: a stale "CV v1, artifact 128" label won every form's "Resume");
         # with none saved yet, the saved answer stands. A text question about the CV never gets here.
@@ -3001,7 +3538,7 @@ def form_check(
             item = None
         # A knock-out is spotted from the question and key alone - never from a gap in the profile or CV
         # (career-ops apply.md:72: a missing field is not evidence the candidate lacks the credential).
-        if _is_knockout(text, key):
+        if _is_knockout(text, key) or pay:
             knockouts.append({"question": text, "key": key, **({"value": item["value"]} if item is not None else {})})
         if item is None:
             row_m: dict[str, Any] = {"question": text, "required": required, "why": why}
@@ -3018,6 +3555,8 @@ def form_check(
         }
         if ftype != "unknown":
             row["field_type"] = ftype
+        if item.get("polarity"):
+            row["polarity"] = item["polarity"]  # the saved fact, negated for this wording
         if item.get("confirmed") is False:
             row["confirmed"] = False
         if _over_limit(item["value"], q.get("limit"), str(q.get("limit_unit") or "chars")):
@@ -3035,7 +3574,10 @@ def form_check(
         nxt += FORM_NEXT_CONFIRM
     if knockouts:
         nxt += FORM_NEXT_KNOCKOUT
+    if instructions:
+        nxt = FORM_NEXT_INSTRUCTIONS + nxt
     out: dict[str, Any] = {
+        **({"user_instructions": instructions} if instructions else {}),
         "questions_count": len(questions), "answered": answered, "missing": missing,
         "counts": {"answered": len(answered), "missing": len(missing), "missing_required": missing_required},
         "needs_confirmation": confirm, "knockouts": knockouts, "next": nxt,
@@ -3043,6 +3585,20 @@ def form_check(
     if knockouts:
         out["stop_for_user"] = True
     return out
+
+
+def user_instructions(profile: Any, country: Optional[str]) -> Optional[dict[str, Any]]:
+    """The user's own rules for a form, read before Memory (owner 2026-11-05): get_profile's ``instructions``
+    (assistant notes that are no Memory step fact) and this country's page lines (else its region's, else
+    ANY's). ``None`` when there are none (rule #29)."""
+    from src.services.profile.edits import STEP_FACT_PREFIXES  # noqa: PLC0415
+
+    notes = [n for n in (profile.preferences.assistant_notes or [])
+             if isinstance(n, str) and n.strip() and not n.startswith(STEP_FACT_PREFIXES)]
+    told = country_pages.instructions_for(profile.user_info.right_to_work, country)
+    out: dict[str, Any] = {**({"lines": notes} if notes else {}),
+                           **({"country": {"for": country, **told}} if told else {})}
+    return out or None
 
 
 async def check_form(
@@ -3070,7 +3626,7 @@ async def check_form(
             documents[kind] = row
     out = form_check(
         answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None, documents,
-        country=country,
+        country=country, instructions=user_instructions(profile, country),
     )
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,

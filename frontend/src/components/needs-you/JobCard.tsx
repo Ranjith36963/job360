@@ -7,18 +7,21 @@ import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, markOutreachSkipped, recordApplicationReceipt, rememberAskAnswers, resolveSubmit, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
-import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
+import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, paceText } from "@/lib/browser-labels";
 import { BLOCKER_TITLE, hasFormHandoff, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { CvPreview } from "@/components/applications/CvPreview";
 import { FormHandoff } from "@/components/applications/FormHandoff";
+import { AlreadyAppliedRow } from "./AlreadyAppliedRow";
 import { AskQuestions } from "./AskQuestions";
 import { AskText } from "./AskText";
 import { BrowserReason } from "./BrowserReason";
 import { PersonRow } from "./PersonRow";
 import type { RowState } from "./AskQuestions";
+import { useAppHref } from "@/lib/app-href";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
 // assistant or a job site: untrusted, rendered only as React text, never as HTML.
@@ -61,18 +64,23 @@ export function JobCard({
   showHeader = true,
   ready,
   bare = false,
+  linkedinPerDay,
 }: {
   card: JobCardData;
   onChanged: () => Promise<void>;
   showHeader?: boolean;
   ready?: ReactNode;
   bare?: boolean;
+  /** The user's own `linkedin_sends_per_day.effective`, for the pace line. */
+  linkedinPerDay?: number | null;
 }) {
+  const appLink = useAppHref();
   const Root = bare ? "div" : "li";
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
+  const [viewCv, setViewCv] = useState(false);
   const structured = ready ? [] : card.asks.filter((a) => a.kind === "structured");
   // Each question is shown once, however many open asks listed it; its answer as it stands and
   // whether the user checked it, per merged row.
@@ -91,6 +99,7 @@ export function JobCard({
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
+  const alreadyApplied = card.asks.filter((a) => a.kind === "already_applied");
   const allReminders = card.asks.filter((a) => a.kind === "outreach");
   // A reminder about someone already under People to reach is not a second row (owner 2026-10-24).
   const covered = remindersCovered(card.people, allReminders.map((r) => r.ask));
@@ -141,8 +150,8 @@ export function JobCard({
 
   const [remembered, setRemembered] = useState<Set<string>>(new Set());
 
-  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; the server
-   *  binds a country-specific one (right to work, salary) to this job's country, the rest are
+  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; a Memory
+   *  question (right to work, salary...) goes into Memory for this job's country (2026-11-06), the rest are
    *  global. A stored fact left unchanged is not saved again. */
   async function rememberRows(values: Map<string, string>) {
     for (const { ask } of structured) {
@@ -151,7 +160,10 @@ export function JobCard({
         const text = values.get(k.rowId);
         return m && text && !(isStoredSource(m.q.source) && text === m.q.answer.trim());
       });
-      if (given.length) await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+      if (!given.length) continue;
+      const done = await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+      // Answer once: a Memory fact already set to another value is never overwritten; say where to change it.
+      for (const why of Object.values(done?.conflicts ?? {})) toast.error(`Not saved to Memory: ${why}`);
     }
     setRemembered((prev) => new Set([...prev, ...values.keys()]));
   }
@@ -242,7 +254,7 @@ export function JobCard({
         Open the form ↗
       </a>
     ) : (
-      <Link href={`/applications/${card.applicationId}`} className={btn} data-testid={`row-link-${id}`}>
+      <Link href={appLink(card.applicationId)} className={btn} data-testid={`row-link-${id}`}>
         Open the application
       </Link>
     );
@@ -282,11 +294,11 @@ export function JobCard({
       className={bare ? "flex flex-col gap-4 p-4 sm:p-5" : "flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card"}>
       {showHeader && (
       <div className="flex flex-col gap-0.5">
-        <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
+        <Link href={appLink(card.applicationId)} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
           {card.company || "Unknown company"}
         </Link>
         <p className="text-sm">
-          <Link href={`/applications/${card.applicationId}`} data-testid={`title-link-${card.applicationId}`}
+          <Link href={appLink(card.applicationId)} data-testid={`title-link-${card.applicationId}`}
             className="underline-offset-2 hover:underline">
             {card.role || "Untitled role"}
           </Link>
@@ -302,7 +314,7 @@ export function JobCard({
         <h2 className="font-heading text-base">Job</h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid={`apply-status-${card.applicationId}`}>
-            {card.formFilled ? "Form filled. Next: you" : "You: finish this"}
+            {card.formFilled ? "Form filled on the site. Waiting for your Send" : "You: finish this"}
           </span>
           {card.formUrl && (
             <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn} data-testid={`section-form-link-${card.applicationId}`}>
@@ -332,6 +344,11 @@ export function JobCard({
           </div>
         </section>
       )}
+
+      {alreadyApplied.map(({ ask }) => (
+        <AlreadyAppliedRow key={ask.id} ask={ask} applicationId={card.applicationId}
+          openItems={card.openItems ?? []} onChanged={onChanged} />
+      ))}
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
@@ -385,9 +402,9 @@ export function JobCard({
             <p className="text-sm">CV version {card.cv.version}, not approved yet</p>
           </div>
           <div className="flex gap-2">
-            <Link href={`/applications/${card.applicationId}`} className={btn}>
+            <button type="button" className={btn} data-testid={`cv-view-${card.applicationId}`} onClick={() => setViewCv(true)}>
               View CV
-            </Link>
+            </button>
             <button type="button" className={btn} onClick={() => void downloadCv(card, card.cv!)}>
               PDF
             </button>
@@ -396,6 +413,10 @@ export function JobCard({
               Approve CV
             </button>
           </div>
+          {viewCv && (
+            <CvPreview applicationId={card.applicationId} artifactId={card.cv.artifactId}
+              title={`CV version ${card.cv.version}`} open onOpenChange={setViewCv} />
+          )}
         </section>
       )}
 
@@ -404,7 +425,7 @@ export function JobCard({
       {(people.length > 0 || reminders.length > 0) && (
         <section className="flex flex-col gap-2" data-testid={`section-outreach-${card.applicationId}`}>
           <h2 className="font-heading text-base">Outreach</h2>
-          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{PACE_TEXT}</p>
+          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{paceText(linkedinPerDay)}</p>
           <div className="flex flex-col gap-2" data-testid="people-to-reach">
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy} onChanged={onChanged}

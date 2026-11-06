@@ -768,6 +768,91 @@ def linkedin_note_too_long(text: str, *, premium: bool) -> Optional[dict[str, st
     )
 
 
+# ── (d) a message sent on its own (owner 2026-11-03) ─────────────────────────
+
+# "worked at Acme", "studied at Leeds", "graduated from MIT", "experience with Kafka": the grammar words before
+# a name the profile must contain. Grammar only, never a skill list (hard rule #28): the profile is the vocabulary.
+_NAME_LEADS = {
+    "worked": ("at", "for"), "work": ("at", "for"), "working": ("at", "for"), "interned": ("at",),
+    "joined": (), "studied": ("at",), "graduated": ("from",), "degree": ("from",), "experience": ("with", "in"),
+}
+# A bare "at Globex", "for Initech", "from MIT", "with Kafka": the same check, the job's own names allowed.
+_BARE_LEADS = ("at", "for", "from", "with")
+_SPELLED = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+    "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14", "fifteen": "15",
+    "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80", "ninety": "90", "hundred": "100",
+}
+
+
+def spelled_to_digits(text: str) -> str:
+    """"ten years" -> "10 years", word by word, so the number checks see a spelled-out claim."""
+    out: list[str] = []
+    for word in text.split(" "):
+        core = word.strip(_OUTER_PUNCT)
+        digits = _SPELLED.get(core.casefold())
+        out.append(word.replace(core, digits, 1) if digits and core else word)
+    return " ".join(out)
+
+
+def unsupported_names(text: str, source: str, allowed: str = "") -> Optional[dict[str, str]]:
+    """Capitalised names after ``_NAME_LEADS`` ("worked at Acme Corp") that the profile never mentions. Word by
+    word, no regex on the caller's text (CodeQL: no backtracking). ``allowed`` (the person and the job) vouches only
+    after a bare lead ("the role at Globex"), never after a claim lead: "I worked at Globex" needs the profile."""
+    raw = _scrub(text).split()
+    words = [w.strip(_OUTER_PUNCT) for w in raw]
+    ends = [w.rstrip("\"')]").endswith((".", "!", "?")) for w in raw]  # a sentence ends after this token
+    hay, wider = _norm(source), _norm(source + "\n" + allowed)
+    bad: list[str] = []
+    for i, word in enumerate(words):
+        bare = word.casefold() in _BARE_LEADS
+        follow = () if bare else _NAME_LEADS.get(word.casefold())
+        if follow is None:
+            continue
+        start = i + 1
+        if follow and (start >= len(words) or words[start].casefold() not in follow):
+            continue
+        start += 1 if follow else 0
+        name: list[str] = []
+        for j in range(start, min(start + 4, len(words))):
+            if not words[j][:1].isupper():
+                break
+            name.append(words[j])
+            if ends[j]:
+                break
+        shown = " ".join(name)
+        if shown and _norm(shown) not in (wider if bare else hay) and shown not in bad:
+            bad.append(shown)
+    if not bad:
+        return None
+    return _issue("unsupported_names", "warn", f"Not found anywhere in the profile: {_listed(bad)}.")
+
+
+def sensitive_words(text: str) -> list[str]:
+    """Words from ``settings.OUTREACH_SENSITIVE_WORDS`` (visa, salary, age, health ...) in ``text``, in order.
+    A message that names one never goes on its own."""
+    words = "".join(c if c.isalnum() else " " for c in text).casefold().split()
+    found: list[str] = []
+    for i, w in enumerate(words):
+        for hit in (w, " ".join(words[i:i + 2]), " ".join(words[i:i + 3])):
+            if hit in settings.OUTREACH_SENSITIVE_WORDS and hit not in found:
+                found.append(hit)
+    return found
+
+
+def outreach_claims_unsupported(text: str, profile: Any, context: str = "") -> bool:
+    """A number (spelled out too), a years claim or a name in this outreach text that the profile lacks. No profile
+    text = True (nothing vouches for the message: it is not sent on its own). ``context`` (the person and the job:
+    their name, company, the job title) vouches for names only, never for a number."""
+    source = profile_source_text(profile) if profile is not None else ""
+    if not source.strip():
+        return True
+    text, digits = spelled_to_digits(text), spelled_to_digits(source)
+    return bool(unsupported_numbers(text, digits) or unsupported_year_claims(text, digits)
+                or unsupported_names(text, source, context))
+
+
 # ── entry points ────────────────────────────────────────────────────────────
 
 

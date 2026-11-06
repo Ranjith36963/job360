@@ -23,9 +23,11 @@ and people are left out. Nothing is judged by its words: a real "Simulation Engi
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.core import settings
+from src.services.applications import asks as asks_service
 from src.services.applications import inbox_items, outcome_suggestions, test_marker
 from src.services.profile import ask_once, setting_requests
 
@@ -96,20 +98,29 @@ async def _open_job_asks(db: JobDatabase, user_id: str, tests: set[int]) -> tupl
         closed = row["app_status"] in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
         if closed and not str(row["context"] or "").startswith("proof_missing:"):
             continue
+        if asks_service.answered_by_applying(row, row["app_status"]):  # "I applied" answered it; the page closes it
+            continue
         tied.append((int(row["id"]), int(row["application_id"])))
     return tied, general
 
 
 async def _unsent_contacts(db: JobDatabase, user_id: str) -> tuple[set[int], int]:
-    """(job ids with a person to reach, people with no job to reach): one query, no per-contact read."""
+    """(job ids with a person to reach, people with no job to reach): one query, no per-contact read. A cold
+    person whose LinkedIn note is over the limit is the assistant's to rewrite, so it is not counted."""
+    from src.services.applications import contacts  # noqa: PLC0415 - contacts imports the spine package
+
     cur = await db._db.execute(_UNSENT_SQL, (user_id, user_id, settings.LIST_PEOPLE_MAX))
     jobs: set[int] = set()
     cold = 0
-    for r in await cur.fetchall():
+    found = [dict(r) for r in await cur.fetchall()]
+    too_long = await contacts.over_limit_notes(
+        db, user_id, [int(r["id"]) for r in found if r["application_id"] is None and str(r["text"] or "").strip()]
+    )
+    for r in found:
         if not str(r["text"] or "").strip():
             continue
         if r["application_id"] is None:
-            cold += 1
+            cold += int(int(r["id"]) not in too_long)
         else:
             jobs.add(int(r["application_id"]))
     return jobs, min(cold, NEW_CONNECTIONS_MAX)
@@ -171,7 +182,11 @@ async def needs_you_count(db: JobDatabase, user_id: str) -> dict[str, Any]:
     )
     # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
     answer_once = ask_once.open_questions(user_id)
+    # Owner #12: one line for the jobs on the user's PC when no session in their own browser worked the queue.
+    from src.services.applications import own_browser  # noqa: PLC0415 - own_browser -> contacts -> this package
+
+    pc_idle = await own_browser.pc_idle(db, user_id, datetime.now(timezone.utc), first["by_actor"]["your_pc"])
     return {
         "n": jobs + other + (1 if answer_once else 0), "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
-        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first,
+        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first, "pc_idle": pc_idle,
     }

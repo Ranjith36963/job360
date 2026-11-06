@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   // Ask once: the Questionnaire card reads this; no countries = nothing to answer, so it hides itself.
   getQuestionnaire: () => questionnaireMock.read(),
+  getCoveredAnswers: async () => ({ answers: [], profile_edit_id: 0 }),
   rememberQuestionnaire: vi.fn().mockResolvedValue({ saved: [] }),
   getSentOnItsOwn: async () => ({ items: [] }),
   rememberAskAnswers: vi.fn().mockResolvedValue({ saved: [], skipped: [] }),
@@ -140,7 +141,7 @@ describe("NeedsYou", () => {
     fireEvent.click(button);
     fireEvent.click(await screen.findByTestId("finish-view"));
     expect(await screen.findByTestId("ask-finish-done")).toHaveTextContent("Did it go through?");
-    expect(screen.getByRole("link", { name: /I sent it/ })).toHaveAttribute("href", "/applications/7");
+    expect(screen.getByRole("link", { name: /I sent it/ })).toHaveAttribute("href", "/applications/7?from=needs-you");
   });
 
   it("renders the question as literal text, never HTML", async () => {
@@ -151,7 +152,7 @@ describe("NeedsYou", () => {
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByRole("link", { name: "AI Engineer · Acme" })).toHaveAttribute(
       "href",
-      "/applications/7"
+      "/applications/7?from=needs-you"
     );
   });
 

@@ -29,7 +29,7 @@ from typing import Any, cast
 
 from src.core import settings
 from src.services.profile import forgiving
-from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN
+from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN, topic_key
 from src.services.profile.countries import is_plain_code, to_iso2
 from src.services.profile.edits import ProfileEditError, _strip_control
 from src.services.profile.models import VALID_LANGUAGE_LEVELS, VALID_WORK_AUTH_STATUSES
@@ -71,8 +71,15 @@ _RTW_COUNTRY: dict[str, str] = {
     # Owner decision 2026-10-26 - the priority of contract roles in that place, chosen
     # right next to the Contract tick (like remote and on-site).
     "contract_priority": "priority",
+    # Owner 2026-11-02 (country pages) - the user's own instructions for this place, a few lines in his
+    # words ("hold the visa question until they ask"). Empty = none (rule #29).
+    "instructions": "instructions",
+    # Country pages: a row an assistant CREATED or changed (``country_pages.DRAFT_MARK``). Stamped by the
+    # server from the writer (``country_pages.stamp``), never trusted from the caller; not the user's.
+    "set_by": "draft_mark",
 }
 ANY_COUNTRY = "ANY"
+COUNTRY_INSTRUCTIONS_MAX_LINES = 5
 ONSITE_VALUES = ("yes", "only_if_sponsored", "no")
 PRIORITY_LEVELS = ("highest", "high", "medium", "low", "off")
 LICENCE_TYPES = ("full", "provisional", "none")
@@ -96,7 +103,11 @@ _EQUALITY: dict[str, str] = {
     "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
 EQUALITY_KEYS: frozenset[str] = frozenset(_EQUALITY)
-_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases", "country")
+_ANSWER_KEYS = (
+    "question", "answer", "approved", "recorded_at", "company", "topic", "aliases", "country", "saved_by",
+)
+# Plan S3: who saved a record, stamped by the server (``edits._stamp_saved_by``), never taken from a caller.
+ANSWER_SAVED_BY = ("web", "assistant")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
 _SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
 PREFER_NOT_TO_SAY = "Prefer not to say"
@@ -297,6 +308,12 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
         return raw
     if kind == "current_salary":
         return _current_salary(at, raw)
+    if kind == "instructions":
+        return _instructions(at, raw)
+    if kind == "draft_mark":
+        if raw != "assistant":
+            raise _fail(f"{at} is set by Job360 only (\"assistant\" or absent)")
+        return raw
     if kind == "rtw_countries":
         return _countries(at, raw, _RTW_COUNTRY, contradictions=True)
     if kind == "logistics_countries":
@@ -345,6 +362,19 @@ def _current_salary(at: str, raw: Any) -> dict[str, Any] | None:
     ):
         raise _fail(f"{at} needs amount (a number > 0), currency (ISO 4217, 3 letters) and period (year or month)")
     return {"amount": amount, "currency": _strip_control(currency).upper(), "period": period.strip().lower()}
+
+
+def _instructions(at: str, raw: Any) -> list[str] | None:
+    """At most ``COUNTRY_INSTRUCTIONS_MAX_LINES`` one-line instructions, each <= ``PROFILE_NOTE_MAX_CHARS``,
+    control characters stripped; a lone string is one line; blanks dropped; ``[]`` = none (rule #29)."""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raise _type_error(at, "a list of strings", raw)
+    lines = [t for i, item in enumerate(raw) if (t := _line(f"{at}[{i}]", item, settings.PROFILE_NOTE_MAX_CHARS))]
+    if len(lines) > COUNTRY_INSTRUCTIONS_MAX_LINES:
+        raise _fail(f"{at} exceeds the {COUNTRY_INSTRUCTIONS_MAX_LINES}-line limit")
+    return lines or None
 
 
 def _unknown_key(where: str, key: Any, allowed: str) -> ProfileEditError:
@@ -629,6 +659,11 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
                 record["company"] = company_line
         if country:
             record["country"] = country
+        saved_by = raw.get("saved_by")
+        if saved_by is not None:
+            if saved_by not in ANSWER_SAVED_BY:
+                raise _fail(f"{where}.saved_by must be one of {', '.join(ANSWER_SAVED_BY)} (the server sets it)")
+            record["saved_by"] = saved_by
         topic = raw.get("topic")
         if topic is not None and topic != "":
             if not isinstance(topic, str):
@@ -669,17 +704,27 @@ def _company_key(rec: dict[str, Any]) -> str:
     return " ".join(str(rec.get("company") or "").lower().split()) + "|" + str(rec.get("country") or "").upper()
 
 
+def _twin_scope(rec: dict[str, Any]) -> str:
+    """Company + country for twin matching: a record without a ``country`` field is bound to the country its
+    topic names (``sponsorship.GB.yes_no``), so a web save bound to GB replaces the unbound GB twin."""
+    country = str(rec.get("country") or "").upper()
+    if not country:
+        codes = [p for p in topic_key(rec.get("topic")).split(".")[1:] if len(p) == 2 and p.isalpha()]
+        country = codes[0].upper() if len(codes) == 1 else ""
+    return " ".join(str(rec.get("company") or "").lower().split()) + "|" + country
+
+
 def answer_upsert_index(records: list[Any], new: Any) -> int | None:
     """Where an ``upsert`` edit puts ``new`` in the saved answers (gap 4): the record with the
     same ``topic`` and company (:func:`_one_per_topic`'s rule), else the one with the same
     question (case/space-insensitive) and company. ``None`` = no match, append it."""
     if not isinstance(new, dict):
         return None
-    company = _company_key(new)
-    same = [i for i, rec in enumerate(records) if isinstance(rec, dict) and _company_key(rec) == company]
+    company = _twin_scope(new)
+    same = [i for i, rec in enumerate(records) if isinstance(rec, dict) and _twin_scope(rec) == company]
     topic = new.get("topic")
     for i in same if isinstance(topic, str) and topic else ():
-        if records[i].get("topic") == topic:
+        if topic_key(records[i].get("topic")) == topic_key(topic):
             return i
     question = new.get("question")
     wanted = " ".join(_strip_control(question).lower().split()) if isinstance(question, str) else ""
@@ -687,6 +732,24 @@ def answer_upsert_index(records: list[Any], new: Any) -> int | None:
         if " ".join(str(records[i].get("question") or "").lower().split()) == wanted:
             return i
     return None
+
+
+def upsert_answer(records: list[Any], new: Any) -> list[Any]:
+    """``records`` with ``new`` saved: it takes the place of the first record answering the same topic
+    (case-insensitive) and company, and every other twin of that topic is dropped, so a saved choice
+    replaces BOTH sides of a contradiction. No match = appended."""
+    at = answer_upsert_index(records, new)
+    if at is None:
+        return [*records, new]
+    topic = new.get("topic") if isinstance(new, dict) else None
+    twin = topic_key(topic) if isinstance(topic, str) and topic else None
+    company = _twin_scope(new)
+    drop = {
+        i for i, rec in enumerate(records)
+        if i != at and twin and isinstance(rec, dict) and _twin_scope(rec) == company
+        and topic_key(rec.get("topic")) == twin
+    }
+    return [new if i == at else rec for i, rec in enumerate(records) if i not in drop]
 
 
 def validate_country_list(path: str, value: Any) -> list[str]:

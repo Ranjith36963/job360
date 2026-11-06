@@ -11,6 +11,7 @@ import type {
   HealthResponse,
   JsonResumeResponse,
   PreferencesRequest,
+  CountryPage,
   ProfileResponse,
   ProfileVersionDiff,
   ProfileVersionsListResponse,
@@ -154,6 +155,11 @@ export async function getProfile(): Promise<ProfileResponse> {
  * Returns the freshly-merged profile so a caller never needs a second
  * round trip.
  */
+/** One country's (or region's) page: instructions, right to work, salary, logistics, saved answers. */
+export async function getCountryPage(place: string): Promise<CountryPage> {
+  return request<CountryPage>(`/api/profile/countries/${encodeURIComponent(place)}`);
+}
+
 export async function updateProfileFields(
   edits: { path: string; value: unknown }[]
 ): Promise<ProfileResponse> {
@@ -599,14 +605,33 @@ export async function downloadTailored(
   URL.revokeObjectURL(url);
 }
 
-/** Download ONE stored CV / cover-letter version as Word or PDF. POST like
- * `downloadTailored` (Origin-checked); same blob + anchor pattern. */
-export async function downloadApplicationArtifact(
+/** The rendered file of ONE stored CV / cover-letter version: the same bytes the download gives
+ * (the in-page preview reads it). POST like `downloadTailored` (Origin-checked). */
+export async function fetchApplicationArtifactFile(
   applicationId: number,
   artifactId: number,
-  fmt: TailorFormat,
-  filenameStem = "document"
-): Promise<void> {
+  fmt: TailorFormat
+): Promise<Blob> {
+  return (await fetchApplicationArtifactNamed(applicationId, artifactId, fmt)).blob;
+}
+
+/** The file name the server gives this download (`Content-Disposition`), or "" when it sends none. */
+export function attachmentName(header: string | null): string {
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header ?? "");
+  if (!m) return "";
+  try {
+    return decodeURIComponent(m[1]).trim();
+  } catch {
+    return m[1].trim();
+  }
+}
+
+/** The same bytes plus the file name the server gives them (the CV preview's title shows it). */
+export async function fetchApplicationArtifactNamed(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat
+): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(
     `${API}/api/applications/${applicationId}/artifacts/${artifactId}/download?fmt=${fmt}`,
     { method: "POST", credentials: "include" }
@@ -621,7 +646,17 @@ export async function downloadApplicationArtifact(
     }
     throw new ApiError(res.status, detail);
   }
-  const blob = await res.blob();
+  return { blob: await res.blob(), filename: attachmentName(res.headers.get("Content-Disposition")) };
+}
+
+/** Download ONE stored CV / cover-letter version as Word or PDF; same blob + anchor pattern. */
+export async function downloadApplicationArtifact(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat,
+  filenameStem = "document"
+): Promise<void> {
+  const blob = await fetchApplicationArtifactFile(applicationId, artifactId, fmt);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -891,14 +926,27 @@ export async function rememberQuestionnaire(
   return request("/api/profile/questionnaire/remember", { method: "POST", body: JSON.stringify({ country, items }) });
 }
 
+/** Memory first (plan S3): old saved answers Memory now covers, each beside what Memory says. Web session only. */
+export type CoveredAnswers = _Schemas["CoveredAnswersOut"];
+export type CoveredAnswer = CoveredAnswers["answers"][number];
+export async function getCoveredAnswers(): Promise<CoveredAnswers> {
+  return request("/api/profile/memory-covered-answers");
+}
+
+/** The owner's own Delete of one listed saved answer (one remove_at on the profile; nothing deletes by itself). */
+export async function deleteCoveredAnswer(id: string): Promise<_Schemas["CoveredDeleteOut"]> {
+  return request(`/api/profile/memory-covered-answers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 /** Sent on its own (owner plan 2026-11-02): answers and essays that went to an employer without the user,
- *  with the sources they were checked against. A log, never a to-do. Empty until autonomy step 4 sends. */
+ *  with the sources they were checked against. A log, never a to-do. Also CVs sent on a strong review (kind
+ *  "cv", id < 0) and `cv_sample`: today's 5 to check. */
 export type SentOnItsOwnItem = _Schemas["SentItem"];
 export async function getSentOnItsOwn(): Promise<_Schemas["SentOnItsOwnOut"]> {
   return request("/api/sent-on-its-own");
 }
 
-/** The user's "Wrong fact" press on one item sent on its own. */
+/** The user's "Wrong fact" press on one item sent on its own (on a CV it turns automatic CV sending off). */
 export async function reportWrongFact(id: number): Promise<void> {
   await request(`/api/sent-on-its-own/${id}/wrong-fact`, { method: "POST" });
 }

@@ -147,8 +147,9 @@ def install_db_audit_trail(audit_logger: logging.Logger) -> None:
 
 def flush(timeout: float = 5.0) -> None:
     """Wait until queued audit records have been written. Test helper."""
+    # The listener takes a record off the queue BEFORE writing it and calls task_done() only after: an empty
+    # queue still had a write in flight (a slow connect outlived the old fixed 50 ms beat, #1498 CI). Wait until
+    # every queued record was handled.
     deadline = time.monotonic() + timeout
-    while not _queue.empty() and time.monotonic() < deadline:
+    while _queue.unfinished_tasks and time.monotonic() < deadline:
         time.sleep(0.02)
-    # The listener may still be mid-write on the last record; one more beat.
-    time.sleep(0.05)

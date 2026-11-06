@@ -36,6 +36,7 @@ from src.services.applications import (
     spine,
     test_marker,
 )
+from src.services.browser_agent import learned
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -62,6 +63,7 @@ _SITE_WORDS = {
     "captcha": "solve the CAPTCHA", "bot_check": "solve the CAPTCHA", "login_needed": "sign in",
     "login": "sign in", "otp_needed": "enter the code", "account_creation": "create an account",
     "upload_failed": "attach your CV", "upload": "attach your CV",
+    blocked.ALREADY_APPLIED: "mark it applied",
 }
 _FILL_TYPES = ("blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen")
 
@@ -87,7 +89,8 @@ def _b(kind: str, actor: Actor, label: str, since: Any, ref: Optional[dict[str, 
 
 
 def _sort_key(b: Blocker) -> tuple[int, int, datetime]:
-    rank = _RANK[b["kind"]] + (1 if b["kind"] == "outreach_send" and b["actor"] == "your_pc" else 0)
+    # outreach_send: on the user first, then on the user's PC, then a rewrite that is the assistant's.
+    rank = _RANK[b["kind"]] + ({"your_pc": 1, "assistant": 2}.get(b["actor"], 0) if b["kind"] == "outreach_send" else 0)
     sub = 1 if b["kind"] == "answers" and b["label"].startswith("OK") else 0  # "answer N" before "OK N"
     return rank, sub, _when(b["since"])
 
@@ -219,6 +222,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         d["questions"] = asks._json_or(d.get("questions"), [])
         open_asks.setdefault(int(d["application_id"]), []).append(d)
     queued_at = await spine.queued_at_by_app(db, user_id, None)
+    hosts = await learned.blocked_hosts(db, user_id) if queued_at else frozenset()
     position = {a: n for n, (a, _t) in enumerate(sorted(queued_at.items(), key=lambda kv: (_when(kv[1]), kv[0])), 1)}
     line = await spine.user_score_line(user_id)
     today_iso = (await spine.user_today(db, user_id)).isoformat()
@@ -250,19 +254,29 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 "job_country": a.get("job_country"), "job_company": a.get("job_company"),
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
             }
-    flags = await ready.answer_flags_for(user_id, fills)
+    flags = await ready.answer_flags_for(db, user_id, fills)
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
     notes = await _outreach(db, user_id, sent_ids, now)
+    for app_id, due in (await _linkedin_follow_ups(db, user_id, sent_ids, now)).items():
+        notes.setdefault(app_id, []).extend(due)
 
     confirmed = await kit.pending_confirmations(db, user_id, ids)
+    from src.services.applications import auto_applied  # noqa: PLC0415 - email_match imports contacts
+
+    silent = await auto_applied.silent_submits(db, user_id, ids, now)
     for app_id in ids:
         a, s, out = apps[app_id], state[app_id], result[app_id]
         if (conf := confirmed.get(app_id)) is not None and a["status"] not in _DEAD:
             conf_ref = {"event_id": conf["id"], "subject": conf["source_subject"] or None,
                    "received_at": conf["source_received_at"] or conf["recorded_at"]}
             out.append(_b("confirm_sent", "you", "employer confirmed — did it go out?", conf["recorded_at"], conf_ref))
+        elif (quiet := silent.get(app_id)) is not None and a["status"] not in _DEAD:
+            # Owner 2026-11-02: a started submit with no confirmation email in CONFIRM_SENT_WAIT_DAYS asks the user.
+            quiet_ref = {"event_id": quiet["id"], "reason": "no_confirmation_email"}
+            label = f"no confirmation email in {settings.CONFIRM_SENT_WAIT_DAYS} days — did it go out?"
+            out.append(_b("confirm_sent", "you", label, quiet["recorded_at"], quiet_ref))
         considering = a["status"] == "considering"
         reason, block_ev = s["reason"], s["block_ev"]
         block_since = block_ev["recorded_at"] if block_ev else a["updated_at"]
@@ -274,7 +288,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         elif considering and (site_asks or (s["block"] is not None and reason != "unknown_question")):
             ask_kind = site_asks[0]["kind"] if site_asks else ""
             word = _SITE_WORDS.get(reason) or _SITE_WORDS.get(ask_kind) or "finish on the site"
-            ref = {k: v for k, v in (("ask_id", site_asks[0]["id"] if site_asks else None),
+            ask_id = site_asks[0]["id"] if site_asks else None
+            if reason == blocked.ALREADY_APPLIED:  # its ask is a plain question, linked by the block itself
+                ask_id = (s["block"] or {}).get("ask_id")
+            ref = {k: v for k, v in (("ask_id", ask_id),
                                      ("event_id", block_ev["id"] if block_ev else None)) if v is not None}
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
@@ -289,14 +306,14 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             yes = s["approved"]
             if yes is None:
                 out.append(_b("send_yes", "you", "Send", s["fill"]["recorded_at"], {"event_id": s["fill"]["id"]}))
-            elif kit._approval_age_over(yes["recorded_at"], now):
+            elif kit._approval_age_over(yes["recorded_at"], now, yes.get("payload")):
                 label = "Send again (your yes expired)"
                 out.append(_b("send_yes", "you", label, yes["recorded_at"], {"event_id": yes["id"]}))
             elif not s["below"]:
                 step = "submit" if s["swept"] else "check form"
                 out.append(_b("assistant_step", "assistant", step, yes["recorded_at"], {"event_id": yes["id"]}))
         if considering and app_id in queued_at:
-            browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {})
+            browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {}, hosts)
             if browser["kind"] == "own_browser":
                 out.append(_b("queued", "your_pc", "apply on the site", queued_at[app_id]))
             else:
@@ -317,6 +334,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if spine._follow_up_due(a.get("follow_up_on"), a["status"], today_iso):
             out.append(_b("follow_up", "assistant", "follow up", a["follow_up_on"]))
         out += notes.get(app_id, [])
+        if considering and reason == blocked.ALREADY_APPLIED:
+            # The site says the user already applied: only their answer waits ("mark it applied"), nothing else.
+            out[:] = [b for b in out if b["kind"] in ("confirm_sent", "site_step")]
 
 
 def settings_line_side(score: Optional[int], line: Optional[int]) -> str:
@@ -325,9 +345,43 @@ def settings_line_side(score: Optional[int], line: Optional[int]) -> str:
     return line_side(score, line)
 
 
+async def _linkedin_follow_ups(
+    db: JobDatabase, user_id: str, app_ids: list[int], now: datetime
+) -> dict[int, list[Blocker]]:
+    """The people of these applications who got ONE LinkedIn message ``LINKEDIN_FOLLOW_UP_DAYS`` or more ago, never
+    replied and have no newer draft (``own_browser.follow_up_due``): the assistant drafts their one follow-up (owner
+    2026-11-03). ``follow_up``, actor ``assistant``, ``ref.reason`` linkedin_follow_up. A person with no job carries
+    the same fact on their card (``linkedin_follow_up_due``). One query; scoped by ``user_id``."""
+    if not app_ids:
+        return {}
+    cur = await db._db.execute(
+        "SELECT c.id AS contact_id, c.application_id, o.id, o.entry, o.channel, o.recorded_at "  # noqa: S608
+        "FROM application_contacts c JOIN contact_outreach o ON o.contact_id = c.id "  # placeholders only
+        f"WHERE c.user_id = ? AND o.user_id = ? AND c.application_id IN ({_marks(app_ids)}) "
+        "AND o.entry IN ('message', 'sent', 'reply') ORDER BY o.id ASC",
+        (user_id, user_id, *app_ids),
+    )
+    rows: dict[int, list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        rows.setdefault(int(r["contact_id"]), []).append(dict(r))
+    grouped: dict[int, list[tuple[int, str]]] = {}
+    for cid, mine in rows.items():
+        if own_browser.follow_up_due(mine, now):
+            sent = [r for r in mine if r["entry"] == "sent"][-1]
+            grouped.setdefault(int(mine[0]["application_id"]), []).append((cid, sent["recorded_at"]))
+    out: dict[int, list[Blocker]] = {}
+    for app_id, people in grouped.items():
+        label = f"draft {_plural(len(people), 'LinkedIn follow-up', 'LinkedIn follow-ups')}"
+        ref = {"contact_ids": [c for c, _ in people], "reason": "linkedin_follow_up"}
+        out[app_id] = [_b("follow_up", "assistant", label, min((s for _, s in people), key=_when), ref)]
+    return out
+
+
 async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> dict[int, list[Blocker]]:
     """The unsent notes of these applications as blockers: on the user (Send, or an email) or, once approved,
-    on the user's PC. A declined note waits on nobody."""
+    on the user's PC. A declined note waits on nobody. A LinkedIn note over the connection-note limit to
+    someone not known to be connected is the ASSISTANT's (label "rewrite ...", ``ref.reason`` note_too_long):
+    the machine's mistake is never the user's job (2026-11-02)."""
     people = [p for p in await needs_you_count.unsent_for_apps(db, user_id, app_ids) if str(p["text"] or "").strip()]
     if not people:
         return {}
@@ -339,17 +393,25 @@ async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: date
     rows: dict[int, list[dict[str, Any]]] = {}
     for r in await cur.fetchall():
         rows.setdefault(int(r["contact_id"]), []).append(dict(r))
+    from src.services.applications import contacts  # noqa: PLC0415 - contacts imports the spine package
+
+    too_long = await contacts.over_limit_notes(db, user_id, [int(p["id"]) for p in people])
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
     for p in people:
         task = own_browser.derive(rows.get(int(p["id"]), []), now)
         if task is not None and task["state"] == "declined":
             continue
         actor = "your_pc" if task is not None and task["state"] in ("queued", "in_progress") else "you"
+        if int(p["id"]) in too_long:
+            actor = "assistant"
         grouped.setdefault((int(p["application_id"]), actor), []).append(p)
     out: dict[int, list[Blocker]] = {}
     for (app_id, actor), group in grouped.items():
         n, since = len(group), min((g["occurred_at"] for g in group), key=_when)
         label = _plural(n, "LinkedIn note", "LinkedIn notes") if actor == "your_pc" else f"send {_plural(n, 'note', 'notes')}"  # noqa: E501
-        ref = {"contact_ids": [int(g["id"]) for g in group]}
+        ref: dict[str, Any] = {"contact_ids": [int(g["id"]) for g in group]}
+        if actor == "assistant":
+            label = f"rewrite {_plural(n, 'LinkedIn note', 'LinkedIn notes')} (over the limit)"
+            ref["reason"] = "note_too_long"
         out.setdefault(app_id, []).append(_b("outreach_send", actor, label, since, ref))
     return out

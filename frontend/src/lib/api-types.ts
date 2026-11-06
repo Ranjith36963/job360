@@ -298,10 +298,10 @@ export interface paths {
         put?: never;
         /**
          * Confirm Answer
-         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is
-         *     saved as the user's own word in memory, so the assistant uses it next time.
-         *     Session only - an assistant can never vouch for its own answer. Returns the
-         *     card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
+         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18, narrowed 2026-11-02): the
+         *     user's word is approved for THIS application only (an ``answer_verified`` event); it is never saved
+         *     for other jobs - that is the "remember" press. Session only - an assistant can never vouch for its own
+         *     answer. Returns the card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
          */
         post: operations["confirm_answer_api_applications__application_id__answers__index__confirm_post"];
         delete?: never;
@@ -427,6 +427,29 @@ export interface paths {
         get: operations["auto_email_check_api_applications__application_id__auto_email_check_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/auto/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo Auto
+         * @description "Undo" - the user reverses what Job360 did by itself: reopens an application the AI closed (posting
+         *     closed, auto_close.py), or un-marks one an employer's confirmation email marked applied (auto_applied.py;
+         *     also records "It was not sent"). A ``note`` correcting that status event. 409 when the newest status event
+         *     is neither. Session only; no MCP twin.
+         */
+        post: operations["undo_auto_api_applications__application_id__auto_undo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -904,12 +927,13 @@ export interface paths {
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
          *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
-         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-         *     or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES (7 days by
+         *     default) passing or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
          *     event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
-         *     nothing is recorded (the yes must name what the user saw).
+         *     nothing is recorded (the yes must name what the user saw). Owner 2026-11-02: Send also puts the job on the
+         *     batch queue; this route starts no run itself (the web page fires the Apply routine right after Send).
          */
         post: operations["approve_send_api_applications__application_id__send_approve_post"];
         delete?: never;
@@ -1065,8 +1089,9 @@ export interface paths {
         put?: never;
         /**
          * Remember Ask Row Answers
-         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers (a country-specific
-         *     one for THIS job's country only, the rest global), so the next job asking them needs no owner.
+         * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job
+         *     asking them needs no owner. A row in Memory's families goes into Memory for the job's country
+         *     (``memory``), or is a ``conflict`` with what Memory says, or is not saved (``not_saved`` says why).
          *     Only the owner's press saves for reuse: session only, no MCP twin.
          *     Per-job rows (how you heard, consent, essays) are skipped.
          */
@@ -1799,6 +1824,27 @@ export interface paths {
          *     surface the cooldown.
          */
         post: operations["verify_email_request_api_auth_verify_email_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/autonomy/agreement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Autonomy Agreement
+         * @description Per kind (essay, fixed, cv): cases, agree, agreement_pct, wrong_facts, bar_met; ``pending`` = cases with
+         *     no owner decision yet; ``examples`` = up to 5 recent disagreements (ids and codes only).
+         */
+        get: operations["autonomy_agreement_api_autonomy_agreement_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2734,7 +2780,8 @@ export interface paths {
         put?: never;
         /**
          * Release
-         * @description Give a claimed person back (409 unless this session holds the live claim).
+         * @description Give a claimed person back, or close a hunt or people task: ``done`` answers the count, any other reason
+         *     records it failed (409 unless this session holds the live claim).
          */
         post: operations["release_api_own_browser_release_post"];
         delete?: never;
@@ -2954,6 +3001,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/countries/{place}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Page
+         * @description One country's (or region's) page: the user's instructions, right to work, salary, logistics and
+         *     that country's saved answers, each effective value labelled with where it came from. 404 when the
+         *     user has no profile; 422 when ``place`` is no country, region or ANY. Read-only, scoped by user (#12).
+         */
+        get: operations["get_country_page_api_profile_countries__place__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/cv": {
         parameters: {
             query?: never;
@@ -3164,6 +3233,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/memory-covered-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Memory Covered Answers
+         * @description Memory first (plan S3): the user's old saved answers that Memory's families now cover, each with what
+         *     Memory says and a verdict, for the Needs-you card. Session only: the owner cleans these up himself.
+         */
+        get: operations["list_memory_covered_answers_api_profile_memory_covered_answers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/memory-covered-answers/{answer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Memory Covered Answer
+         * @description The owner's own Delete on one listed answer: one ``remove_at`` through ``PATCH /profile`` (history and
+         *     ``profile_edit_id`` as usual), guarded by the version read with it (409 if anything wrote since). 404 when
+         *     no listed answer has that id (already gone, or changed). Session only, no MCP twin.
+         */
+        delete: operations["delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/preferences": {
         parameters: {
             query?: never;
@@ -3220,8 +3332,9 @@ export interface paths {
         put?: never;
         /**
          * Remember Questionnaire
-         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer,
-         *     bound to ``country`` when it is country-specific (right to work, salary...), else global.
+         * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer;
+         *     one in Memory's families (right to work, salary...) goes into Memory for ``country`` (``memory``), or is a
+         *     ``conflict`` with Memory, or is not saved (``not_saved``: set it on that page).
          *     Session only (no MCP twin): nothing is remembered without that press.
          */
         post: operations["remember_questionnaire_api_profile_questionnaire_remember_post"];
@@ -3576,7 +3689,8 @@ export interface paths {
         /**
          * Sent On Its Own Route
          * @description Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its
-         *     sources. A log, never counted on Needs you. Empty until autonomy step 4 sends anything.
+         *     sources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,
+         *     and CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check.
          */
         get: operations["sent_on_its_own_route_api_sent_on_its_own_get"];
         put?: never;
@@ -3598,8 +3712,9 @@ export interface paths {
         put?: never;
         /**
          * Report Wrong Fact Route
-         * @description The user's "Wrong fact" press on one item. Autonomy step 4 records it and stops reusing that fact;
-         *     until it ships there is no item to press on, so every id is 404.
+         * @description The user's "Wrong fact" press on one item. On a ``cv`` item (owner 2026-11-06) it is recorded (the item
+         *     reads ``reported_wrong``) and automatic CV sending (``cv_auto_approve``) is turned off at once. Other kinds
+         *     arrive with autonomy step 4 (409). Another user's item, or none, is 404.
          */
         post: operations["report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post"];
         delete?: never;
@@ -4045,6 +4160,18 @@ export interface components {
             /** Value */
             value?: unknown;
         };
+        /** AgreementOut */
+        AgreementOut: {
+            bar: components["schemas"]["Bar"];
+            /** Examples */
+            examples: components["schemas"]["Disagreement"][];
+            /** Kinds */
+            kinds: {
+                [key: string]: components["schemas"]["KindAgreement"];
+            };
+            /** Pending */
+            pending: number;
+        };
         /**
          * AlignmentOut
          * @description ``GET …/alignment`` (2026-09-20) — the fit picture: the agent's stored
@@ -4364,6 +4491,7 @@ export interface components {
              * @enum {string}
              */
             autofill: "allow" | "deny" | "unset";
+            country_instructions?: components["schemas"]["KitCountryInstructionsOut"] | null;
             cover_letter?: components["schemas"]["KitDocumentOut"] | null;
             /** Cover Letter None Reason */
             cover_letter_none_reason?: string | null;
@@ -4872,19 +5000,31 @@ export interface components {
             check_every: string;
             company_cap: components["schemas"]["SettingFieldOut"];
             company_cap_days: components["schemas"]["SettingFieldOut"];
+            cv_auto_approve: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
+            email_sends_per_day: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "count": 0,
+             *       "meaning": ""
+             *     }
+             */
+            grant_covers_jobs: components["schemas"]["GrantCoversJobsOut"];
             hunt_every_hours: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
              * @default
              */
             inbox_mode: string;
+            linkedin_sends_per_day: components["schemas"]["SettingFieldOut"];
             min_gap_minutes: components["schemas"]["SettingFieldOut"];
+            network_per_hour: components["schemas"]["SettingFieldOut"];
             /**
              * Notes
              * @default []
              */
             notes: string[];
+            outreach_per_company: components["schemas"]["SettingFieldOut"];
             outreach_send: components["schemas"]["SettingFieldOut"];
             pause_reason: components["schemas"]["SettingFieldOut"];
             /** Paused */
@@ -4958,6 +5098,13 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /** Bar */
+        Bar: {
+            /** Min Agree Pct */
+            min_agree_pct: number;
+            /** Min Cases */
+            min_cases: number;
         };
         /** BatchContactRowOut */
         BatchContactRowOut: {
@@ -5115,6 +5262,8 @@ export interface components {
             }[];
             /** Country */
             country?: string | null;
+            /** Differs */
+            differs?: string[];
             /** Duplicate Of */
             duplicate_of?: number | null;
             /** Employer Published At */
@@ -5127,6 +5276,10 @@ export interface components {
             known_people?: components["schemas"]["KnownPeopleOut"];
             /** Listed People */
             listed_people?: components["schemas"]["ListedPersonOut"][] | null;
+            /** Matched On */
+            matched_on?: ("same_title_and_company" | "same_url" | "same_company_and_role" | "repost") | null;
+            /** Next */
+            next?: string | null;
             /** Queue Note */
             queue_note?: string | null;
             /** Queued */
@@ -5438,8 +5591,15 @@ export interface components {
         CommonQuestionOut: {
             /** Answer */
             answer?: string | null;
+            /** Conflict */
+            conflict?: string[];
             /** Country */
             country?: string | null;
+            /**
+             * From
+             * @default
+             */
+            from: string;
             /**
              * Group
              * @enum {string}
@@ -5489,6 +5649,11 @@ export interface components {
             state: "confirmed" | "relayed" | "inferred" | "sensitive" | "guessed" | "missing";
             /** Topic */
             topic?: string | null;
+            /**
+             * Value
+             * @default
+             */
+            value: string;
             /** Verified */
             verified: boolean;
         };
@@ -5599,6 +5764,11 @@ export interface components {
             found_via?: string | null;
             /** Id */
             id: number;
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */
@@ -5607,6 +5777,7 @@ export interface components {
             links?: string[];
             /** Name */
             name: string;
+            note_rewrite?: components["schemas"]["NoteRewriteOut"] | null;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
@@ -5703,6 +5874,87 @@ export interface components {
             sha256: string;
             /** Version */
             version: number;
+        };
+        /** CountryInstructionsOut */
+        CountryInstructionsOut: {
+            /** From */
+            from: string;
+            /** Lines */
+            lines: string[];
+        };
+        /**
+         * CountryPageOut
+         * @description Country pages (owner 2026-11-02): one place per country. Unset = absent (rule #29).
+         */
+        CountryPageOut: {
+            /** Answers */
+            answers?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Assistant Drafted */
+            assistant_drafted?: boolean | null;
+            /** Confirmed */
+            confirmed?: boolean | null;
+            /** Country */
+            country: string;
+            instructions?: components["schemas"]["CountryInstructionsOut"] | null;
+            logistics?: components["schemas"]["CountryPickOut"] | null;
+            /** Region Fallback */
+            region_fallback?: string | null;
+            right_to_work?: components["schemas"]["CountryPickOut"] | null;
+            salary?: components["schemas"]["CountryPickOut"] | null;
+            /** To Confirm */
+            to_confirm?: string[] | null;
+        };
+        /**
+         * CountryPickOut
+         * @description One effective value and where it came from: the country's own row, its region's, or ANY.
+         */
+        CountryPickOut: {
+            /** From */
+            from: string;
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
+        };
+        /** CoveredAnswerOut */
+        CoveredAnswerOut: {
+            /** Answer */
+            answer: string;
+            /** Country */
+            country?: string | null;
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Memory */
+            memory?: string | null;
+            /** Question */
+            question: string;
+            /** Saved By */
+            saved_by?: ("web" | "assistant") | null;
+            /** Topic */
+            topic?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "same" | "different" | "memory_empty";
+        };
+        /** CoveredAnswersOut */
+        CoveredAnswersOut: {
+            /** Answers */
+            answers: components["schemas"]["CoveredAnswerOut"][];
+            /** Profile Edit Id */
+            profile_edit_id: number;
+        };
+        /** CoveredDeleteOut */
+        CoveredDeleteOut: {
+            /** Deleted */
+            deleted: string;
+            /** Profile Edit Id */
+            profile_edit_id: number;
         };
         /** CreateAskOut */
         CreateAskOut: {
@@ -5854,6 +6106,19 @@ export interface components {
             job_company: string;
             /** Job Title */
             job_title: string;
+        };
+        /** Disagreement */
+        Disagreement: {
+            /** Application Id */
+            application_id: number;
+            /** Kind */
+            kind: string;
+            /** Owner */
+            owner: string;
+            /** Question Key */
+            question_key: string;
+            /** Would Clear */
+            would_clear: boolean;
         };
         /** DismissIn */
         DismissIn: {
@@ -6629,6 +6894,10 @@ export interface components {
             questions_count: number;
             /** Stop For User */
             stop_for_user?: boolean | null;
+            /** User Instructions */
+            user_instructions?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * FormCheckRequest
@@ -6704,6 +6973,25 @@ export interface components {
             merged: boolean;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * GrantCoversJobsOut
+         * @description What ``auto_grant_scope.queue.count`` really counts, named honestly. ``count`` = the jobs an
+         *     "Auto for a while" grant confirmed NOW would cover: every job queued and still ``considering``,
+         *     counted BEFORE the user's own score-line rule drops any (and at most 500). It is NOT the apply
+         *     queue: that is ``list_applications(queued=true)``'s ``queue_summary.queued``.
+         */
+        GrantCoversJobsOut: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Meaning
+             * @default
+             */
+            meaning: string;
         };
         /** GrantListResponse */
         GrantListResponse: {
@@ -6858,10 +7146,37 @@ export interface components {
             resolved_by: string | null;
             /** Sender */
             sender: string;
+            /**
+             * Sender Kind
+             * @default person
+             */
+            sender_kind: string;
             /** Subject */
             subject: string;
             /** Thread Id */
             thread_id: string | null;
+        };
+        /**
+         * InboxPageOut
+         * @description whats_new's inbox page: pass ``next_offset`` back as ``inbox_offset`` while ``more``.
+         */
+        InboxPageOut: {
+            /** Groups */
+            groups: components["schemas"]["InboxSenderGroupOut"][];
+            /** More */
+            more: boolean;
+            /** Next Offset */
+            next_offset: number | null;
+            /** Offset */
+            offset: number;
+            /** People */
+            people: number;
+            /** Shown */
+            shown: number;
+            /** Stale Alerts Hidden */
+            stale_alerts_hidden: number;
+            /** Total */
+            total: number;
         };
         /** InboxSearchOut */
         InboxSearchOut: {
@@ -6877,6 +7192,15 @@ export interface components {
             gmail_after: string;
             /** Skip Message Ids */
             skip_message_ids: string[];
+        };
+        /** InboxSenderGroupOut */
+        InboxSenderGroupOut: {
+            /** Count */
+            count: number;
+            /** Sender */
+            sender: string;
+            /** Sender Kind */
+            sender_kind: string;
         };
         /**
          * InterviewAgenda
@@ -7002,6 +7326,19 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** KindAgreement */
+        KindAgreement: {
+            /** Agree */
+            agree: number;
+            /** Agreement Pct */
+            agreement_pct?: number | null;
+            /** Bar Met */
+            bar_met: boolean;
+            /** Cases */
+            cases: number;
+            /** Wrong Facts */
+            wrong_facts: number;
+        };
         /** KitAccountSiteOut */
         KitAccountSiteOut: {
             /** Host */
@@ -7090,6 +7427,15 @@ export interface components {
             status: string;
             /** Submit Override */
             submit_override?: string | null;
+        };
+        /** KitCountryInstructionsOut */
+        KitCountryInstructionsOut: {
+            /** Country */
+            country: string;
+            /** From */
+            from: string;
+            /** Lines */
+            lines: string[];
         };
         /** KitDocumentOut */
         KitDocumentOut: {
@@ -7649,6 +7995,13 @@ export interface components {
              */
             timezone: string;
         };
+        /** MemoryRowOut */
+        MemoryRowOut: {
+            /** Key */
+            key: string;
+            /** Path */
+            path: string;
+        };
         /**
          * MissingToolRequest
          * @description ``POST /api/missing-tools`` body. ``name`` must match
@@ -7758,6 +8111,7 @@ export interface components {
              * @default []
              */
             other_ask_ids: number[];
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
         };
         /**
          * NextStepOut
@@ -7782,6 +8136,17 @@ export interface components {
             path: string;
             /** Rule */
             rule: string;
+        };
+        /**
+         * NoteRewriteOut
+         * @description The newest LinkedIn draft is over the connection-note ``limit`` (it has ``chars``) and the person is not
+         *     known to be connected: the ASSISTANT rewrites it (never the user); it is not ready to send.
+         */
+        NoteRewriteOut: {
+            /** Chars */
+            chars: number;
+            /** Limit */
+            limit: number;
         };
         /** OAuthGrantOut */
         OAuthGrantOut: {
@@ -7836,7 +8201,9 @@ export interface components {
          * @description The answer to "may I press Send on this outreach email?" - one gate
          *     (``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then
          *     record ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:
-         *     do not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap.
+         *     do not send. ``sent_today`` / ``daily_max``: recorded sends today (every channel) vs the operator ceiling;
+         *     ``job_sent_today`` / ``network_sent_today`` split them (owner 2026-11-02: a contact with an application is
+         *     job outreach, one without is network). The user's own limits are in get_profile ``settings``.
          */
         OutreachCheckResponse: {
             /** Daily Max */
@@ -7848,6 +8215,16 @@ export interface components {
             decision: "send" | "ask" | "stop";
             /** Detail */
             detail: string;
+            /**
+             * Job Sent Today
+             * @default 0
+             */
+            job_sent_today: number;
+            /**
+             * Network Sent Today
+             * @default 0
+             */
+            network_sent_today: number;
             /** Reason */
             reason: string;
             /** Sent Today */
@@ -7894,10 +8271,14 @@ export interface components {
         OwnBrowserTaskItemOut: {
             /** Application Id */
             application_id?: number | null;
+            /** Application Ids */
+            application_ids?: number[] | null;
             browser: components["schemas"]["TaskBrowserOut"];
             claim?: components["schemas"]["TaskClaimOut"] | null;
             /** Contact Id */
             contact_id?: number | null;
+            /** Contact Ids */
+            contact_ids?: number[] | null;
             /**
              * Draft Chars
              * @default 0
@@ -7912,9 +8293,11 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "linkedin_outreach" | "application";
+            kind: "linkedin_outreach" | "application" | "linkedin_search" | "profile_read" | "linkedin_check_pending";
             /** Linkedin State */
             linkedin_state?: string | null;
+            /** Max People */
+            max_people?: number | null;
             /** Message Id */
             message_id?: number | null;
             /**
@@ -7922,6 +8305,11 @@ export interface components {
              * @default
              */
             name: string;
+            /**
+             * No Note
+             * @default false
+             */
+            no_note: boolean;
             /**
              * Owner Yes
              * @default false
@@ -8007,6 +8395,20 @@ export interface components {
             period?: string | null;
         };
         /**
+         * PcIdleOut
+         * @description Owner #12: tasks wait and nothing in the user's own browser worked the queue for over ``hours`` (or ever).
+         */
+        PcIdleOut: {
+            /** Hours */
+            hours: number;
+            /** Since */
+            since?: string | null;
+            /** Text */
+            text: string;
+            /** Waiting */
+            waiting: number;
+        };
+        /**
          * PersonFullOut
          * @description ``list_people(contact_id=...)``'s shape — the one row's own full
          *     record (never merged with another row that happens to share an email).
@@ -8041,6 +8443,11 @@ export interface components {
             id: number;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
+            /**
+             * Linkedin Follow Up Due
+             * @default false
+             */
+            linkedin_follow_up_due: boolean;
             /** Linkedin State */
             linkedin_state?: string | null;
             /** Linkedin Url */
@@ -8049,6 +8456,7 @@ export interface components {
             links?: string[];
             /** Name */
             name: string;
+            note_rewrite?: components["schemas"]["NoteRewriteOut"] | null;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
@@ -8563,6 +8971,7 @@ export interface components {
             open_now: boolean;
             /** Opens At */
             opens_at?: string | null;
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
             /** Pc On Hours */
             pc_on_hours?: {
                 [key: string]: unknown;
@@ -8976,6 +9385,8 @@ export interface components {
             answers?: components["schemas"]["ReceiptAnswer"][];
             /** Applied At */
             applied_at?: string | null;
+            /** Browser */
+            browser?: string | null;
             /**
              * Channel
              * @default
@@ -9026,6 +9437,11 @@ export interface components {
              * @default
              */
             answers_from: string;
+            /**
+             * Browser
+             * @default unknown
+             */
+            browser: string;
             /** Channel */
             channel: string;
             /**
@@ -9263,7 +9679,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other";
+            reason: "captcha" | "login_wall" | "weekly_limit" | "draft_rewritten" | "already_pending" | "profile_not_found" | "other" | "done" | "invited";
             /** Session */
             session: string;
             /** Task Id */
@@ -9271,10 +9687,18 @@ export interface components {
         };
         /** ReleaseOut */
         ReleaseOut: {
+            /** Count */
+            count?: number | null;
+            /** Failures In Row */
+            failures_in_row?: number | null;
+            /** Outcome */
+            outcome?: ("done" | "failed") | null;
             /** Reason */
             reason: string;
             /** Released */
             released: boolean;
+            /** Summary */
+            summary?: string | null;
             /** Task Id */
             task_id: string;
         };
@@ -9289,6 +9713,20 @@ export interface components {
         };
         /** RememberOut */
         RememberOut: {
+            /** Conflicts */
+            conflicts?: {
+                [key: string]: string;
+            } | null;
+            /** Memory */
+            memory?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            } | null;
+            /** Not Saved */
+            not_saved?: {
+                [key: string]: string;
+            };
             /** Saved */
             saved: string[];
         };
@@ -9301,8 +9739,20 @@ export interface components {
         };
         /** RememberRowsOut */
         RememberRowsOut: {
+            /** Conflicts */
+            conflicts?: {
+                [key: string]: string;
+            } | null;
             /** Country */
             country?: string | null;
+            /** Memory */
+            memory?: {
+                [key: string]: components["schemas"]["MemoryRowOut"];
+            } | null;
+            /** Not Saved */
+            not_saved?: {
+                [key: string]: string;
+            };
             /** Saved */
             saved: string[];
             /** Skipped */
@@ -9537,7 +9987,7 @@ export interface components {
             /** Answer */
             answer: string;
             /** Application Id */
-            application_id: number;
+            application_id?: number | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -9563,6 +10013,11 @@ export interface components {
         };
         /** SentOnItsOwnOut */
         SentOnItsOwnOut: {
+            /**
+             * Cv Sample
+             * @default []
+             */
+            cv_sample: number[];
             /** Items */
             items: components["schemas"]["SentItem"][];
         };
@@ -10265,6 +10720,7 @@ export interface components {
             since: string | null;
             sites?: components["schemas"]["StatsSitesOut"] | null;
             skill_gaps?: components["schemas"]["StatsSkillGapsOut"] | null;
+            today?: components["schemas"]["StatsTodayOut"] | null;
             velocity?: components["schemas"]["StatsVelocityOut"] | null;
         };
         /** StatsRoleGroupOut */
@@ -10323,6 +10779,12 @@ export interface components {
             };
             /** Blocked Total */
             blocked_total: number;
+            /** By Browser */
+            by_browser?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
             /** Forms Filled */
             forms_filled: number;
             /** Host */
@@ -10399,6 +10861,70 @@ export interface components {
             truncated?: boolean | null;
             /** Truncated Hint */
             truncated_hint?: string | null;
+        };
+        /**
+         * StatsTodayCountsOut
+         * @description Today's counts in the user's own timezone; each is a number, never a list.
+         */
+        StatsTodayCountsOut: {
+            /**
+             * Applied
+             * @default 0
+             */
+            applied: number;
+            /**
+             * Asks Answered
+             * @default 0
+             */
+            asks_answered: number;
+            /**
+             * Asks Opened
+             * @default 0
+             */
+            asks_opened: number;
+            /**
+             * Brought
+             * @default 0
+             */
+            brought: number;
+            /**
+             * Fit Judged
+             * @default 0
+             */
+            fit_judged: number;
+            /**
+             * Outreach Replies
+             * @default 0
+             */
+            outreach_replies: number;
+            /**
+             * Outreach Sent
+             * @default 0
+             */
+            outreach_sent: number;
+            /**
+             * Replies
+             * @default 0
+             */
+            replies: number;
+        };
+        /**
+         * StatsTodayOut
+         * @description ``stats(view="today")``: where the user stands. ``queue_summary`` is the block
+         *     ``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports.
+         */
+        StatsTodayOut: {
+            counts: components["schemas"]["StatsTodayCountsOut"];
+            /** Date */
+            date: string;
+            /** Queue Summary */
+            queue_summary: {
+                [key: string]: unknown;
+            };
+            /** Timezone */
+            timezone: string;
+            /** Waiting On You */
+            waiting_on_you: number;
         };
         /** StatsVelocityOut */
         StatsVelocityOut: {
@@ -10866,6 +11392,7 @@ export interface components {
             };
             /** Nothing Due */
             nothing_due: boolean;
+            pc_idle?: components["schemas"]["PcIdleOut"] | null;
             /** Run Now */
             run_now?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Running */
@@ -10934,6 +11461,7 @@ export interface components {
             events: components["schemas"]["WhatsNewEventOut"][];
             /** Inbox Items */
             inbox_items?: components["schemas"]["InboxItemOut"][];
+            inbox_page?: components["schemas"]["InboxPageOut"] | null;
             /**
              * @default {
              *       "just_passed": [],
@@ -11695,6 +12223,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoEmailCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_auto_api_applications__application_id__auto_undo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */
@@ -14054,6 +14617,39 @@ export interface operations {
             };
         };
     };
+    autonomy_agreement_api_autonomy_agreement_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     browser_action_api_browser_post: {
         parameters: {
             query?: never;
@@ -15908,6 +16504,41 @@ export interface operations {
             };
         };
     };
+    get_country_page_api_profile_countries__place__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                place: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upload_cv_api_profile_cv_post: {
         parameters: {
             query?: never;
@@ -16148,6 +16779,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkedInResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memory_covered_answers_api_profile_memory_covered_answers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveredAnswersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_covered_answer_api_profile_memory_covered_answers__answer_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                answer_id: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveredDeleteOut"];
                 };
             };
             /** @description Validation Error */
@@ -17260,6 +17959,8 @@ export interface operations {
                 since?: string | null;
                 after_id?: number | null;
                 limit?: number;
+                inbox_offset?: number;
+                inbox_stale_alerts?: boolean;
             };
             header?: {
                 authorization?: string | null;

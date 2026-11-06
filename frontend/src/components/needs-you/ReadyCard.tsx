@@ -23,6 +23,7 @@ import { AskQuestions } from "./AskQuestions";
 import { openQuestionAsks, useReadyAsks } from "./useReadyAsks";
 import { suggestSalary } from "@/lib/salary-suggest";
 import type { SalaryFacts } from "@/lib/salary-suggest";
+import { useAppHref } from "@/lib/app-href";
 
 // Every string here (company, title, questions, answers, flags) was written by
 // the user's assistants - untrusted. Only ever rendered as React text nodes.
@@ -61,6 +62,7 @@ export function ReadyCard({
   paused: boolean;
   onChanged: () => void;
 }) {
+  const appLink = useAppHref();
   const openAsks = openQuestionAsks(asks);
   const ra = useReadyAsks(openAsks);
   const askBlocked = openAsks.length > 0 && !ra.complete;
@@ -127,7 +129,7 @@ export function ReadyCard({
             <>
               <p className="font-mono text-xs text-faint">{readyEyebrow(card)}</p>
               <h3 className="font-heading text-2xl leading-tight">
-                <Link href={`/applications/${card.application_id}`} data-testid={`title-link-${card.application_id}`}
+                <Link href={appLink(card.application_id)} data-testid={`title-link-${card.application_id}`}
                   className="underline-offset-2 hover:underline">
                   {card.job_title || "Untitled role"}
                 </Link>
@@ -139,7 +141,7 @@ export function ReadyCard({
           ) : (
           <p className="text-sm text-muted-foreground">
             {card.job_company ? (
-              <Link href={`/applications/${card.application_id}`} data-testid={`company-link-${card.application_id}`}
+              <Link href={appLink(card.application_id)} data-testid={`company-link-${card.application_id}`}
                 className="underline-offset-2 hover:underline">{card.job_company}</Link>
             ) : null}
             {readySub(card).slice(card.job_company ? card.job_company.length : 0) || (card.job_company ? "" : readySub(card))}
@@ -178,7 +180,7 @@ export function ReadyCard({
         })}
         {(card.cv || card.cover_letter) && (
           <Link
-            href={`/applications/${card.application_id}#section-documents`}
+            href={appLink(card.application_id, "#section-documents")}
             className={cn(tap, "inline-flex items-center text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline")}
           >
             Open both

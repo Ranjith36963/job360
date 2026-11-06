@@ -11,7 +11,7 @@ description: How to build, launch and sign in to Job360 locally (Postgres, backe
 - Backend: Python 3.12 venv, then from `backend/`: `pip install -e ".[dev]"`.
 - Pitfall: the editable install resolves `import src` to whichever checkout installed it (often a git worktree). In a standalone script `sys.path.insert(0, "<this checkout>/backend")` and `os.chdir` there; check with `python -c "import src; print(src.__file__)"`.
 - `backend/.env` (read by `load_dotenv()`) needs `SESSION_SECRET` (any `python -c "import secrets;print(secrets.token_urlsafe(64))"`); sessions fail without it.
-- Local `REQUIRE_EMAIL_VERIFICATION=false` skips the verified-email gate (token mint, assistant settings).
+- Local `REQUIRE_EMAIL_VERIFICATION=false` switches off every reading of the verified-email gate at once: `api.auth_deps.email_verification_satisfied`.
 - Frontend: `cd frontend && npm ci` first.
 
 ## Start

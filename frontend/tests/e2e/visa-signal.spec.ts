@@ -188,7 +188,7 @@ test.describe("Visa signal — application detail", () => {
     });
 
     await page.goto(`/applications/${APPLICATION_ID}`);
-    await expect(page.getByText("Backend Engineer")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Backend Engineer", { exact: true })).toBeVisible({ timeout: 20_000 });
 
     const badge = page.getByTestId("visa-badge");
     await expect(badge).toHaveAttribute("data-visa", "no_sponsorship");
