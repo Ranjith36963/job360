@@ -15622,6 +15622,14 @@
       },
       "SentOnItsOwnOut": {
         "properties": {
+          "cv_sample": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Cv Sample",
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SentItem"
@@ -32351,7 +32359,7 @@
     },
     "/api/sent-on-its-own": {
       "get": {
-        "description": "Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its\nsources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed.",
+        "description": "Sent on its own (owner plan 2026-11-02): what went to an employer without the user, with its\nsources. A log, never counted on Needs you. LinkedIn requests and messages that went without a Send are listed,\nand CVs that went on a strong review (kind ``cv``), with ``cv_sample``: today's 5 to check.",
         "operationId": "sent_on_its_own_route_api_sent_on_its_own_get",
         "parameters": [
           {
@@ -32417,7 +32425,7 @@
     },
     "/api/sent-on-its-own/{item_id}/wrong-fact": {
       "post": {
-        "description": "The user's \"Wrong fact\" press on one item. Autonomy step 4 records it and stops reusing that fact;\nuntil it ships there is no item to press on, so every id is 404.",
+        "description": "The user's \"Wrong fact\" press on one item. On a ``cv`` item (owner 2026-11-06) it is recorded (the item\nreads ``reported_wrong``) and automatic CV sending (``cv_auto_approve``) is turned off at once. Other kinds\narrive with autonomy step 4 (409). Another user's item, or none, is 404.",
         "operationId": "report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post",
         "parameters": [
           {

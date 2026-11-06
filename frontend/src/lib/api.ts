@@ -908,13 +908,14 @@ export async function deleteCoveredAnswer(id: string): Promise<_Schemas["Covered
 }
 
 /** Sent on its own (owner plan 2026-11-02): answers and essays that went to an employer without the user,
- *  with the sources they were checked against. A log, never a to-do. Empty until autonomy step 4 sends. */
+ *  with the sources they were checked against. A log, never a to-do. Also CVs sent on a strong review (kind
+ *  "cv", id < 0) and `cv_sample`: today's 5 to check. */
 export type SentOnItsOwnItem = _Schemas["SentItem"];
 export async function getSentOnItsOwn(): Promise<_Schemas["SentOnItsOwnOut"]> {
   return request("/api/sent-on-its-own");
 }
 
-/** The user's "Wrong fact" press on one item sent on its own. */
+/** The user's "Wrong fact" press on one item sent on its own (on a CV it turns automatic CV sending off). */
 export async function reportWrongFact(id: number): Promise<void> {
   await request(`/api/sent-on-its-own/${id}/wrong-fact`, { method: "POST" });
 }

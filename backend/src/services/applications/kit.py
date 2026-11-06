@@ -959,25 +959,37 @@ async def _cv_not_approved(
     CV is the user's yes). No CV at all counts as not approved (owner 2026-11-01): an assistant may not record
     it; the user marks it applied themselves. With ``cv_auto_approve`` on, a stored ``strong`` ``cv_reviewed`` of
     that exact CV counts as approved too (owner 2026-11-05: the gate cleared ``cv_not_seen`` on it)."""
+    return (await cv_cleared_by(db, user_id, application_id, cv_artifact_id, channel))[0] is None
+
+
+async def cv_cleared_by(
+    db: JobDatabase, user_id: str, application_id: int, cv_artifact_id: Optional[int], channel: str = "",
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """Who cleared the CV the receipt would freeze (:func:`_cv_not_approved`'s rule): ``"user"`` (a matching
+    ``cv_seen`` / ``submit_approved``), ``"review"`` with that strong ``cv_reviewed`` event (``cv_auto_approve``
+    on), ``"bad_id"`` (the receipt route reports it), or ``None``: nobody, so not approved."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     frozen = await spine.frozen_cv_id(db, user_id, application_id, cv_artifact_id, channel)
     if frozen is None:
-        return True
+        return None, None
     art = await spine.get_artifact(db, user_id, application_id, frozen)
     if art is None or art["kind"] != "cv":
-        return False  # the receipt route reports a bad id itself
+        return "bad_id", None  # the receipt route reports a bad id itself
     sha = sha256_text(art["text"])
     if any(
         cv_mark_matches(ev, frozen, sha)
         for ev in await _events(db, user_id, application_id, ("cv_seen", "submit_approved"))
     ):
-        return False
+        return "user", None
     cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
     if not cfg.cv_auto_approve:
-        return True
-    return await cv_review.review_state(db, user_id, application_id, frozen, sha) != cv_review.STRONG
+        return None, None
+    review = await cv_review.newest_review(db, user_id, application_id, frozen, sha)
+    if review is None or review["payload"].get("confidence") != cv_review.STRONG:
+        return None, None
+    return "review", review
 
 
 async def open_rule_items(

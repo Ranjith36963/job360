@@ -8,15 +8,92 @@ for exactly that send (kind ``linkedin_message``: the message after an accepted 
 Derived from the append-only ``contact_outreach`` rows (``own_browser``), so nothing new is stored. Each item is
 ``{id, application_id, job_company, job_title, kind, question, answer, sources: [{label, text}], sent_at,
 reported_wrong}``. Always scoped by ``user_id`` (rules #12/#25).
+
+CV (owner 2026-11-06, the safety net before ``cv_auto_approve``): kind ``cv`` is a CV that went to an employer
+on a strong ``cv_reviewed`` instead of the user's look, read from the server-written ``cv_sent_on_review`` event
+(cv_review.py) and the review it names. Its id is the NEGATIVE of that event id: LinkedIn items keep their
+positive ``contact_outreach`` ids, so the two never collide and the id stays a whole number for old clients.
+``reported_wrong`` = a ``cv_wrong_fact`` event names it. :func:`daily_sample` picks 5 CV items a day to check.
 """
 from __future__ import annotations
 
+import hashlib
+import random
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
 
 _LIMIT = 200
+SAMPLE_SIZE = 5
+
+
+def today() -> date:
+    """The day the sample is drawn for (UTC); tests patch it."""
+    return datetime.now(timezone.utc).date()
+
+
+def daily_sample(user_id: str, ids: list[int], day: date) -> list[int]:
+    """Up to :data:`SAMPLE_SIZE` of ``ids``, the same all ``day`` for this user (seeded by user + date)."""
+    seed = hashlib.sha256(f"{user_id}|{day.isoformat()}".encode()).hexdigest()
+    pool = sorted(set(ids))
+    return sorted(random.Random(seed).sample(pool, min(SAMPLE_SIZE, len(pool))))  # noqa: S311 - not security
+
+
+def _payload(raw: Any) -> dict[str, Any]:
+    from src.services.applications import kit  # noqa: PLC0415
+
+    parsed = kit._json(raw)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _review_sources(review: dict[str, Any]) -> list[dict[str, str]]:
+    """The review's verdict and its line-coverage facts (codes and counts, never CV text)."""
+    by = review.get("reviewer") or "a reviewer"
+    out = [{"label": "Review", "text": f"{review.get('confidence', '?')} (by {by})"}]
+    if review.get("content_lines") is not None:
+        covered = f"{review.get('covered', 0)} of {review.get('content_lines')}"
+        out.append({"label": "Lines covered", "text": f"{covered} CV lines quoted from your profile"})
+    out.append({"label": "Lines checked", "text": str(review.get("lines", 0))})
+    return out
+
+
+async def _cv_items(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+    """Kind ``cv``: one per ``cv_sent_on_review`` event, only from stored rows."""
+    from src.services.applications import cv_review, spine  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT id, event_type, application_id, payload, recorded_at FROM application_events WHERE user_id = ? "
+        "AND event_type IN (?, ?) ORDER BY id DESC LIMIT ?",
+        (user_id, cv_review.SENT_EVENT, cv_review.WRONG_FACT_EVENT, _LIMIT * 2),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    reported = {
+        _payload(r["payload"]).get("sent_event_id") for r in rows if r["event_type"] == cv_review.WRONG_FACT_EVENT
+    }
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if r["event_type"] != cv_review.SENT_EVENT:
+            continue
+        app_id, p = int(r["application_id"]), _payload(r["payload"])
+        app = await spine.get_owned_application(db, user_id, app_id)
+        cur = await db._db.execute(
+            "SELECT payload FROM application_events WHERE id = ? AND user_id = ? AND application_id = ? "
+            "AND event_type = ?", (p.get("review_event_id"), user_id, app_id, cv_review.EVENT_TYPE),
+        )
+        review = await cur.fetchone()
+        art = await spine.get_artifact(db, user_id, app_id, int(p["artifact_id"])) if p.get("artifact_id") else None
+        if app is None or review is None or art is None:
+            continue  # never invent: every part must be a stored row of this user
+        out.append({
+            "id": -int(r["id"]), "application_id": app_id, "job_company": str(app.get("job_company") or ""),
+            "job_title": str(app.get("job_title") or ""), "kind": "cv", "question": "CV sent after a strong review",
+            "answer": f"CV version {art.get('version_no')} (artifact {art['id']})",
+            "sources": _review_sources(_payload(dict(review)["payload"])), "sent_at": str(r["recorded_at"]),
+            "reported_wrong": int(r["id"]) in reported,
+        })
+    return out
 
 
 def _linkedin_items(rows: list[dict[str, Any]], person: dict[str, Any]) -> list[dict[str, Any]]:
@@ -78,9 +155,31 @@ async def list_items(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
             "job_title": str((app or {}).get("job_title") or ""),
         }
         out.extend(_linkedin_items(await contacts._outreach_rows(db, contact_id), person))
+    out.extend(await _cv_items(db, user_id))
     return sorted(out, key=lambda i: (i["sent_at"], i["id"]), reverse=True)
 
 
 async def get_item(db: JobDatabase, user_id: str, item_id: int) -> Optional[dict[str, Any]]:
     """One of the user's items, or ``None`` (another user's item is ``None`` too)."""
     return next((i for i in await list_items(db, user_id) if i["id"] == item_id), None)
+
+
+async def report_cv_wrong_fact(db: JobDatabase, user_id: str, item: dict[str, Any]) -> None:
+    """The user's Wrong fact on a ``cv`` item: one append-only ``cv_wrong_fact`` (a repeat press writes nothing),
+    then ``cv_auto_approve`` off at once through the web user's own settings write (on -> off is safer)."""
+    from src.services.applications import cv_review, spine  # noqa: PLC0415
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile import edits as profile_edits  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    profile = load_profile(user_id)
+    if profile is not None and profile.assistant_settings.cv_auto_approve is not False:
+        profile_edits.record_edits(
+            user_id, profile_edits.WEB_ACTOR, [(rules.CV_AUTO_APPROVE_PATH, False)], enforce_rate_limit=False,
+        )
+    if not item["reported_wrong"]:
+        await spine.append_event(
+            db, user_id=user_id, application_id=int(item["application_id"]), event_type=cv_review.WRONG_FACT_EVENT,
+            payload={"sent_event_id": -int(item["id"])}, occurred_at=datetime.now(timezone.utc).isoformat(),
+            recorded_by=profile_edits.WEB_ACTOR,
+        )
