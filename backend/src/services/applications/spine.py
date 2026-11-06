@@ -2332,6 +2332,31 @@ async def queued_at_by_app(
     return queued
 
 
+async def open_queue(db: JobDatabase, user_id: str, profile: Any = None) -> tuple[list[int], dict[int, str]]:
+    """The user's WHOLE open batch queue, the one reading ``list_applications(queued=true)`` and the stats
+    ``today`` view share: ``(ids first in first out, {id: queued_at})``. Queued, still ``considering``, and
+    not dropped by the user's own score-line rule (S4, ``below_line_dropped``). ``profile`` = the caller's
+    loaded profile (``None`` = defaults). Scoped by ``user_id`` (rule #12)."""
+    queued_at: dict[int, str] = {}
+    all_queued = await queued_at_by_app(db, user_id)
+    if not all_queued:
+        return [], queued_at
+    qcur = await db._db.execute(
+        f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' "  # noqa: S608 - placeholders, not values
+        f"AND id IN ({','.join('?' for _ in all_queued)})",
+        [user_id, *all_queued],
+    )
+    queued_at = {int(q[0]): all_queued[int(q[0])] for q in await qcur.fetchall()}
+    # S4: a row the user's own rule drops (below the line, below_line skip) is not in the queue.
+    from src.services.profile import assistant_settings as _line_rules  # noqa: PLC0415 - profile <-> spine
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+
+    cfg = _line_rules.effective((profile or UserProfile()).assistant_settings)
+    for app_id in await below_line_dropped(db, user_id, list(queued_at), cfg):
+        queued_at.pop(app_id, None)
+    return sorted(queued_at, key=lambda i: (queued_at[i], i)), queued_at
+
+
 # ── R11 — get_application / list_applications ────────────────────────────────
 
 
@@ -2903,24 +2928,7 @@ async def list_applications(
         params.append(user_id)
     # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
     # Two queries for the page (events, then the status of the queued ids), never N+1.
-    queue_order: list[int] = []
-    queued_at: dict[int, str] = {}
-    all_queued = await queued_at_by_app(db, user_id)
-    if all_queued:
-        qcur = await db._db.execute(
-            f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' "  # noqa: S608 - placeholders, not values
-            f"AND id IN ({','.join('?' for _ in all_queued)})",
-            [user_id, *all_queued],
-        )
-        queued_at = {int(q[0]): all_queued[int(q[0])] for q in await qcur.fetchall()}
-        # S4: a row the user's own rule drops (below the line, below_line skip) is not in the queue.
-        from src.services.profile import assistant_settings as _line_rules  # noqa: PLC0415 - profile <-> spine
-        from src.services.profile.models import UserProfile  # noqa: PLC0415
-
-        cfg = _line_rules.effective((_profile or UserProfile()).assistant_settings)
-        for app_id in await below_line_dropped(db, user_id, list(queued_at), cfg):
-            queued_at.pop(app_id, None)
-        queue_order = sorted(queued_at, key=lambda i: (queued_at[i], i))
+    queue_order, queued_at = await open_queue(db, user_id, _profile)
     queue_position = {app_id: pos for pos, app_id in enumerate(queue_order, start=1)}
     if queued:
         if queue_order:

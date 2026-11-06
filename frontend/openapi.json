@@ -2829,6 +2829,13 @@
           "email_sends_per_day": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "grant_covers_jobs": {
+            "$ref": "#/components/schemas/GrantCoversJobsOut",
+            "default": {
+              "count": 0,
+              "meaning": ""
+            }
+          },
           "hunt_every_hours": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -7832,6 +7839,23 @@
           "merged"
         ],
         "title": "GitHubResponse",
+        "type": "object"
+      },
+      "GrantCoversJobsOut": {
+        "description": "What ``auto_grant_scope.queue.count`` really counts, named honestly. ``count`` = the jobs an\n\"Auto for a while\" grant confirmed NOW would cover: every job queued and still ``considering``,\ncounted BEFORE the user's own score-line rule drops any (and at most 500). It is NOT the apply\nqueue: that is ``list_applications(queued=true)``'s ``queue_summary.queued``.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "meaning": {
+            "default": "",
+            "title": "Meaning",
+            "type": "string"
+          }
+        },
+        "title": "GrantCoversJobsOut",
         "type": "object"
       },
       "GrantListResponse": {
@@ -17789,6 +17813,16 @@
               }
             ]
           },
+          "today": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsTodayOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "velocity": {
             "anyOf": [
               {
@@ -18235,6 +18269,87 @@
           "scored"
         ],
         "title": "StatsSkillGapsOut",
+        "type": "object"
+      },
+      "StatsTodayCountsOut": {
+        "description": "Today's counts in the user's own timezone; each is a number, never a list.",
+        "properties": {
+          "applied": {
+            "default": 0,
+            "title": "Applied",
+            "type": "integer"
+          },
+          "asks_answered": {
+            "default": 0,
+            "title": "Asks Answered",
+            "type": "integer"
+          },
+          "asks_opened": {
+            "default": 0,
+            "title": "Asks Opened",
+            "type": "integer"
+          },
+          "brought": {
+            "default": 0,
+            "title": "Brought",
+            "type": "integer"
+          },
+          "fit_judged": {
+            "default": 0,
+            "title": "Fit Judged",
+            "type": "integer"
+          },
+          "outreach_replies": {
+            "default": 0,
+            "title": "Outreach Replies",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "default": 0,
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "replies": {
+            "default": 0,
+            "title": "Replies",
+            "type": "integer"
+          }
+        },
+        "title": "StatsTodayCountsOut",
+        "type": "object"
+      },
+      "StatsTodayOut": {
+        "description": "``stats(view=\"today\")``: where the user stands. ``queue_summary`` is the block\n``list_applications(queued=true)`` returns; ``waiting_on_you`` the count ``whats_due`` reports.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/StatsTodayCountsOut"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "queue_summary": {
+            "additionalProperties": true,
+            "title": "Queue Summary",
+            "type": "object"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "waiting_on_you": {
+            "title": "Waiting On You",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "timezone",
+          "counts",
+          "queue_summary",
+          "waiting_on_you"
+        ],
+        "title": "StatsTodayOut",
         "type": "object"
       },
       "StatsVelocityOut": {

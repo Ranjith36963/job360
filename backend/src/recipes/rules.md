@@ -62,6 +62,8 @@ the end and fewer than the count of applications were recorded since the grant b
 auto (the practice run, every stop and the per-job confirm still apply); afterwards the user's own `submit_mode` is back.
 A grant covers only the applications in the user's queue when they confirmed it, on the form site they had then
 (`settings.auto_grant_scope.granted`); any other one asks `grant_scope` - never queue more to widen it.
+`settings.grant_covers_jobs.count` (= `auto_grant_scope.queue.count`) is what a grant would cover, NOT the apply queue: that is
+`queue_summary.queued`. "Where do I stand today" = `stats(view="today")`: today's counts, `queue_summary`, `waiting_on_you`.
 `assistant_settings.paused_until` ("" for not paused,
 "until_resumed", or an ISO-8601 time with an offset, in the future, at most
 365 days ahead) and `assistant_settings.pause_reason` (one plain line).

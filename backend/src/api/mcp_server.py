@@ -2370,27 +2370,28 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Counts over YOUR applications from the event log — brought,
         applied, replied, interview, offer, rejected — plus rates and
-        groupings: by CV version (label the CV with save_artifact's `label`
-        to get a per-variant count here), by role, by_country (the job's
+        groupings: by CV version (save_artifact's `label`
+        names the variant), by role, by_country (the job's
         `country`; remote jobs are their own "remote" group), by_job_source
         (`found_on`), by_channel (record_application's `channel`) and
         by_contact_found_via / by_contact_relationship (contacts, reachable, sent, replies, reply rate per
         add_contact `found_via` / `relationship`), by_outreach_variant (per outreach `label`).
         Applications marked with a `simulation` event are left
-        out; overall.simulations_excluded says how many. An unset value is the group with key null
-        ("Not set"). `since` (an ISO date/datetime) scopes to applications
-        (and contacts) added on/after that date. `view` adds one block: funnel (furthest
+        out (overall.simulations_excluded counts them). An unset value is the group null ("Not set").
+        `since` (an ISO date/datetime) scopes to applications (and contacts) added on/after that date.
+        `view` adds one block: funnel (furthest
         stage reached; a rejection counts as a reply), velocity (median and p75 days per stage hop;
         still-waiting ones left out), calibration (interview rate per fit-score band
-        <70/70-79/80-89/>=90, 5 per band, with a verdict to quote as printed), company (history card
+        <70/70-79/80-89/>=90, 5 per band, verdict to quote as printed), company (history card
         per company; pass `company` for one), lesson_effect (rates before vs after each agreed lesson,
-        not proof of cause), followups (check-ins and feedback asks sent), digest (interview rounds this
-        week: tags, open gaps), friction (process friction + redflags per company), assessments
+        not proof of cause), followups (check-ins and feedback asks sent), digest (this week's interview
+        rounds: tags, gaps), friction (process friction + redflags per company), assessments
         (skills tests), patterns (outcome counts by archetype, remote policy, team size and
         agency/direct, needs 5 sent; `signals` need 2 decided; ghosted is no answer, never a rejection;
         `rejection_reasons` are exact words, group them yourself), skill_gaps (the gaps you saved with
         save_fit, counted and tiered; needs 5 scored fits), sites (per form host: forms filled, applied,
-        blocked by reason, with n), referrals (referred vs not: reply and interview rates), or all.
+        blocked by reason, with n), referrals (referred vs not: reply and interview rates), today (your day:
+        counts, queue_summary, waiting_on_you), or all.
         Every rate has its n; small_sample
         is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:

@@ -579,7 +579,7 @@ async def compute_stats(
 
     # Slice 3's loader only for slice 3's own views: a single slice-4/5 view must not
     # pay for (or audit-log) a load it does not use.
-    other_views = ("patterns", "skill_gaps", "sites", "referrals")
+    other_views = ("patterns", "skill_gaps", "sites", "referrals", "today")
     numbers_selected = [v for v in selected if v not in interview_counts.INTERVIEW_VIEWS and v not in other_views]
     if numbers_selected:
         from src.services.applications import feedback_numbers  # noqa: PLC0415
@@ -614,6 +614,11 @@ async def compute_stats(
         from src.services.applications import referral_stats  # noqa: PLC0415
 
         view_blocks["referrals"] = await referral_stats.build(db, user_id, rows)
+
+    if "today" in selected:
+        from src.services.applications import today as today_view  # noqa: PLC0415
+
+        view_blocks["today"] = await today_view.build(db, user_id)
 
     return {
         "since": since_val,
