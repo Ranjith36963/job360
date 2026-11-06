@@ -1249,6 +1249,31 @@ def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
     return "brand" if any(label in brands for label in host.split(".")) else "company"
 
 
+_CV_NOT_SEEN = "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes."
+_CV_NEEDS_REVIEW = (
+    "The user has not seen the latest CV, and no review of it is stored. Have this CV reviewed now: "
+    'get_recipe("doctor"), row CV review. A FRESH reviewer that did not write the CV quotes the profile for '
+    "every CV line; then record_event cv_reviewed {artifact_id, sha256, confidence, lines, reviewer}. A strong "
+    "review clears this. If it is weak, rewrite only the weak lines once, save, and review the new version; "
+    "weak a second time waits for the user."
+)
+_CV_REVIEW_WEAK = (
+    "The newest review of this CV is weak. If it is this application's first weak review, rewrite only the "
+    "weak lines once from the profile's own words, save, and have the new version reviewed (doctor row CV "
+    "review); a rewrite is allowed only once. Otherwise it waits for the user: show the CV and get the user's "
+    "OK, then fill the form and ask yes (after two weak CV versions on an application, a new review is weak: "
+    "retry_limit)."
+)
+
+
+def _cv_not_seen_detail(cfg: EffectiveSettings, application: SubmitFacts) -> str:
+    """The ``cv_not_seen`` sentence. With ``cv_auto_approve`` on it names the review that would clear the ask
+    (none stored yet) or says a weak one waits for the user; with it off the sentence is the old one."""
+    if not cfg.cv_auto_approve:
+        return _CV_NOT_SEEN
+    return _CV_REVIEW_WEAK if application.cv_review == "weak" else _CV_NEEDS_REVIEW
+
+
 def may_submit(
     cfg: EffectiveSettings,
     application: SubmitFacts,
@@ -1814,10 +1839,7 @@ def _first_ask(
         )
     reviewed = cfg.cv_auto_approve and application.cv_review == "strong"
     if not (application.cv_seen or application.approved or reviewed):
-        return SubmitDecision(
-            "ask", "cv_not_seen",
-            "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes.",
-        )
+        return SubmitDecision("ask", "cv_not_seen", _cv_not_seen_detail(cfg, application))
     if counts.applied_since_auto_on == 0:
         return SubmitDecision(
             "ask", "practice_run",
