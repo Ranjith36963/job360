@@ -605,14 +605,33 @@ export async function downloadTailored(
   URL.revokeObjectURL(url);
 }
 
-/** Download ONE stored CV / cover-letter version as Word or PDF. POST like
- * `downloadTailored` (Origin-checked); same blob + anchor pattern. */
-export async function downloadApplicationArtifact(
+/** The rendered file of ONE stored CV / cover-letter version: the same bytes the download gives
+ * (the in-page preview reads it). POST like `downloadTailored` (Origin-checked). */
+export async function fetchApplicationArtifactFile(
   applicationId: number,
   artifactId: number,
-  fmt: TailorFormat,
-  filenameStem = "document"
-): Promise<void> {
+  fmt: TailorFormat
+): Promise<Blob> {
+  return (await fetchApplicationArtifactNamed(applicationId, artifactId, fmt)).blob;
+}
+
+/** The file name the server gives this download (`Content-Disposition`), or "" when it sends none. */
+export function attachmentName(header: string | null): string {
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header ?? "");
+  if (!m) return "";
+  try {
+    return decodeURIComponent(m[1]).trim();
+  } catch {
+    return m[1].trim();
+  }
+}
+
+/** The same bytes plus the file name the server gives them (the CV preview's title shows it). */
+export async function fetchApplicationArtifactNamed(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat
+): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(
     `${API}/api/applications/${applicationId}/artifacts/${artifactId}/download?fmt=${fmt}`,
     { method: "POST", credentials: "include" }
@@ -627,7 +646,17 @@ export async function downloadApplicationArtifact(
     }
     throw new ApiError(res.status, detail);
   }
-  const blob = await res.blob();
+  return { blob: await res.blob(), filename: attachmentName(res.headers.get("Content-Disposition")) };
+}
+
+/** Download ONE stored CV / cover-letter version as Word or PDF; same blob + anchor pattern. */
+export async function downloadApplicationArtifact(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat,
+  filenameStem = "document"
+): Promise<void> {
+  const blob = await fetchApplicationArtifactFile(applicationId, artifactId, fmt);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
