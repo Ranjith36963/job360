@@ -148,8 +148,8 @@ export function JobCard({
 
   const [remembered, setRemembered] = useState<Set<string>>(new Set());
 
-  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; the server
-   *  binds a country-specific one (right to work, salary) to this job's country, the rest are
+  /** Ask once (owner 2026-11-02): only the owner's "remember" press saves answers for later jobs; a Memory
+   *  question (right to work, salary...) goes into Memory for this job's country (2026-11-06), the rest are
    *  global. A stored fact left unchanged is not saved again. */
   async function rememberRows(values: Map<string, string>) {
     for (const { ask } of structured) {
@@ -158,7 +158,10 @@ export function JobCard({
         const text = values.get(k.rowId);
         return m && text && !(isStoredSource(m.q.source) && text === m.q.answer.trim());
       });
-      if (given.length) await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+      if (!given.length) continue;
+      const done = await rememberAskAnswers(ask.id, Object.fromEntries(given.map((k) => [k.key, values.get(k.rowId)!])));
+      // Answer once: a Memory fact already set to another value is never overwritten; say where to change it.
+      for (const why of Object.values(done?.conflicts ?? {})) toast.error(`Not saved to Memory: ${why}`);
     }
     setRemembered((prev) => new Set([...prev, ...values.keys()]));
   }
