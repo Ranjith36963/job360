@@ -115,7 +115,8 @@ def _contact_label(words: list[str]) -> Optional[str]:
     seen = set(words) - _FILLER
     if not seen:
         return None
-    if "code" in seen and seen & (_DIAL_CORE | {"country"}) and seen <= _DIAL_CORE | {"country", "code", "phone"}:
+    # A bare "Country code" can be an address field: a dial code label also names dialling, calling or a phone.
+    if "code" in seen and seen & (_DIAL_CORE | {"phone"}) and seen <= _DIAL_CORE | {"country", "code", "phone"}:
         return DIAL_CODE
     if seen & _PHONE_CORE and seen <= _PHONE_CORE | _PHONE_EXTRA:
         return "contact.phone"

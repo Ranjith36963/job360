@@ -3000,9 +3000,25 @@ _OWN_CONTACT_KEYS = frozenset({"contact.legal_first_name", "contact.legal_last_n
                                "contact.phone", DIAL_CODE})
 
 
-def _dial_code(phone: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+# Real country calling codes (ITU E.164) for the countries Job360 users apply in. The saved number's prefix must
+# be one of these, and the residence country's own when that country is saved and listed here.
+_CALLING_CODES = {
+    "GB": "44", "IE": "353", "US": "1", "CA": "1", "IN": "91", "AU": "61", "NZ": "64", "DE": "49", "FR": "33",
+    "NL": "31", "BE": "32", "ES": "34", "PT": "351", "IT": "39", "CH": "41", "AT": "43", "SE": "46", "NO": "47",
+    "DK": "45", "FI": "358", "PL": "48", "CZ": "420", "RO": "40", "GR": "30", "AE": "971", "SA": "966",
+    "QA": "974", "KW": "965", "BH": "973", "OM": "968", "SG": "65", "MY": "60", "HK": "852", "JP": "81",
+    "KR": "82", "CN": "86", "PK": "92", "LK": "94", "BD": "880", "NG": "234", "KE": "254", "ZA": "27",
+    "EG": "20", "IL": "972", "BR": "55", "MX": "52", "PH": "63", "ID": "62", "TH": "66", "VN": "84",
+}
+
+
+def _dial_code(phone: Optional[dict[str, Any]], residence: Optional[dict[str, Any]] = None
+               ) -> Optional[dict[str, Any]]:
     """The saved number's own dial prefix ("+44 7700 900123" -> "+44") as a kit item, else ``None``: the
-    number must start with "+" and 1-3 digits followed by a separator. Never looked up, never guessed."""
+    number must start with "+" and 1-3 digits followed by a separator, the digits a real calling code
+    (:data:`_CALLING_CODES`) and, with a saved residence country on that list, that country's. Never guessed."""
+    from src.services.profile.countries import to_iso2  # noqa: PLC0415
+
     if phone is None or not isinstance(phone.get("value"), str):
         return None
     number = phone["value"].strip()
@@ -3014,8 +3030,11 @@ def _dial_code(phone: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
             break
         digits += ch
     rest = number[1 + len(digits):]
-    if not 1 <= len(digits) <= 3 or not rest or rest[0] not in " -.(":
+    if not 1 <= len(digits) <= 3 or not rest or rest[0] not in " -.(" or digits not in _CALLING_CODES.values():
         return None
+    home = to_iso2(str(residence.get("value") or ""), strict=True) if residence is not None else None
+    if home in _CALLING_CODES and _CALLING_CODES[home] != digits:
+        return None  # the number's prefix is not the residence country's own: ask, never pick one
     return {**phone, "key": DIAL_CODE, "value": f"+{digits}"}
 
 
@@ -3152,32 +3171,70 @@ _EMPLOYER_TAILS = frozenset({
     for verbs in ("obtain maintain or extend", "obtain maintain and or extend", "obtain or maintain or extend")
     for auth in ("authorization", "authorisation")
 })
-_EXAMPLE_HEADS = (("for", "example"), ("e", "g"), ("eg",), ("such", "as"), ("including",))
-_NEGATIONS = frozenset({"not", "no", "never", "without", "nor", "if", "yes", "unless"})
-_NOT_A_NAME = _NEGATIONS | {"or", "and", "you"}
+_EXAMPLE_HEADS = (("for", "example"), ("e.g",), ("eg",), ("e", "g"), ("such", "as"), ("including",))
+# ALLOW-lists (checker round 2): an example token is a visa name - a word with a digit (H-1B, O-1), 2-4 capital
+# letters as written (TN, OPT, STEM, EAD) - or one of these joiners; a company word is Capitalised as written,
+# a legal suffix, "&" or holds a digit, and is none of the words that turn the question around.
+_EXAMPLE_JOINERS = frozenset({"or", "status", "visa", "etc"})
+_COMPANY_SUFFIXES = frozenset({"ltd", "inc", "llc", "plc", "&"})
+_NOT_A_NAME = frozenset({"not", "no", "never", "without", "nor", "if", "yes", "unless", "or", "and", "you",
+                         "except", "none", "nobody", "anyone", "exempt", "answer", "n/a", "na"})
+_EDGE_PUNCT = ".,;:!?\"'()[]…"
+
+
+def _tokens(text: str, separators: str = "") -> list[str]:
+    """Whitespace (and ``separators``) split ``text`` as written, each token stripped of :data:`_EDGE_PUNCT`."""
+    out: list[str] = []
+    cur: list[str] = []
+    for ch in str(text or "") + " ":
+        if ch.isspace() or ch in separators:
+            tok = "".join(cur).strip(_EDGE_PUNCT)
+            if tok:
+                out.append(tok)
+            cur = []
+        else:
+            cur.append(ch)
+    return out
+
+
+def _visa_example(inside: str) -> bool:
+    """True for "for example, H-1B, TN or E-3 visa status": an example head, then visa names and joiners only."""
+    toks = _tokens(inside, ",/")
+    low = [t.casefold() for t in toks]
+    head = next((h for h in _EXAMPLE_HEADS if tuple(low[:len(h)]) == h), None)
+    if head is None:
+        return False
+    rest = toks[len(head):]
+    names = [t for t in rest if any(c.isdigit() for c in t) or (2 <= len(t) <= 4 and t.isalpha() and t.isupper())]
+    return bool(names) and all(t in names or t.casefold() in _EXAMPLE_JOINERS for t in rest)
+
+
+def _company_name(toks: list[str]) -> bool:
+    """1-6 words, each a Capitalised word as written, a legal suffix, "&" or a word with a digit."""
+    return 1 <= len(toks) <= 6 and all(
+        t.casefold() not in _NOT_A_NAME and (
+            t.casefold() in _COMPANY_SUFFIXES or any(c.isdigit() for c in t) or (t[0].isalpha() and t[0].isupper()))
+        for t in toks)
 
 
 def _employer_sponsorship(text: str, country: Optional[str]) -> bool:
-    """True for :data:`_EMPLOYER_HEAD` + a company name (1-6 words) + one of :data:`_EMPLOYER_TAILS`, then
-    nothing but an optional closing parenthetical that starts with an example word (:data:`_EXAMPLE_HEADS`)."""
+    """True for :data:`_EMPLOYER_HEAD` + a company name (:func:`_company_name`) + one of :data:`_EMPLOYER_TAILS`,
+    then nothing but an optional closing visa example (:func:`_visa_example`)."""
     main = str(text or "").strip().rstrip("?.! ").strip()
     if main.endswith(")"):
         cut = main.rfind("(")
-        if cut <= 0:
-            return False
-        example = [w.casefold() for w in _letter_runs(main[cut + 1:-1])]  # visa names ("TN") are no places here
-        if not any(tuple(example[:len(h)]) == h for h in _EXAMPLE_HEADS) or set(example) & _NEGATIONS:
+        if cut <= 0 or not _visa_example(main[cut + 1:-1]):
             return False
         main = main[:cut]
-    words = form_words(main, country)
-    if tuple(words[:len(_EMPLOYER_HEAD)]) != _EMPLOYER_HEAD:
+    toks = _tokens(main)
+    low = [t.casefold() for t in toks]
+    if "from" not in low:
         return False
-    rest = words[len(_EMPLOYER_HEAD):]
-    for size in range(1, 7):
-        name, tail = rest[:size], " ".join(rest[size:])
-        if tail in _EMPLOYER_TAILS:
-            return len(name) == size and not set(name) & _NOT_A_NAME
-    return False
+    i = low.index("from")
+    j = next((k for k in range(i + 1, len(low) - 1) if low[k] == "to" and low[k + 1] == "obtain"), None)
+    if j is None or tuple(form_words(" ".join(toks[:i + 1]), country)) != _EMPLOYER_HEAD:
+        return False
+    return " ".join(form_words(" ".join(toks[j:]), country)) in _EMPLOYER_TAILS and _company_name(toks[i + 1:j])
 
 
 POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
@@ -3365,7 +3422,7 @@ def form_check(
 
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
-    dial = _dial_code(by_key.get("contact.phone"))
+    dial = _dial_code(by_key.get("contact.phone"), by_key.get("contact.residence_country"))
     if dial is not None:
         by_key[DIAL_CODE] = dial
     answers_by_user = any(i.get("by_user") for i in answers.get("approved_text", []))

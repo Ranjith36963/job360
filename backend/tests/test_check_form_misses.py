@@ -75,16 +75,29 @@ def test_plain_phone_labels_take_the_saved_number(question):
     assert (answered["key"], answered["value"]) == ("contact.phone", PHONE)
 
 
-@pytest.mark.parametrize("question", ["Dial code", "Country code", "Phone country code"])
+@pytest.mark.parametrize("question", ["Dial code", "Phone country code", "Country calling code", "Calling code",
+                                      "Dialing code", "Country dial code"])
 def test_dial_code_is_the_saved_numbers_own_prefix(question):
     answered, missing = _one(_profile(), question)
     assert missing is None, missing
     assert answered["value"] == "+44"
 
 
-@pytest.mark.parametrize("phone", ["07700 900123", "+447700900123"])
+def test_a_bare_country_code_is_a_gap_it_can_be_an_address_field():
+    answered, missing = _one(_profile(), "Country code")
+    assert answered is None and missing is not None
+
+
+@pytest.mark.parametrize("phone", ["07700 900123", "+447700900123", "+4 4 7700 900123", "+0 123 456"])
 def test_a_dial_code_the_saved_number_does_not_show_is_a_gap(phone):
-    answered, missing = _one(_profile(phone=phone), "Country code")
+    answered, missing = _one(_profile(phone=phone), "Dial code")
+    assert answered is None and missing is not None
+
+
+def test_the_dial_code_must_be_the_residence_countrys_own():
+    answered, missing = _one(_profile(residence_country="GB"), "Dial code")
+    assert missing is None and answered["value"] == "+44"
+    answered, missing = _one(_profile(residence_country="IN"), "Dial code")
     assert answered is None and missing is not None
 
 
@@ -126,6 +139,50 @@ def test_the_employer_wording_off_its_exact_shape_is_a_gap(question):
     for needs in (False, True):
         answered, missing = _one(_profile(needs), question)
         assert answered is None, (question, needs, answered)
+        assert missing is not None
+
+
+def _employer(company: str = "Acme", example: str = "") -> str:
+    return (f"Will you now or in the future require sponsorship from {company} to obtain, maintain or extend "
+            f"employment based work authorization{' (' + example + ')' if example else ''}?")
+
+
+@pytest.mark.parametrize("example", [
+    "for example, H-1B", "for example, H1B, O-1 or TN status", "e.g. H-1B, OPT, CPT, STEM OPT, EAD, L1 etc.",
+    "such as H-1B / TN visa", "for example, H-1B …",
+])
+def test_visa_examples_are_noise(example):
+    answered, missing = _one(_profile(True), _employer(example=example))
+    assert missing is None, (example, missing)
+    assert answered["value"] == "Yes"
+
+
+@pytest.mark.parametrize("example", [
+    "for example, none", "for example, n/a", "for example, citizens are exempt", "for example, you don't",
+    "for example, answer N", "including those who are exempt", "such as citizens who already hold the right to work",
+])
+def test_an_example_that_is_no_visa_name_is_a_gap(example):
+    for needs in (False, True):
+        answered, missing = _one(_profile(needs), _employer(example=example))
+        assert answered is None, (example, needs, answered)
+        assert missing is not None
+
+
+@pytest.mark.parametrize("company", ["Acme", "Acme Robotics Inc.", "Smith & Jones LLP Ltd", "3M", "Acme plc"])
+def test_company_names_are_noise(company):
+    answered, missing = _one(_profile(False), _employer(company))
+    assert missing is None, (company, missing)
+    assert answered["value"] == "No"
+
+
+@pytest.mark.parametrize("company", [
+    "anyone except Acme", "nobody", "none of Acme", "Acme except for citizens", "Nobody", "Anyone Except Acme",
+    "acme",
+])
+def test_a_company_that_is_no_plain_name_is_a_gap(company):
+    for needs in (False, True):
+        answered, missing = _one(_profile(needs), _employer(company))
+        assert answered is None, (company, needs, answered)
         assert missing is not None
 
 
