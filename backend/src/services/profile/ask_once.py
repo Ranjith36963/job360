@@ -107,6 +107,8 @@ _NAME_EXTRA = frozenset({"name", "legal"})
 _PHONE_CORE = frozenset({"phone", "mobile", "telephone", "cell"})
 _PHONE_EXTRA = frozenset({"number", "no"})
 _DIAL_CORE = frozenset({"dial", "dialing", "dialling", "calling"})
+_EMAIL_LABELS = tuple(frozenset(w) for w in (
+    {"email"}, {"email", "address"}, {"e", "mail"}, {"e", "mail", "address"}, {"mail", "address"}))
 
 
 def _contact_label(words: list[str]) -> Optional[str]:
@@ -120,6 +122,8 @@ def _contact_label(words: list[str]) -> Optional[str]:
         return DIAL_CODE
     if seen & _PHONE_CORE and seen <= _PHONE_CORE | _PHONE_EXTRA:
         return "contact.phone"
+    if seen in _EMAIL_LABELS:
+        return "contact.email"  # "Email address", "E-mail", "Your email"; never "Referee / Company email"
     if "preferred" in seen:
         rest = seen - {"preferred"}
         return "contact.preferred_name" if rest in ({"name"}, {"first", "name"}) else None
