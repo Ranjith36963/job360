@@ -108,12 +108,22 @@ async def test_answer_once_shows_a_conflict_row_and_a_press_on_it_saves_nothing(
         gb = (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]
         row = next(q for q in gb if q["conflict"])
         assert (row["topic"], row["conflict"], row["answer"]) == ("sponsorship.GB.yes_no", ["Yes", "No"], None)
-        # Memory first (owner 2026-11-05, plan S2): sponsorship is Memory's, so a press saves nothing and points
-        # to the GB page; the stored twins are left for the owner's clean-up (S3), never deleted here.
+        # Memory first (owner 2026-11-05, plan S2): sponsorship is Memory's, so a press saves no answer; the
+        # stored twins are left for the owner's clean-up (S3), never deleted here.
+        # owner 2026-11-06: answer once writes Memory (refines S2)
+        # GB's Memory holds no sponsorship fact yet, so the press fills it.
         resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
             {"topic": row["topic"], "question": row["question"], "answer": "No"}]})
         assert resp.status_code == 200 and resp.json()["saved"] == [], resp.text
-        assert "your GB page" in resp.json()["not_saved"]["sponsorship.GB.yes_no"]
+        assert resp.json()["memory"]["sponsorship.GB.yes_no"]["key"] == "right_to_work.GB.needs_sponsorship"
+        gb_page = [{"country": "GB", "work_authorization": "citizen", "needs_sponsorship": False}]
+        assert load_profile(fixture_user_id).user_info.right_to_work["countries"] == gb_page
+        # Now Memory is set: a press with another value is a conflict and writes nothing.
+        resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
+            {"topic": row["topic"], "question": row["question"], "answer": "Yes"}]})
+        assert resp.status_code == 200 and resp.json()["saved"] == [] and "memory" not in resp.json(), resp.text
+        assert resp.json()["conflicts"]["sponsorship.GB.yes_no"].startswith("your GB page says No; this answer says Yes")
+        assert load_profile(fixture_user_id).user_info.right_to_work["countries"] == gb_page
     mine = [r for r in load_profile(fixture_user_id).user_info.answers if "sponsorship" in str(r.get("topic"))]
     assert [(r["topic"], r["answer"]) for r in mine] == [("sponsorship.GB.yes_no", "Yes"), ("sponsorship.gb.yes_no", "No")]
 

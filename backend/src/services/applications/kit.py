@@ -3111,13 +3111,16 @@ POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, 
 def _sponsorship_reading(text: str, country: Optional[str], keyed: bool = False) -> Optional[str]:
     """``"direct"``, ``"inverted"`` or ``None`` (a gap): the normalised wording is on one allow-list. A run that
     named the kit key with a placeholder for a question (no word of three letters) keeps the key's reading."""
-    from src.services.profile import common_questions  # noqa: PLC0415
+    from src.services.profile import answer_to_memory, common_questions  # noqa: PLC0415
 
     words = form_words(text, country)
     said = " ".join(words)
     catalog = {" ".join(form_words(str(q["question"]).replace("{country}", CTRY), country))
                for q in common_questions.catalog() if str(q.get("kit_key") or "").endswith(".needs_sponsorship")}
     if said in _SPONSOR_DIRECT or said in catalog or (keyed and not any(len(w) > 2 for w in words)):
+        return "direct"
+    # Answer once (#1526): the wordings it stores needs_sponsorship from are all as-is ones; read them the same.
+    if answer_to_memory.exact("needs_sponsorship", "right_to_work.{cc}.needs_sponsorship", text, country):
         return "direct"
     return "inverted" if said in _SPONSOR_INVERTED else None
 

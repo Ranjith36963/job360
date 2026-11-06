@@ -113,22 +113,32 @@ class RememberOut(BaseModel):
     saved: list[str]
     # Memory first (plan S2): rows in Memory's families, never saved -> why, naming the page to set it on.
     not_saved: dict[str, str] = Field(default_factory=dict)
+    # Answer once (owner 2026-11-06): as RememberRowsOut (routes/asks.py); absent when none.
+    memory: Optional[dict[str, dict[str, str]]] = None
+    conflicts: Optional[dict[str, str]] = None
 
 
-@router.post("/profile/questionnaire/remember", response_model=RememberOut, dependencies=AUTH_FIRST)
+@router.post("/profile/questionnaire/remember", response_model=RememberOut, dependencies=AUTH_FIRST,
+             response_model_exclude_none=True)
 async def remember_questionnaire(
     body: RememberRequest, user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
     """The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer;
-    one in Memory's families (right to work, salary...) is not saved (``not_saved``: set it on that page).
+    one in Memory's families (right to work, salary...) goes into Memory for ``country`` (``memory``), or is a
+    ``conflict`` with Memory, or is not saved (``not_saved``: set it on that page).
     Session only (no MCP twin): nothing is remembered without that press."""
     from src.services.profile import ask_once  # noqa: PLC0415
     from src.services.profile.edits import ProfileEditError  # noqa: PLC0415
 
     try:
-        return ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
+        out = ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
     except ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if out.get("memory"):  # Answer once: open asks the new Memory facts answer close
+        from src.api.routes.profile import _close_asks_memory_answers  # noqa: PLC0415
+
+        await _close_asks_memory_answers(user.id, [m["path"] for m in out["memory"].values()])
+    return out
 
 
 class CoveredAnswerOut(BaseModel):

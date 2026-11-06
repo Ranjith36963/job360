@@ -1090,7 +1090,8 @@ export interface paths {
         /**
          * Remember Ask Row Answers
          * @description Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job
-         *     asking them needs no owner. A row in Memory's families is not saved (``not_saved`` says why).
+         *     asking them needs no owner. A row in Memory's families goes into Memory for the job's country
+         *     (``memory``), or is a ``conflict`` with what Memory says, or is not saved (``not_saved`` says why).
          *     Only the owner's press saves for reuse: session only, no MCP twin.
          *     Per-job rows (how you heard, consent, essays) are skipped.
          */
@@ -3332,7 +3333,8 @@ export interface paths {
         /**
          * Remember Questionnaire
          * @description The owner's own "remember" press on the questionnaire: each answer is saved as their approved answer;
-         *     one in Memory's families (right to work, salary...) is not saved (``not_saved``: set it on that page).
+         *     one in Memory's families (right to work, salary...) goes into Memory for ``country`` (``memory``), or is a
+         *     ``conflict`` with Memory, or is not saved (``not_saved``: set it on that page).
          *     Session only (no MCP twin): nothing is remembered without that press.
          */
         post: operations["remember_questionnaire_api_profile_questionnaire_remember_post"];
@@ -7988,6 +7990,13 @@ export interface components {
              */
             timezone: string;
         };
+        /** MemoryRowOut */
+        MemoryRowOut: {
+            /** Key */
+            key: string;
+            /** Path */
+            path: string;
+        };
         /**
          * MissingToolRequest
          * @description ``POST /api/missing-tools`` body. ``name`` must match
@@ -9699,6 +9708,16 @@ export interface components {
         };
         /** RememberOut */
         RememberOut: {
+            /** Conflicts */
+            conflicts?: {
+                [key: string]: string;
+            } | null;
+            /** Memory */
+            memory?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            } | null;
             /** Not Saved */
             not_saved?: {
                 [key: string]: string;
@@ -9715,8 +9734,16 @@ export interface components {
         };
         /** RememberRowsOut */
         RememberRowsOut: {
+            /** Conflicts */
+            conflicts?: {
+                [key: string]: string;
+            } | null;
             /** Country */
             country?: string | null;
+            /** Memory */
+            memory?: {
+                [key: string]: components["schemas"]["MemoryRowOut"];
+            } | null;
             /** Not Saved */
             not_saved?: {
                 [key: string]: string;

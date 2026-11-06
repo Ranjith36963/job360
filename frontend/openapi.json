@@ -10359,6 +10359,24 @@
         "title": "MeResponse",
         "type": "object"
       },
+      "MemoryRowOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "key"
+        ],
+        "title": "MemoryRowOut",
+        "type": "object"
+      },
       "MissingToolRequest": {
         "additionalProperties": false,
         "description": "``POST /api/missing-tools`` body. ``name`` must match\n``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters.",
@@ -14674,6 +14692,37 @@
       },
       "RememberOut": {
         "properties": {
+          "conflicts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflicts"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
           "not_saved": {
             "additionalProperties": {
               "type": "string"
@@ -14723,6 +14772,20 @@
       },
       "RememberRowsOut": {
         "properties": {
+          "conflicts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflicts"
+          },
           "country": {
             "anyOf": [
               {
@@ -14733,6 +14796,20 @@
               }
             ],
             "title": "Country"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/MemoryRowOut"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
           },
           "not_saved": {
             "additionalProperties": {
@@ -24302,7 +24379,7 @@
     },
     "/api/asks/{ask_id}/answers/remember": {
       "post": {
-        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job\nasking them needs no owner. A row in Memory's families is not saved (``not_saved`` says why).\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
+        "description": "Ask once (owner 2026-11-02): remember these rows as the user's approved answers, so the next job\nasking them needs no owner. A row in Memory's families goes into Memory for the job's country\n(``memory``), or is a ``conflict`` with what Memory says, or is not saved (``not_saved`` says why).\nOnly the owner's press saves for reuse: session only, no MCP twin.\nPer-job rows (how you heard, consent, essays) are skipped.",
         "operationId": "remember_ask_row_answers_api_asks__ask_id__answers_remember_post",
         "parameters": [
           {
@@ -31159,7 +31236,7 @@
     },
     "/api/profile/questionnaire/remember": {
       "post": {
-        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer;\none in Memory's families (right to work, salary...) is not saved (``not_saved``: set it on that page).\nSession only (no MCP twin): nothing is remembered without that press.",
+        "description": "The owner's own \"remember\" press on the questionnaire: each answer is saved as their approved answer;\none in Memory's families (right to work, salary...) goes into Memory for ``country`` (``memory``), or is a\n``conflict`` with Memory, or is not saved (``not_saved``: set it on that page).\nSession only (no MCP twin): nothing is remembered without that press.",
         "operationId": "remember_questionnaire_api_profile_questionnaire_remember_post",
         "parameters": [
           {

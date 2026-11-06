@@ -113,8 +113,10 @@ async def test_edit_is_this_jobs_word_only(authenticated_async_context, fixture_
 
 @pytest.mark.asyncio
 async def test_remember_is_still_what_makes_the_next_job_fill_itself(authenticated_async_context, fixture_user_id):
-    """Memory first (owner 2026-11-05, plan S2): the "remember" press saves no sponsorship answer: the user sets
-    it on the GB page in Job360, so the next job still waits on Memory."""
+    """Memory first (owner 2026-11-05, plan S2): the "remember" press saves no sponsorship ANSWER. Answer once
+    (owner 2026-11-06): it writes the GB page's Memory fact instead, so the next GB job fills from Memory."""
+    # owner 2026-11-06: answer once writes Memory (refines S2)
+    from src.services.profile.storage import load_profile
     async with authenticated_async_context() as client:
         job_a, job_b = await _bring(client, "Acme"), await _bring(client, "Initech")
         qs = [{**VISA, "answer": "No", "source": "guess"}]
@@ -126,9 +128,13 @@ async def test_remember_is_still_what_makes_the_next_job_fill_itself(authenticat
         assert await _missing(client, job_b) == [VISA["question"]], "Verify alone reuses nothing"
         resp = await client.post(f"/api/asks/{resp.json()['id']}/answers/remember", json={"answers": {VISA["key"]: "No"}})
         assert resp.status_code == 200 and resp.json()["saved"] == [], resp.text
-        assert "your GB page" in resp.json()["not_saved"][VISA["key"]]
+        assert resp.json()["not_saved"] == {}
+        assert resp.json()["memory"][VISA["key"]] == {"path": "user_info.right_to_work",
+                                                      "key": "right_to_work.GB.needs_sponsorship"}
+        assert load_profile(fixture_user_id).user_info.right_to_work["countries"] == [
+            {"country": "GB", "needs_sponsorship": False}]
         assert _approved(fixture_user_id) == []
-        assert await _missing(client, job_b) == [VISA["question"]], "Memory, never a saved answer"
+        assert await _missing(client, job_b) == [], "Memory, never a saved answer, fills job B"
 
 
 CERTIFY = {"key": "certify.truth", "question": "I certify that everything in this application is true"}

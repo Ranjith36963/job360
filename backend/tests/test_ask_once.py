@@ -73,12 +73,35 @@ def _memory(user_id: str) -> tuple[Any, Any]:
 
 @pytest.mark.asyncio
 async def test_a_memory_row_is_never_remembered_as_a_saved_answer(authenticated_async_context, fixture_user_id):
-    """Plan S2 (owner 2026-11-05): a GB sponsorship row and a PL right-to-work row save nothing, neither a
-    saved answer nor Memory (the user sets Memory in Job360); the reply names the country page."""
+    """Plan S2 (owner 2026-11-05): a Memory row is never a saved answer. Answer once (owner 2026-11-06): a clean
+    GB sponsorship "No" goes into GB's Memory; a PL right-to-work "Yes" (no status) saves nothing and names the
+    page; an assistant's press is refused and writes nothing."""
+    # owner 2026-11-06: answer once writes Memory (refines S2)
+    from src.api.main import app
+
     rtw = {"key": "pl_rtw", "question": "Do you have the right to work in Poland?"}
     async with authenticated_async_context() as client:
         before = _memory(fixture_user_id)
-        for country, row, answer in (("GB", VISA, "No"), ("PL", rtw, "Yes")):
+        gb_app = await _bring(client, "AcmeGB", "GB")
+        gb_ask = await _ask(client, gb_app, VISA)
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as agent:
+            refused = await agent.post(f"/api/asks/{gb_ask}/answers/remember", json={"answers": {VISA["key"]: "No"}})
+            assert refused.status_code == 403, refused.text
+        assert _memory(fixture_user_id) == before, "an assistant's press writes nothing"
+        resp = await client.post(f"/api/asks/{gb_ask}/answers/remember", json={"answers": {VISA["key"]: "No"}})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["saved"], body["skipped"], body["country"], body["not_saved"]) == ([], [], "GB", {})
+        assert body["memory"] == {VISA["key"]: {"path": "user_info.right_to_work",
+                                                "key": "right_to_work.GB.needs_sponsorship"}}
+        answers, right_to_work = _memory(fixture_user_id)
+        assert right_to_work["countries"] == [{"country": "GB", "needs_sponsorship": False}]
+        assert _approved(fixture_user_id) == [] and not answers, "never a saved answer"
+        assert await _form_check_missing(client, gb_app, VISA) == [], "GB's Memory now answers it"
+        after_gb = _memory(fixture_user_id)
+        for country, row, answer in (("PL", rtw, "Yes"),):
             app_id = await _bring(client, "Acme" + country, country)
             ask_id = await _ask(client, app_id, row)
             resp = await client.post(f"/api/asks/{ask_id}/answers/remember", json={"answers": {row["key"]: answer}})
@@ -87,7 +110,7 @@ async def test_a_memory_row_is_never_remembered_as_a_saved_answer(authenticated_
             assert (body["saved"], body["skipped"], body["country"]) == ([], [row["key"]], country)
             assert f"your {country} page" in body["not_saved"][row["key"]]
             assert "user_info.right_to_work" in body["not_saved"][row["key"]]
-            assert _memory(fixture_user_id) == before, "no saved answer, no Memory write"
+            assert _memory(fixture_user_id) == after_gb, "no saved answer, no Memory write"
             assert await _form_check_missing(client, app_id, row) == [row["question"]], "Memory still asks"
 
 
@@ -167,8 +190,8 @@ async def test_questionnaire_lists_up_to_ten_per_country_and_a_remembered_row_le
         after = {c["country"]: [q["topic"] for q in c["questions"]]
                  for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
         assert "contact.website" not in after["GB"] and "contact.website" not in after["US"], "global: off every list"
-        # Memory first (plan S2): a Memory row (phone, sponsorship) is never saved; it stays until the user sets
-        # it on that page in Job360.
+        # Memory first (plan S2): a Memory row (phone, sponsorship) is never a saved answer.
+        # owner 2026-11-06: answer once writes Memory (refines S2)
         rtw = "right_to_work.GB.needs_sponsorship"
         assert rtw in after["GB"] and "right_to_work.US.needs_sponsorship" in after["US"]
         question = next(q["question"] for q in gb if q["topic"] == rtw)
@@ -177,11 +200,20 @@ async def test_questionnaire_lists_up_to_ten_per_country_and_a_remembered_row_le
             {"topic": rtw, "question": question, "answer": "No"},
             {"topic": "contact.phone", "question": phone, "answer": "+44 7700 900123"}]})
         assert resp.status_code == 200 and resp.json()["saved"] == [], resp.text
-        assert "your GB page" in resp.json()["not_saved"][rtw]
-        assert "your Memory page" in resp.json()["not_saved"]["contact.phone"]
+        assert resp.json()["not_saved"] == {} and resp.json()["memory"] == {
+            rtw: {"path": "user_info.right_to_work", "key": rtw},
+            "contact.phone": {"path": "user_info.contact", "key": "contact.phone"}}
+        from src.services.profile.storage import load_profile
+
+        info = load_profile(fixture_user_id).user_info
+        assert info.right_to_work["countries"] == [
+            {"country": "GB", "work_authorization": "citizen", "needs_sponsorship": False},
+            {"country": "US", "work_authorization": "visa"}], "GB's page only; US untouched"
+        assert info.contact["phone"] == "+44 7700 900123"
         after = {c["country"]: [q["topic"] for q in c["questions"]]
                  for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
-        assert rtw in after["GB"] and "contact.phone" in after["GB"]
+        assert rtw not in after["GB"] and "contact.phone" not in after["GB"], "Memory answers them now"
+        assert "right_to_work.US.needs_sponsorship" in after["US"], "a GB answer never fills the US page"
         saved = {r["topic"]: r.get("country") for r in _approved(fixture_user_id)}
         assert saved == {"contact.website": None}
 
