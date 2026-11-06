@@ -95,6 +95,48 @@ def _contact_link(words: set[str]) -> Optional[str]:
     return next(iter(sites)) if len(words) == 1 or words & _LINK_WORDS else None
 
 
+# Names and phone (PC browser, live forms 2026-11-06): a PLAIN label asking for the user's own name or phone.
+# ALLOW-list: every word is a core word of ONE field or a filler word; anything else ("Referrer first name",
+# "Emergency contact phone", "First and last name") is not the user's own field. Word sets, no regex.
+DIAL_CODE = "contact.phone_dial_code"  # derived from the saved number's own "+44" prefix, never a stored field
+_FILLER = frozenset({"your", "please", "enter", "provide", "optional", "required"})
+_NAME_CORE = {"first": "contact.legal_first_name", "given": "contact.legal_first_name",
+              "forename": "contact.legal_first_name", "last": "contact.legal_last_name",
+              "family": "contact.legal_last_name", "surname": "contact.legal_last_name"}
+_NAME_EXTRA = frozenset({"name", "legal"})
+_PHONE_CORE = frozenset({"phone", "mobile", "telephone", "cell"})
+_PHONE_EXTRA = frozenset({"number", "no"})
+_DIAL_CORE = frozenset({"dial", "dialing", "dialling", "calling"})
+
+
+def _contact_label(words: list[str]) -> Optional[str]:
+    """The contact key a plain own-name / own-phone label names (:data:`DIAL_CODE` for a dial or country code),
+    else ``None``. ``words`` is the normalised label, split."""
+    seen = set(words) - _FILLER
+    if not seen:
+        return None
+    # A bare "Country code" can be an address field: a dial code label also names dialling, calling or a phone.
+    if "code" in seen and seen & (_DIAL_CORE | {"phone"}) and seen <= _DIAL_CORE | {"country", "code", "phone"}:
+        return DIAL_CODE
+    if seen & _PHONE_CORE and seen <= _PHONE_CORE | _PHONE_EXTRA:
+        return "contact.phone"
+    if "preferred" in seen:
+        rest = seen - {"preferred"}
+        return "contact.preferred_name" if rest in ({"name"}, {"first", "name"}) else None
+    keys = {_NAME_CORE[w] for w in seen if w in _NAME_CORE}
+    if len(keys) != 1 or not seen <= set(_NAME_CORE) | _NAME_EXTRA:
+        return None
+    # "First name" / "Legal last name" need "name"; "Surname" / "Forename" are names on their own.
+    return next(iter(keys)) if "name" in seen or seen & {"surname", "forename"} else None
+
+
+def contact_label(question: str) -> Optional[str]:
+    """:func:`_contact_label` over a form question's own text."""
+    from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
+
+    return _contact_label(normalize_question(question).split())
+
+
 def own_link_label(question: str) -> bool:
     """True when the question is an allow-listed ask for the user's own LinkedIn or GitHub link."""
     from src.services.profile.answer_match import normalize_question  # noqa: PLC0415
@@ -139,6 +181,9 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
     words = set(normalize_question(question).split())
     if not k and words & set(_LINK_SITES) and _contact_link(words) is None:
         return False, None  # names the site but is no allow-listed ask for the user's own link (catalog too)
+    label = None if k else _contact_label(normalize_question(question).split())
+    if label is not None and label != DIAL_CODE:
+        return True, label  # a plain own-name / own-phone label (the dial code is read in kit.form_check)
     if words & _PAY_WORDS:
         words.add("salary")  # "Desired pay" names the salary field (:data:`_PAY_WORDS`)
     rows = [q for q in common_questions.catalog() if q.get("kit_key")]
