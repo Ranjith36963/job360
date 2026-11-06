@@ -111,6 +111,15 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("assistant_settings.people_hunt", false).change).toBe("Stop the people hunt");
   });
 
+  it("cv auto approve: on reads in plain words; off says you look at every CV", () => {
+    const on = describeSettingRequest("assistant_settings.cv_auto_approve", true);
+    expect(on.title).toBe("Send reviewed CVs without asking me");
+    expect(on.change).toBe("Your assistant asks to send CVs that pass both checks without asking you first");
+    expect(describeSettingRequest("assistant_settings.cv_auto_approve", false).change).toBe(
+      "Ask me to look at every CV before it goes",
+    );
+  });
+
   it("standing instructions: shows every line, so a note is never confirmed blind", () => {
     const notes = describeSettingRequest("preferences.assistant_notes", ["Be brief", "No agencies"]);
     expect(notes.title).toBe("Standing instructions for your assistants");

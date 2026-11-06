@@ -151,6 +151,14 @@ export function describeSettingRequest(
             ? "Let your assistant send the outreach emails it writes from your Gmail, in your name"
             : "Only draft outreach emails; I send them myself",
       };
+    case "assistant_settings.cv_auto_approve":
+      return {
+        title: "Send reviewed CVs without asking me",
+        change:
+          value === true
+            ? "Your assistant asks to send CVs that pass both checks without asking you first"
+            : "Ask me to look at every CV before it goes",
+      };
     case "assistant_settings.hunt_every_hours":
       return {
         title: "Job hunt",

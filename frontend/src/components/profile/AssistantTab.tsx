@@ -20,6 +20,9 @@ import {
   INBOX_MODES,
   AUTO_EMAILS_HELP,
   OUTREACH_SEND_HELP,
+  CV_AUTO_APPROVE_HELP,
+  CV_AUTO_APPROVE_LABEL,
+  P_CV_AUTO_APPROVE,
   LINKEDIN_PREMIUM_HELP,
   P_AUTO_EMAILS,
   P_BELOW,
@@ -92,6 +95,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const [pcFrom, setPcFrom] = useState("");
   const [pcTo, setPcTo] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
+  const [confirmCv, setConfirmCv] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
   const [confirmBelowAuto, setConfirmBelowAuto] = useState(false);
   const [premium, setPremium] = useState(false);
@@ -205,6 +209,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const belowLine = String(eff(view.below_line) || "ask");
   const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const outreachSend = settingOutreachSend(view.outreach_send);
+  const cvAuto = settingAutoEmails(view.cv_auto_approve);
   const applyMode = applyModeText(modeOf(view), view.auto_grant_count?.value);
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
@@ -610,6 +615,55 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   type="button"
                   data-testid="auto-employer-emails-cancel"
                   onClick={() => setConfirmAuto(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
+          <Row title={CV_AUTO_APPROVE_LABEL} sub={CV_AUTO_APPROVE_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={cvAuto}
+              aria-label={CV_AUTO_APPROVE_LABEL}
+              data-testid="cv-auto-approve-toggle"
+              disabled={busy}
+              onClick={() => {
+                if (cvAuto) {
+                  setConfirmCv(false);
+                  void save(P_CV_AUTO_APPROVE, false); // the stop switch applies at once
+                } else {
+                  setConfirmCv(true);
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                cvAuto ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {cvAuto ? "On" : "Off"}
+            </button>
+            {confirmCv && !cvAuto && (
+              <span className="flex items-center gap-2 text-[13px]">
+                Let a CV that passes both checks go without you looking at it first?
+                <button
+                  type="button"
+                  data-testid="cv-auto-approve-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmCv(false);
+                    void save(P_CV_AUTO_APPROVE, true);
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Yes, apply this change
+                </button>
+                <button
+                  type="button"
+                  data-testid="cv-auto-approve-cancel"
+                  onClick={() => setConfirmCv(false)}
                   className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
                 >
                   Cancel
