@@ -3172,13 +3172,12 @@ _EMPLOYER_TAILS = frozenset({
     for auth in ("authorization", "authorisation")
 })
 _EXAMPLE_HEADS = (("for", "example"), ("e.g",), ("eg",), ("e", "g"), ("such", "as"), ("including",))
-# ALLOW-lists (checker round 2): an example token is a visa name - a word with a digit (H-1B, O-1), 2-4 capital
-# letters as written (TN, OPT, STEM, EAD) - or one of these joiners; a company word is Capitalised as written,
-# a legal suffix, "&" or holds a digit, and is none of the words that turn the question around.
+# CLOSED lists (checker round 3): an example token is one of these visa names (casefolded, hyphens dropped) or a
+# joiner; anything else ("NO", "USA", "none", "citizens") is a gap. The company must be THIS job's own (rule-1
+# key: :func:`normalized_company_key`, which drops punctuation and Ltd / Inc / GmbH / Corp suffixes).
+_VISA_NAMES = frozenset({"h1b", "h1b1", "h2b", "o1", "l1", "l1a", "l1b", "tn", "e3", "f1", "j1", "opt", "cpt",
+                         "stem", "ead", "gc", "e2", "tps", "daca"})  # plus "green card", two words
 _EXAMPLE_JOINERS = frozenset({"or", "status", "visa", "etc"})
-_COMPANY_SUFFIXES = frozenset({"ltd", "inc", "llc", "plc", "&"})
-_NOT_A_NAME = frozenset({"not", "no", "never", "without", "nor", "if", "yes", "unless", "or", "and", "you",
-                         "except", "none", "nobody", "anyone", "exempt", "answer", "n/a", "na"})
 _EDGE_PUNCT = ".,;:!?\"'()[]…"
 
 
@@ -3198,28 +3197,31 @@ def _tokens(text: str, separators: str = "") -> list[str]:
 
 
 def _visa_example(inside: str) -> bool:
-    """True for "for example, H-1B, TN or E-3 visa status": an example head, then visa names and joiners only."""
-    toks = _tokens(inside, ",/")
-    low = [t.casefold() for t in toks]
+    """True for "for example, H-1B, TN or E-3 visa status": an example head, then only :data:`_VISA_NAMES` (at
+    least one) and :data:`_EXAMPLE_JOINERS`."""
+    low = [t.casefold() for t in _tokens(inside, ",/")]
     head = next((h for h in _EXAMPLE_HEADS if tuple(low[:len(h)]) == h), None)
     if head is None:
         return False
-    rest = toks[len(head):]
-    names = [t for t in rest if any(c.isdigit() for c in t) or (2 <= len(t) <= 4 and t.isalpha() and t.isupper())]
-    return bool(names) and all(t in names or t.casefold() in _EXAMPLE_JOINERS for t in rest)
+    rest = [t.replace("-", "") for t in low[len(head):]]
+    named, i = False, 0
+    while i < len(rest):
+        if rest[i:i + 2] == ["green", "card"]:
+            named, i = True, i + 2
+        elif rest[i] in _VISA_NAMES:
+            named, i = True, i + 1
+        elif rest[i] in _EXAMPLE_JOINERS:
+            i += 1
+        else:
+            return False
+    return named
 
 
-def _company_name(toks: list[str]) -> bool:
-    """1-6 words, each a Capitalised word as written, a legal suffix, "&" or a word with a digit."""
-    return 1 <= len(toks) <= 6 and all(
-        t.casefold() not in _NOT_A_NAME and (
-            t.casefold() in _COMPANY_SUFFIXES or any(c.isdigit() for c in t) or (t[0].isalpha() and t[0].isupper()))
-        for t in toks)
-
-
-def _employer_sponsorship(text: str, country: Optional[str]) -> bool:
-    """True for :data:`_EMPLOYER_HEAD` + a company name (:func:`_company_name`) + one of :data:`_EMPLOYER_TAILS`,
-    then nothing but an optional closing visa example (:func:`_visa_example`)."""
+def _employer_sponsorship(text: str, country: Optional[str], company_key: Optional[str]) -> bool:
+    """True for :data:`_EMPLOYER_HEAD` + THIS job's own company (``company_key``, the rule-1 key) + one of
+    :data:`_EMPLOYER_TAILS`, then nothing but an optional closing visa example (:func:`_visa_example`)."""
+    if not company_key:
+        return False
     main = str(text or "").strip().rstrip("?.! ").strip()
     if main.endswith(")"):
         cut = main.rfind("(")
@@ -3232,21 +3234,24 @@ def _employer_sponsorship(text: str, country: Optional[str]) -> bool:
         return False
     i = low.index("from")
     j = next((k for k in range(i + 1, len(low) - 1) if low[k] == "to" and low[k + 1] == "obtain"), None)
-    if j is None or tuple(form_words(" ".join(toks[:i + 1]), country)) != _EMPLOYER_HEAD:
+    if j is None or j == i + 1 or tuple(form_words(" ".join(toks[:i + 1]), country)) != _EMPLOYER_HEAD:
         return False
-    return " ".join(form_words(" ".join(toks[j:]), country)) in _EMPLOYER_TAILS and _company_name(toks[i + 1:j])
+    return (" ".join(form_words(" ".join(toks[j:]), country)) in _EMPLOYER_TAILS
+            and normalized_company_key(" ".join(toks[i + 1:j])) == company_key)
 
 
 POLARITY_WHY = ("the question's polarity (does a Yes mean you need sponsorship, or that you do not?) is not "
                 "clear: ask the user, never guess")
 
 
-def _sponsorship_reading(text: str, country: Optional[str], keyed: bool = False) -> Optional[str]:
+def _sponsorship_reading(
+    text: str, country: Optional[str], keyed: bool = False, company_key: Optional[str] = None,
+) -> Optional[str]:
     """``"direct"``, ``"inverted"`` or ``None`` (a gap): the normalised wording is on one allow-list. A run that
     named the kit key with a placeholder for a question (no word of three letters) keeps the key's reading."""
     from src.services.profile import answer_to_memory, common_questions  # noqa: PLC0415
 
-    if _employer_sponsorship(text, country):
+    if _employer_sponsorship(text, country, company_key):
         return "direct"  # its "(for example, H-1B, TN ...)" names visas, not places: checked before FOREIGN
     words = form_words(text, country)
     if words == [FOREIGN]:
@@ -3269,10 +3274,10 @@ def _yes_no(value: Any) -> Optional[str]:
 
 
 def _sponsorship_polarity(
-    item: dict[str, Any], text: str, country: Optional[str], keyed: bool,
+    item: dict[str, Any], text: str, country: Optional[str], keyed: bool, company_key: Optional[str] = None,
 ) -> tuple[Optional[dict[str, Any]], str]:
     """The ``needs_sponsorship`` answer read for THIS wording: as-is, negated, or a gap (:data:`POLARITY_WHY`)."""
-    reading = _sponsorship_reading(text, country, keyed)
+    reading = _sponsorship_reading(text, country, keyed, company_key)
     if reading == "direct":
         return item, ""
     said = _yes_no(item["value"])
@@ -3446,7 +3451,7 @@ def form_check(
         family, template = memory_question(key, text)
         if key is None and contact_label(text) == DIAL_CODE:
             family, template = True, DIAL_CODE  # "Country code": only the saved number's own "+44", never a guess
-        if family and template is None and _sponsorship_reading(text, country) is not None:
+        if family and template is None and _sponsorship_reading(text, country, company_key=company_key) is not None:
             template = "right_to_work.{cc}.needs_sponsorship"  # an allow-listed sponsorship wording names the fact
         own = by_key.get(key) if key is not None else None
         if own is not None and (not family or own.get("source") != "approved_text"):
@@ -3496,7 +3501,7 @@ def form_check(
                                "saved one does not answer): ask the user")
         if item is not None and str(item["key"]).endswith(".needs_sponsorship"):
             # "eligible ... WITHOUT sponsorship" = the negation; only allow-listed wordings are answered
-            item, why = _sponsorship_polarity(item, text, country, key is not None)
+            item, why = _sponsorship_polarity(item, text, country, key is not None, company_key)
         pay = str(item["key"] if item is not None else template or "").startswith("salary.")
         if pay:
             sensitive = True

@@ -29,10 +29,13 @@ def _profile(needs_sponsorship: bool = False, **contact: Any) -> Any:
     )
 
 
+JOB_COMPANY = "Acme Robotics"  # THIS application's job company (check_form passes its rule-1 key)
+
+
 def _one(profile: Any, question: str, **extra: Any) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
     answers, _missing = kit.compute_answers(profile, [], "GB", None)
     out = kit.form_check(answers, [{"question": question, **extra}], records=profile.user_info.answers,
-                         country="GB")
+                         company_key=kit.normalized_company_key(JOB_COMPANY), country="GB")
     return (out["answered"][0] if out["answered"] else None), (out["missing"][0] if out["missing"] else None)
 
 
@@ -118,8 +121,8 @@ EMPLOYER = ("Will you now or in the future require sponsorship from Acme Robotic
 
 @pytest.mark.parametrize("question", [
     GREENHOUSE, EMPLOYER,
-    "Will you now or in the future require sponsorship from Acme to obtain, maintain or extend employment-based "
-    "work authorization?",
+    "Will you now or in the future require sponsorship from Acme Robotics to obtain, maintain or extend "
+    "employment-based work authorization?",
 ])
 def test_standard_sponsorship_wordings_are_read_as_is(question):
     for needs, expected in ((False, "No"), (True, "Yes")):
@@ -129,11 +132,12 @@ def test_standard_sponsorship_wordings_are_read_as_is(question):
 
 
 @pytest.mark.parametrize("question", [
-    "Will you now or in the future require sponsorship from Acme to obtain, maintain or extend employment based "
-    "work authorization (for example, H-1B) or not?",
-    "Will you now or in the future require sponsorship from Acme to obtain, maintain or extend employment based "
-    "work authorization (if not, say no)?",
-    "Will you not require sponsorship from Acme to obtain, maintain or extend employment based work authorization?",
+    "Will you now or in the future require sponsorship from Acme Robotics to obtain, maintain or extend employment "
+    "based work authorization (for example, H-1B) or not?",
+    "Will you now or in the future require sponsorship from Acme Robotics to obtain, maintain or extend employment "
+    "based work authorization (if not, say no)?",
+    "Will you not require sponsorship from Acme Robotics to obtain, maintain or extend employment based work "
+    "authorization?",
 ])
 def test_the_employer_wording_off_its_exact_shape_is_a_gap(question):
     for needs in (False, True):
@@ -142,14 +146,15 @@ def test_the_employer_wording_off_its_exact_shape_is_a_gap(question):
         assert missing is not None
 
 
-def _employer(company: str = "Acme", example: str = "") -> str:
+def _employer(company: str = JOB_COMPANY, example: str = "") -> str:
     return (f"Will you now or in the future require sponsorship from {company} to obtain, maintain or extend "
             f"employment based work authorization{' (' + example + ')' if example else ''}?")
 
 
 @pytest.mark.parametrize("example", [
     "for example, H-1B", "for example, H1B, O-1 or TN status", "e.g. H-1B, OPT, CPT, STEM OPT, EAD, L1 etc.",
-    "such as H-1B / TN visa", "for example, H-1B …",
+    "such as H-1B / TN visa", "for example, H-1B …", "for example, H-1B1, H-2B, L-1A, L-1B, E-2 or F-1",
+    "for example, J-1, TPS, DACA, GC or green card status", "for example, H-1B, TN or E-3 visa status",
 ])
 def test_visa_examples_are_noise(example):
     answered, missing = _one(_profile(True), _employer(example=example))
@@ -160,6 +165,9 @@ def test_visa_examples_are_noise(example):
 @pytest.mark.parametrize("example", [
     "for example, none", "for example, n/a", "for example, citizens are exempt", "for example, you don't",
     "for example, answer N", "including those who are exempt", "such as citizens who already hold the right to work",
+    "for example, NO", "for example, NA", "for example, NOT", "for example, NONE", "for example, NIL",
+    "for example, YES", "for example, NOPE", "for example, USA", "for example, NO H-1B", "for example, H-1B, USA",
+    "for example, Q-1", "for example, green", "for example, or",
 ])
 def test_an_example_that_is_no_visa_name_is_a_gap(example):
     for needs in (False, True):
@@ -168,8 +176,10 @@ def test_an_example_that_is_no_visa_name_is_a_gap(example):
         assert missing is not None
 
 
-@pytest.mark.parametrize("company", ["Acme", "Acme Robotics Inc.", "Smith & Jones LLP Ltd", "3M", "Acme plc"])
-def test_company_names_are_noise(company):
+@pytest.mark.parametrize("company", ["Acme Robotics", "Acme Robotics Inc.", "acme robotics", "ACME ROBOTICS LIMITED",
+                                     "Acme Robotics GmbH", "Acme Robotics Corp", "Acme Robotics plc",
+                                     "Acme Robotics, LLC"])
+def test_the_jobs_own_company_is_noise(company):
     answered, missing = _one(_profile(False), _employer(company))
     assert missing is None, (company, missing)
     assert answered["value"] == "No"
@@ -177,13 +187,21 @@ def test_company_names_are_noise(company):
 
 @pytest.mark.parametrize("company", [
     "anyone except Acme", "nobody", "none of Acme", "Acme except for citizens", "Nobody", "Anyone Except Acme",
-    "acme",
+    "Neither Corp", "Nothing Ltd", "Cannot Ltd", "Ineligible Ltd", "Waived Ltd", "Acme Citizens Only", "Acme Doesnt",
+    "Acme", "Globex Corporation", "Initech Ltd", "Acme Robotics except for citizens", "anyone except Acme Robotics",
 ])
-def test_a_company_that_is_no_plain_name_is_a_gap(company):
+def test_any_company_but_the_jobs_own_is_a_gap(company):
     for needs in (False, True):
         answered, missing = _one(_profile(needs), _employer(company))
         assert answered is None, (company, needs, answered)
         assert missing is not None
+
+
+def test_with_no_job_company_the_employer_wording_is_a_gap():
+    profile = _profile(True)
+    answers, _missing = kit.compute_answers(profile, [], "GB", None)
+    out = kit.form_check(answers, [{"question": _employer()}], records=profile.user_info.answers, country="GB")
+    assert out["answered"] == [] and len(out["missing"]) == 1
 
 
 # ── 4. Base salary excluding bonus ──
