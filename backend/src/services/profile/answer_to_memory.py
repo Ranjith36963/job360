@@ -6,9 +6,11 @@ is saved into that country's Memory permanently; nobody asks again." The user's 
 families (:func:`ask_once.memory_question`) to :func:`plan`, which converts the answer to the field's real
 shape or refuses:
 
-* yes/no -> a bool (sponsorship, relocation); on-site -> ``yes`` / ``no`` / ``only_if_sponsored``; a work
-  authorization only as one of its own statuses (a yes/no is no status); travel -> a whole 0-100 percent
-  ("No" = 0); a salary -> ``{min, max, currency, period}`` for THAT country, the currency as written (never
+* yes/no -> a bool (sponsorship, relocation), only for a question in a known DIRECT phrasing
+  (:data:`_DIRECT`, a positive allow-list; "eligible without sponsorship" is not saved); on-site ->
+  ``yes`` / ``no`` / ``only_if_sponsored`` (direct phrasing only); a work authorization only as one of its
+  own statuses (a yes/no is no status); travel -> a whole 0-100 percent ("No" = 0, direct phrasing only);
+  a salary -> ``{min, max, currency, period}`` for THAT country, the currency as written (never
   converted), the period as said, else ``year`` when min >= :data:`YEAR_FLOOR` (else not saved); a
   floor ("at least", a "minimum salary" question) is never stored; notice, start, contact and equality
   lines as written (the validators judge).
@@ -91,15 +93,51 @@ def salary(text: str, country: str) -> Optional[dict[str, Any]]:
             "period": period.pop() if period else "year"}
 
 
+# A yes/no is stored only for a question in one of these DIRECT phrasings (a positive allow-list): a verb
+# word AND a subject word of the field, and no polarity word at all. "eligible without sponsorship", "free
+# of any need", "unwilling to relocate", "don't you need": an inverted or either/or question is not saved.
+_DIRECT: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "needs_sponsorship": (frozenset({"need", "needs", "require", "requires"}), frozenset({"sponsorship", "sponsor"})),
+    "willing_to_relocate": (frozenset({"willing", "open"}), frozenset({"relocate", "relocation", "relocating"})),
+    "onsite": (frozenset({"willing", "open", "able", "happy"}), frozenset({"office", "onsite", "site"})),
+    "travel_ok_pct": (frozenset({"willing", "open", "able", "happy"}), frozenset({"travel", "travelling"})),
+}
+# "t" is the tail of every n't ("don't" -> don t); "or" is an either/or ("on-site or hybrid").
+_POLARITY = frozenset({
+    "without", "free", "exempt", "unable", "unwilling", "cannot", "cant", "can", "don", "doesn", "won", "t",
+    "never", "no", "none", "ineligible", "not", "or", "unless", "except", "instead", "nor", "neither",
+})
+_NOW_OR_FUTURE = ["now", "or", "in", "the", "future"]  # "Will you now or in the future need..." is direct
+
+
+def _question_words(question: str) -> set[str]:
+    """The question's words, with the standard "now or in the future" taken out (it is not an either/or)."""
+    words = _words(question)
+    for i in range(len(words) - len(_NOW_OR_FUTURE) + 1):
+        if words[i:i + len(_NOW_OR_FUTURE)] == _NOW_OR_FUTURE:
+            words = words[:i] + words[i + len(_NOW_OR_FUTURE):]
+            break
+    return set(words)
+
+
+def direct(field: str, question: str) -> bool:
+    """True when ``question`` asks ``field`` in a known direct phrasing (:data:`_DIRECT`), so "Yes" means
+    the field is true. Anything else is not a yes/no Job360 may store."""
+    verbs, subjects = _DIRECT[field]
+    words = _question_words(question)
+    return bool(words & verbs) and bool(words & subjects) and not words & _POLARITY
+
+
 def convert(template: str, question: str, answer: str, country: Optional[str]) -> Optional[Any]:
     """The answer in the shape of the Memory field ``template`` names, or ``None`` (never a guess)."""
     from src.services.profile.models import VALID_WORK_AUTH_STATUSES  # noqa: PLC0415
 
     field = template.rsplit(".", 1)[-1]
-    if "not" in _words(question):
-        return None  # "Do you NOT need...": a yes/no would mean its opposite
+    if field in _DIRECT and not direct(field, question):
+        return None  # an inverted, negated or either/or question: a yes/no could mean its opposite
     if template == "salary.{cc}":
-        return None if not country or _FLOOR_WORDS & set(_words(question)) else salary(answer, country)
+        words = _question_words(question)
+        return None if not country or (_FLOOR_WORDS | _POLARITY) & words else salary(answer, country)
     if field in ("needs_sponsorship", "willing_to_relocate"):
         return yes_no(answer)
     if field == "onsite":
@@ -187,7 +225,10 @@ def plan(profile: Any, overlay: list[dict[str, Any]], working: dict[str, Any], t
         old = have["value"]
         if old == new or _shown(old) == _shown(new):
             return "same", key
-        where = f"your {cc} page" if cc else "your Memory page"
+        from src.services.profile.regions import place_name  # noqa: PLC0415
+
+        # The page the value really comes from: the country's own, else its region's or ANY's (applies_via).
+        where = f"your {place_name(str(have.get('applies_via') or cc))} page" if cc else "your Memory page"
         return "conflict", (f"{where} says {_shown(old)}; this answer says {_shown(new)}. "
                             "Change it there if it is wrong.")
     stored = working.get(path, field_values(profile, [path])[path])

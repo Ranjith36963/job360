@@ -153,6 +153,54 @@ async def test_a_small_range_with_no_period_is_not_saved_and_names_the_page(
     assert _de_salary(fixture_user_id) is None
 
 
+# Checker on #1526 (2026-11-06): each of these, answered "Yes", once stored needs_sponsorship / relocation TRUE.
+INVERTED = [
+    ("sponsorship.de.q1", "Are you eligible to work in Germany without sponsorship?"),
+    ("sponsorship.de.q2", "Are you free of any need for visa sponsorship?"),
+    ("sponsorship.de.q3", "Are you unable to work here without sponsorship?"),
+    ("sponsorship.de.q4", "Are you exempt from needing sponsorship?"),
+    ("sponsorship.de.q5", "Can you start without requiring sponsorship?"),
+    ("sponsorship.de.q6", "Don't you need sponsorship to work in Germany?"),
+    ("relocation.de.q7", "Are you unwilling to relocate?"),
+]
+
+
+@pytest.mark.parametrize("key,question", INVERTED)
+@pytest.mark.asyncio
+async def test_an_inverted_question_answered_yes_is_not_saved(
+    authenticated_async_context, fixture_user_id, key, question
+):
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, {"key": key, "question": question})
+        body = await _remember(web, ask_id, {key: "Yes"})
+    assert "memory" not in body and "conflicts" not in body, body
+    assert "your DE page" in body["not_saved"][key]
+    p = _profile(fixture_user_id)
+    assert (_de_rtw(fixture_user_id), (p.user_info.logistics or {}).get("countries") if p else None) in (
+        (None, None), (None, [])), "Memory unchanged"
+
+
+@pytest.mark.parametrize("place,shown", [("EUROPE", "Europe"), ("ANY", "ANY")])
+@pytest.mark.asyncio
+async def test_a_conflict_names_the_page_the_value_comes_from(
+    authenticated_async_context, fixture_user_id, place, shown
+):
+    async with authenticated_async_context() as web:
+        page = [{"country": place, "work_authorization": "visa", "needs_sponsorship": False}]
+        resp = await web.patch("/api/profile", json={"edits": [
+            {"path": "user_info.right_to_work", "value": {"countries": page}}]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(web, "Acme")
+        async with _agent(await _token(web)) as agent:
+            ask_id = await _ask(agent, app_id, SPONSOR)
+        body = await _remember(web, ask_id, {SPONSOR["key"]: "Yes"})
+    assert "memory" not in body
+    assert body["conflicts"][SPONSOR["key"]].startswith(f"your {shown} page says No; this answer says Yes")
+    assert _profile(fixture_user_id).user_info.right_to_work["countries"] == page, "nothing written"
+
+
 @pytest.mark.asyncio
 async def test_an_assistant_answering_never_writes_memory(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as web:
@@ -202,7 +250,11 @@ def test_shapes_are_converted_or_refused_never_guessed():
     assert salary("10000 EUR", "DE")["period"] == "year" and salary("9999 EUR", "DE") is None
     rel = "logistics.{cc}.willing_to_relocate"
     assert convert(rel, "Willing to relocate?", "Yes", "DE") is True
-    assert convert("logistics.{cc}.travel_ok_pct", "Travel?", "25%", "DE") == 25
-    assert convert("right_to_work.{cc}.onsite", "On site?", "Only if sponsored", "DE") == "only_if_sponsored"
+    assert convert("logistics.{cc}.travel_ok_pct", "Willing to travel?", "25%", "DE") == 25
+    assert convert("right_to_work.{cc}.onsite", "Willing to work on site?", "Only if sponsored", "DE") == "only_if_sponsored"
+    assert convert("right_to_work.{cc}.onsite", "Willing to work on-site or hybrid?", "Yes", "DE") is None, "either/or"
+    assert convert("logistics.{cc}.travel_ok_pct", "Unable to travel?", "No", "DE") is None
+    sponsor = "right_to_work.{cc}.needs_sponsorship"
+    assert convert(sponsor, "Will you now or in the future require visa sponsorship?", "Yes", "DE") is True
     assert convert("right_to_work.{cc}.work_authorization", "Allowed to work?", "Yes", "DE") is None
     assert convert("salary.{cc}", "Minimum salary you would accept", "50000 EUR", "DE") is None, "a floor"
