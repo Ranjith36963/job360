@@ -12,12 +12,12 @@ Print this checklist and tick each step:
    clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`). `empty`, `wait`,
    `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead; pass `browser`
    "own_browser" on every form event, `submit_attempted`, `blocked` and `record_application`. Job360 had marked it blocked
-   and the page loaded clean here: `record_event` `unblocked` {resolution: "own_browser"}, then check_submit right before
-   Submit (record_application refuses without its `submit`). A sign-in wall here: `hold_released` {reason: blocked},
-   `ask_user`, STOP. **CAPTCHA or bot check** (`why_own_browser`: Job360's browser hit one): no `blocked`, no release. ONE
-   `ask_user` kind captcha: "Solve the CAPTCHA in the open <host> tab, then answer done"; wait. Answered: `record_event`
-   `unblocked` {resolution: "own_browser"}, continue the same form, end with check_submit. Never solve it yourself. Other `kind`s: their part below. Open the person's
-   `linkedin_url` in the own browser. **Done when** you hold one.
+   and the page loaded clean here (no CAPTCHA, no sign-in wall): `record_event` `unblocked` {resolution: "own_browser"},
+   then check_submit right before Submit (record_application refuses without its `submit`). A sign-in wall here:
+   `hold_released` {reason: blocked}, `ask_user`, STOP. **CAPTCHA or bot check** (`why_own_browser`: Job360's browser hit
+   one): no `blocked`, no release. ONE `ask_user` kind captcha: "Solve the CAPTCHA in the open <host> tab, then answer done";
+   wait. Answered: `record_event` `unblocked` {resolution: "own_browser"}, continue the same form, end with check_submit.
+   Never solve it yourself. Other `kind`s: below. Open the person's `linkedin_url` in the own browser. **Done when** you hold one.
 2. **Read their state** on the page: a `1st` badge or a Message button with no Connect = `connected`; Pending =
    `pending`; Connect (also under More) = `not_connected`. Save it: `update_contact(contact_id, linkedin_state=...)`.
    A login page, CAPTCHA or security check: `own_browser_queue(action="release", session, task_id,
