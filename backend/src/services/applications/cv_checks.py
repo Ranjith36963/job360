@@ -418,33 +418,86 @@ def _is_name_word(core: str) -> bool:
     )
 
 
+_PROSE_PUNCT = ".,;:!?()[]{}\"'\u201c\u201d\u2018\u2019"  # _OUTER_PUNCT plus curly quotes
+_CLOSERS = "\"')]\u201d\u2019"
+_JOINERS = ("/", "\u2013", "\u2014", "-")
+
+
+def _prose_tokens(s: str) -> list[str]:
+    """Whitespace words, with "Kubernetes/Docker", "Kubernetes-based" and "fast\u2014Redis" split into their parts."""
+    out: list[str] = []
+    for word in s.split():
+        parts = [word]
+        for j in _JOINERS:
+            parts = [p for part in parts for p in part.split(j)]
+        last = len(parts) - 1
+        # a joiner inside the word ends a run: keep the comma-like break on every part but the last
+        out.extend((p + "," if i < last and len(parts) > 1 and p else p) for i, p in enumerate(parts) if p)
+    return out
+
+
+def _strip_possessive(core: str) -> str:
+    for tail in ("'s", "\u2019s"):
+        if core.endswith(tail) and len(core) > len(tail) + 1:
+            return core[: -len(tail)]
+    return core
+
+
+def _chunks(run: list[str]) -> list[str]:
+    """A run longer than ``_MAX_RUN`` words is checked in pieces, so no word goes unchecked."""
+    return [" ".join(run[i : i + _MAX_RUN]) for i in range(0, len(run), _MAX_RUN)]
+
+
+# The words a CV section heading ends with: CV grammar, not skills (hard rule #28 is about skill lists).
+_SECTION_WORDS = frozenset(
+    "summary profile experience employment history skills competencies expertise education projects achievements"
+    " highlights certifications qualifications training courses awards honours honors publications languages"
+    " interests activities volunteering references objective overview background contact details information".split()
+)
+
+
+def _title_heading(s: str) -> bool:
+    """"Work Experience", "Key Achievements": a short Title Case line ending in a section word. "Google Cloud
+    Certified" is not one: it stays a claim."""
+    words = s.strip(" \t#*:").replace("&", " ").split()
+    return (
+        0 < len(words) <= 3
+        and all(w[:1].isupper() and w.isalpha() for w in words)
+        and words[-1].casefold() in _SECTION_WORDS
+    )
+
+
 def _line_runs(s: str) -> list[str]:
     """The capitalised runs of one CV line (see ``prose_names``)."""
     out: list[str] = []
     run: list[str] = []
     start = True  # the next word opens a sentence
-    for raw in s.split():
+    for raw in _prose_tokens(s):
         if raw.startswith(("(", "[")) and run:
-            out.append(" ".join(run[:_MAX_RUN]))
+            out.extend(_chunks(run))
             run = []
-        core = raw.strip(_OUTER_PUNCT)
+        bare = raw.strip(_PROSE_PUNCT)
+        core = _strip_possessive(bare)
         named = bool(core) and any(c.isalnum() for c in core) and not start and _is_name_word(core)
         if named:
             run.append(core)
+            if core != bare:  # "Claude Code's CLI": the possessive ends the name
+                out.extend(_chunks(run))
+                run = []
         elif run:  # a lowercase word or a separator ("|", "-", "&") ends the run
-            out.append(" ".join(run[:_MAX_RUN]))
+            out.extend(_chunks(run))
             run = []
         if not core or not any(c.isalnum() for c in core):
             continue
-        if raw.rstrip("\"')]").endswith(_SENTENCE_ENDS) or raw.endswith(_RUN_BREAK_ENDS):
+        if raw.rstrip(_CLOSERS).endswith(_SENTENCE_ENDS) or raw.endswith(_RUN_BREAK_ENDS):
             if run:
-                out.append(" ".join(run[:_MAX_RUN]))
+                out.extend(_chunks(run))
                 run = []
-            start = raw.rstrip("\"')]").endswith(_SENTENCE_ENDS)
+            start = raw.rstrip(_CLOSERS).endswith(_SENTENCE_ENDS)
         else:
             start = False
     if run:
-        out.append(" ".join(run[:_MAX_RUN]))
+        out.extend(_chunks(run))
     return out
 
 
@@ -461,7 +514,7 @@ def prose_names(text: str) -> list[str]:
         if s and name_left:
             name_left = False
             continue
-        if not s or _is_section_heading(s) or _is_skill_line(line):
+        if not s or _is_section_heading(s) or _title_heading(s) or _is_skill_line(line):
             continue
         out.extend(_line_runs(s))
     return list(dict.fromkeys(n for n in out if len(n) <= 40))
@@ -482,7 +535,14 @@ def _name_supported(name: str, hay: str) -> bool:
         words = words[:-1]
     while len(words) > 1 and words[0].isupper() and _run_in(_norm(words[0]), hay):
         words = words[1:]
-    return _run_in(_norm(" ".join(words)), hay)
+    n = _norm(" ".join(words))
+    return _run_in(n, hay) or _run_in(n, _unjoin(hay))
+
+
+def _unjoin(hay: str) -> str:
+    for j in _JOINERS:
+        hay = hay.replace(j, " ")
+    return " ".join(hay.split())
 
 
 def unsupported_terms(text: str, source: str) -> Optional[dict[str, str]]:

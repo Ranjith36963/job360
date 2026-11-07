@@ -107,6 +107,21 @@ def test_prose_names_need_the_whole_name_and_skip_dates_and_sentence_starts():
     assert cc.prose_names("Jane Doe\nSKILLS\nLanguages: Rust, Zig, Nim\n") == []  # skills lines: terms_to_check
 
 
+def test_prose_names_checker_cases_curly_quotes_joins_possessives_headings_long_runs():
+    # the independent check's cases (2026-11-07)
+    hay = cc._norm("claude code, kubernetes, docker, ai-native engineer")
+
+    def bad(body: str) -> list[str]:
+        return [n for n in cc.prose_names("Jane Doe\nSUMMARY\n" + body + "\n") if not cc._name_supported(n, hay)]
+
+    assert bad("- Built it \u201cTerraform\u201d daily") == ["Terraform"]  # curly quotes no longer hide a name
+    assert bad("- used Claude Code\u2019s agents and Claude Code's Docker setup") == []  # possessive ends the name
+    assert bad("- ran Kubernetes/Docker and Kubernetes-based Helm") == ["Helm"]  # joined words checked apart
+    assert bad("- as AI-Native Engineer") == []  # the profile's hyphenated words
+    assert bad("Work Experience") == [] and bad("Key Achievements") == []  # Title Case headings
+    assert bad("- uses Claude Code Max Pro Plus Ultra daily") == ["Claude Code Max Pro", "Plus Ultra"]  # no word unchecked
+
+
 def test_clean_cv_with_known_names_in_prose_is_silent():
     text = CLEAN + "- Built a RAG pipeline with ChromaDB and FastAPI at Calnex Solutions.\n"
     assert "unsupported_terms" not in _codes("cv", text)
