@@ -2912,6 +2912,9 @@
           "submit_mode": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "use_email_codes": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "waiting": {
             "default": [],
             "items": {
@@ -2950,6 +2953,7 @@
           "email_sends_per_day",
           "ask_before_signed_in_submit",
           "cv_auto_approve",
+          "use_email_codes",
           "paused",
           "practice_run"
         ],

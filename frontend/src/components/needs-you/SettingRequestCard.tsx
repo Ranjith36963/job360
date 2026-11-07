@@ -159,6 +159,14 @@ export function describeSettingRequest(
             ? "Let your assistant send CVs that pass both checks without asking you first"
             : "Ask me to look at every CV before it goes",
       };
+    case "assistant_settings.use_email_codes":
+      return {
+        title: "Use codes job sites email me",
+        change:
+          value === true
+            ? "Let your assistant type a one-time code a job site emails you into that same site"
+            : "I type every emailed code myself",
+      };
     case "assistant_settings.hunt_every_hours":
       return {
         title: "Job hunt",

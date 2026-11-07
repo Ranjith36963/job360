@@ -120,6 +120,15 @@ describe("describeSettingRequest", () => {
     );
   });
 
+  it("emailed codes: on and off read in plain words", () => {
+    const on = describeSettingRequest("assistant_settings.use_email_codes", true);
+    expect(on.title).toBe("Use codes job sites email me");
+    expect(on.change).toBe("Let your assistant type a one-time code a job site emails you into that same site");
+    expect(describeSettingRequest("assistant_settings.use_email_codes", false).change).toBe(
+      "I type every emailed code myself",
+    );
+  });
+
   it("standing instructions: shows every line, so a note is never confirmed blind", () => {
     const notes = describeSettingRequest("preferences.assistant_notes", ["Be brief", "No agencies"]);
     expect(notes.title).toBe("Standing instructions for your assistants");

@@ -71,7 +71,8 @@
     "answer_verified",
     "cv_reviewed",
     "cv_sent_on_review",
-    "cv_wrong_fact"
+    "cv_wrong_fact",
+    "email_code_used"
   ],
   "process": [
     "process_log",

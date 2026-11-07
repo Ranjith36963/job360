@@ -421,6 +421,9 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # {artifact_id, sha256, review_event_id}, and the user's Wrong fact on one {sent_event_id}. SERVER-WRITTEN
     # (record_event refuses both; services/applications/cv_review.py, sent_alone.py).
     "cv_sent_on_review", "cv_wrong_fact",
+    # Owner 2026-11-07: a one-time code the job site emailed was typed {host, sender_host, received_at, purpose}.
+    # Only with assistant_settings.use_email_codes on; checked in services/applications/email_codes.py. Never the code.
+    "email_code_used",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).
@@ -1019,6 +1022,8 @@ PROFILE_EDITABLE_PATHS = (
     # Owner 2026-11-05 - a CV a separate reviewer verified as strong goes without the owner's look (true / false).
     # On is riskier.
     "assistant_settings.cv_auto_approve",
+    # Owner 2026-11-07 - may the assistant type a one-time code the job site emailed (true / false). On is riskier.
+    "assistant_settings.use_email_codes",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

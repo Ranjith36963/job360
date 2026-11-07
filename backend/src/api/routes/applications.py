@@ -69,6 +69,7 @@ from src.services.applications import (
     submit_clearance,
     which_browser,
 )
+from src.services.applications import email_codes as email_codes_service
 from src.services.applications import evidence as evidence_service
 from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import kit as kit_service
@@ -4125,6 +4126,12 @@ async def _record_event(
             if body.corrects_event_id is not None or source is not None:
                 raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
             payload = await cv_review_service.check(db, user, application_id, payload)
+        if body.event_type == email_codes_service.EVENT_TYPE:
+            # Owner 2026-11-07: an emailed one-time code may be typed only with use_email_codes on and every rule
+            # checked here (M5: the MCP record_event tool calls this route function). Never the code itself.
+            if body.corrects_event_id is not None or source is not None or detail:
+                raise SpineError(422, f"{body.event_type} takes no corrects_event_id, source or detail")
+            payload = await email_codes_service.check(db, user, application_id, payload)
         if body.event_type in outcome_suggestions.EVENT_TYPES:
             # Feature 9: a suggestion never moves status; checks + dedupe live in the service,
             # in the ROUTE function, so the MCP record_event tool inherits them (M5).

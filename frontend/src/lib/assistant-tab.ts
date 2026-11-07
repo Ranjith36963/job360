@@ -101,6 +101,11 @@ export const P_CV_AUTO_APPROVE = "assistant_settings.cv_auto_approve";
 export const CV_AUTO_APPROVE_LABEL = "Send reviewed CVs without asking me";
 export const CV_AUTO_APPROVE_HELP =
   "A CV goes on its own only when the code check and a second AI reviewer both pass it (strong). Anything weak still waits for you. Works only when automatic submit is on.";
+/** Owner 2026-11-07: the assistant may type a one-time code the job site emailed the user. Off unless the user says. */
+export const P_EMAIL_CODES = "assistant_settings.use_email_codes";
+export const EMAIL_CODES_LABEL = "Use codes job sites email me";
+export const EMAIL_CODES_HELP =
+  "Your assistant may read a one-time code from your Gmail and type it into the same job site, only when the email is to you, from that site, and came in the last 15 minutes. Never passwords, password resets, or codes from Google, Microsoft, Apple, LinkedIn or banks.";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Owner 2026-10-23: hunt for jobs every N hours (1-168); empty or 0 = off. */
@@ -117,7 +122,7 @@ export const PC_ON_HELP =
   "When your computer is usually on. Your assistant uses its own browser only then, for tasks Job360's browser could not finish. Blank = any time.";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
-  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE,
+  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE, P_EMAIL_CODES,
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
   P_PEOPLE_HUNT, P_PC_ON,
   P_OUTREACH_PER_COMPANY, P_NETWORK_PER_HOUR, P_LINKEDIN_PER_DAY, P_EMAIL_PER_DAY,
@@ -140,6 +145,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_AUTO_EMAILS]: "Automatic employer emails",
   [P_OUTREACH_SEND]: "Automatic outreach emails",
   [P_CV_AUTO_APPROVE]: CV_AUTO_APPROVE_LABEL,
+  [P_EMAIL_CODES]: EMAIL_CODES_LABEL,
   [P_COMPANY_CAP]: "Applications per company",
   [P_COMPANY_DAYS]: "Days for the company limit",
   [P_WEEKLY_CAP]: "Weekly limit",
@@ -201,7 +207,7 @@ export function pcOnText(v: unknown): string {
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
-  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM || path === P_CV_AUTO_APPROVE) return v === true ? "on" : "off";
+  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM || path === P_CV_AUTO_APPROVE || path === P_EMAIL_CODES) return v === true ? "on" : "off";
   if (path === P_OUTREACH_SEND) return v === "auto" ? "on" : "off";
   if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
   if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;

@@ -23,6 +23,9 @@ import {
   CV_AUTO_APPROVE_HELP,
   CV_AUTO_APPROVE_LABEL,
   P_CV_AUTO_APPROVE,
+  EMAIL_CODES_HELP,
+  EMAIL_CODES_LABEL,
+  P_EMAIL_CODES,
   LINKEDIN_PREMIUM_HELP,
   P_AUTO_EMAILS,
   P_BELOW,
@@ -96,6 +99,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const [pcTo, setPcTo] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirmCv, setConfirmCv] = useState(false);
+  const [confirmCodes, setConfirmCodes] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
   const [confirmBelowAuto, setConfirmBelowAuto] = useState(false);
   const [premium, setPremium] = useState(false);
@@ -210,6 +214,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const outreachSend = settingOutreachSend(view.outreach_send);
   const cvAuto = settingAutoEmails(view.cv_auto_approve);
+  const emailCodes = settingAutoEmails(view.use_email_codes);
   const applyMode = applyModeText(modeOf(view), view.auto_grant_count?.value);
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
@@ -664,6 +669,55 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   type="button"
                   data-testid="cv-auto-approve-cancel"
                   onClick={() => setConfirmCv(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
+          <Row title={EMAIL_CODES_LABEL} sub={EMAIL_CODES_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={emailCodes}
+              aria-label={EMAIL_CODES_LABEL}
+              data-testid="email-codes-toggle"
+              disabled={busy}
+              onClick={() => {
+                if (emailCodes) {
+                  setConfirmCodes(false);
+                  void save(P_EMAIL_CODES, false); // the stop switch applies at once
+                } else {
+                  setConfirmCodes(true);
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                emailCodes ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {emailCodes ? "On" : "Off"}
+            </button>
+            {confirmCodes && !emailCodes && (
+              <span className="flex items-center gap-2 text-[13px]">
+                Let your assistant read a job site&apos;s emailed code from your Gmail and type it on that site?
+                <button
+                  type="button"
+                  data-testid="email-codes-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmCodes(false);
+                    void save(P_EMAIL_CODES, true);
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Yes, apply this change
+                </button>
+                <button
+                  type="button"
+                  data-testid="email-codes-cancel"
+                  onClick={() => setConfirmCodes(false)}
                   className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
                 >
                   Cancel
