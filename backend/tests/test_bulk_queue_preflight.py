@@ -111,7 +111,7 @@ def _seed_profile(user_id: str, avoid: list[str] | None = None) -> None:
 
     save_profile(
         UserProfile(
-            cv_data=CVData(raw_text="Python data engineer.", name="Ada Lovelace", skills=["Python"]),
+            cv_data=CVData(raw_text="Python data engineer: dbt, Snowflake.", name="Ada Lovelace", skills=["Python"]),
             preferences=UserPreferences(target_job_titles=["Data Engineer"], avoid_companies=avoid or []),
         ),
         user_id,

@@ -42,7 +42,7 @@ def _seed_profile(user_id: str) -> None:
 
     save_profile(
         UserProfile(
-            cv_data=CVData(raw_text="Python data engineer.", name="Ada Lovelace", location="London, UK"),
+            cv_data=CVData(raw_text="Python data engineer: dbt, Snowflake.", name="Ada Lovelace", location="London, UK"),
             preferences=UserPreferences(target_job_titles=["Data Engineer"]),
         ),
         user_id, source_action="cv_upload",

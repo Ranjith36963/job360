@@ -379,7 +379,7 @@ async def test_a_correcting_note_removes_a_lesson_from_get_profile(authenticated
     from src.services.profile.storage import save_profile
 
     save_profile(
-        UserProfile(cv_data=CVData(raw_text="Python data engineer.", name="Ada Lovelace")),
+        UserProfile(cv_data=CVData(raw_text="Python data engineer: dbt, Snowflake.", name="Ada Lovelace")),
         fixture_user_id, source_action="cv_upload",
     )
     async with authenticated_async_context() as client:
