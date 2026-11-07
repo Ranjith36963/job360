@@ -30,6 +30,7 @@ export const ROUTE_LABELS = {
   linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
   link_unclear: "This link looks broken or disguised: your own browser checks it",
   learned_bot_check: "Job360's browser was blocked twice on {site}: your own browser runs it",
+  captcha_handoff: "Job360's browser hit a CAPTCHA on {site}: your own browser, you solve it, it fills the rest",
   waiting: "Waiting for your PC",
 } as const;
 
