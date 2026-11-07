@@ -61,7 +61,48 @@ async def _blocked_counts(db: JobDatabase, user_id: str, ids: list[int]) -> dict
         f"GROUP BY e.application_id",
         [user_id, *ids],
     )
-    return {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    counts = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    for app_id, n in (await _handed_off(db, user_id, sorted(counts))).items():
+        counts[app_id] = max(0, counts[app_id] - n)
+    return counts
+
+
+async def _handed_off(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, int]:
+    """Per application: CAPTCHA / bot-check blocks from Job360's cloud browser (``blocked.captcha_handoff``,
+    counted by :func:`_blocked_counts`) that the user's own browser then took over: a later event stamped
+    ``browser: own_browser``. That block was handed off, not failed, so it is not counted (owner 2026-11-07).
+    Read at query time from stored payloads: no migration, old rows count. Scoped by ``user_id``."""
+    if not ids:
+        return {}
+    cur = await db._db.execute(
+        f"SELECT e.id, e.application_id, e.event_type, e.payload FROM application_events e "  # noqa: S608
+        f"WHERE e.user_id = ? AND e.application_id IN ({_marks(ids)}) "
+        f"AND e.event_type IN ('queued', 'blocked', 'form_checked', 'form_filled', 'form_swept', "
+        f"'submit_attempted') "
+        f"AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        [user_id, *ids],
+    )
+    open_handoffs: dict[int, int] = {}  # handed-off blocks not yet taken over, per application
+    out: dict[int, int] = {}
+    for r in await cur.fetchall():
+        raw = r[3]
+        try:
+            p = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        if not isinstance(p, dict):
+            continue
+        app_id = int(r[1])
+        if r[2] == "queued":  # counting starts again from a re-queue, as in _blocked_counts
+            open_handoffs.pop(app_id, None)
+            out.pop(app_id, None)
+        elif r[2] == "blocked":
+            if blocked_service.captcha_handoff(p):
+                open_handoffs[app_id] = open_handoffs.get(app_id, 0) + 1
+        elif p.get("browser") == "own_browser" and open_handoffs.get(app_id):
+            open_handoffs.pop(app_id)
+            out[app_id] = 1  # ONE hand-off per queue span is free; a CAPTCHA that comes back counts
+    return out
 
 
 async def _with_kind(db: JobDatabase, user_id: str, ids: list[int], kind: str) -> set[int]:
@@ -315,10 +356,11 @@ def route_label(url: str, block: dict[str, Any], hosts: frozenset[str] = frozens
     carries the plain reason ("Job360's browser was blocked twice on <site>"). Pure; ``queue_browsers`` and
     ``blockers`` share it."""
     reason = str(block.get("reason") or "")
+    handoff = blocked_service.captcha_handoff(block)
     by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER
     return routing.label(routing.browser_for(
-        url=url, queue_kind="application",
-        job360_failed=reason if by_browser and reason in routing.JOB360_FAILURES else "",
+        url=url, queue_kind="application", handoff=handoff,
+        job360_failed=reason if (by_browser and reason in routing.JOB360_FAILURES) or handoff else "",
         page_stop="otp_needed" if reason == "otp_needed" else "", route=learned.route_for(url, hosts),
     ), site=routing.site_of(url)[1])
 

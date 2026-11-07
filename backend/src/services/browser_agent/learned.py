@@ -69,7 +69,10 @@ async def blocked_hosts(db: JobDatabase, user_id: str, now: Optional[datetime] =
             p = json.loads(raw) if isinstance(raw, str) else raw
         except ValueError:
             continue
-        if not isinstance(p, dict) or p.get("by") != "browser" or p.get("reason") not in LEARN_REASONS:
+        # Job360's browser wrote it (``by``), or an assistant recorded it for the cloud browser (a hand-off).
+        if not isinstance(p, dict) or p.get("reason") not in LEARN_REASONS or (
+            p.get("by") != "browser" and p.get("browser") != "job360"
+        ):
             continue
         host, at = host_of(str(p.get("page_host") or "")), _when(d.get("recorded_at"))
         if host and at is not None and d.get("application_id") is not None:

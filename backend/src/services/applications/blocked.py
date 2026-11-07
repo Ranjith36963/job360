@@ -244,6 +244,17 @@ def job360_wrote(block_payload: dict[str, Any]) -> bool:
     return block_payload.get(BY_KEY) == BY_BROWSER or block_payload.get(which_browser.KEY) == which_browser.JOB360
 
 
+def captcha_handoff(block_payload: dict[str, Any]) -> bool:
+    """A CAPTCHA / bot check Job360's cloud browser met, recorded by an assistant (``browser: job360``) without
+    the browser's own ``by`` marker: it cannot hand the CAPTCHA over, so the next PC run takes it (owner
+    2026-11-07, route reason ``captcha_handoff``). Decided at read time from the stored payload: no migration,
+    old rows count. ``login_needed``, ``site_error`` and the rest never do."""
+    return (
+        block_payload.get("reason") in FINISH_HERE_REASONS and job360_wrote(block_payload)
+        and block_payload.get(BY_KEY) != BY_BROWSER
+    )
+
+
 async def browser_captcha_open(db: JobDatabase, user_id: str, application_id: int) -> bool:
     """The open block is a CAPTCHA that Job360's own browser recorded (``by: browser``). A caller's
     look-alike (``step: "Job360 browser"`` typed by an assistant) never counts, nor does a block from
@@ -394,6 +405,7 @@ async def browser_for_asks(
         route = routing.ask_route(
             a.get("kind") or "", block_reason=str(mine.get("reason") or ""),
             block_by_browser=mine.get(BY_KEY) == BY_BROWSER, finish_here=a["id"] in finish,
+            handoff=captcha_handoff(mine),
             url=urls.get(int(a.get("application_id") or 0), ""),
         )
         out[int(a["id"])] = routing.label(route)

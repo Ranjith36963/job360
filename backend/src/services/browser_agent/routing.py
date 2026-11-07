@@ -33,7 +33,7 @@ ROUTE_REASONS = (
     "default", "job360_login_required", "job360_bot_check", "job360_safety_stop", "password", "mfa", "only_you",
     "linkedin_own_browser",
     "learned_blocked", "learned_login", "probe", "at_cap", "linkedin_paused", "account_step", "linkedin_guest_blocked",
-    "linkedin_guest_read", "link_unclear", "learned_bot_check",
+    "linkedin_guest_read", "link_unclear", "learned_bot_check", "captcha_handoff",
 )
 
 # "unnamed" is never stored by the route learner (its CHECK allows only the four named kinds): a link whose host
@@ -74,6 +74,9 @@ JOB360_FAILURES: dict[str, str] = {
     "captcha": "job360_bot_check", "bot_check": "job360_bot_check",
     "manual_only": "job360_safety_stop", "safety_block": "job360_safety_stop",
 }
+# Owner 2026-11-07: a CAPTCHA / bot check met in Job360's cloud browser (which cannot hand it over) goes to the
+# PC queue, where the user solves it in their own tab. The two bot keys of ``JOB360_FAILURES``.
+CAPTCHA_HANDOFF = frozenset({"captcha", "bot_check"})
 # What a page asks for that no browser may give: the user's alone.
 HUMAN_STOPS: dict[str, str] = {"password": "password", "mfa": "mfa", "otp": "mfa", "otp_needed": "mfa"}
 
@@ -99,6 +102,7 @@ ROUTE_LABELS: dict[str, str] = {
     "linkedin_guest_blocked": "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
     "link_unclear": "This link looks broken or disguised: your own browser checks it",
     "learned_bot_check": "Job360's browser was blocked twice on {site}: your own browser runs it",
+    "captcha_handoff": "Job360's browser hit a CAPTCHA on {site}: your own browser, you solve it, it fills the rest",
     "waiting": "Waiting for your PC",
 }
 # Shown for a route Job360's server reads itself (reason "linkedin_guest_read").
@@ -232,14 +236,15 @@ def strict(
 
 def browser_for(
     *, page_stop: str = "", job360_failed: str = "", url: str = "", linkedin: bool = False,
-    route: Route | None = None, queue_kind: str = "", account_step: bool = False,
+    route: Route | None = None, queue_kind: str = "", account_step: bool = False, handoff: bool = False,
 ) -> Route:
     """The route for a task: ``strict`` first, then what Job360's browser just reported, then the learned
     ``route``, then Job360's browser. ``page_stop`` is what the page asks for (a password, a code);
     ``job360_failed`` is why Job360's browser already stopped on it ("" = it has not tried or has not failed);
     ``url`` is the task's page (an application's apply link); ``linkedin`` marks a LinkedIn task that has no
     link here (a message or a connection note); ``route`` is the learner's answer for the site and can never
-    override ``strict``."""
+    override ``strict``. ``handoff``: the failure was a CAPTCHA / bot check an assistant recorded for Job360's
+    browser (not the browser's own marker): reason ``captcha_handoff``."""
     if linkedin:
         kind, key, path = "linkedin", "linkedin", ""
     else:
@@ -252,24 +257,30 @@ def browser_for(
     )
     if fixed is not None:
         return fixed
+    if handoff and job360_failed in CAPTCHA_HANDOFF:
+        return Route("own_browser", "captcha_handoff")
     if job360_failed in JOB360_FAILURES:
         return Route("own_browser", JOB360_FAILURES[job360_failed])
     return route if route is not None else Route("job360", "default")
 
 
 def ask_route(
-    kind: str, *, block_reason: str = "", block_by_browser: bool = False, finish_here: bool = False, url: str = ""
+    kind: str, *, block_reason: str = "", block_by_browser: bool = False, finish_here: bool = False, url: str = "",
+    handoff: bool = False,
 ) -> Route:
     """The route for one open Needs-you ask: its ``kind``, the reason of the open block it came from and
     whether Job360's own browser wrote that block (``by: browser``). ``finish_here``: the CAPTCHA can be
     solved right now on Needs you, in the page Job360's browser still holds - the user's alone. ``url``: the
-    application's apply link; linkedin.com is the user's own browser for whatever is not the user's alone."""
+    application's apply link; ``handoff``: an assistant recorded the CAPTCHA / bot check for Job360's browser
+    (``blocked.captcha_handoff``). linkedin.com is the user's own browser for whatever is not the user's alone."""
     if finish_here:
         return Route("human", "only_you")
     if kind == "login" and block_reason == "otp_needed":
         return Route("human", "mfa")
     if block_by_browser and block_reason in JOB360_FAILURES:
         return Route("own_browser", JOB360_FAILURES[block_reason])
+    if handoff and block_reason in CAPTCHA_HANDOFF:
+        return Route("own_browser", "captcha_handoff")
     if kind == "login":
         return Route("human", "password")
     if kind in ("upload", "safety", "captcha"):
