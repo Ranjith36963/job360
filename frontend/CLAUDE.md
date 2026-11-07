@@ -46,7 +46,7 @@ Training data for Next.js 14–15 is **wrong** here. Before any App Router patte
   interactive parts into a child client component (this repo's pattern:
   `applications/[id]/page.tsx` server + `applications/[id]/ApplicationClient.tsx` client).
 - A codemod exists for the async migration, but **don't trust auto-fixes blindly** —
-  verify against the running app (see "Verify", below).
+  verify against the running app (the `run-job360` skill, "What /verify should do per change").
 
 ## Commands (run from `frontend/`)
 
@@ -79,11 +79,5 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
   `src/app/__tests__/redirects.test.tsx` pins where each old `/settings/*` URL lands.
 - `src/middleware.ts` — session-cookie auth guard; `PROTECTED_PATHS` there is the
   gated list, and an unauthed hit bounces to `/login?next=…`.
-
-## Verify, don't assume (root rule + verify-job360 skill)
-
-A clean `npm run build` does NOT prove the UI works. After touching pages, API calls,
-or auth, run the **`/verify-job360`** skill (browser flavor) — it drives a real browser
-with Playwright, checks the console for errors, and walks the journey. "Compiles" ≠ "works".
 
 See root [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the deep technical reference.
