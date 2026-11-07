@@ -74,6 +74,7 @@ WHY_WORDS = {
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
     "link_unclear": "This link looks broken or disguised: your own browser checks it.",
     "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
+    "captcha_handoff": "Job360's browser hit a CAPTCHA or bot check: you solve it in your own tab.",
 }
 
 
@@ -566,16 +567,21 @@ async def _application_tasks(
     blocks = await blocked.open_blocks(db, user.id, list(apps))
     routes: list[tuple[int, routing.Route]] = []
     for app_id, p in sorted(blocks.items()):
-        if p.get(blocked.BY_KEY) != blocked.BY_BROWSER:
+        handoff = blocked.captcha_handoff(p)
+        if p.get(blocked.BY_KEY) != blocked.BY_BROWSER and not handoff:
             continue
         reason = str(p.get("reason") or "")
         route = routing.ask_route(
-            blocked.ASK_KIND_FOR_REASON.get(reason, ""), block_reason=reason, block_by_browser=True,
+            blocked.ASK_KIND_FOR_REASON.get(reason, ""), block_reason=reason, block_by_browser=not handoff,
+            handoff=handoff,
             # While Job360's browser still holds that page the user finishes it on Needs you; once it let go, no.
             finish_here=reason == "captcha" and blocked.browser_hold_live(user.id, app_id),
         )
         if route.kind == "own_browser":
             routes.append((app_id, route))
+            if route.reason == "captcha_handoff":
+                _log("captcha_handoff_routed", user.id, "own_browser", application_id=app_id,
+                     host=p.get("page_host") or "", reason=reason, route_reason=route.reason)
     # Easy Apply (owner 2026-10-26): a batch-queued application on linkedin.com with no open block waits here
     # from the start, oldest queued first; Job360's browser never opens it.
     # A link whose host cannot be named waits here too ("link_unclear"), so the user's own browser can check it.

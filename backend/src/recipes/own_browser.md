@@ -1,23 +1,23 @@
 # 360-own_browser — send a LinkedIn message the user clicked Send on, in their own browser only
 <!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
-A send is for a person whose card the user pressed **Send** on, or one check_outreach clears without it (below).
-Every LinkedIn step runs ONLY in the user's OWN browser (your app drives it on their PC): Job360's browser never
-opens linkedin.com. PC off, or a scheduled cloud run: the person waits in the queue; a scheduled run never takes
-those. You send ONLY while you hold the person: take first. Which browser: get_recipe("rules") "Which browser".
-
+A send is for a person whose card the user pressed **Send** on, or one check_outreach clears without it (below). Every
+LinkedIn step runs ONLY in the user's OWN browser (your app drives it on their PC): Job360's browser never opens
+linkedin.com. PC off, or a scheduled cloud run: the person waits in the queue; a scheduled run never takes those. You
+send ONLY while you hold the person: take first. Which browser: get_recipe("rules") "Which browser".
 Print this checklist and tick each step:
 [ ] 1 Take  [ ] 2 Read their state  [ ] 3 Right draft  [ ] 4 Gate  [ ] 5 Send  [ ] 6 Record  [ ] 7 Gap
-
-1. **Take ONE person.** Use ONE `session` label for the whole run. `own_browser_queue(action="list")` (`open_now`
-   false: tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session` (one person
-   the user just clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`).
-   `empty`, `wait`, `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead;
-   pass `browser` "own_browser" on every form event, `submit_attempted`, `blocked` and `record_application`.
-   Job360 had marked it blocked and the page loaded clean here (no CAPTCHA, no sign-in wall): `record_event`
-   `unblocked` {resolution: "own_browser"}, then check_submit as usual right before Submit (record_application
-   refuses without its `submit`). A CAPTCHA or sign-in here: `hold_released` {reason: blocked}, `ask_user`, STOP.
-   Other `kind`s: their part below. Open the person's `linkedin_url` in the own browser. **Done when** you hold one.
+1. **Take ONE person.** Use ONE `session` label for the whole run. `own_browser_queue(action="list")` (`open_now` false:
+   tell the user when it opens, `opens_at`, and STOP), then `action="take"` with your `session` (one person the user just
+   clicked: `own_browser_queue(action="take", session, contact_id)`, `own_browser_task` state `queued`). `empty`, `wait`,
+   `daily_limit`, `busy`, `paused`: STOP. `kind` application: follow get_recipe("apply") instead; pass `browser`
+   "own_browser" on every form event, `submit_attempted`, `blocked` and `record_application`. Job360 had marked it blocked
+   and the page loaded clean here: `record_event` `unblocked` {resolution: "own_browser"}, then check_submit right before
+   Submit (record_application refuses without its `submit`). A sign-in wall here: `hold_released` {reason: blocked},
+   `ask_user`, STOP. **CAPTCHA or bot check** (`why_own_browser`: Job360's browser hit one): no `blocked`, no release. ONE
+   `ask_user` kind captcha: "Solve the CAPTCHA in the open <host> tab, then answer done"; wait. Answered: `record_event`
+   `unblocked` {resolution: "own_browser"}, continue the same form, end with check_submit. Never solve it yourself. Other `kind`s: their part below. Open the person's
+   `linkedin_url` in the own browser. **Done when** you hold one.
 2. **Read their state** on the page: a `1st` badge or a Message button with no Connect = `connected`; Pending =
    `pending`; Connect (also under More) = `not_connected`. Save it: `update_contact(contact_id, linkedin_state=...)`.
    A login page, CAPTCHA or security check: `own_browser_queue(action="release", session, task_id,
