@@ -119,6 +119,9 @@ def test_prose_names_checker_cases_curly_quotes_joins_possessives_headings_long_
     assert bad("- ran Kubernetes/Docker and Kubernetes-based Helm") == ["Helm"]  # joined words checked apart
     assert bad("- as AI-Native Engineer") == []  # the profile's hyphenated words
     assert bad("Work Experience") == [] and bad("Key Achievements") == []  # Title Case headings
+    assert bad("- Kubernetes Terraform Skills") == ["Terraform Skills"]  # a name dressed as a heading is still read
+    assert bad("- Built with Claude-Code") == []  # hyphenated name is one name...
+    assert cc.prose_names("Jane Doe\nSUMMARY\n- Built with Claude-Kode\n") == ["Claude Kode"]  # ...checked whole
     assert bad("- uses Claude Code Max Pro Plus Ultra daily") == ["Claude Code Max Pro", "Plus Ultra"]  # no word unchecked
 
 

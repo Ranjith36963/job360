@@ -420,19 +420,34 @@ def _is_name_word(core: str) -> bool:
 
 _PROSE_PUNCT = ".,;:!?()[]{}\"'\u201c\u201d\u2018\u2019"  # _OUTER_PUNCT plus curly quotes
 _CLOSERS = "\"')]\u201d\u2019"
-_JOINERS = ("/", "\u2013", "\u2014", "-")
+_JOINERS = ("/", "\u2013", "\u2014")  # list or dash: the parts are separate names
+
+
+def _hyphen_word(part: str) -> list[str]:
+    """"Claude-Code" stays one name ("Claude Code"); "Kubernetes-based" keeps only "Kubernetes" and ends the run."""
+    pieces = [p for p in part.split("-") if p]
+    lead: list[str] = []
+    for p in pieces:
+        if not p[:1].isupper():
+            break
+        lead.append(p)
+    if not lead or len(lead) == len(pieces):
+        return [" ".join(lead) if lead else part]
+    return [" ".join(lead) + ","]
 
 
 def _prose_tokens(s: str) -> list[str]:
-    """Whitespace words, with "Kubernetes/Docker", "Kubernetes-based" and "fast\u2014Redis" split into their parts."""
+    """Whitespace words, with "Kubernetes/Docker" and "fast\u2014Redis" split into their parts."""
     out: list[str] = []
     for word in s.split():
         parts = [word]
         for j in _JOINERS:
             parts = [p for part in parts for p in part.split(j)]
-        last = len(parts) - 1
-        # a joiner inside the word ends a run: keep the comma-like break on every part but the last
-        out.extend((p + "," if i < last and len(parts) > 1 and p else p) for i, p in enumerate(parts) if p)
+        parts = [p for p in parts if p]
+        for i, p in enumerate(parts):
+            toks = _hyphen_word(p) if "-" in p.strip("-") else [p]
+            # a list or dash joiner inside the word ends a run: a comma-like break on every part but the last
+            out.extend(t + "," if i < len(parts) - 1 and not t.endswith(",") else t for t in toks)
     return out
 
 
@@ -456,14 +471,21 @@ _SECTION_WORDS = frozenset(
 )
 
 
+_HEADING_LEADS = frozenset(
+    "work key professional technical core relevant career personal selected additional other academic"
+    " notable recent and of".split()
+)
+
+
 def _title_heading(s: str) -> bool:
-    """"Work Experience", "Key Achievements": a short Title Case line ending in a section word. "Google Cloud
-    Certified" is not one: it stays a claim."""
+    """"Work Experience", "Key Achievements": every word heading grammar, the last a section word. "Kubernetes
+    Skills" or "Google Cloud Certified" is not one: it stays a claim."""
     words = s.strip(" \t#*:").replace("&", " ").split()
     return (
         0 < len(words) <= 3
         and all(w[:1].isupper() and w.isalpha() for w in words)
         and words[-1].casefold() in _SECTION_WORDS
+        and all(w.casefold() in _HEADING_LEADS | _SECTION_WORDS for w in words[:-1])
     )
 
 
@@ -540,7 +562,7 @@ def _name_supported(name: str, hay: str) -> bool:
 
 
 def _unjoin(hay: str) -> str:
-    for j in _JOINERS:
+    for j in _JOINERS + ("-",):
         hay = hay.replace(j, " ")
     return " ".join(hay.split())
 

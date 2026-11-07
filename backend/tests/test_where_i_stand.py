@@ -136,7 +136,7 @@ def _seed_line(user_id: str, line: int = 70) -> None:
     from src.services.profile.storage import save_assistant_settings, save_profile
 
     save_profile(
-        UserProfile(cv_data=CVData(raw_text="Python data engineer.", name="Ada Lovelace"),
+        UserProfile(cv_data=CVData(raw_text="Python data engineer: dbt, Snowflake.", name="Ada Lovelace"),
                     preferences=UserPreferences(target_job_titles=["Data Engineer"])),
         user_id, source_action="cv_upload",
     )
