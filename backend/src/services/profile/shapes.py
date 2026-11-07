@@ -204,6 +204,11 @@ SHAPES: dict[str, dict[str, Any]] = {
         "note": "a CV the reviewer judged strong (and Job360 verified) skips the user's look in auto mode. "
         "On needs the user's OK",
     },
+    _settings.EMAIL_CODES_PATH: {
+        "example": False,
+        "note": "type a one-time code the job site emailed to the user (record email_code_used first). "
+        "On needs the user's OK",
+    },
     _settings.PC_ON_HOURS_PATH: {
         "example": {"days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "18:00"},
         "note": "when the user's PC is on, in their timezone; null = any time. A from later than to runs overnight",

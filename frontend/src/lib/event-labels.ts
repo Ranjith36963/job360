@@ -135,6 +135,7 @@ export const EVENT_LABEL: Record<string, string> = {
   // Owner 2026-11-06: Sent on its own - a CV that went on a strong review, and the user's Wrong fact on it.
   cv_sent_on_review: "CV sent after a strong review",
   cv_wrong_fact: "Wrong fact reported on a CV",
+  email_code_used: "Emailed code entered on the job site",
 };
 
 function relayedWords(payload: unknown): boolean {

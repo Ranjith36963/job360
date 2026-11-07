@@ -42,6 +42,9 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   applies it (owner 2026-11-03); every other submit rule still holds.
 * ``cv_auto_approve`` — ``True`` | ``False`` (default): in auto mode, a CV whose stored ``cv_reviewed`` is
   ``strong`` for its exact id + sha clears ``cv_not_seen`` (owner 2026-11-05). Turning it on is riskier.
+* ``use_email_codes`` — ``True`` | ``False`` (default): may the assistant type a one-time code the job site
+  emailed to the user's own Gmail (owner 2026-11-07); every rule is checked by ``applications.email_codes``.
+  Turning it on is riskier.
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -123,6 +126,7 @@ HUNT_EVERY_MAX = 168  # one week
 PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
 PC_ON_HOURS_PATH = f"{HEAD}.pc_on_hours"
 CV_AUTO_APPROVE_PATH = f"{HEAD}.cv_auto_approve"
+EMAIL_CODES_PATH = f"{HEAD}.use_email_codes"
 PC_ON_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SIGNED_IN_ASK_PATH = f"{HEAD}.ask_before_signed_in_submit"
 # Owner 2026-11-02 - the user's own outreach send limits: field -> (default, operator backstop setting name).
@@ -139,6 +143,7 @@ SETTING_PATHS: tuple[str, ...] = (
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
     PEOPLE_HUNT_PATH, PC_ON_HOURS_PATH, *OUTREACH_LIMIT_PATHS, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH,
+    EMAIL_CODES_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -395,7 +400,9 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH):
+    if path in (
+        AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH, SIGNED_IN_ASK_PATH, EMAIL_CODES_PATH,
+    ):
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
@@ -444,6 +451,7 @@ class EffectiveSettings:
     # Owner 2026-11-03 - rule 7 (ask_always_site, a signed-in submit) applies only while this is on.
     ask_before_signed_in_submit: bool = True
     cv_auto_approve: bool = False
+    use_email_codes: bool = False
 
 
 def outreach_backstop(name: str) -> int:
@@ -550,6 +558,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         **{name: outreach_limit(name, getattr(s, name)) for name in OUTREACH_LIMITS},
         ask_before_signed_in_submit=s.ask_before_signed_in_submit is not False,
         cv_auto_approve=s.cv_auto_approve is True,
+        use_email_codes=s.use_email_codes is True,
     )
 
 
@@ -604,7 +613,7 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == INBOX_MODE_PATH:
         return raw or ""
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH, EMAIL_CODES_PATH):
         return bool(raw)
     if path == OUTREACH_SEND_PATH:
         return _outreach_send(raw)
@@ -719,6 +728,7 @@ def classify_change(
     ask_before_signed_   on -> off (a submit through the user's own     off -> on (applies at once)
     in_submit            signed-in account may go on to auto-submit)
     cv_auto_approve      off -> on (a reviewed CV goes unseen)          on -> off (applies at once)
+    use_email_codes      off -> on (the assistant types emailed codes)  on -> off (applies at once)
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -768,7 +778,7 @@ def classify_change(
         return "safer"
     if path == INBOX_MODE_PATH:
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
-    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH):
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH, CV_AUTO_APPROVE_PATH, EMAIL_CODES_PATH):
         return "riskier" if (bool(after) and not bool(before)) else "safer"
     if path == OUTREACH_SEND_PATH:
         return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
@@ -2793,6 +2803,7 @@ def build_settings_view(
         "people_hunt": {"value": raw.people_hunt, "effective": eff.people_hunt},
         "pc_on_hours": {"value": raw.pc_on_hours, "effective": eff.pc_on_hours},
         "cv_auto_approve": {"value": raw.cv_auto_approve, "effective": eff.cv_auto_approve},
+        "use_email_codes": {"value": raw.use_email_codes, "effective": eff.use_email_codes},
         **{name: {"value": getattr(raw, name), "effective": getattr(eff, name)} for name in OUTREACH_LIMITS},
         "ask_before_signed_in_submit": {
             "value": raw.ask_before_signed_in_submit, "effective": eff.ask_before_signed_in_submit,

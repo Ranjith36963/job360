@@ -5046,6 +5046,7 @@ export interface components {
              */
             setup_progress: components["schemas"]["SetupProgressOut"];
             submit_mode: components["schemas"]["SettingFieldOut"];
+            use_email_codes: components["schemas"]["SettingFieldOut"];
             /**
              * Waiting
              * @default []

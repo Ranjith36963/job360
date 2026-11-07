@@ -209,6 +209,27 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("emailed codes: off by default, on asks to confirm, Cancel sends nothing, off is one click", async () => {
+    await ready();
+    const toggle = screen.getByTestId("email-codes-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("email-codes-cancel"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("email-codes-toggle"));
+    fireEvent.click(screen.getByTestId("email-codes-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.use_email_codes", value: true }]),
+    );
+    getAssistantSettings.mockResolvedValue(view({ use_email_codes: field(true, true) }));
+    await ready();
+    const on = screen.getAllByTestId("email-codes-toggle").find((t) => t.getAttribute("aria-checked") === "true");
+    fireEvent.click(on!);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.use_email_codes", value: false }]),
+    );
+  });
+
   it("automatic outreach emails: turning on asks to confirm first", async () => {
     await ready();
     const toggle = screen.getByTestId("outreach-send-toggle");

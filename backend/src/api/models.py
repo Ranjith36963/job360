@@ -316,6 +316,7 @@ class AssistantSettingsView(BaseModel):
     # Owner 2026-11-03 - a submit through the user's own signed-in account always asks first (default true).
     ask_before_signed_in_submit: SettingFieldOut
     cv_auto_approve: SettingFieldOut
+    use_email_codes: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""

@@ -40,7 +40,7 @@ Rows (unconfirmed = confirm on first real run):
 | Lever tick-box raises a CAPTCHA (SEEN-rule) | `record_event` `blocked` {reason: captcha, page_host}. The user solves it. Never work around it. |
 | Site says you already applied ("You already have an application for this role") | `blocked` {reason: already_applied_on_site, page_host}; stop. Never retry it; the user says if it is applied. |
 | Site says you applied too much today | `blocked` {reason: site_limit_reached, page_host}; stop this site for the run. |
-| Sign-up wall, one-time code, ID / selfie / card / SSN, timed test or video | `blocked` with `account_creation`, `otp_needed`, `id_or_payment_asked` (never entered), `assessment_required`. Posting closed: `posting_closed`. Cannot be filled: `manual_only`. |
+| Sign-up wall, one-time code (unless rules "EMAIL CODES" allows it), ID / selfie / card / SSN, timed test or video | `blocked` with `account_creation`, `otp_needed`, `id_or_payment_asked` (never entered), `assessment_required`. Posting closed: `posting_closed`. Cannot be filled: `manual_only`. |
 
 Rows that are only a name (Oracle, Taleo, BambooHR, Breezy, Recruitee, Personio) have no notes yet:
 fill by the forms recipe, and tell the user which site it was so a row can be written from what you saw.

@@ -778,6 +778,9 @@ class AssistantSettings:
     # Owner 2026-11-05: in auto mode, may a CV that a separate reviewer judged strong (and Job360 verified,
     # services/applications/cv_review.py) go without the user's look? False = no (default). On is riskier.
     cv_auto_approve: bool = False
+    # Owner 2026-11-07: may the assistant type a one-time code the job site emailed to the user's own Gmail?
+    # False = no (default). On is riskier; applications/email_codes.py checks every use.
+    use_email_codes: bool = False
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

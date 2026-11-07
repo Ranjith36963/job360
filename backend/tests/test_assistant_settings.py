@@ -58,6 +58,8 @@ SIX = (
     "assistant_settings.ask_before_signed_in_submit",
     # 2026-11-05 cv_auto_approve (tests/test_cv_review.py).
     "assistant_settings.cv_auto_approve",
+    # 2026-11-07 use_email_codes (tests/test_email_codes.py).
+    "assistant_settings.use_email_codes",
 )
 PROGRESS = "assistant_settings.setup_progress"
 
