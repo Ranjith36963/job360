@@ -93,7 +93,7 @@ def test_cv_check_uses_check_text_and_bullet_overlap():
     invented = cv + "- Led a team of 12 engineers on a Kubernetes migration.\n"
     got = evidence.cv_verdict(invented, profile)
     assert got["would_clear"] is False
-    assert got["reasons"] == ["unsupported_numbers", "bullet_unmatched"]
+    assert got["reasons"] == ["unsupported_numbers", "unsupported_terms", "bullet_unmatched"]  # Kubernetes (2026-11-07)
     assert evidence.cv_verdict(None, profile) == {"would_clear": False, "reasons": ["no_cv"]}
 
 

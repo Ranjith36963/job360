@@ -399,11 +399,15 @@ async def test_thin_quotes_unchecked_first_words_and_stretches_are_weak(authenti
                              "Worked on the warehouse migration and cut storage costs in half.") == (
             "weak", ["claim_not_in_quote"])
         # a heading that carries a claim is a content line: with no quote it is uncovered
-        for heading in ("AWS SOLUTIONS ARCHITECT", "# Google Cloud Certified", "Kubernetes Administrator:",
-                        "CTO: ada@example.com"):
+        # owner 2026-11-07: a capitalised name inside a line the profile lacks ("Cloud Certified", "Administrator")
+        # is also a save-time check finding now.
+        for heading, want in (("AWS SOLUTIONS ARCHITECT", ["line_uncovered"]),
+                              ("# Google Cloud Certified", ["line_uncovered", "cv_checks_found"]),
+                              ("Kubernetes Administrator:", ["line_uncovered", "cv_checks_found"]),
+                              ("CTO: ada@example.com", ["line_uncovered"])):
             cv = CV + heading + "\n"
             app_id, cv_id = await _setup(client, cv=cv)
-            assert (await _stored(client, app_id, _review(cv_id, cv)))["downgraded"] == ["line_uncovered"], heading
+            assert (await _stored(client, app_id, _review(cv_id, cv)))["downgraded"] == want, heading
 
 
 @pytest.mark.asyncio

@@ -396,15 +396,105 @@ def _supported(term: str, hay: str) -> bool:
     return len(parts) > 1 and all(_found(p, hay) for p in parts)
 
 
+# Names inside sentences (owner 2026-11-07: "built alone using Claude Code" in a summary passed while the
+# same words on a skills line were flagged). Grammar only, never a skill list (hard rule #28): a run of
+# capitalised words that does not open a sentence is a name, and the profile is the only vocabulary.
+_MONTH_WORDS = frozenset(
+    "jan feb mar apr may jun jul aug sep sept oct nov dec january february march april june july august"
+    " september october november december present current".split()
+)
+_BULLET_CHARS = "-*•·–—>"
+_RUN_BREAK_ENDS = (",", ";", ")", "]", "/")
+_SENTENCE_ENDS = (".", "!", "?", ":")
+_MAX_RUN = 4
+
+
+def _is_name_word(core: str) -> bool:
+    return (
+        len(core) > 1
+        and core[:1].isupper()
+        and "@" not in core
+        and core.casefold() not in _MONTH_WORDS
+    )
+
+
+def _line_runs(s: str) -> list[str]:
+    """The capitalised runs of one CV line (see ``prose_names``)."""
+    out: list[str] = []
+    run: list[str] = []
+    start = True  # the next word opens a sentence
+    for raw in s.split():
+        if raw.startswith(("(", "[")) and run:
+            out.append(" ".join(run[:_MAX_RUN]))
+            run = []
+        core = raw.strip(_OUTER_PUNCT)
+        named = bool(core) and any(c.isalnum() for c in core) and not start and _is_name_word(core)
+        if named:
+            run.append(core)
+        elif run:  # a lowercase word or a separator ("|", "-", "&") ends the run
+            out.append(" ".join(run[:_MAX_RUN]))
+            run = []
+        if not core or not any(c.isalnum() for c in core):
+            continue
+        if raw.rstrip("\"')]").endswith(_SENTENCE_ENDS) or raw.endswith(_RUN_BREAK_ENDS):
+            if run:
+                out.append(" ".join(run[:_MAX_RUN]))
+                run = []
+            start = raw.rstrip("\"')]").endswith(_SENTENCE_ENDS)
+        else:
+            start = False
+    if run:
+        out.append(" ".join(run[:_MAX_RUN]))
+    return out
+
+
+def prose_names(text: str) -> list[str]:
+    """Capitalised word runs ("Claude Code", "AWS Bedrock") inside the CV's sentences and bullets, skills
+    lines and section headings left out (``terms_to_check`` reads those). A sentence's first word is never
+    a name. Word by word, no regex on the caller's text (CodeQL: no backtracking)."""
+    out: list[str] = []
+    body = _body_lines(text)
+    # No header block was cut: the first non-empty line is still the name, never a claim.
+    name_left = len(body) == len(text.splitlines())
+    for line in body:
+        s = line.strip().lstrip(_BULLET_CHARS).strip()
+        if s and name_left:
+            name_left = False
+            continue
+        if not s or _is_section_heading(s) or _is_skill_line(line):
+            continue
+        out.extend(_line_runs(s))
+    return list(dict.fromkeys(n for n in out if len(n) <= 40))
+
+
+def _run_in(n: str, hay: str) -> bool:
+    if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", hay):
+        return True
+    return n.endswith("s") and len(n) > 3 and re.search(rf"(?<!\w){re.escape(n[:-1])}(?!\w)", hay) is not None
+
+
+def _name_supported(name: str, hay: str) -> bool:
+    """The whole run, as words, somewhere in the profile ("Claude" alone never vouches for "Claude Code").
+    An all-caps word at either end ("GitHub Actions CI", "UK Home Office") may stand apart when the profile
+    has it on its own too; no other word is split off."""
+    words = name.split()
+    while len(words) > 1 and words[-1].isupper() and _run_in(_norm(words[-1]), hay):
+        words = words[:-1]
+    while len(words) > 1 and words[0].isupper() and _run_in(_norm(words[0]), hay):
+        words = words[1:]
+    return _run_in(_norm(" ".join(words)), hay)
+
+
 def unsupported_terms(text: str, source: str) -> Optional[dict[str, str]]:
     hay = _norm(source)
     bad = [t for t in terms_to_check(text) if not _supported(t, hay)]
+    bad += [n for n in prose_names(text) if not _name_supported(n, hay) and n not in bad]
     if not bad:
         return None
     return _issue(
         "unsupported_terms",
         "warn",
-        f"Skills/tools in the CV that the profile never mentions: {_listed(bad)}.",
+        f"Skills, tools or names in the CV that the profile never mentions: {_listed(bad)}.",
     )
 
 

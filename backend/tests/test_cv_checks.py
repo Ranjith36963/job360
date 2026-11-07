@@ -83,6 +83,35 @@ def test_unsupported_terms_flags_items_missing_from_profile():
     assert "Python" not in detail and "Go" not in detail  # Go comes from GitHub languages
 
 
+def test_prose_names_missing_from_profile_flag_like_skill_lines():
+    # owner 2026-11-07: "Claude Code" in a summary and a bullet passed; only a skills line flagged it.
+    text = CLEAN.replace(
+        "EXPERIENCE\n",
+        "SUMMARY\nEngineer who builds software with AI coding agents (Claude Code).\nEXPERIENCE\n",
+    ) + "- Built alone using Claude Code and Kubernetes, on Docker.\n"
+    detail = next(c["detail"] for c in cc.check_text("cv", text, _profile()) if c["code"] == "unsupported_terms")
+    assert "Claude Code" in detail and "Kubernetes" in detail
+    assert "Docker" not in detail and "Engineer" not in detail and "Built" not in detail  # profile / sentence start
+
+
+def test_prose_names_need_the_whole_name_and_skip_dates_and_sentence_starts():
+    prof = _profile()
+    prof.cv_data.raw_text += " Used Claude for drafting. CI on GitHub Actions."
+    hay = cc._norm(cc.profile_source_text(prof))
+    assert not cc._name_supported("Claude Code", hay)  # "Claude" alone never vouches for "Claude Code"
+    assert cc._name_supported("GitHub Actions CI", hay)  # a known acronym at the end stands apart
+    assert cc._name_supported("APIs", cc._norm("REST API"))
+    names = cc.prose_names("Jane Doe\nEXPERIENCE\nFounder | Job360 | Jan 2025 - Present\n- Shipped it. Kafka ran it.\n")
+    assert "Job360" in names and "Kafka" not in names  # "Kafka" opens a sentence
+    assert not any(n.startswith(("Jan", "Present")) for n in names)
+    assert cc.prose_names("Jane Doe\nSKILLS\nLanguages: Rust, Zig, Nim\n") == []  # skills lines: terms_to_check
+
+
+def test_clean_cv_with_known_names_in_prose_is_silent():
+    text = CLEAN + "- Built a RAG pipeline with ChromaDB and FastAPI at Calnex Solutions.\n"
+    assert "unsupported_terms" not in _codes("cv", text)
+
+
 def test_dropped_present_role_flags():
     text = CLEAN.replace("Job360", "Acme")
     assert "missing_current_roles" in _codes("cv", text)
