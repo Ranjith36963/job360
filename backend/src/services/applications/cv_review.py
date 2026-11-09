@@ -26,6 +26,7 @@ exact current CV id + sha, and only with ``assistant_settings.cv_auto_approve`` 
 """
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import cv_checks, evidence
@@ -51,6 +52,9 @@ REVIEWER_MAX = 40
 _BULLETS = "".join(cv_checks._BULLET_STARTS)
 _SEPARATORS = frozenset({"|", "•", "·", "-", "–", "—", ",", "/"})
 _PHONE_CHARS = frozenset("0123456789+()-.")
+
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(text: Any) -> str:
@@ -130,6 +134,15 @@ def content_lines(text: str, profile: Any) -> list[str]:
             continue
         out.append(line)
     return out
+
+
+def missing_warning(stored: dict[str, Any]) -> Optional[str]:
+    """The reply line for a review that quoted too few lines (it is still stored, weak)."""
+    if "line_uncovered" not in (stored.get("downgraded") or []):
+        return None
+    missing = int(stored.get("content_lines") or 0) - int(stored.get("covered") or 0)
+    return (f"cv_reviewed stored weak: {missing} of {stored.get('content_lines')} required lines had no row; "
+            "return ONE row per line in get_application's review.lines (cv_line copied exactly)")
 
 
 def shape_problems(payload: dict[str, Any]) -> list[str]:
@@ -227,6 +240,23 @@ async def record_sent(
     )
 
 
+REVIEW_LINES_CAP = 200
+
+
+async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """What a review of the NEWEST cv must name: its id, the sha256 ``check`` compares and the lines it requires a
+    quote for (``None`` when no cv is saved). Same functions as ``check``, so the agent never guesses."""
+    from src.services.applications import kit, spine  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    cv = await spine.latest_artifact(db, user_id, application_id, "cv")
+    if cv is None:
+        return None
+    lines = content_lines(cv["text"], load_profile(user_id) or UserProfile())
+    return {"artifact_id": cv["id"], "sha256": kit.sha256_text(cv["text"]), "lines": lines[:REVIEW_LINES_CAP]}
+
+
 async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     """The stored payload: the verified confidence, the downgrade codes and counts (never text)."""
     from src.services.applications import kit, spine  # noqa: PLC0415
@@ -244,7 +274,11 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
     content: list[str] = []
     covered = 0
     if not current or cv is None:
-        down.add("not_current_cv")  # nothing else about that CV is read: it is not the one that would go
+        # Never stored, never counted toward retry_limit: a review of another CV would only look like a review.
+        logger.warning("cv_reviewed refused: not_current_cv application=%s artifact=%s current=%s",
+                       application_id, payload["artifact_id"], cv["id"] if cv else None)
+        raise SpineError(422, "not_current_cv: this is not the application's newest CV; use get_application's "
+                              "review.artifact_id, review.sha256 and review.lines (nothing was stored)")
     else:
         content = content_lines(cv["text"], profile)
         keys = {line_key(e["cv_line"]) for e in entries}

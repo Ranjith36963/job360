@@ -2701,6 +2701,15 @@ async def get_application_detail(
     from src.services.applications.blocked import with_hand_off  # noqa: PLC0415
 
     detail["asks"] = await with_hand_off(db, user_id, detail["asks"])
+    from src.services.applications import cv_review  # noqa: PLC0415 - it imports this module
+
+    try:  # what a cv_reviewed must name; a failure here must never break the whole read
+        detail["review"] = await cv_review.inputs(db, user_id, application_id)
+    except Exception:  # noqa: BLE001 - loud in the log, the rest of the application still loads
+        logging.getLogger("job360.spine").exception(
+            "cv_review_inputs_unavailable", extra={"application_id": application_id},
+        )
+        detail["review"] = None
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
     # reaches the web header and every agent calling get_application.
