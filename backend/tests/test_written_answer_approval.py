@@ -268,6 +268,23 @@ async def test_typed_answers_dressed_as_files_stay_unapproved(authenticated_asyn
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [
+    {"question": "Cover letter (paste text)", "answer": LETTER_ESSAY + "\nPortfolio: drive/letter.pdf", "source": "written"},
+    {"question": "Cover letter", "answer": LETTER_ESSAY + "\\Ranjith letter.pdf", "source": "written"},
+])
+async def test_an_essay_before_a_path_separator_is_not_a_file_even_with_a_letter_uploaded(
+    authenticated_async_context, fixture_user_id, answer,
+):
+    """Third security review (2026-11-09): only the browser's exact C:\\fakepath\\ prefix is stripped; text before any
+    other path separator made the essay look like the file's last segment."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _uploaded(fixture_user_id, app_id, kind="cover_letter")
+        assert await _unapproved_texts(client, fixture_user_id, app_id, [answer]) != []
+        assert await _gate_says_unapproved(fixture_user_id, app_id) is True
+
+
+@pytest.mark.asyncio
 async def test_a_guessed_file_row_keeps_its_guessed_flag(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)

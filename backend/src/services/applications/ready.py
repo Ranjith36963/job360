@@ -723,16 +723,20 @@ _FILE_NAME_MAX = 120
 
 _FILE_NAME_CHARS = frozenset(" -_.()+&'")
 _FILE_NAME_MAX_WORDS = 10
+_FAKEPATH = "C:\\fakepath\\"  # the one path a browser reports for a file input
 
 
 def _bare_file_name(text: str) -> bool:
-    """The WHOLE text is one file name, as a file input reports it: a browser's ``C:\\fakepath\\Ada CV.pdf`` or
-    a path counts by its LAST segment. The name is at most 120 characters, single spaces inside, only letters,
-    digits and ``-_.()+&'``, one document extension at the END, at most 10 words and no sentence break
-    (``. ``) - so an essay with ``.pdf`` tacked on is not a file name. A URL is typed text."""
+    """The WHOLE text is one file name, as a file input reports it: a bare name, or a browser's exact
+    ``C:\\fakepath\\Ada CV.pdf`` (only that one prefix is stripped; any other path separator makes it typed
+    text, so an essay ending in ``.../letter.pdf`` never counts). The name is at most 120 characters, single
+    spaces inside, only letters, digits and ``-_.()+&'``, one document extension at the END, at most 10 words
+    and no sentence break (``. ``) - so an essay with ``.pdf`` tacked on is not a file name. A URL is typed text."""
     if "://" in text:
         return False
-    name = text.replace("\\", "/").rsplit("/", 1)[-1]
+    name = text[len(_FAKEPATH):] if text.casefold().startswith(_FAKEPATH.casefold()) else text
+    if "/" in name or "\\" in name:
+        return False
     if not name or name != name.strip() or len(name) > _FILE_NAME_MAX or "  " in name or ". " in name:
         return False
     if not all(c.isalnum() or c in _FILE_NAME_CHARS for c in name):
