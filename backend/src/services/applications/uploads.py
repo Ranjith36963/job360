@@ -138,15 +138,26 @@ async def uploads_since_last_receipt(db: JobDatabase, user_id: str, application_
     """This application's ``document_uploaded`` events, newest first, recorded after its newest
     ``applied`` event (an earlier receipt's files belong to that submission). Each row:
     ``{event_id, kind, artifact_id, sha256, fmt, host}``; an unreadable payload is skipped."""
+    return (await uploads_since_last_receipt_many(db, user_id, [application_id])).get(application_id, [])
+
+
+async def uploads_since_last_receipt_many(
+    db: JobDatabase, user_id: str, application_ids: list[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """:func:`uploads_since_last_receipt` for many applications in ONE query: ``{application_id: rows}``."""
+    out: dict[int, list[dict[str, Any]]] = {}
+    ids = [int(i) for i in application_ids]
+    if not ids:
+        return out
+    marks = ", ".join("?" for _ in ids)
     cur = await db._db.execute(
-        "SELECT e.id, e.payload FROM application_events e "
-        "WHERE e.user_id = ? AND e.application_id = ? AND e.event_type = 'document_uploaded' "
+        "SELECT e.id, e.application_id, e.payload FROM application_events e "  # noqa: S608
+        f"WHERE e.user_id = ? AND e.application_id IN ({marks}) AND e.event_type = 'document_uploaded' "
         "AND e.id > COALESCE((SELECT MAX(a.id) FROM application_events a "
-        "WHERE a.user_id = ? AND a.application_id = ? AND a.event_type = 'applied'), 0) "
+        "WHERE a.user_id = e.user_id AND a.application_id = e.application_id AND a.event_type = 'applied'), 0) "
         "ORDER BY e.id DESC",
-        (user_id, application_id, user_id, application_id),
+        (user_id, *ids),
     )
-    out: list[dict[str, Any]] = []
     for raw in await cur.fetchall():
         row = dict(raw)
         try:
@@ -156,7 +167,7 @@ async def uploads_since_last_receipt(db: JobDatabase, user_id: str, application_
             continue
         if p.get("kind") not in KINDS or not isinstance(p.get("sha256"), str):
             continue
-        out.append({
+        out.setdefault(int(row["application_id"]), []).append({
             "event_id": int(row["id"]), "kind": p["kind"], "artifact_id": artifact_id, "sha256": p["sha256"],
             "fmt": str(p.get("fmt") or ""), "host": p.get("host") or None,
         })

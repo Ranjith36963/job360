@@ -9,11 +9,13 @@ is not ``blocked``). One SQL, no per-row query. Always scoped by ``user_id`` (ru
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import hiding, kit, spine
+from src.services.applications import uploads as uploads_service
 from src.services.applications.kit import _json
 from src.services.applications.test_marker import TEST_APP_SQL
 from src.services.profile import country_pages, user_info
@@ -177,6 +179,7 @@ async def answer_flags_for(
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
     approvals = await job_approvals_many(db, user_id, list(fills))
     out: dict[int, list[dict[str, Any]]] = {}
+    uploads_by_app = await uploads_service.uploads_since_last_receipt_many(db, user_id, list(fills))
     for app_id, f in fills.items():
         country = (str(f.get("job_country") or "").strip().upper()) or None
         blocks, _missing = kit.compute_answers(profile, overlay, country)
@@ -187,7 +190,8 @@ async def answer_flags_for(
         ]
         company = _company_key(str(f.get("job_company") or ""))
         mine = with_job_approvals(profile, approvals.get(app_id, []))
-        out[app_id] = _answer_rows(typed, have, saved, mine, company, f["filled_at"], country)[1]
+        ups = uploads_by_app.get(app_id, [])
+        out[app_id] = _answer_rows(typed, have, saved, mine, company, f["filled_at"], country, ups)[1]
     return out
 
 
@@ -516,7 +520,7 @@ def _hashed_row(a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any
 def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
     profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
-    country: Optional[str] = None,
+    country: Optional[str] = None, uploads: Sequence[dict[str, Any]] = (),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(answers with saved_by / saved_at / verified / changed_to / changed_reason, the flags they
     raise). ``filled_at`` is when the fill was recorded: only a web save after it is an owner edit."""
@@ -535,7 +539,7 @@ def _answer_rows(
             _user_check(a, profile, saved, company_key, have, filled_at, country) if profile is not None
             else (False, None, None)
         )
-        if changed_to is not None and is_file_answer(a, changed_to):
+        if changed_to is not None and is_file_answer(a, uploads):
             changed_to = reason = None  # a CV / letter file is not typed text: never "changed" (2026-10-30)
         answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
                         "changed_to": changed_to, "changed_reason": reason, "check": answer_check(a)})
@@ -546,9 +550,13 @@ def _answer_rows(
             # The code stays "changed" (Send all holds on it); only the user's own edit says "You changed".
             flags.append(_flag("changed", _CHANGED_TEXT[reason or SAVED_ANSWER].format(q=a["question"]), key))
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
+        # A CV / letter FILE field holds the kit's own document, put there by the browser `upload` action (its
+        # `document_uploaded` is the proof): never an essay to approve, however the run labelled the source.
+        # Production 2026-11-09, application 1004: a CV-only form recorded `written` -> answer_unapproved forever.
+        file_field = is_file_answer(a, uploads)
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
-        if src in ("written", "approved") and not verified:
+        if src in ("written", "approved") and not verified and not file_field:
             # Owner rule: "I draft, you approve" - an essay is typed only after the user approved it.
             flags.append(_flag("unapproved", f"A written answer needs your OK: {a['question']}", key))
         if not verified and kit._question_is_sensitive(str(a["question"]), str(key) if key else None):
@@ -587,7 +595,8 @@ async def _unverified_flags(
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
     mine = with_job_approvals(profile, await job_approvals(db, user_id, int(app_row["id"])))
     _answers, flags = _answer_rows(
-        rows, have, saved, mine, _company_key(str(app_row.get("job_company") or "")), country=country)
+        rows, have, saved, mine, _company_key(str(app_row.get("job_company") or "")), country=country,
+        uploads=await uploads_service.uploads_since_last_receipt(db, user_id, int(app_row["id"])))
     return flags
 
 
@@ -709,30 +718,56 @@ async def blank_or_placeholder(
 _DOCUMENT_EXTENSIONS = frozenset({"pdf", "doc", "docx", "rtf", "odt", "txt", "pages"})
 
 
-def _names_a_file(text: str) -> bool:
-    """``text`` is what a file field holds: a bare file name with a document extension (a URL is typed
-    text, so any ``/`` rules it out) or check_form's artifact label ("CV v1 (artifact 128)", "CV v1,
-    artifact 128"). Scanned word by word, no regex on caller text."""
-    text = text.strip()
-    if not text:
-        return False
-    words = "".join(c if c.isalnum() else " " for c in text.casefold()).split()
-    if any(w == "artifact" and nxt.isdigit() for w, nxt in zip(words, words[1:])):
-        return True
-    head, dot, ext = text.rpartition(".")
-    return "/" not in text and bool(dot and head.strip()) and ext.casefold() in _DOCUMENT_EXTENSIONS
+_FILE_NAME_MAX = 120
 
 
-def is_file_answer(answer: dict[str, Any], users_word: str) -> bool:
-    """True when ``answer`` is the form's CV or cover-letter FILE field, so the user's saved word for it can
-    never be typed in. Form events carry no ``field_type`` (their answer keys are closed), so the field is
-    known by check_form's own ``artifact.*`` key, or by a CV / letter question whose typed value or the
-    user's word names a file. A typed text field - even one asking about the CV - is never one."""
-    if str(answer.get("key") or "").split(".", 1)[0] == "artifact":
-        return True
-    if not kit.is_document_question(str(answer.get("question") or "")):
+_FILE_NAME_CHARS = frozenset(" -_.()+&'")
+_FILE_NAME_MAX_WORDS = 10
+
+
+def _bare_file_name(text: str) -> bool:
+    """The WHOLE text is one file name, as a file input reports it: a browser's ``C:\\fakepath\\Ada CV.pdf`` or
+    a path counts by its LAST segment. The name is at most 120 characters, single spaces inside, only letters,
+    digits and ``-_.()+&'``, one document extension at the END, at most 10 words and no sentence break
+    (``. ``) - so an essay with ``.pdf`` tacked on is not a file name. A URL is typed text."""
+    if "://" in text:
         return False
-    return _names_a_file(str(answer.get("answer") or "")) or _names_a_file(users_word)
+    name = text.replace("\\", "/").rsplit("/", 1)[-1]
+    if not name or name != name.strip() or len(name) > _FILE_NAME_MAX or "  " in name or ". " in name:
+        return False
+    if not all(c.isalnum() or c in _FILE_NAME_CHARS for c in name):
+        return False
+    stem, dot, ext = name.rpartition(".")
+    return bool(dot and stem.strip()) and ext.casefold() in _DOCUMENT_EXTENSIONS and (
+        len(stem.split()) <= _FILE_NAME_MAX_WORDS
+    )
+
+
+def _is_check_form_label(text: str, kind: str, uploads: Sequence[dict[str, Any]]) -> bool:
+    """Exactly check_form's label for an upload ("CV v1 (artifact 128)") naming an artifact THIS application
+    uploaded of this ``kind``. Parsed by prefix and digits, no regex on caller text."""
+    prefix = f"{kit._DOCUMENT_LABELS[kind]} v"
+    if not text.startswith(prefix) or not text.endswith(")"):
+        return False
+    version, sep, artifact = text[len(prefix):-1].partition(" (artifact ")
+    return bool(sep and version.isdigit() and artifact.isdigit()
+                and any(u["kind"] == kind and u["artifact_id"] == int(artifact) for u in uploads))
+
+
+def is_file_answer(answer: dict[str, Any], uploads: Sequence[dict[str, Any]]) -> bool:
+    """True ONLY for the form's CV / cover-letter FILE field the browser really uploaded (owner 2026-11-09,
+    security review of the Lenskart fix). ALL must hold: the question asks for exactly one of the two
+    documents; the key is absent or exactly ``artifact.<kind>``; the WHOLE answer is one file name or exactly
+    check_form's label for it; and this application has a ``document_uploaded`` of that kind
+    (``uploads``: :func:`uploads.uploads_since_last_receipt`). A typed text - even one asking about the
+    CV - is never one. Used by BOTH the ``unapproved`` and the ``changed_to`` exemptions, so they cannot drift."""
+    kind = kit._file_kind(str(answer.get("question") or ""))
+    if kind is None or not any(u["kind"] == kind for u in uploads):
+        return False
+    if answer.get("key") not in (None, f"artifact.{kind}"):
+        return False
+    text = str(answer.get("answer") or "").strip()
+    return _bare_file_name(text) or _is_check_form_label(text, kind, uploads)
 
 
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
@@ -796,11 +831,12 @@ async def refill_keeps_answers(
     if was is None or now is None or was.get("fields_count") != now.get("fields_count"):
         return False
     before, after = _answers_by_question(was), _answers_by_question(now)
+    ups = await uploads_service.uploads_since_last_receipt(db, user_id, int(app_row["id"]))
     if before is None or after is None or before.keys() != after.keys():
         return False
     # A CV / letter file row is governed by the CV checks (cv_not_seen, document_uploaded), not compared here.
     changed = [a for q, a in after.items() if _norm(a["answer"]) != _norm(before[q]["answer"])
-               and not is_file_answer(a, str(before[q]["answer"]))]
+               and not is_file_answer(a, ups)]
     if not changed:
         return True
     loaded, overlay = load_profile_with_overlay(user_id)
@@ -838,12 +874,14 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     blocks, _ = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     mine = with_job_approvals(profile, await job_approvals(db, user_id, int(app_row["id"])))
+    ups = await uploads_service.uploads_since_last_receipt(db, user_id, int(app_row["id"]))
     answers, _ = _answer_rows(
-        typed, have, saved, mine, _company_key(str(app_row.get("job_company") or "")), country=country)
+        typed, have, saved, mine, _company_key(str(app_row.get("job_company") or "")), country=country,
+        uploads=ups)
     # A CV / letter file field is not typed text: the file sent is the CV gates' (cv_not_seen,
     # document_uploaded), so a saved label like "CV v1, artifact 128" is never demanded in it.
     pending = [{"question": a["question"], "answer": str(a["changed_to"])}
-               for a in answers if a["changed_to"] is not None and not is_file_answer(a, str(a["changed_to"]))]
+               for a in answers if a["changed_to"] is not None and not is_file_answer(a, ups)]
     if not pending:
         return []
     # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
@@ -904,6 +942,7 @@ async def ready_cards(
         answers, answer_flags = _answer_rows(
             typed, have, saved, with_job_approvals(profile, await job_approvals(db, user_id, app_id)),
             _company_key(r["job_company"] or ""), r["filled_at"], country,
+            await uploads_service.uploads_since_last_receipt(db, user_id, app_id),
         )
         flags += answer_flags + _missing_flags(profile, missing, country)
         cv = await _doc(db, user_id, app_id, "cv")

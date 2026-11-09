@@ -58,6 +58,19 @@ async def _app(client: AsyncClient, user_id: str, saved: list[dict[str, Any]], t
     return app_id, int(cv.json()["artifact_id"])
 
 
+async def _upload_cv(user_id: str, app_id: int, artifact_id: int) -> None:
+    """The browser uploaded this application's tailored CV: its ``document_uploaded`` event."""
+    from src.api import dependencies as api_deps
+    from src.services.applications import uploads
+
+    event_id = await uploads.record(
+        await api_deps.get_db(), user_id=user_id, application_id=app_id, kind="cv",
+        artifact={"id": artifact_id, "version_no": 1}, data=b"%PDF", fmt="pdf", renderer_version="t",
+        host="jobs.example", recorded_by="test",
+    )
+    assert event_id is not None
+
+
 async def _form_check(client: AsyncClient, app_id: int, questions: list[dict[str, Any]]) -> dict[str, Any]:
     resp = await client.post(f"/api/applications/{app_id}/kit/form-check", json={"form_url": FORM, "questions": questions})
     assert resp.status_code == 200, resp.text
@@ -133,6 +146,7 @@ async def test_a_ready_card_differing_only_on_the_file_row_is_not_changed(authen
     a TEXT row the user changed still reads ``changed``."""
     async with authenticated_async_context() as client:
         app_id, cv_id = await _app(client, fixture_user_id, [STALE_RESUME, USERS_GAP])
+        await _upload_cv(fixture_user_id, app_id, cv_id)
         resume = {"question": "Resume", "answer": f"CV v1 (artifact {cv_id})", "source": "profile"}
         gap = {"question": GAP_Q, "answer": "Yes, a 2024 sabbatical", "source": "approved"}
         await _fill(client, app_id, [NOTICE, resume, gap])
@@ -159,6 +173,7 @@ async def test_a_refill_differing_only_on_the_file_row_keeps_the_yes(authenticat
 
     async with authenticated_async_context() as client:
         app_id, cv_id = await _app(client, fixture_user_id, [STALE_RESUME, USERS_GAP])
+        await _upload_cv(fixture_user_id, app_id, cv_id)
         resume = {"question": "Resume", "answer": "Ada_Lovelace_CV.pdf", "source": "profile"}
         gap = {"question": GAP_Q, "answer": "Yes, a 2024 sabbatical", "source": "approved"}
         was = await _fill(client, app_id, [NOTICE, resume, gap])

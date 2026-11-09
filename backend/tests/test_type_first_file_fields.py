@@ -61,6 +61,18 @@ async def _check(client: AsyncClient, app_id: int) -> dict[str, Any]:
     return resp.json()
 
 
+async def _upload_cv(user_id: str, app_id: int) -> None:
+    from src.api import dependencies as api_deps
+    from src.services.applications import uploads
+
+    event_id = await uploads.record(
+        await api_deps.get_db(), user_id=user_id, application_id=app_id, kind="cv",
+        artifact={"id": 128, "version_no": 1}, data=b"%PDF", fmt="pdf", renderer_version="t",
+        host="jobs.ashbyhq.example", recorded_by="test",
+    )
+    assert event_id is not None
+
+
 async def _approved_app(
     client: AsyncClient, user_id: str, saved: list[dict[str, Any]], answers: list[dict[str, Any]]
 ) -> int:
@@ -75,6 +87,7 @@ async def _approved_app(
     assert (await client.put(f"/api/applications/{app_id}/fit", json=fit)).status_code == 200
     resp = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": CV_TEXT})
     assert resp.status_code == 201, resp.text
+    await _upload_cv(user_id, app_id)  # the browser uploaded the tailored CV: its `document_uploaded` event
     fill = await _fill(client, app_id, answers)
     yes = await client.post(f"/api/applications/{app_id}/send/approve", params={"form_filled_event_id": fill})
     assert yes.status_code == 201, yes.text
@@ -114,19 +127,27 @@ async def test_a_text_field_the_user_changed_still_holds_the_submit(authenticate
         assert (verdict["decision"], verdict["reason"], verdict["type_first"]) == ("submit", "user_approved", [])
 
 
-def test_only_a_cv_or_letter_question_holding_a_file_is_a_file_answer() -> None:
-    """The pure test: the question must ask for the CV or a cover letter AND the field must hold a file
-    (a bare file name, check_form's artifact label, or check_form's ``artifact.*`` key); a URL, a typed
-    sentence or a non-document question stays typed text the lock holds."""
+def test_only_a_cv_or_letter_question_holding_a_uploaded_file_is_a_file_answer() -> None:
+    """The pure test (owner 2026-11-09, strict allow-list): the question asks for exactly one document, the key
+    is absent or ``artifact.<kind>``, the WHOLE answer is one file name or check_form's label of an upload of
+    THIS application, and that kind was uploaded. A URL, a sentence, a name with extra words, another kind's
+    key or a document nobody uploaded stays typed text the lock holds."""
     from src.services.applications.ready import is_file_answer
 
-    assert is_file_answer({"question": "Resume", "answer": "Ada_CV.pdf"}, "CV v1, artifact 128")
-    assert is_file_answer({"question": "Resume/CV", "answer": ""}, "CV v1, artifact 128")
-    assert is_file_answer({"question": "CV", "answer": "C:\\fakepath\\Ada CV.docx"}, "something else")
-    assert is_file_answer({"question": "Cover letter", "answer": "CV v3 (artifact 140)"}, "Cover letter v1")
-    assert is_file_answer({"question": "Attach", "answer": "x", "key": "artifact.cv"}, "y")
-    assert not is_file_answer({"question": "Resume", "answer": "I led a team of 5"}, "I led a team of 6")
-    assert not is_file_answer({"question": "Link to your CV", "answer": "https://a.example/cv.pdf"},
-                              "https://a.example/cv2.pdf")
-    assert not is_file_answer({"question": "Is there a gap in your CV?", "answer": "No"}, "Yes")
-    assert not is_file_answer({"question": "Portfolio", "answer": "work.pdf"}, "artifact 12 v1")
+    cv = [{"kind": "cv", "artifact_id": 128}]
+    assert is_file_answer({"question": "Resume", "answer": "Ada_CV.pdf"}, cv)
+    assert is_file_answer({"question": "Resume/CV", "answer": "CV v3 (artifact 128)", "key": "artifact.cv"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "Ada_CV.pdf"}, [])
+    assert not is_file_answer({"question": "Cover letter", "answer": "Ada_CV.pdf"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "CV v3 (artifact 140)"}, cv)
+    assert is_file_answer({"question": "CV", "answer": "C:\\fakepath\\Ada CV.docx"}, cv)
+    assert is_file_answer({"question": "Resume", "answer": "Ranjith Maliga CV.pdf"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "My cover letter. I love your company.pdf"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "Ada CV.pdf and my story"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "Ada CV.pdf\nmore"}, cv)
+    assert not is_file_answer({"question": "Attach", "answer": "x", "key": "artifact.cv"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "Ada_CV.pdf", "key": "artifact.cover_letter"}, cv)
+    assert not is_file_answer({"question": "Resume", "answer": "I led a team of 5"}, cv)
+    assert not is_file_answer({"question": "Link to your CV", "answer": "https://a.example/cv.pdf"}, cv)
+    assert not is_file_answer({"question": "Is there a gap in your CV?", "answer": "No"}, cv)
+    assert not is_file_answer({"question": "Portfolio", "answer": "work.pdf"}, cv)
