@@ -477,7 +477,8 @@ async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
 
 async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
     """How many of the queued ``ids`` no run can move on without the user (owner 2026-10-25): an open ask
-    on it, an open block, or its newest CV not seen yet (the gate's ``cv_not_seen``). The batch is due only
+    on it, an open block, or its newest CV not seen yet (the gate's ``cv_not_seen``; a strong review clears it,
+    kit.reviews_clearing). The batch is due only
     while the assistant may apply on its own, so a filled form is not waiting: check_submit decides it."""
     if not ids:
         return 0

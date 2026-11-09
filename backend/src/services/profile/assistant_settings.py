@@ -1014,6 +1014,7 @@ class SubmitFacts:
     signed_in_account: bool = False
     # Owner 2026-11-05: the newest stored ``cv_reviewed`` of the latest CV (exact id + sha): strong | weak | none.
     # With ``cv_auto_approve`` on, in auto mode, ``strong`` clears ``cv_not_seen`` and nothing else.
+    # The fact is derived by kit.reviews_clearing (the one rule), never read from the event here.
     cv_review: str = "none"
     # Autonomy slice 3 (watch-only): ``evidence.for_application`` when ``kit.gate_facts(shadow=True)``.
     # ``may_submit`` NEVER reads it; it is not compared or hashed, so it cannot change a verdict.

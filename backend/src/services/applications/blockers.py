@@ -255,6 +255,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
             }
     flags = await ready.answer_flags_for(db, user_id, fills)
+    # Owner 2026-11-09: a strong review of the exact newest CV clears "approve the CV" (cv_auto_approve on).
+    unseen = {i: state[i]["cv"] for i in ids if state[i]["cv"] and not state[i]["seen"]}
+    reviewed = await kit.reviews_clearing(db, user_id, unseen)
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
@@ -299,7 +302,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             fill_at = s["fill"]["recorded_at"] if s["fill"] else block_since
             since = min((k["asked_at"] for k in question_asks), key=_when, default=fill_at)
             out += _answer_blockers(app_id, question_asks, flags.get(app_id, []), since, reason == "unknown_question")
-        if considering and s["cv"] and not s["seen"] and app_id not in receipts:
+        if considering and s["cv"] and not s["seen"] and app_id not in receipts and app_id not in reviewed:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
             out.append(_b("approve_cv", "you", "approve the CV", s["cv"]["created_at"], cv_ref))
         if s["fill_open"]:

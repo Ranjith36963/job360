@@ -915,9 +915,7 @@ async def gate_facts(
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
-        cv_review=await cv_review.review_state(
-            db, user_id, application_id, cv["artifact_id"] if cv else None, cv["sha256"] if cv else ""
-        ),
+        cv_review=await _gate_cv_review(db, user_id, application_id, cv),
         has_cv=cv is not None,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
@@ -1010,10 +1008,7 @@ async def cv_cleared_by(
 ) -> tuple[Optional[str], Optional[dict[str, Any]]]:
     """Who cleared the CV the receipt would freeze (:func:`_cv_not_approved`'s rule): ``"user"`` (a matching
     ``cv_seen`` / ``submit_approved``), ``"review"`` with that strong ``cv_reviewed`` event (``cv_auto_approve``
-    on), ``"bad_id"`` (the receipt route reports it), or ``None``: nobody, so not approved."""
-    from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile  # noqa: PLC0415
-
+    on, :func:`reviews_clearing`), ``"bad_id"`` (the receipt route reports it), or ``None``: nobody."""
     frozen = await spine.frozen_cv_id(db, user_id, application_id, cv_artifact_id, channel)
     if frozen is None:
         return None, None
@@ -1026,13 +1021,86 @@ async def cv_cleared_by(
         for ev in await _events(db, user_id, application_id, ("cv_seen", "submit_approved"))
     ):
         return "user", None
+    want = {application_id: {"artifact_id": frozen, "sha": sha}}
+    review = (await reviews_clearing(db, user_id, want, log=True, auto_only=False)).get(application_id)
+    return ("review", review) if review is not None else (None, None)
+
+
+async def _gate_cv_review(
+    db: JobDatabase, user_id: str, application_id: int, cv: Optional[dict[str, Any]],
+) -> str:
+    """The gate's ``cv_review`` fact: ``strong`` only when :func:`reviews_clearing` (the one rule) clears this CV;
+    a stored strong review it refuses (setting off, unsupported checks) reads ``weak``."""
+    state = await cv_review.review_state(
+        db, user_id, application_id, cv["artifact_id"] if cv else None, cv["sha256"] if cv else ""
+    )
+    if state != cv_review.STRONG or cv is None:
+        return state
+    want = {application_id: {"artifact_id": cv["artifact_id"], "sha": cv["sha256"]}}
+    cleared = await reviews_clearing(db, user_id, want, log=True, auto_only=False)
+    return cv_review.STRONG if application_id in cleared else cv_review.WEAK
+
+
+async def reviews_clearing(
+    db: JobDatabase, user_id: str, cvs: dict[int, dict[str, Any]], *, log: bool = False, auto_only: bool = True,
+) -> dict[int, dict[str, Any]]:
+    """THE rule for "a strong review clears this CV" (owner 2026-11-09), shared by the gate's receipt check
+    (:func:`cv_cleared_by`), the ``approve_cv`` blocker, the Needs-you card and the batch's due rule. ``cvs`` is
+    ``{application_id: {artifact_id, sha}}``; returns ``{application_id: the strong cv_reviewed event}`` for those
+    cleared: ``cv_auto_approve`` on in auto mode, the newest stored review of exactly that CV (id + sha) is
+    ``strong``, and the CV's save-time checks name no unsupported numbers or terms. Three queries at most,
+    however many applications. ``log`` writes the per-application decision event (decision points only)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    if not cvs:
+        return {}
     cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
-    if not cfg.cv_auto_approve:
-        return None, None
-    review = await cv_review.newest_review(db, user_id, application_id, frozen, sha)
-    if review is None or review["payload"].get("confidence") != cv_review.STRONG:
-        return None, None
-    return "review", review
+    # The cards are for auto mode only, as the gate (confirm mode asks every submit, so the user still approves
+    # the CV). The gate and the receipt decide the mode themselves and pass ``auto_only=False``.
+    # Edge: the gate also resolves a per-job override and a counted auto grant; the cards use the user's own
+    # ``submit_mode`` (a granted run in confirm mode still shows the card, the safe side).
+    if not cfg.cv_auto_approve or (auto_only and cfg.submit_mode != settings_rules.AUTO_SUBMIT_MODE):
+        return {}
+    app_ids = sorted(cvs)
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT id, application_id, event_type, payload, recorded_at, recorded_by FROM application_events "  # noqa: S608
+        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({marks}) ORDER BY id DESC",
+        (user_id, cv_review.EVENT_TYPE, *app_ids),
+    )
+    newest: dict[int, dict[str, Any]] = {}
+    for r in await cur.fetchall():
+        ev = dict(r)
+        ev["payload"] = _json(ev.get("payload"))
+        app_id, want = int(ev["application_id"]), cvs[int(ev["application_id"])]
+        p = ev["payload"]
+        if app_id not in newest and p.get("artifact_id") == want["artifact_id"] and p.get("sha256") == want["sha"]:
+            newest[app_id] = ev
+    strong = {a: ev for a, ev in newest.items() if ev["payload"].get("confidence") == cv_review.STRONG}
+    if not strong:
+        return {}
+    art_ids = sorted({int(cvs[a]["artifact_id"]) for a in strong})
+    cur = await db._db.execute(
+        "SELECT id, checks_json FROM application_artifacts "  # noqa: S608
+        f"WHERE user_id = ? AND id IN ({','.join('?' for _ in art_ids)})",
+        (user_id, *art_ids),
+    )
+    flagged = {
+        int(r[0]) for r in await cur.fetchall()
+        if any(c.get("code") in _UNSUPPORTED_CODES for c in _stored_checks(r[1]))
+    }
+    out = {a: ev for a, ev in strong.items() if int(cvs[a]["artifact_id"]) not in flagged}
+    if log:  # only at a decision point (the gate, the receipt); the read paths already log their own read
+        for a in sorted(out):
+            get_audit_logger().info(
+                "cv_cleared_by_review",
+                extra={
+                    "event": "cv_cleared_by_review", "user_id": safe_log_value(user_id), "result": "cleared",
+                    "reason": "strong_review", "application_id": a, "artifact_id": cvs[a]["artifact_id"],
+                },
+            )
+    return out
 
 
 async def open_rule_items(
