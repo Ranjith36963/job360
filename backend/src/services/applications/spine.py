@@ -2707,7 +2707,7 @@ async def get_application_detail(
         detail["review"] = await cv_review.inputs(db, user_id, application_id)
     except Exception:  # noqa: BLE001 - loud in the log, the rest of the application still loads
         logging.getLogger("job360.spine").exception(
-            "cv_review_inputs_unavailable", extra={"application_id": application_id},
+            "cv_review_inputs_unavailable", extra={"application_id": safe_log_value(application_id)},
         )
         detail["review"] = None
     # 2026-09-20 — the one line at the top: what to do next, read off the

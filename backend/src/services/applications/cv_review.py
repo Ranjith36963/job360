@@ -54,6 +54,8 @@ _SEPARATORS = frozenset({"|", "•", "·", "-", "–", "—", ",", "/"})
 _PHONE_CHARS = frozenset("0123456789+()-.")
 
 
+from src.utils.logger import safe_log_value  # noqa: E402 - CodeQL: no caller value reaches a log raw
+
 logger = logging.getLogger(__name__)
 
 
@@ -276,7 +278,8 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
     if not current or cv is None:
         # Never stored, never counted toward retry_limit: a review of another CV would only look like a review.
         logger.warning("cv_reviewed refused: not_current_cv application=%s artifact=%s current=%s",
-                       application_id, payload["artifact_id"], cv["id"] if cv else None)
+                       safe_log_value(application_id), safe_log_value(payload["artifact_id"]),
+                       safe_log_value(cv["id"] if cv else None))
         raise SpineError(422, "not_current_cv: this is not the application's newest CV; use get_application's "
                               "review.artifact_id, review.sha256 and review.lines (nothing was stored)")
     else:
