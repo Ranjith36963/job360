@@ -25,6 +25,15 @@ An empty preference (salary, locations, workplace, experience level, about_me)
 profile the agent reads shows an unset field as absent, not zero. Details:
 `../docs/product/product_design_rules.md` (hard-rules skill, rule #29).
 
+## Permanent fixes only (owner, 2026-11-09 — STRICT)
+
+Every bug fix follows `../.claude/rules/permanent-fixes.md` (loads every session): reproduce the
+exact failure first, trace it to its source, find why the safeguards missed it, write a regression
+test that fails on the original bug, make the smallest root-cause fix, add defence in depth, check
+the blast radius (every caller and connected component), leave a log line that would have shown
+it, and document Root cause / Why safeguards failed / Prevention / Proof. Never patch a symptom;
+never call it fixed because the error went away.
+
 ## Commands (run from `backend/`)
 
 ```bash

@@ -14,6 +14,15 @@
 jargon (if a technical word is needed, say what it means in one short line). No walls
 of text — say what happened, what I did, what's next.
 
+## Permanent fixes only (owner, 2026-11-09 — STRICT)
+
+Every bug fix follows `../.claude/rules/permanent-fixes.md` (loads every session): reproduce the
+exact failure first, trace it to its source, find why the safeguards missed it, write a regression
+test that fails on the original bug, make the smallest root-cause fix, add defence in depth, check
+the blast radius (every caller and connected component), leave a log line that would have shown
+it, and document Root cause / Why safeguards failed / Prevention / Proof. Never patch a symptom;
+never call it fixed because the error went away.
+
 ## What this is
 
 The Job360 web app: **Next.js 16 (App Router) + React 19 + Tailwind 4**, talking to

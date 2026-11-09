@@ -51,7 +51,7 @@ schema, the application spine, MCP, auth, extraction. They live in
 
 Read them before editing any of those areas.
 
-**Mistakes:** `.claude/rules/mistakes.md` loads every session; add each new mistake's rule there and its story to `.claude/skills/session-lessons/SKILL.md` (owner rule).
+**Mistakes:** `.claude/rules/mistakes.md` loads every session; add each new mistake's rule there and its story to `.claude/skills/session-lessons/SKILL.md` (owner rule). Fixes: `.claude/rules/permanent-fixes.md`.
 
 ## Commands
 
