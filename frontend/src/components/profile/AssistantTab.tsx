@@ -50,6 +50,11 @@ import {
   pcOnText,
   peopleHuntLastText,
   settingAutoEmails,
+  settingSignedInAsk,
+  P_SIGNED_IN_ASK,
+  SIGNED_IN_ASK_LABEL,
+  SIGNED_IN_ASK_HELP,
+  SIGNED_IN_ASK_CONFIRM,
   settingOutreachSend,
   settingScore,
 } from "@/lib/assistant-tab";
@@ -100,6 +105,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirmCv, setConfirmCv] = useState(false);
   const [confirmCodes, setConfirmCodes] = useState(false);
+  const [confirmSignedIn, setConfirmSignedIn] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
   const [confirmBelowAuto, setConfirmBelowAuto] = useState(false);
   const [premium, setPremium] = useState(false);
@@ -215,6 +221,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const outreachSend = settingOutreachSend(view.outreach_send);
   const cvAuto = settingAutoEmails(view.cv_auto_approve);
   const emailCodes = settingAutoEmails(view.use_email_codes);
+  const signedInAsk = settingSignedInAsk(view.ask_before_signed_in_submit);
   const applyMode = applyModeText(modeOf(view), view.auto_grant_count?.value);
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
@@ -669,6 +676,55 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   type="button"
                   data-testid="cv-auto-approve-cancel"
                   onClick={() => setConfirmCv(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
+          <Row title={SIGNED_IN_ASK_LABEL} sub={SIGNED_IN_ASK_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={signedInAsk}
+              aria-label={SIGNED_IN_ASK_LABEL}
+              data-testid="perm-signed-in-ask"
+              disabled={busy}
+              onClick={() => {
+                if (signedInAsk) {
+                  setConfirmSignedIn(true); // off lets submits go without asking: confirm first
+                } else {
+                  setConfirmSignedIn(false);
+                  void save(P_SIGNED_IN_ASK, true); // the safe direction applies at once
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                signedInAsk ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {signedInAsk ? "On" : "Off"}
+            </button>
+            {confirmSignedIn && signedInAsk && (
+              <span className="flex items-center gap-2 text-[13px]">
+                {SIGNED_IN_ASK_CONFIRM}
+                <button
+                  type="button"
+                  data-testid="perm-signed-in-ask-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmSignedIn(false);
+                    void save(P_SIGNED_IN_ASK, false);
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Yes, apply this change
+                </button>
+                <button
+                  type="button"
+                  data-testid="perm-signed-in-ask-cancel"
+                  onClick={() => setConfirmSignedIn(false)}
                   className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
                 >
                   Cancel

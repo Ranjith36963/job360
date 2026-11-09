@@ -209,6 +209,40 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("signed-in accounts: on by default; off asks to confirm first; on applies at once", async () => {
+    await ready();
+    const toggle = screen.getByTestId("perm-signed-in-ask");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent(
+      "Ask me before submitting through my signed-in accounts (LinkedIn, Indeed and sites I am signed into)",
+    );
+    fireEvent.click(toggle);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent(
+      "Your PC browser will submit applications on your signed-in accounts without asking you first, when every other check passes.",
+    );
+    fireEvent.click(screen.getByTestId("perm-signed-in-ask-cancel"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("perm-signed-in-ask"));
+    fireEvent.click(screen.getByTestId("perm-signed-in-ask-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([
+        { path: "assistant_settings.ask_before_signed_in_submit", value: false },
+      ]),
+    );
+    updateProfileFields.mockClear();
+    getAssistantSettings.mockResolvedValue(view({ ask_before_signed_in_submit: field(false, false) }));
+    await ready();
+    const off = screen.getAllByTestId("perm-signed-in-ask").find((t) => t.getAttribute("aria-checked") === "false");
+    expect(off).toBeTruthy();
+    fireEvent.click(off!);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([
+        { path: "assistant_settings.ask_before_signed_in_submit", value: true },
+      ]),
+    );
+  });
+
   it("emailed codes: off by default, on asks to confirm, Cancel sends nothing, off is one click", async () => {
     await ready();
     const toggle = screen.getByTestId("email-codes-toggle");

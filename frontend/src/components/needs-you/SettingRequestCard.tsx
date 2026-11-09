@@ -159,6 +159,14 @@ export function describeSettingRequest(
             ? "Let your assistant send CVs that pass both checks without asking you first"
             : "Ask me to look at every CV before it goes",
       };
+    case "assistant_settings.ask_before_signed_in_submit":
+      return {
+        title: "Ask me before submitting through my signed-in accounts",
+        change:
+          value === false
+            ? "Let your assistant submit through your signed-in accounts (LinkedIn, Indeed, sites you are signed into) without asking you first"
+            : "Ask me before every submit through my signed-in accounts",
+      };
     case "assistant_settings.use_email_codes":
       return {
         title: "Use codes job sites email me",
