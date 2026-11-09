@@ -907,6 +907,8 @@ class CvReviewInputsOut(BaseModel):
     artifact_id: int
     sha256: str
     lines: list[str]
+    # This CV's newest VALID stored review (2026-11-09): "none" = no valid review yet, so review it.
+    state: Literal["none", "weak", "strong"] = "none"
 
 
 class ApplicationDetailOut(BaseModel):

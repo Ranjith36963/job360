@@ -6101,6 +6101,12 @@ export interface components {
             lines: string[];
             /** Sha256 */
             sha256: string;
+            /**
+             * State
+             * @default none
+             * @enum {string}
+             */
+            state: "none" | "weak" | "strong";
         };
         /** CvSeenRequest */
         CvSeenRequest: {

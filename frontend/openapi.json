@@ -5812,6 +5812,16 @@
           "sha256": {
             "title": "Sha256",
             "type": "string"
+          },
+          "state": {
+            "default": "none",
+            "enum": [
+              "none",
+              "weak",
+              "strong"
+            ],
+            "title": "State",
+            "type": "string"
           }
         },
         "required": [

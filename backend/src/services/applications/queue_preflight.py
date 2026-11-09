@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import blocked as blocked_service
-from src.services.applications import kit, ready, spine
+from src.services.applications import cv_review, kit, ready, spine
 from src.services.browser_agent import learned, routing
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -247,7 +247,8 @@ async def preflight_rows(
 ) -> dict[int, dict[str, Any]]:
     """``{application_id: preflight}`` for queued ``rows`` (applications table rows). Per row:
     ``kit_missing`` (the job-country keys memory lacks, same functions the Needs-you card uses),
-    ``has_cv``, ``duplicate_flag`` ('' / same_job / same_role / same_company), ``company_left``
+    ``has_cv``, ``cv_review`` (none / weak / strong: the newest CV's valid stored review),
+    ``duplicate_flag`` ('' / same_job / same_role / same_company), ``company_left``
     (null = no company limit), ``avoided`` (the user's own never-apply list), ``blocked_count``,
     ``queued_days``, ``hold`` (another session's live hold, else null) and ``waiting_on_owner`` (an open
     ask). ``profile`` / ``overlay`` are the caller's one ``load_profile_with_overlay`` read
@@ -261,6 +262,7 @@ async def preflight_rows(
     cv_apps = await _with_kind(db, user_id, ids, "cv")
     cleared = await _cleared(db, user_id, ids)
     waiting = await _open_ask_apps(db, user_id, ids)
+    reviews = await cv_review.states_for_apps(db, user_id, ids)
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         app_id = int(r["id"])
@@ -280,6 +282,8 @@ async def preflight_rows(
         out[app_id] = {
             "kit_missing": [str(f["key"]) for f in flags if f.get("key")],
             "has_cv": app_id in cv_apps,
+            # 2026-11-09 (application 339): the newest CV's review, from valid reviews only; "none" = review it.
+            "cv_review": reviews.get(app_id, cv_review.NONE),
             "duplicate_flag": flag,
             "company_left": left,
             "avoided": kit.company_avoided(user_id, app_row, profile.preferences.avoid_companies),
