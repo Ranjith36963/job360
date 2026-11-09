@@ -178,19 +178,88 @@ def _label(text: str) -> str:
     return "".join(c for c in text.strip() if c.isalnum() or c in " ._-")[:REVIEWER_MAX]
 
 
+def review_valid(payload: dict[str, Any], cv_id: Optional[int] = None, cv_sha: Optional[str] = None) -> bool:
+    """A stored ``cv_reviewed`` that is a real review of a real CV version: a non-empty sha256 and no
+    ``not_current_cv`` downgrade (the 70 legacy reviews stored weak before #1539 refused them, 2026-11-06), and,
+    when ``cv_id`` is given, exactly that CV (id + sha). THE validity rule: the gate, the queue's
+    ``preflight.cv_review``, get_application's ``review.state`` and ``retry_limit`` all read it."""
+    sha = payload.get("sha256")
+    down = payload.get("downgraded")
+    if not isinstance(sha, str) or not sha or (isinstance(down, list) and "not_current_cv" in down):
+        return False
+    return cv_id is None or (payload.get("artifact_id") == cv_id and sha == cv_sha)
+
+
 async def newest_review(
     db: JobDatabase, user_id: str, application_id: int, cv_id: Optional[int], cv_sha: str,
 ) -> Optional[dict[str, Any]]:
-    """The newest stored ``cv_reviewed`` event of exactly this CV (id + sha), or ``None``."""
+    """The newest VALID stored ``cv_reviewed`` event of exactly this CV (id + sha), or ``None``."""
     from src.services.applications import kit  # noqa: PLC0415 - kit imports this module lazily
 
     if cv_id is None:
         return None
     for ev in await kit._events(db, user_id, application_id, (EVENT_TYPE,)):
-        p = ev["payload"]
-        if p.get("artifact_id") == cv_id and p.get("sha256") == cv_sha:
+        if review_valid(ev["payload"], cv_id, cv_sha):
             return ev
     return None
+
+
+async def states_for_apps(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, str]:
+    """``{application_id: none | weak | strong}`` for each application's NEWEST (unhidden) CV, read as
+    :func:`review_state` reads one: the newest valid stored review of exactly that id + sha. Four queries
+    however many applications (the queue has ~470 rows), never N+1; scoped by ``user_id``; read-only; one
+    count-only log line per call, never per row. ``strong`` is the REVIEW's verdict, not the gate's clearance:
+    the CV still needs the user when ``cv_auto_approve`` is off or its save checks list unsupported claims
+    (``kit.reviews_clearing`` decides that)."""
+    from src.services.applications import kit  # noqa: PLC0415 - kit imports this module lazily
+    from src.services.applications.hiding import hidden_artifact_ids  # noqa: PLC0415
+
+    ids = sorted(set(application_ids))
+    out = {a: NONE for a in ids}
+    if not ids:
+        return out
+    marks = ",".join("?" for _ in ids)
+    hidden = await hidden_artifact_ids(db, user_id)
+    cur = await db._db.execute(
+        "SELECT id, application_id FROM application_artifacts "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND kind = 'cv' AND application_id IN ({marks}) ORDER BY version_no DESC",
+        (user_id, *ids),
+    )
+    newest: dict[int, int] = {}
+    for art_id, app_id in await cur.fetchall():
+        if int(art_id) not in hidden:
+            newest.setdefault(int(app_id), int(art_id))
+    if not newest:
+        return out
+    art_ids = sorted(newest.values())
+    cur = await db._db.execute(
+        "SELECT id, text FROM application_artifacts "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND id IN ({','.join('?' for _ in art_ids)})",
+        (user_id, *art_ids),
+    )
+    shas = {int(r[0]): kit.sha256_text(r[1] or "") for r in await cur.fetchall()}
+    cur = await db._db.execute(
+        "SELECT application_id, payload FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({marks}) ORDER BY id DESC",
+        (user_id, EVENT_TYPE, *ids),
+    )
+    seen: set[int] = set()
+    invalid: set[int] = set()
+    for app_id, raw in await cur.fetchall():
+        app_id = int(app_id)
+        cv_id = newest.get(app_id)
+        if app_id in seen or cv_id is None:
+            continue
+        p = kit._json(raw)
+        if review_valid(p, cv_id, shas.get(cv_id)):
+            seen.add(app_id)
+            out[app_id] = STRONG if p.get("confidence") == STRONG else WEAK
+        elif p.get("artifact_id") == cv_id:
+            invalid.add(app_id)  # a stored review of this CV that is not a valid one: it reads "none"
+    invalid -= seen
+    if invalid:  # ONE line per read, never one per row: how many newest CVs carry only an invalid review
+        logger.info("cv_review_states invalid_only=%s of=%s", len(invalid), len(ids))
+    return out
 
 
 async def review_state(db: JobDatabase, user_id: str, application_id: int, cv_id: Optional[int], cv_sha: str) -> str:
@@ -247,7 +316,8 @@ REVIEW_LINES_CAP = 200
 
 async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
     """What a review of the NEWEST cv must name: its id, the sha256 ``check`` compares and the lines it requires a
-    quote for (``None`` when no cv is saved). Same functions as ``check``, so the agent never guesses."""
+    quote for, plus ``state`` (:func:`review_state` of that CV) (``None`` when no cv is saved). Same functions
+    as ``check``, so the agent never guesses."""
     from src.services.applications import kit, spine  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
@@ -256,7 +326,9 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
     if cv is None:
         return None
     lines = content_lines(cv["text"], load_profile(user_id) or UserProfile())
-    return {"artifact_id": cv["id"], "sha256": kit.sha256_text(cv["text"]), "lines": lines[:REVIEW_LINES_CAP]}
+    sha = kit.sha256_text(cv["text"])
+    return {"artifact_id": cv["id"], "sha256": sha, "lines": lines[:REVIEW_LINES_CAP],
+            "state": await review_state(db, user_id, application_id, cv["id"], sha)}
 
 
 async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -310,7 +382,12 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
             if len(quote_words) < 3 or 2 * len(content_words & quote_words) < len(content_words):
                 down.add("quote_too_thin")
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
-    weak_versions = {e["payload"].get("artifact_id") for e in reviews if e["payload"].get("confidence") != STRONG}
+    # A legacy review that named no real version (not_current_cv, empty sha) was never a try: it never counts.
+    weak = [e for e in reviews if e["payload"].get("confidence") != STRONG]
+    weak_versions = {e["payload"].get("artifact_id") for e in weak if review_valid(e["payload"])}
+    if len(weak_versions) < len({e["payload"].get("artifact_id") for e in weak}):
+        logger.info("cv_reviewed retry_limit ignores invalid legacy reviews application=%s",
+                    safe_log_value(application_id))
     if len(weak_versions - {payload["artifact_id"]}) >= MAX_WEAK:  # a re-review of a judged version is no new try
         down.add("retry_limit")
     claimed = payload["confidence"]

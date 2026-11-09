@@ -1075,7 +1075,7 @@ async def reviews_clearing(
         ev["payload"] = _json(ev.get("payload"))
         app_id, want = int(ev["application_id"]), cvs[int(ev["application_id"])]
         p = ev["payload"]
-        if app_id not in newest and p.get("artifact_id") == want["artifact_id"] and p.get("sha256") == want["sha"]:
+        if app_id not in newest and cv_review.review_valid(p, want["artifact_id"], want["sha"]):
             newest[app_id] = ev
     strong = {a: ev for a, ev in newest.items() if ev["payload"].get("confidence") == cv_review.STRONG}
     if not strong:

@@ -176,7 +176,8 @@ def _request_db() -> AbstractAsyncContextManager[JobDatabase]:
 # named the size as a reason to stop. `compact=true` keeps what a run branches on, about 400 characters a row.
 _COMPACT_KEYS = ("id", "job_title", "job_company", "job_url", "country", "status", "fit_score", "line_side",
                  "queue_position")
-_COMPACT_PREFLIGHT = ("has_cv", "blocked_count", "waiting_on_owner", "duplicate_flag", "avoided", "kit_missing")
+_COMPACT_PREFLIGHT = ("has_cv", "cv_review", "blocked_count", "waiting_on_owner", "duplicate_flag", "avoided",
+                      "kit_missing")
 
 
 def _compact_row(row: dict[str, Any]) -> dict[str, Any]:

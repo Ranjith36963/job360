@@ -20,7 +20,7 @@ from src.services.profile.models import AssistantSettings, UserPreferences
 
 FORM = "https://careers.northwind.example/apply/7"
 PREFLIGHT_KEYS = {
-    "kit_missing", "has_cv", "duplicate_flag", "company_left", "avoided", "blocked_count", "queued_days", "hold",
+    "kit_missing", "has_cv", "cv_review", "duplicate_flag", "company_left", "avoided", "blocked_count", "queued_days", "hold",
     "waiting_on_owner",
 }
 SUMMARY_KEYS = {
