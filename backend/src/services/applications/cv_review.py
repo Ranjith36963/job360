@@ -19,7 +19,7 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
     letters (``quote_too_thin``); words are scanned one by one, no regex on caller text;
 (e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
 After weak reviews of :data:`MAX_WEAK` other CV versions on an application, a review of a new one is weak
-(``retry_limit``): one rewrite, one re-review, never a third try.
+(``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try.
 
 The event stores codes and counts, never CV or profile text. ``may_submit`` reads :func:`review_state` for the
 exact current CV id + sha, and only with ``assistant_settings.cv_auto_approve`` on, in auto mode.
@@ -45,7 +45,7 @@ DOWNGRADES = (
     "not_current_cv", "no_content", "line_uncovered", "line_not_in_cv", "quote_not_in_profile",
     "claim_not_in_quote", "quote_too_thin", "cv_checks_found", "retry_limit",
 )
-MAX_WEAK = 2
+MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 MAX_LINES = 200
 _CAPS = {"cv_line": 1000, "profile_quote": 2000, "field_path": 200}
 REVIEWER_MAX = 40
