@@ -192,12 +192,12 @@ def test_cv_not_seen_message_names_the_review_when_auto_approve_is_on():
     none = ask(on, cv_review="none")
     assert (none.decision, none.reason) == ("ask", "cv_not_seen")
     for part in ('get_recipe("doctor")', "CV review", "FRESH reviewer", "record_event cv_reviewed",
-                 "{artifact_id, sha256, confidence, lines, reviewer}", "weak a second time waits for the user"):
+                 "{artifact_id, sha256, confidence, lines, reviewer}", "weak after the second rewrite waits for the user"):
         assert part in none.detail, part
     weak = ask(on, cv_review="weak")
     assert (weak.decision, weak.reason) == ("ask", "cv_not_seen")
     assert "waits for the user" in weak.detail and "show the CV" in weak.detail
-    assert "only once" in weak.detail and "retry_limit" in weak.detail and "waits for the user" in weak.detail
+    assert "at most two rewrites" in weak.detail and "retry_limit" in weak.detail and "waits for the user" in weak.detail
     assert "record_event cv_reviewed" not in weak.detail
     old = "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes."
     for review in ("none", "weak"):
@@ -337,7 +337,8 @@ async def test_the_receipt_rule_takes_the_strong_review_only_with_the_setting(
 
 
 @pytest.mark.asyncio
-async def test_after_two_weak_reviews_a_third_is_weak(authenticated_async_context, fixture_user_id):
+async def test_after_three_weak_reviews_a_fourth_is_weak(authenticated_async_context, fixture_user_id):
+    # owner 2026-11-09: two rewrites, each re-reviewed; the review of a 4th version is forced weak
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client)
@@ -347,9 +348,28 @@ async def test_after_two_weak_reviews_a_third_is_weak(authenticated_async_contex
         assert (await _stored(client, app_id, _review(v2_id, v2, confidence="weak")))["confidence"] == "weak"
         v3 = CV.replace("- Built", "* Built")
         v3_id = await _save_cv(client, app_id, v3)
-        third = await _stored(client, app_id, _review(v3_id, v3))
-        assert (third["confidence"], third["downgraded"]) == ("weak", ["retry_limit"])
+        assert (await _stored(client, app_id, _review(v3_id, v3, confidence="weak")))["downgraded"] == []
+        v4 = CV.replace("- Built", "** Built")
+        v4_id = await _save_cv(client, app_id, v4)
+        fourth = await _stored(client, app_id, _review(v4_id, v4))
+        assert (fourth["confidence"], fourth["downgraded"]) == ("weak", ["retry_limit"])
         assert (await _gate(client, app_id))["reason"] == "cv_not_seen"
+
+
+@pytest.mark.asyncio
+async def test_the_second_rewrite_is_judged_on_its_merits(authenticated_async_context, fixture_user_id):
+    # owner 2026-11-09: two rewrites. v1 weak, v2 weak, a strong v3 is accepted (the v4 case: test above).
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id, cv_id = await _setup(client)
+        assert (await _stored(client, app_id, _review(cv_id, confidence="weak")))["downgraded"] == []
+        v2 = CV.replace("- Data engineer", "* Data engineer")
+        v2_id = await _save_cv(client, app_id, v2)
+        assert (await _stored(client, app_id, _review(v2_id, v2, confidence="weak")))["downgraded"] == []
+        v3 = CV.replace("- Built", "* Built")
+        v3_id = await _save_cv(client, app_id, v3)
+        third = await _stored(client, app_id, _review(v3_id, v3))
+        assert (third["confidence"], third["downgraded"]) == ("strong", [])
 
 
 @pytest.mark.asyncio
