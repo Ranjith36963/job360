@@ -4357,6 +4357,7 @@ export interface components {
             proof: components["schemas"]["ProofOut"];
             /** Receipts */
             receipts: components["schemas"]["ApplicationReceiptOut"][];
+            review?: components["schemas"]["CvReviewInputsOut"] | null;
             /**
              * Stage
              * @default
@@ -6088,6 +6089,18 @@ export interface components {
             for_scheduled_runs: boolean;
             /** Name */
             name: string;
+        };
+        /**
+         * CvReviewInputsOut
+         * @description The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed).
+         */
+        CvReviewInputsOut: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Lines */
+            lines: string[];
+            /** Sha256 */
+            sha256: string;
         };
         /** CvSeenRequest */
         CvSeenRequest: {

@@ -1492,8 +1492,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def get_application(application_id: int, with_artifact_text: bool = False) -> dict[str, Any]:
         """One application in full: status, the job snapshot, the fit verdict,
         every artifact version (text omitted unless with_artifact_text=true),
-        the whole event timeline, receipts, and `next_step` — what to do next,
-        read off the stored state. Branch on `next_step.code`: judge_fit → call
+        `review` (newest cv's sha256 + lines to quote), the whole event timeline,
+        receipts, and `next_step` — what to do next, read off the stored
+        state. Branch on `next_step.code`: judge_fit → call
         save_fit; write_cv → save_artifact(kind="cv"); submit_now → the user
         clicked Send on the web: open the form, check_submit, type its
         type_first answers, record form_swept with `answers`, check_submit

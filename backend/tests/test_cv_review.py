@@ -255,8 +255,10 @@ async def test_each_check_forces_weak_with_its_code(authenticated_async_context,
             return got["downgraded"]
 
         # (a) not this CV's text or id
-        assert await downgraded(app_id, {**_review(cv_id), "sha256": sha("another text")}) == ["not_current_cv"]
-        assert await downgraded(app_id, _review(other_cv, summary)) == ["not_current_cv"]
+        # (a) is refused with 422 and stored nowhere (stricter than the old stored-weak; see test_cv_review_inputs)
+        for bad in ({**_review(cv_id), "sha256": sha("another text")}, _review(other_cv, summary)):
+            refused = await _event(client, app_id, "cv_reviewed", bad)
+            assert refused.status_code == 422 and "review.sha256" in refused.text
         # (b) a line with no quote: an uncovered bullet, and the owner's case, an unquoted summary line
         assert await downgraded(app_id, _review(cv_id, lines=[L1])) == ["line_uncovered"]
         assert await downgraded(other_app, _review(other_cv, summary)) == ["line_uncovered"]
@@ -297,7 +299,7 @@ async def test_a_new_cv_version_needs_a_new_review(authenticated_async_context, 
         body = await _gate(client, app_id)
         assert body["reason"] == "cv_not_seen" and body["autonomy_shadow"]["cv_review"] == "none"
         # the old sha's review is no review of this one; a review of v2 clears it again
-        assert (await _stored(client, app_id, _review(cv_id)))["downgraded"] == ["not_current_cv"]
+        assert (await _event(client, app_id, "cv_reviewed", _review(cv_id))).status_code == 422
         assert (await _stored(client, app_id, _review(v2_id, v2)))["confidence"] == "strong"
         assert (await _gate(client, app_id))["reason"] == "practice_run"
 

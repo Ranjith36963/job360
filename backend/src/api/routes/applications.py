@@ -901,6 +901,14 @@ class KitHoldOut(BaseModel):
     detail: Optional[str] = None
 
 
+class CvReviewInputsOut(BaseModel):
+    """The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed)."""
+
+    artifact_id: int
+    sha256: str
+    lines: list[str]
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -944,6 +952,8 @@ class ApplicationDetailOut(BaseModel):
     form_state: Optional[Literal["filled", "submitted"]] = None
     # Owner 2026-10-29: a test application (an uncorrected `simulation` mark): left out of every list.
     is_test: bool = False
+    # What a `cv_reviewed` event must name (null = no cv saved yet).
+    review: Optional[CvReviewInputsOut] = None
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -4120,12 +4130,14 @@ async def _record_event(
             payload = which_browser.stamp(
                 await kit_service.check_kit_event(db, user, application_id, body.event_type, payload), browser
             )
+        review_warning: Optional[str] = None
         if body.event_type == cv_review_service.EVENT_TYPE:
             # Owner 2026-11-05: Job360 verifies the reviewer's evidence and stores the CHECKED confidence (M5: the
             # MCP record_event tool calls this route function, so it inherits the check).
             if body.corrects_event_id is not None or source is not None:
                 raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
             payload = await cv_review_service.check(db, user, application_id, payload)
+            review_warning = cv_review_service.missing_warning(payload)
         if body.event_type == email_codes_service.EVENT_TYPE:
             # Owner 2026-11-07: an emailed one-time code may be typed only with use_email_codes on and every rule
             # checked here (M5: the MCP record_event tool calls this route function). Never the code itself.
@@ -4237,6 +4249,8 @@ async def _record_event(
         stored_type = str(result.get("event_type") or body.event_type)
         missing = await spine.missing_applied_warnings(db, application_id, stored_type)
         warnings = [*result.get("warnings", []), *missing, *([hold_warning] if hold_warning else [])]
+        if body.event_type == cv_review_service.EVENT_TYPE and review_warning:
+            warnings.append(review_warning)
         if body.event_type == "note" and source and not result.get("already_existed"):
             from src.services.applications import auto_applied  # noqa: PLC0415
 
