@@ -1067,6 +1067,16 @@
             "title": "Receipts",
             "type": "array"
           },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CvReviewInputsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "stage": {
             "default": "",
             "title": "Stage",
@@ -5783,6 +5793,33 @@
           "name"
         ],
         "title": "CreateTokenRequest",
+        "type": "object"
+      },
+      "CvReviewInputsOut": {
+        "description": "The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed).",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "sha256",
+          "lines"
+        ],
+        "title": "CvReviewInputsOut",
         "type": "object"
       },
       "CvSeenRequest": {
