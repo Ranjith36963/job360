@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.storage import save_profile
+from tests._outreach_review import seed_strong_review
 
 INBOX = "assistant_settings.outreach_send"
 _AD = {
@@ -103,6 +104,7 @@ async def test_a_true_plain_email_still_sends(authenticated_async_context, fixtu
     async with authenticated_async_context() as client:
         app_id, cid = await _auto_ready(client, fixture_user_id)
         saved = await _draft(client, app_id, cid, "Hi Rita, I have 2 years of Python at Acme and would like to talk.")
+        seed_strong_review(cid)  # owner 2026-11-09: an automatic send needs a strong review
         verdict = await _check(client, cid, int(saved["artifact_id"]))
         assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
 

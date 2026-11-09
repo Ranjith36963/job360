@@ -72,7 +72,8 @@
     "cv_reviewed",
     "cv_sent_on_review",
     "cv_wrong_fact",
-    "email_code_used"
+    "email_code_used",
+    "outreach_reviewed"
   ],
   "process": [
     "process_log",

@@ -22,6 +22,7 @@ from src.core import settings
 from src.services.profile import assistant_settings as rules
 from src.services.profile import edits
 from src.services.profile.models import AssistantSettings, UserPreferences
+from tests._outreach_review import seed_strong_review
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
 INBOX = "preferences.daily_check"
@@ -241,6 +242,7 @@ async def _auto_ready(client: AsyncClient, user_id: str) -> tuple[int, int, int]
     app_id = await _bring(client)
     cid = await _contact(client, app_id)
     mid = await _draft(client, app_id, cid)
+    seed_strong_review(cid)  # owner 2026-11-09: an automatic send needs a strong review of this draft
     return app_id, cid, mid
 
 
@@ -327,6 +329,7 @@ async def test_daily_check_auto_alone_never_sends(authenticated_async_context, f
         app_id = await _bring(client)
         cid = await _contact(client, app_id)
         mid = await _draft(client, app_id, cid)
+        seed_strong_review(cid)
         verdict = await _check(client, cid, mid)
         assert (verdict["decision"], verdict["reason"]) == ("ask", "mode_not_auto")
         view = (await client.get("/api/assistant-settings")).json()
@@ -353,6 +356,7 @@ async def test_an_assistant_cannot_turn_outreach_send_on_until_the_user_confirms
         app_id = await _bring(client)
         cid = await _contact(client, app_id)
         mid = await _draft(client, app_id, cid)
+        seed_strong_review(cid)
         agent_headers = {"Authorization": f"Bearer {token}"}
 
         async def agent_set(value: str) -> dict[str, Any]:
@@ -421,6 +425,7 @@ async def test_stop_not_latest_draft(authenticated_async_context, fixture_user_i
     async with authenticated_async_context() as client:
         app_id, cid, first = await _auto_ready(client, fixture_user_id)
         second = await _draft(client, app_id, cid)
+        seed_strong_review(cid)
         assert (await _check(client, cid, first))["reason"] == "not_latest_draft"
         assert (await _check(client, cid, second))["reason"] == "auto_mode"
         # an id that is not this contact's message reads as not found (no oracle)
@@ -462,6 +467,7 @@ async def test_stop_no_email(authenticated_async_context, fixture_user_id):
         app_id = await _bring(client)
         cid = await _contact(client, app_id, email="")
         mid = await _draft(client, app_id, cid)
+        seed_strong_review(cid)
         assert (await _check(client, cid, mid))["reason"] == "no_email"
         # an edit that ADDS the address is read (the current value, not the base row)
         edited = await client.patch(f"/api/contacts/{cid}", json={"email": "new@northwind.example"})

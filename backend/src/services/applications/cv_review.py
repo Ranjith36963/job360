@@ -147,14 +147,17 @@ def missing_warning(stored: dict[str, Any]) -> Optional[str]:
             "return ONE row per line in get_application's review.lines (cv_line copied exactly)")
 
 
-def shape_problems(payload: dict[str, Any]) -> list[str]:
-    """Every shape problem (422); the verification of a well-formed payload never refuses, it downgrades."""
+def shape_problems(
+    payload: dict[str, Any], *, event: str = EVENT_TYPE, id_key: str = "artifact_id", line_field: str = "cv_line",
+) -> list[str]:
+    """Every shape problem (422); the verification of a well-formed payload never refuses, it downgrades.
+    ``event`` / ``id_key`` / ``line_field`` name the same shape for ``outreach_reviewed`` (outreach_review.py)."""
     problems: list[str] = []
-    if set(payload) != PAYLOAD_KEYS:
-        problems.append("cv_reviewed takes exactly {artifact_id, sha256, confidence, lines, reviewer}")
-    artifact_id = payload.get("artifact_id")
+    if set(payload) != {id_key, "sha256", "confidence", "lines", "reviewer"}:
+        problems.append(f"{event} takes exactly {{{id_key}, sha256, confidence, lines, reviewer}}")
+    artifact_id = payload.get(id_key)
     if isinstance(artifact_id, bool) or not isinstance(artifact_id, int) or not isinstance(payload.get("sha256"), str):
-        problems.append("needs artifact_id (a whole number) and sha256 (text)")
+        problems.append(f"needs {id_key} (a whole number) and sha256 (text)")
     if payload.get("confidence") not in (STRONG, WEAK):
         problems.append('confidence must be "strong" or "weak"')
     reviewer = payload.get("reviewer")
@@ -162,13 +165,14 @@ def shape_problems(payload: dict[str, Any]) -> list[str]:
         problems.append(f"reviewer must be a short label (1-{REVIEWER_MAX} characters)")
     lines = payload.get("lines")
     if not isinstance(lines, list) or not 1 <= len(lines) <= MAX_LINES:
-        problems.append(f"lines must be a list of 1-{MAX_LINES} {{cv_line, profile_quote, field_path}}")
+        problems.append(f"lines must be a list of 1-{MAX_LINES} {{{line_field}, profile_quote, field_path}}")
         return problems
+    caps = {line_field: _CAPS["cv_line"], "profile_quote": _CAPS["profile_quote"], "field_path": _CAPS["field_path"]}
     for i, row in enumerate(lines):
-        if not isinstance(row, dict) or set(row) != LINE_KEYS:
-            problems.append(f"lines[{i}] takes exactly {{cv_line, profile_quote, field_path}}")
+        if not isinstance(row, dict) or set(row) != set(caps):
+            problems.append(f"lines[{i}] takes exactly {{{line_field}, profile_quote, field_path}}")
             continue
-        for key, cap in _CAPS.items():
+        for key, cap in caps.items():
             if not isinstance(row[key], str) or not row[key].strip() or len(row[key]) > cap:
                 problems.append(f"lines[{i}].{key} must be text of 1-{cap} characters")
     return problems

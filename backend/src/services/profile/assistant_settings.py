@@ -1988,6 +1988,9 @@ class OutreachFacts:
     follow_up: bool = False
     linkedin_sent_to_person: int = 0
     days_since_sent: int = 0
+    # Owner 2026-11-09: the newest stored ``outreach_reviewed`` of exactly this draft (id + sha): strong | weak |
+    # none (services/applications/outreach_review.py). The route's check_outreach reads it for automatic sends.
+    review: str = "none"
 
 
 @dataclass(frozen=True)

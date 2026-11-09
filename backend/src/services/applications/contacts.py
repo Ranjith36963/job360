@@ -2025,6 +2025,18 @@ async def unsupported_numbers_detail(
     return " ".join(found) or None
 
 
+async def claim_context(db: JobDatabase, user_id: str, contact: dict[str, Any], current: dict[str, Any]) -> str:
+    """The words that vouch for a NAME in an outreach draft (never a number): the person's current name and
+    company, and their linked job's company and title. ``current`` = ``contact`` with its edits applied."""
+    job_company = job_title = ""
+    if contact.get("application_id") is not None:
+        app_row = await get_owned_application(db, user_id, int(contact["application_id"]))
+        if app_row is not None:
+            job_company = str(app_row.get("job_company") or "")
+            job_title = str(app_row.get("job_title") or "")
+    return " ".join(str(v or "") for v in (current.get("name"), current.get("company"), job_company, job_title))
+
+
 async def outreach_gate_facts(
     db: JobDatabase,
     user_id: str,
@@ -2050,13 +2062,12 @@ async def outreach_gate_facts(
     _apply_current_fields(current, (await _latest_edits_for_user(db, user_id)).get(contact_id, {}))
     application_id = contact.get("application_id")
     closed = False
-    job_company = job_title = ""
+    job_company = ""
     if application_id is not None:
         app_row = await get_owned_application(db, user_id, int(application_id))
         if app_row is not None:
             closed = str(app_row.get("status") or "") in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
             job_company = str(app_row.get("job_company") or "")
-            job_title = str(app_row.get("job_title") or "")
     company = contact_company_key({"company": current.get("company"), "job_company": job_company})
     email = (current.get("email") or "").strip().lower()
     bounced = False
@@ -2066,7 +2077,7 @@ async def outreach_gate_facts(
             (user_id, email),
         )
         bounced = await cur.fetchone() is not None
-    context = " ".join(str(v or "") for v in (current.get("name"), current.get("company"), job_company, job_title))
+    context = await claim_context(db, user_id, contact, current)
     linkedin = await _linkedin_gate_facts(
         db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc), context
     )
@@ -2080,9 +2091,13 @@ async def outreach_gate_facts(
             "unsupported_claims": cv_checks.outreach_claims_unsupported(text, profile, context),
             "sensitive": bool(cv_checks.sensitive_words(text)),
         }
+    from src.services.applications import kit, outreach_review  # noqa: PLC0415 - both import this package
+
+    review = outreach_review.review_state(rows, int(target["id"]), kit.sha256_text(str(target.get("text") or "")))
     return settings_rules.OutreachFacts(
         **linkedin,
         **checks,
+        review=review,
         message_found=True,
         latest_draft=int(target["id"]) == max(int(r["id"]) for r in messages),
         channel=str(target.get("channel") or ""),
@@ -2445,6 +2460,10 @@ async def list_people(
                 }
         person = await _full_contact_view(db, user_id, contact)
         person["jobs"] = [job] if job else []
+        from src.services.applications import outreach_review  # noqa: PLC0415 - it imports this module
+
+        # Owner 2026-11-09: what an outreach_reviewed of the newest draft must name (id, sha, lines, state).
+        person["review"] = await outreach_review.inputs(db, user_id, contact)
         return {"person": person}
 
     truncated = False

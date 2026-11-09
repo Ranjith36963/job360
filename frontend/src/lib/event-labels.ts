@@ -136,6 +136,8 @@ export const EVENT_LABEL: Record<string, string> = {
   cv_sent_on_review: "CV sent after a strong review",
   cv_wrong_fact: "Wrong fact reported on a CV",
   email_code_used: "Emailed code entered on the job site",
+  // Owner 2026-11-09: a fresh reviewer's verdict on one outreach draft, checked by Job360.
+  outreach_reviewed: "Outreach message checked by a second reviewer",
 };
 
 function relayedWords(payload: unknown): boolean {

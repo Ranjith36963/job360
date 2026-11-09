@@ -74,6 +74,7 @@ from src.services.applications import evidence as evidence_service
 from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
+from src.services.applications import outreach_review as outreach_review_service
 from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
 from src.services.applications import stats as stats_service
@@ -1841,11 +1842,23 @@ class PersonOut(BaseModel):
     last_reply: Optional[OutreachEntryOut]
 
 
+class OutreachReviewOut(BaseModel):
+    """What an ``outreach_reviewed`` of the person's NEWEST draft must name (outreach_review.inputs): its id, the
+    sha256 Job360 compares, the lines needing a profile quote, and the newest stored review's state."""
+
+    message_id: int
+    sha256: str
+    lines: list[str]
+    state: str
+
+
 class PersonFullOut(ContactOut):
     """``list_people(contact_id=...)``'s shape — the one row's own full
     record (never merged with another row that happens to share an email)."""
 
     jobs: list[PersonJobOut]
+    # Owner 2026-11-09: null = no draft saved yet.
+    review: Optional[OutreachReviewOut] = None
 
 
 class ListPeopleResponse(BaseModel):
@@ -3059,6 +3072,50 @@ async def record_outreach(
     return result
 
 
+class RecordOutreachReviewRequest(BaseModel):
+    """``POST /api/contacts/{contact_id}/outreach-review`` - one ``outreach_reviewed`` (owner 2026-11-09)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict[str, Any]
+    client_key: Optional[str] = None
+
+
+def _refuse_review_extras(body: Any) -> None:
+    """``outreach_reviewed`` is its payload alone: anything else would be silently dropped, so it is refused."""
+    if (body.corrects_event_id is not None or body.source is not None or body.scheduled_at
+            or body.follow_up_on is not None or body.detail):
+        raise SpineError(
+            422, "outreach_reviewed takes only contact_id and payload (no detail, source, corrects_event_id, "
+                 "scheduled_at or follow_up_on)",
+        )
+
+
+@router.post(
+    "/contacts/{contact_id}/outreach-review", status_code=201, response_model=RecordEventResponse,
+    dependencies=AUTH_FIRST,
+)
+async def record_outreach_review(
+    contact_id: int,
+    body: RecordOutreachReviewRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """A fresh reviewer's verdict on the person's NEWEST outreach draft, verified by Job360 (outreach_review.py):
+    the door for any contact, a cold one too (the record_event tool calls it with no ``application_id``).
+    422 for a review of another draft or sha (nothing stored); 404 for a contact that is not the caller's."""
+
+    async def _write() -> dict[str, Any]:
+        try:
+            return await outreach_review_service.record(db, user, contact_id, body.payload)
+        except SpineError as exc:
+            _raise(exc)
+            raise AssertionError("unreachable")  # pragma: no cover
+
+    key_body = {**_key_body(body), "contact_id": contact_id}
+    return await _client_key_once(db, user, "record_event", body.client_key, key_body, _write)
+
+
 @router.get(
     "/contacts/{contact_id}/outreach-check", response_model=OutreachCheckResponse, dependencies=AUTH_FIRST
 )
@@ -3078,8 +3135,9 @@ async def outreach_check(
     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
     kind="outreach"`` created), plus today's recorded sends, then answers
     through ``settings_rules.may_send_outreach`` - the same function for this
-    route and the MCP ``check_outreach`` tool. Read-only: it records nothing
-    except one audit line. 404 for a contact that is not the caller's (rule #12)."""
+    route and the MCP ``check_outreach`` tool. An automatic send (``outreach_review.AUTO_SEND_REASONS``) also needs
+    a strong ``outreach_reviewed`` of exactly this draft, else ``ask`` ``outreach_not_reviewed``. Read-only: it
+    records nothing except one audit line. 404 for a contact that is not the caller's (rule #12)."""
     try:
         contact = await contacts_service.get_owned_contact(db, user.id, contact_id)
         if contact is None:
@@ -3120,13 +3178,24 @@ async def outreach_check(
             "The email raises visa, salary, health or another private topic: the user's to raise. Save a Gmail "
             "draft and ask_user.",
         )
+    # Owner 2026-11-09: a text that goes with nobody pressing Send needs a strong outreach_reviewed of exactly
+    # this draft (id + sha). The user's own Send (owner_clicked, connect_no_note) and a no-note request do not.
+    review_needed = verdict.decision == "send" and verdict.reason in outreach_review_service.AUTO_SEND_REASONS
+    if review_needed and facts.review != outreach_review_service.STRONG:
+        verdict = settings_rules.OutreachDecision(
+            "ask", outreach_review_service.NOT_REVIEWED,
+            f"No strong outreach_reviewed of this exact draft (review: {facts.review}). "
+            + ("Save a Gmail draft; the user sends it. " if facts.channel == "email" else "Do not send. ")
+            + "A fresh reviewer may quote the profile for every list_people(contact_id) review.lines row first.",
+        )
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",
         extra={
             "event": "outreach_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "contact_id": contact_id, "message_id": message_id,
-            "decision": verdict.decision, "reason": verdict.reason, "result": "ok",
+            "decision": verdict.decision, "reason": verdict.reason, "review": safe_log_value(facts.review, max_len=10),
+            "result": "ok",
         },
     )
     return {
@@ -4011,8 +4080,15 @@ async def _record_event(
 ) -> dict[str, Any]:
     _refuse_dev_talk(body.detail)  # every caller-written detail, agent and web alike (owner 2026-10-29)
     try:
-        if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
+        if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES + (outreach_review_service.EVENT_TYPE,):
             raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
+        if body.event_type == outreach_review_service.EVENT_TYPE:
+            # Owner 2026-11-09: verified and stored on the contact's ledger (+ this job's timeline); M5: the MCP
+            # record_event tool reaches it through this route function or, for a cold contact, record_outreach_review.
+            _refuse_review_extras(body)
+            return await outreach_review_service.record(
+                db, user, int(body.contact_id or 0), body.payload or {}, application_id_hint=application_id,
+            )
         source = spine.validate_source(
             body.source.model_dump() if body.source else None, allow_quote=body.contact_id is None
         )

@@ -150,6 +150,9 @@ def _refused_calls(app_id: int, job_id: int) -> dict[tuple[str, str], tuple[str,
         ("POST", "applications.add_contacts_batch"): ("POST", "/api/contacts/batch", {"contacts": [{"name": "B"}]}),
         ("PATCH", "applications.update_contact"): ("PATCH", "/api/contacts/1", {"notes": "x"}),
         ("POST", "applications.record_outreach"): ("POST", "/api/contacts/1/outreach", {"text": "Hi"}),
+        ("POST", "applications.record_outreach_review"): (
+            "POST", "/api/contacts/1/outreach-review", {"payload": {"message_id": 1}}
+        ),
         ("PATCH", "applications.update_job_facts"): ("PATCH", f"{a}/job", {"country": "GB"}),
         ("GET", "applications.outreach_check"): ("GET", "/api/contacts/1/outreach-check?message_id=1", None),
         ("GET", "applications.auto_email_check"): ("GET", f"{a}/auto-email-check?kind=checkin", None),
