@@ -101,6 +101,18 @@ export const P_CV_AUTO_APPROVE = "assistant_settings.cv_auto_approve";
 export const CV_AUTO_APPROVE_LABEL = "Send reviewed CVs without asking me";
 export const CV_AUTO_APPROVE_HELP =
   "A CV goes on its own only when the code check and a second AI reviewer both pass it (strong). Anything weak still waits for you. Works only when automatic submit is on.";
+/** Default ON: a submit through the user's own signed-in account asks first. Turning it OFF is the riskier way. */
+export const P_SIGNED_IN_ASK = "assistant_settings.ask_before_signed_in_submit";
+export const SIGNED_IN_ASK_LABEL =
+  "Ask me before submitting through my signed-in accounts (LinkedIn, Indeed and sites I am signed into)";
+export const SIGNED_IN_ASK_HELP =
+  "On: your assistant asks you before it submits through an account you are signed into. Off: it submits without asking when every other check passes.";
+export const SIGNED_IN_ASK_CONFIRM =
+  "Your PC browser will submit applications on your signed-in accounts without asking you first, when every other check passes.";
+/** On unless the server says false (the backend default is true). */
+export function settingSignedInAsk(f: { effective?: unknown; value?: unknown } | undefined): boolean {
+  return settingEffective(f) !== false;
+}
 /** Owner 2026-11-07: the assistant may type a one-time code the job site emailed the user. Off unless the user says. */
 export const P_EMAIL_CODES = "assistant_settings.use_email_codes";
 export const EMAIL_CODES_LABEL = "Use codes job sites email me";
@@ -122,7 +134,7 @@ export const PC_ON_HELP =
   "When your computer is usually on. Your assistant uses its own browser only then, for tasks Job360's browser could not finish. Blank = any time.";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
-  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE, P_EMAIL_CODES,
+  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE, P_SIGNED_IN_ASK, P_EMAIL_CODES,
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
   P_PEOPLE_HUNT, P_PC_ON,
   P_OUTREACH_PER_COMPANY, P_NETWORK_PER_HOUR, P_LINKEDIN_PER_DAY, P_EMAIL_PER_DAY,
@@ -145,6 +157,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_AUTO_EMAILS]: "Automatic employer emails",
   [P_OUTREACH_SEND]: "Automatic outreach emails",
   [P_CV_AUTO_APPROVE]: CV_AUTO_APPROVE_LABEL,
+  [P_SIGNED_IN_ASK]: SIGNED_IN_ASK_LABEL,
   [P_EMAIL_CODES]: EMAIL_CODES_LABEL,
   [P_COMPANY_CAP]: "Applications per company",
   [P_COMPANY_DAYS]: "Days for the company limit",

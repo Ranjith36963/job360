@@ -120,6 +120,15 @@ describe("describeSettingRequest", () => {
     );
   });
 
+  it("signed-in ask: off and on read in plain words, never the raw path", () => {
+    const off = describeSettingRequest("assistant_settings.ask_before_signed_in_submit", false);
+    expect(off.title).toBe("Ask me before submitting through my signed-in accounts");
+    expect(off.change).toMatch(/without asking you first/);
+    expect(describeSettingRequest("assistant_settings.ask_before_signed_in_submit", true).change).toBe(
+      "Ask me before every submit through my signed-in accounts",
+    );
+  });
+
   it("emailed codes: on and off read in plain words", () => {
     const on = describeSettingRequest("assistant_settings.use_email_codes", true);
     expect(on.title).toBe("Use codes job sites email me");
