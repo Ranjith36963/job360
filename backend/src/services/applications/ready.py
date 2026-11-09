@@ -109,11 +109,20 @@ async def cv_to_approve(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
         _CV_TO_APPROVE_SQL.replace("{hidden}", skip), (*hidden, user_id, *_TEST_PARAMS, CV_TO_APPROVE_MAX * 4)
     )
     out: list[dict[str, Any]] = []
+    unseen: list[tuple[dict[str, Any], int, str]] = []
     for r in await cur.fetchall():
         row = dict(r)
         app_id, sha = int(row["application_id"]), kit.sha256_text(row["text"])
         marks = await kit._events(db, user_id, app_id, ("cv_seen", "submit_approved"))
         if any(kit.cv_mark_matches(ev, row["artifact_id"], sha) for ev in marks):
+            continue
+        unseen.append((row, app_id, sha))
+    # Owner 2026-11-09: a strong review of this exact CV clears it too (cv_auto_approve on; one batched read).
+    reviewed = await kit.reviews_clearing(
+        db, user_id, {a: {"artifact_id": r["artifact_id"], "sha": sha} for r, a, sha in unseen}
+    )
+    for row, app_id, _sha in unseen:
+        if app_id in reviewed:
             continue
         out.append({
             "application_id": app_id, "job_title": row["job_title"] or "", "job_company": row["job_company"] or "",
