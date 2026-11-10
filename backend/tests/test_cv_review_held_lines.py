@@ -413,3 +413,77 @@ async def test_both_bypasses_are_stored_weak(authenticated_async_context, fixtur
             assert got[0] == "weak" and "quote_not_in_profile" in got[1], (line, got)
         # the true current-role header is still strong with no quote that holds it
         assert await _verdict(client, base, [{**cur, "profile_quote": "anything at all"}]) == ("strong", [])
+
+
+# ── Wrapped raw bullets (coordinator yes, 2026-11-10): apps 345 / 478 copied PDF bullets that wrap ─────────
+# Inside ONE raw text, a line starting lowercase continues the line before it, unless that line ends a sentence
+# (. ! ? :), is a header or a section heading, or a blank line comes between. Never a record.
+
+WRAP_RAW = (
+    "Ada Lovelace\nEXPERIENCE\nNorthwind Labs | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage\n"
+    "• Engineered a RAG pipeline with Bedrock, improving relevance by 40%; added Redis caching\n"
+    "that cut response time from 3.2s to 0.8s.\n"
+    "• Built LLM systems in PyTorch, tuning responses to improve engagement; evaluated\n"
+    "video models via the Gemini and OpenAI APIs.\n"
+    "• Added a Critic layer that caught 5 of 6 risky replies sent without\n"
+    "approval; 148 tests, CI and tracing.\n"
+    "• Shipped the billing service.\nusing Stripe webhooks in 2024.\n"
+    "• Worked at Tidewater as AI/ML Engineer Intern, from\noct 2024 - jan 2025, remote\n"
+    "PROJECTS\nlangGraph agents for triage\n"
+    "Orbitly (orbitly.uk) | Founder, Feb 2026 - Present\nfounder of nothing else\n\nwhile at Northwind, led 9 engineers\n"
+)
+WRAPPED_TRUE = (
+    "Engineered a RAG pipeline with Bedrock, improving relevance by 40%; added Redis caching that cut response time "
+    "from 3.2s to 0.8s.",
+    "Built LLM systems in PyTorch, tuning responses to improve engagement; evaluated video models via the Gemini and "
+    "OpenAI APIs.",
+    "Added a Critic layer that caught 5 of 6 risky replies sent without approval; 148 tests, CI and tracing.",
+)
+WRAP_ATTACKS = (
+    "Shipped the billing service. using Stripe webhooks in 2024.",  # the bullet before ended its sentence
+    "PROJECTS langGraph agents for triage",  # after a section heading
+    "Founder, Feb 2026 - Present founder of nothing else",  # after a header line
+    "founder of nothing else while at Northwind, led 9 engineers",  # across a blank line
+    "approval; 148 tests, CI and tracing. Shipped the billing service.",  # the joined line plus the next line
+    "and tracing. • Shipped the billing service.",
+)
+
+
+def _wrap_profile() -> UserProfile:
+    return UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=WRAP_RAW))
+
+
+def test_a_wrapped_raw_bullet_is_one_quote_and_nothing_more():
+    source, words = cv_review.quote_sources(_wrap_profile())
+    for line in WRAPPED_TRUE:
+        assert cv_review.quote_in_profile(line, source, words), line
+    for quote in WRAP_ATTACKS:
+        assert not cv_review.quote_in_profile(quote, source, words), quote
+    # the same lines in two DIFFERENT fields never join (raw_text and linkedin_raw_text are separate texts)
+    split = UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text="• Shipped the billing service with\n",
+                                       linkedin_raw_text="stripe webhooks in 2024\n"))
+    source, words = cv_review.quote_sources(split)
+    assert not cv_review.quote_in_profile("Shipped the billing service with stripe webhooks", source, words)
+
+
+def test_a_joined_line_is_never_a_header_record():
+    records = cv_review.profile_records(_wrap_profile())
+    assert not cv_review.record_line_holds(
+        "Worked at Tidewater as AI/ML Engineer Intern, from oct 2024 - jan 2025, remote", records)
+    assert not cv_review.record_line_holds("Tidewater | AI/ML Engineer Intern | oct 2024 - jan 2025 | remote", records)
+
+
+@pytest.mark.asyncio
+async def test_wrapped_bullets_quoting_themselves_are_stored_strong(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id, _wrap_profile())
+        header = "Northwind Labs | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage"
+        text = "Ada Lovelace\nEXPERIENCE\n" + header + "\n" + "".join(f"- {s}\n" for s in WRAPPED_TRUE)
+        rows = [{"cv_line": header, "profile_quote": header, "field_path": "cv_data.raw_text"}] + [
+            {"cv_line": f"- {s}", "profile_quote": s, "field_path": "cv_data.raw_text"} for s in WRAPPED_TRUE]
+        assert await _verdict(client, text, rows) == ("strong", [])
+        bad = "- Shipped the billing service using Stripe webhooks in 2024."
+        got = await _verdict(client, text + bad + "\n", rows + [
+            {"cv_line": bad, "profile_quote": "Shipped the billing service. using Stripe webhooks in 2024.",
+             "field_path": "cv_data.raw_text"}])
+        assert got[0] == "weak" and "quote_not_in_profile" in got[1], got

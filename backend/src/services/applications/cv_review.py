@@ -401,11 +401,12 @@ def header_pieces(line: str) -> Optional[list[tuple[str, ...]]]:
     ``•``, or 3+ joined by commas / dashes with one a date range (:func:`_dated_header`)."""
     if len(line) > HEADER_MAX_CHARS:
         return None
-    toks = line.split()
+    body = line.strip().lstrip(_BULLETS + " \t")  # a leading "•" is the line's bullet, never a bar between pieces
+    toks = body.split()
     barred = bool(_HEADER_BARS.intersection(toks))
     if not barred and not any(t.endswith(",") or set(t) <= _DASH_TOKENS for t in toks):
         return None
-    got = pieces(line.strip().lstrip(_BULLETS + " \t"))
+    got = pieces(body)
     if len(got) > HEADER_MAX_PIECES or len(set(got)) < 2:
         return None
     if not barred and not _dated_header(got):
@@ -440,12 +441,40 @@ def _runs_in(got: list[tuple[str, ...]], record: frozenset[tuple[str, ...]]) -> 
 _SEGMENT = "\x00"  # between two profile fields / text lines: a quote never spans it
 
 
+_RAW_FIELDS = frozenset({"raw_text", "linkedin_raw_text"})
+_WRAP_STOPS = (".", "!", "?", ":")
+
+
+def _unwrapped(text: str) -> list[str]:
+    """The lines of ONE raw text, a PDF-wrapped bullet joined back into one line (apps 345 / 478, 2026-11-10): a line
+    that starts with a lowercase letter continues the line before it, unless that line ends a sentence (``. ! ? :``),
+    is a header (:func:`header_pieces`) or a section heading, or a blank line comes between. Line by line, no regex.
+    Used for quotes only: a joined line is never a record (:func:`profile_records` reads the raw lines)."""
+    out: list[str] = []
+    last = ""  # the previous physical line, "" after a blank line
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            last = ""
+            continue
+        if (last and out and line[:1].islower() and not last.endswith(_WRAP_STOPS)
+                and header_pieces(last) is None and not cv_checks._is_section_heading(last) and not is_heading(last)):
+            out[-1] = f"{out[-1]} {line}"
+        else:
+            out.append(line)
+        last = line
+    return out
+
+
 def quote_sources(profile: Any) -> tuple[str, str]:
-    """``(source, source_words)`` for :func:`quote_in_profile`: each field value and each text line of
-    ``cv_checks.profile_source_text`` normalised on its own, joined by :data:`_SEGMENT`, so a quote must lie inside
-    ONE field value or ONE line. Joined plainly, "Calnex Solutions ... Stevenage ... Founder & AI-Native Engineer"
-    (one job's company and dates, another's title) read as one quote (checker 2026-11-10)."""
-    lines = [ln for ln in (_norm(x) for x in cv_checks.profile_source_text(profile).split("\n")) if ln]
+    """``(source, source_words)`` for :func:`quote_in_profile`: each field value and each text line (a wrapped raw
+    bullet as one line, :func:`_unwrapped`) normalised on its own, joined by :data:`_SEGMENT`, so a quote must lie
+    inside ONE field value or ONE line. Joined plainly, "Calnex Solutions ... Stevenage ... Founder & AI-Native
+    Engineer" (one job's company and dates, another's title) read as one quote (checker 2026-11-10)."""
+    found: list[str] = []
+    for name, text in cv_checks.profile_source_parts(profile):
+        found += _unwrapped(text) if name in _RAW_FIELDS else text.split("\n")
+    lines = [ln for ln in (_norm(x) for x in found) if ln]
     sep = f" {_SEGMENT} "
     return sep.join(lines), f' {sep.join(" ".join(evidence._words(ln)) for ln in lines)} '
 
