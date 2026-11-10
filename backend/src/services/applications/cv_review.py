@@ -22,8 +22,9 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
     what it says in other words: ``&`` is ``and``, and a place of the CLOSED ``cv_checks.PLACE_ABBREVIATIONS``
     table is its other spelling ("United Kingdom" says "UK"). Two line shapes need no one quote to hold them,
     because the profile itself does, token for token (production 2026-11-10: 234 of 279 newest reviews weak):
-    a list line ``[Label:] a, b, c`` whose every item is a WHOLE profile skill item and every label word a
-    section word or a profile word (:func:`list_line_holds`), and a ``|`` header line whose every piece is a
+    a list line ``[Label:] a, b, c`` whose every item is a WHOLE profile skill item under a label of the
+    profile's own group words or closed generic category words, never an employer, title, project or degree
+    word (:func:`list_line_holds`), and a ``|`` header line (12 pieces, 300 characters at most) whose every piece is a
     whole piece of ONE profile record: one role, one project, one education entry, one CV text line, never two
     mixed (:func:`record_line_holds`). One item or piece the profile lacks keeps the line a claim;
 (e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
@@ -39,6 +40,7 @@ in auto mode. The writer avoids rewrites by copying the profile's own sentences 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import cv_checks, evidence
@@ -92,14 +94,20 @@ def _is_link(tok: str) -> bool:
     return tok.casefold().startswith(("http://", "https://", "www.", "linkedin.com/", "github.com/"))
 
 
+# The countries a residence code names, for the contact line only (closed; the codes PLACE_ABBREVIATIONS spells).
+_ISO2_PLACES = {"GB": "United Kingdom", "US": "United States", "AE": "United Arab Emirates"}
+
+
 def place_words(profile: Any) -> frozenset[str]:
-    """The words of the profile's OWN location fields (and their :data:`cv_checks.PLACE_ABBREVIATIONS` spelling)."""
+    """The words of where the PERSON lives: ``cv_data.location`` and ``user_info.contact`` residence / address city
+    and country (with their :data:`cv_checks.PLACE_ABBREVIATIONS` spelling). Never a job's location: "Stevenage"
+    or "Remote" on a role is where the work was, not the person's place."""
     cv = getattr(profile, "cv_data", None)
-    found = [getattr(cv, "location", "")]
-    for blob in (getattr(cv, "github_identity", None), getattr(cv, "linkedin_contact", None)):
-        found.append(blob.get("location") if isinstance(blob, dict) else "")
-    for name in ("cv_positions", "linkedin_positions"):
-        found += [p.get("location") for p in (getattr(cv, name, None) or []) if isinstance(p, dict)]
+    contact = getattr(getattr(profile, "user_info", None), "contact", None) or {}
+    found = [getattr(cv, "location", ""), contact.get("residence_city"), contact.get("address_city")]
+    for key in ("residence_country", "address_country"):
+        code = contact.get(key)
+        found.append(_ISO2_PLACES.get(code.upper(), "") if isinstance(code, str) else "")
     text = " ".join(f for f in found if isinstance(f, str))
     return frozenset(evidence._words(text + " " + cv_checks.place_equivalents(text)))
 
@@ -217,33 +225,88 @@ def list_parts(line: str) -> Optional[tuple[list[str], list[str]]]:
     return [w.casefold() for w in words], items
 
 
-def profile_items(profile: Any) -> frozenset[str]:
-    """Every whole skill item the profile holds: its skill lists, and the items of its own LABELLED list lines
-    ("Languages: Python, SQL, TypeScript"). Compared whole, case and spacing aside: never a word of an item."""
+# Closed and hard-coded: generic skill-category words a CV may label a skills line with. Never an employer, title,
+# project, degree or section of the CV ("Education: Python" is no skills group).
+GENERIC_LABEL_WORDS = frozenset({
+    "skills", "skill", "technical", "tools", "technologies", "languages", "frameworks", "core", "key", "backend",
+    "frontend", "data", "engineering", "cloud", "ops", "ai", "ml", "agents", "llms", "web", "devops", "databases",
+})
+_NEVER_LABEL_WORDS = frozenset({"education", "experience", "work", "employment"})
+
+
+@dataclass(frozen=True)
+class SkillBook:
+    """What the profile says about skills: every whole item, its own labelled groups (label words -> items), and
+    the words of its records (companies, titles, projects, education, certifications) a label may never use."""
+
+    items: frozenset[str]
+    groups: tuple[tuple[frozenset[str], frozenset[str]], ...]
+    entities: frozenset[str]
+
+
+def _label_words(words: list[str]) -> frozenset[str]:
+    return frozenset("and" if w == "&" else w for w in words if w not in ("/", "+"))
+
+
+def skill_book(profile: Any) -> SkillBook:
+    """The profile's :class:`SkillBook`: skill lists, the items of its own LABELLED list lines ("Languages: Python,
+    SQL, TypeScript"); items compared whole, case and spacing aside, never a word of an item."""
     cv = getattr(profile, "cv_data", None)
     prefs = getattr(profile, "preferences", None)
     raw = [s for n in _SKILL_FIELDS for s in cv_checks._flat(getattr(cv, n, None))]
     raw += cv_checks._flat(getattr(prefs, "additional_skills", None))
     out = {_norm(s) for s in raw} | {_norm(i) for s in raw for i in cv_checks._split_items(s)}
+    groups: dict[frozenset[str], set[str]] = {}
     for ln in cv_checks.profile_source_text(profile).splitlines():
         parts = list_parts(ln)
         if parts and parts[0]:
-            out |= {_norm(i) for i in parts[1]}
-    return frozenset(out - {""})
+            got = {_norm(i) for i in parts[1]}
+            out |= got
+            groups.setdefault(_label_words(parts[0]), set()).update(got)
+    texts = [str(r.get(k) or "") for n in ("cv_positions", "linkedin_positions") for r in (getattr(cv, n, None) or [])
+             if isinstance(r, dict) for k in ("company", "title")]
+    texts += [str(r.get("name") or "") for n in ("cv_projects", "linkedin_projects")
+              for r in (getattr(cv, n, None) or []) if isinstance(r, dict)]
+    texts += [s for n in ("education", "certifications", "companies", "job_titles")
+              for s in cv_checks._flat(getattr(cv, n, None))]
+    entities = frozenset(evidence._words(" ".join(texts).replace("/", " ").replace("-", " ")))
+    return SkillBook(frozenset(out - {""}), tuple((k, frozenset(v)) for k, v in groups.items()), entities)
 
 
-def list_line_holds(line: str, items: frozenset[str], known: set[str]) -> bool:
-    """A skills line the profile holds item by item (production 2026-11-10, apps 848-882): "Backend & Data: Python,
-    SQL, dbt" is true when EVERY item is a whole profile item, whatever their order, and every label word is a
-    section word or a word of the profile. One item the profile lacks ("Kubernetes", "7 years") keeps it a claim."""
+def profile_items(profile: Any) -> frozenset[str]:
+    """Every whole skill item the profile holds (:func:`skill_book`)."""
+    return skill_book(profile).items
+
+
+def list_line_holds(line: str, book: SkillBook) -> bool:
+    """A skills line the profile holds item by item (production 2026-11-10, apps 848-882): EVERY item a whole
+    profile item, in any order, under a label that is a skills group, never a fact. Each label word is a word of one
+    of the profile's OWN group labels, or a closed :data:`GENERIC_LABEL_WORDS` word; a word of an employer, title,
+    project, degree or certification is never one (unless the profile's own group label uses it), nor
+    :data:`_NEVER_LABEL_WORDS`. A label made only of profile group words claims THOSE groups: its items must come
+    from them ("Agents: Python, SQL" is weak when Python is not in "Agents & LLMs"). A label with a generic word no
+    group uses ("Backend & Data") may take any profile item. One item the profile lacks keeps it a claim."""
     parts = list_parts(line)
     if parts is None:
         return False
-    label, got = parts
-    grammar = SECTION_WORDS | cv_checks._SECTION_WORDS | cv_checks._HEADING_LEADS | _LABEL_JOINERS
-    return all(w in grammar or w in known for w in label) and all(_norm(i) in items for i in got)
+    label = _label_words(parts[0]) - {"and"}
+    group_words = frozenset().union(*(k for k, _ in book.groups)) if book.groups else frozenset()
+    for w in label:
+        named = w in group_words
+        if w in _NEVER_LABEL_WORDS or not (named or w in GENERIC_LABEL_WORDS) or (w in book.entities and not named):
+            return False
+    got = {_norm(i) for i in parts[1]}
+    if not got <= book.items:
+        return False
+    if label and label <= group_words:  # it names the profile's own groups: the items come from them
+        named_items = frozenset().union(*(v for k, v in book.groups if k & label))
+        return got <= named_items
+    return True
 
 
+HEADER_MAX_CHARS = 300
+HEADER_MAX_PIECES = 12
+RAW_RECORD_MAX_CHARS = 200  # a CV text line longer than this is a paragraph, never one record
 _PIECE_ENDS = frozenset("|•·;/")
 _HEADER_BARS = frozenset({"|", "•", "·"})
 _DASH_TOKENS = frozenset("-–—‐‑‒―−")
@@ -289,7 +352,8 @@ def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
         groups += [cv_checks._flat(list(r.values())) for r in (getattr(cv, name, None) or []) if isinstance(r, dict)]
     groups += [[s] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None))]
     for name in ("raw_text", "linkedin_raw_text"):
-        groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines() if ln.strip()]
+        groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines()
+                   if ln.strip() and len(ln) <= RAW_RECORD_MAX_CHARS]
     records = [frozenset(p for s in g for p in [*pieces(s), tuple(evidence._words(s))] if p) for g in groups]
     return [r for r in records if r]
 
@@ -300,18 +364,30 @@ def record_line_holds(line: str, records: list[frozenset[tuple[str, ...]]]) -> b
     for piece, whole pieces, any order
     (production 2026-11-10, app 478). Pieces of two records never combine: a title is never moved to another
     employer, and a piece the record lacks ("Senior", "2018") keeps the line a claim."""
-    if not _HEADER_BARS.intersection(line.split()):  # a comma line is prose or a list: a quote or the list rule
+    if len(line) > HEADER_MAX_CHARS or not _HEADER_BARS.intersection(line.split()):  # a comma line: a quote
         return False
     got = pieces(line.strip().lstrip(_BULLETS + " \t"))
-    return len(set(got)) >= 2 and any(_runs_in(got, r) for r in records)
+    if len(got) > HEADER_MAX_PIECES or len(set(got)) < 2:  # a header has a few pieces; never an unbounded scan
+        return False
+    return any(_runs_in(got, r) for r in records)
 
 
 def _runs_in(got: list[tuple[str, ...]], record: frozenset[tuple[str, ...]]) -> bool:
     """Every piece of ``got`` is a whole piece of ``record``, or a run of neighbouring pieces is one, joined in their
-    order (a separator the CV adds: "R&D | Jun 2025 - Sep 2025" against the PDF's "R&D Jun 2025 – Sep 2025")."""
+    order (a separator the CV adds: "R&D | Jun 2025 - Sep 2025" against the PDF's "R&D Jun 2025 – Sep 2025"). A run
+    never grows past the record's longest piece (at most :data:`HEADER_MAX_PIECES` pieces: bounded work)."""
+    longest = max((len(p) for p in record), default=0)
     ok = [True] + [False] * len(got)  # ok[i]: got[:i] splits into such runs
-    for end in range(1, len(got) + 1):
-        ok[end] = any(ok[start] and sum(got[start:end], ()) in record for start in range(end))
+    for start in range(len(got)):
+        if not ok[start]:
+            continue
+        run: list[str] = []
+        for end in range(start + 1, len(got) + 1):
+            run.extend(got[end - 1])
+            if len(run) > longest:
+                break
+            if not ok[end] and tuple(run) in record:
+                ok[end] = True
     return ok[-1]
 
 
@@ -575,7 +651,7 @@ async def verify(
     for ln in cv["text"].splitlines():  # the CV's own text decides case, never the entry's copy
         actual.setdefault(line_key(ln), []).append(ln.strip().lstrip(_BULLETS + " \t"))
     content_keys = {line_key(ln) for ln in content}
-    items, records = profile_items(profile), profile_records(profile)
+    book, records = skill_book(profile), profile_records(profile)
     held = 0
     for n, e in enumerate(entries, 1):
         row = f"row {n}"
@@ -590,7 +666,7 @@ async def verify(
         bank = _quote_bank(e["profile_quote"])
         quote_words = set(evidence._words(bank))
         for body in bodies:
-            if list_line_holds(body, items, known) or record_line_holds(body, records):  # no one quote must hold it
+            if list_line_holds(body, book) or record_line_holds(body, records):  # no one quote must hold it
                 held += 1
                 continue
             if evidence.unsupported_tokens(body, bank, first_word=True):

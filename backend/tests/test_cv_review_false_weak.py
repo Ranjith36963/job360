@@ -91,10 +91,15 @@ def test_contact_location_links_headers_and_and_headings_need_no_row():
     text = ("Ada Lovelace\nLondon, UK | +44 7700 900123 | ada@example.com\n"
             "github.com/ada | linkedin.com/in/ada | ada.github.io | job360.uk\nEDUCATION AND CERTIFICATION\n"
             "EDUCATION & CERTIFICATION\nLondon, UK\nevil.example | ada@example.com\n"
-            "Leeds | ada@example.com\nNorthwind | +44 7700 900123\nUK 2019 | ada@example.com\n")
+            "Leeds | ada@example.com\nNorthwind | +44 7700 900123\nUK 2019 | ada@example.com\n"
+            "Stevenage, UK | ada@example.com\nRemote | ada@example.com\n")  # a JOB's place is not the person's
     assert cv_review.content_lines(text, _profile()) == [
         "London, UK", "evil.example | ada@example.com", "Leeds | ada@example.com", "Northwind | +44 7700 900123",
-        "UK 2019 | ada@example.com"]
+        "UK 2019 | ada@example.com", "Stevenage, UK | ada@example.com", "Remote | ada@example.com"]
+    # the person's residence in user_info.contact counts; a city and a country code they gave
+    lives = UserProfile(cv_data=CVData(name="Ada Lovelace"))
+    lives.user_info.contact = {"residence_city": "Leeds", "residence_country": "GB"}
+    assert cv_review.content_lines("Ada Lovelace\nLeeds, UK | ada@example.com\n", lives) == []
 
 
 def test_one_profile_record_holds_a_header_line_and_two_never_combine():
@@ -119,12 +124,22 @@ def test_one_profile_record_holds_a_header_line_and_two_never_combine():
         assert not cv_review.record_line_holds(line, records), line
 
 
+# Checker, 2026-11-10: each was stored strong on b9c8e74cc (a label of ANY profile word): skills tied to an employer,
+# title, project, degree or section the profile never tied them to.
+LABEL_ATTACKS = (
+    "Calnex: Python, SQL", "Northwind: Python, SQL", "Founder: Python, SQL", "Data Engineer: Python, SQL",
+    "MSc: Python, SQL", "Leeds: Python, SQL", "Human-in-the-Loop Support Agent: Python, SQL",
+    "Founder Engineer: Python, SQL", "Agents: Python, SQL", "Education: Python, SQL",
+)
+
+
 def test_a_list_line_holds_only_whole_profile_items_under_a_profile_label():
-    p = _profile()
-    items = cv_review.profile_items(p)
-    known = set(cv_review.evidence._words(cv_review.cv_checks.profile_source_text(p)))
-    for line in TRUE_LINES[3:6] + ("Python, SQL", "- Data: dbt | Airflow"):
-        assert cv_review.list_line_holds(line, items, known), line
+    book = cv_review.skill_book(_profile())
+    for line in TRUE_LINES[3:6] + ("Python, SQL", "- Data: dbt | Airflow", "Languages: SQL, Python",
+                                   "Agents & LLMs: MCP, LangGraph", "Technical Skills: Python, dbt, MCP"):
+        assert cv_review.list_line_holds(line, book), line
+    for line in LABEL_ATTACKS + ("Data: Python, SQL", "Agents & LLMs: Python, MCP"):  # a named group lends only its own
+        assert not cv_review.list_line_holds(line, book), line
     for line in ("Backend & Data: Python, SQL, Kubernetes",  # an invented skill among true ones
                  "Languages: Python (7 years), SQL",  # a number inside an item
                  "Languages: Python 3, SQL",
@@ -133,7 +148,28 @@ def test_a_list_line_holds_only_whole_profile_items_under_a_profile_label():
                  "Led the Snowflake migration, cut costs, Python",  # prose disguised with commas
                  "Data: Snowflake, dbt and Airflow pipelines saving 30%",
                  "Python"):  # one item is no list
-        assert not cv_review.list_line_holds(line, items, known), line
+        assert not cv_review.list_line_holds(line, book), line
+
+
+def test_a_huge_header_line_is_bounded_and_weak():
+    """Checker: "Stevenage | London | " x1000 took 7.4 s of CPU inside the request; x2500 ran for minutes."""
+    import time
+
+    records = cv_review.profile_records(_profile())
+    start = time.process_time()
+    assert not cv_review.record_line_holds("Stevenage | London | " * 2500, records)
+    assert not cv_review.record_line_holds(" | ".join(["Stevenage", "London"] * 7), records)  # 14 pieces
+    assert time.process_time() - start < 1.0
+
+
+def test_a_one_line_raw_text_is_never_one_record():
+    """Checker: a CV text that is ONE long line held "Calnex Solutions | Data Engineer Jan 2019 – May 2025" (another
+    job's title and dates). A text line over RAW_RECORD_MAX_CHARS is a paragraph, never one record."""
+    one = " | ".join([*RAW.split("\n"), "Calnex Solutions", "AI Solutions Engineer, R&D Jun 2025 – Sep 2025",
+                      "Stevenage", "Northwind Analytics", "Data Engineer Jan 2019 – May 2025", "London"])
+    records = cv_review.profile_records(UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=one)))
+    assert not cv_review.record_line_holds("Calnex Solutions | Data Engineer Jan 2019 – May 2025", records)
+    assert not cv_review.record_line_holds("Calnex Solutions | Stevenage", records)
 
 
 def test_quotes_compare_word_for_word_and_the_profile_says_its_location_and_bold_is_no_name():
@@ -195,9 +231,31 @@ async def test_attacks_stay_weak(authenticated_async_context, fixture_user_id):
              "Relocated to the United Kingdom in 2019 to join Northwind."),
             ("- Relocated to the US in 2019 to join Northwind.",
              "Relocated to the United Kingdom in 2019 to join Northwind."),
+            *((line, "Languages: Python, SQL, TypeScript") for line in LABEL_ATTACKS),
         ):
             got = await _verdict(client, line, quote)
             assert got[0] == "weak" and got[1], (line, got)
+
+
+@pytest.mark.asyncio
+async def test_job_places_beside_an_email_need_a_row_and_a_one_line_raw_text_holds_no_header(
+    authenticated_async_context, fixture_user_id,
+):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        for line in ("Stevenage, UK | ada@example.com", "Remote | ada@example.com"):
+            cv = BASE + line + "\n"
+            app_id, cv_id = await _setup(client, cv=cv)
+            got = await _stored(client, app_id, _review(cv_id, cv, lines=[ETL_ROW]))
+            assert (got["confidence"], got["downgraded"]) == ("weak", ["line_uncovered"]), line
+        from src.services.profile.storage import save_profile
+
+        one = " | ".join([*RAW.split("\n"), "Calnex Solutions", "AI Solutions Engineer, R&D Jun 2025 – Sep 2025",
+                          "Stevenage", "Northwind Analytics", "Data Engineer Jan 2019 – May 2025", "London"])
+        save_profile(UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=one)), fixture_user_id,
+                     source_action="cv_upload")
+        line = "Calnex Solutions | Data Engineer Jan 2019 – May 2025"
+        assert (await _verdict(client, line, "Calnex Solutions"))[0] == "weak"
 
 
 @pytest.mark.asyncio
