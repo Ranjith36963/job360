@@ -56,13 +56,14 @@ def _run(words: list[str], value: Any) -> bool:
     return bool(want) and any(words[i:i + n] == want for i in range(len(words) - n + 1))
 
 
-def _named(profile: Any, line: str) -> frozenset[str]:
+def _named(profile: Any, line: str, words: Optional[list[str]] = None) -> frozenset[str]:
     """Structured roles / projects this header NAMES: the role's company (narrowed by its title when two roles share
     the company) or the project's name, as a run of the header's words. The PDF's "Co | Title, R&D Jun 2025 – ..."
     holds only its raw record, yet it is the role whose bullets the CV quotes (production CV 1060). A lie in the header
-    itself is the header line's own claim, judged on its own row."""
+    itself is the header line's own claim, judged on its own row. ``words``: a prose line's own words instead."""
     cv = getattr(profile, "cv_data", None)
-    words = [w for p in cv_review.header_pieces(line) or [] for w in p if not set(w) <= cv_review._DASH_TOKENS]
+    if words is None:
+        words = [w for p in cv_review.header_pieces(line) or [] for w in p if not set(w) <= cv_review._DASH_TOKENS]
     found: dict[str, bool] = {}  # id -> its title is in the header too
     for name in cv_review._RECORD_FIELDS:
         for i, r in enumerate(getattr(cv, name, None) or []):
@@ -93,12 +94,19 @@ def line_records(cv_text: str, profile: Any) -> list[Optional[frozenset[str]]]:
                 out.append(None)
             continue
         header = cv_review._raw_header(line)
-        if is_content:
+        if is_content and not header and current is None:  # B4: a free line that names a job is that job's line
+            named = _named(profile, line, [w for w in evidence._words(line) if not set(w) <= cv_review._DASH_TOKENS])
+            out.append(_one_job(named, raw_named) or None)
+        elif is_content:
             out.append(None if header else current)
         if header:
             got = cv_review.header_pieces(line) or []
             held = frozenset(k for k, r in keyed if cv_review._runs_in(got, r)) | _named(profile, line)
-            held |= {s for k in held for s in raw_named.get(k, ())}
-            held |= {k for k, named in raw_named.items() if named & held}
-            current = held if in_section else None
+            current = _one_job(held, raw_named) if in_section else None
     return out
+
+
+def _one_job(held: frozenset[str], raw_named: dict[str, frozenset[str]]) -> frozenset[str]:
+    """``held`` with the raw blocks and structured records that are the same job (a raw header names the role)."""
+    held = held | {s for k in held for s in raw_named.get(k, ())}
+    return held | {k for k, named in raw_named.items() if named & held}

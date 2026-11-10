@@ -192,3 +192,52 @@ async def test_many_reviews_go_in_one_record_events_call_under_the_same_check(
 async def _stored_payload(client: Any, app_id: int) -> dict[str, Any]:
     events = (await client.get(f"/api/applications/{app_id}")).json()["events"]
     return next(e for e in events if e["event_type"] == "cv_reviewed")["payload"]
+
+
+# ── Attack round on edaafb7eb (checker 2026-11-10): the code is the hard-fact backstop ─────────────────────────────
+
+
+@pytest.mark.parametrize("line", [
+    "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Amazon adopted it.",  # B1 2nd sentence
+    "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB: Amazon adopted it.",
+    "Lifted relevance by 40% as a staff engineer on a RAG pipeline on Bedrock and ChromaDB.",  # B2
+    "Oversaw a RAG pipeline on Bedrock and ChromaDB, lifting relevance by 40%.",
+    "Lifted relevance by 40% as the person responsible for a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% as team-lead on a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% in the manager's seat on a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% in charge of a RAG pipeline on Bedrock and ChromaDB.",
+    "Le​d a RAG pipeline on Bedrock and ChromaDB, lifting relevance by 40%.",  # B3 zero-width space
+    "Sеnior work on a RAG pipeline on Bedrock and ChromaDB lifted relevance by 40%.",  # Cyrillic e
+    "Lifted relevance by 4​1% with a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% for a three-person team with a RAG pipeline on Bedrock and ChromaDB.",  # B6
+    "Lifted relevance by 40% with zero downtime on a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% in a fortnight with a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% since march with a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% twelve-fold with a RAG pipeline on Bedrock and ChromaDB.",
+    "Lifted relevance by 40% over a decade with a RAG pipeline on Bedrock and ChromaDB.",
+])
+def test_attack_round_facts_are_weak(line):
+    assert "claim_not_in_quote" in _judge(_cv((NORTHWIND, line)), {line: [B2]}), line
+
+
+def test_a_summary_line_naming_a_job_takes_its_facts_from_that_job():  # B4
+    line = "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB at Tidewater."
+    text = f"Ada Lovelace\nSUMMARY\n{line}\n"
+    assert _judge(text, {line: [B2, "Tidewater | AI/ML Engineer Intern Oct 2024 – Jan 2025 | Remote"]}) == {
+        "evidence_wrong_record": [1]}
+    assert _judge(text.replace(" at Tidewater", ""), {line.replace(" at Tidewater", ""): [B2]}) == {}
+
+
+def test_a_skills_list_under_a_job_is_held_only_by_that_jobs_own_text():  # B5
+    text = _cv((TIDEWATER, B3), (NORTHWIND, "Agents & LLMs: LangGraph, LangChain, MCP, RAG"))
+    assert _judge(text, {B3: [B3]}) == {"no_evidence": [4]}
+    held = _cv((TIDEWATER, B3), ("Support Agent | LangGraph, MCP, Gmail, Slack", "LangGraph, MCP"))
+    assert _judge(held, {B3: [B3]}) == {}
+
+
+def test_symbols_and_fullwidth_digits_are_no_false_weak():
+    for line in ("Lifted relevance by 40% with a RAG pipeline on Bedrock + ChromaDB.",
+                 "Lifted relevance by ４０% with a RAG pipeline on Bedrock and ChromaDB.",
+                 "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Built it end to end.",
+                 "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Hands-on throughout."):
+        assert _judge(_cv((NORTHWIND, line)), {line: [B2]}) == {}, line
