@@ -143,6 +143,7 @@ def _flat(value: Any) -> list[str]:
 
 _SOURCE_FIELDS = (
     "raw_text",
+    "location",  # the user's own location (2026-11-10: "London, United Kingdom" quotes read as not in the profile)
     "linkedin_raw_text",
     "cv_positions",
     "cv_projects",
@@ -194,6 +195,33 @@ def profile_source_text(profile: Any, *, include_targets: bool = True) -> str:
         for name in names:
             parts.extend(_flat(getattr(prefs, name, None)))
     return "\n".join(parts)
+
+
+# Closed and hard-coded, never caller-supplied, never fuzzy (production 2026-11-10, CV review apps 353-389): a
+# country or region and its standard abbreviation name ONE place. An abbreviation counts only as written here, in
+# capitals ("us" the pronoun is no place); the full name only as these exact words in this order.
+PLACE_ABBREVIATIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("UK", "U.K"), ("united", "kingdom")),
+    (("US", "U.S", "USA", "U.S.A"), ("united", "states")),
+    (("UAE", "U.A.E"), ("united", "arab", "emirates")),
+    (("EU", "E.U"), ("european", "union")),
+)
+
+
+def place_equivalents(text: str) -> str:
+    """The other spelling of every place of :data:`PLACE_ABBREVIATIONS` that ``text`` names ("United Kingdom" ->
+    "UK U.K"; "UK" -> "united kingdom"), as text to append to a fact bank. Word by word, no regex."""
+    raw = [t.strip(_OUTER_PUNCT) for t in str(text or "").split()]
+    words = [t.casefold() for t in raw if t]
+    caps = set(raw)
+    extra: list[str] = []
+    for abbrs, full in PLACE_ABBREVIATIONS:
+        n = len(full)
+        if any(tuple(words[i : i + n]) == full for i in range(len(words) - n + 1)):
+            extra.extend(abbrs)
+        if caps.intersection(abbrs):
+            extra.extend(full)
+    return " ".join(extra)
 
 
 def _issue(code: str, severity: str, detail: str) -> dict[str, str]:
@@ -532,7 +560,7 @@ def prose_names(text: str) -> list[str]:
     # No header block was cut: the first non-empty line is still the name, never a claim.
     name_left = len(body) == len(text.splitlines())
     for line in body:
-        s = line.strip().lstrip(_BULLET_CHARS).strip()
+        s = line.replace("**", "").strip().lstrip(_BULLET_CHARS).strip()  # markdown bold is no part of a name
         if s and name_left:
             name_left = False
             continue
@@ -1043,7 +1071,8 @@ def check_text(kind: str, text: str, profile: Any) -> list[dict[str, str]]:
             if kind == "outreach":
                 out.append(unsupported_year_claims(text, source))
             if kind == "cv":
-                out.append(unsupported_terms(text, source))
+                # "UK" = "United Kingdom" (the closed PLACE_ABBREVIATIONS table)
+                out.append(unsupported_terms(text, source + "\n" + place_equivalents(source)))
                 out.append(missing_current_roles(text, profile))
                 out.append(cv_entry_mismatch(text, profile))
     return [i for i in out if i]
