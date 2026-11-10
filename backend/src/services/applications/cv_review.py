@@ -28,7 +28,9 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
     300 characters at most), whose every piece is a whole piece (places read through the same closed table) of ONE
     profile record: one role, one project, one education entry, one CV text line, never two
     mixed (:func:`record_line_holds`). One item or piece the profile lacks keeps the line a claim;
-(e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
+(e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``);
+(f) a quote lies inside the job, project or raw block its line sits under (``cv_records``; ``evidence_wrong_record``):
+    a true number moved to another job is no truth of that job.
 After weak reviews of :data:`MAX_WEAK` other CV versions judged under the current :data:`RULES`, a review of a
 new one is weak (``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try. A
 weak review judged under older rules never counts (its rows were not stored, so it cannot be judged again).
@@ -58,13 +60,14 @@ PAYLOAD_KEYS = frozenset({"artifact_id", "sha256", "confidence", "lines", "revie
 LINE_KEYS = frozenset({"cv_line", "profile_quote", "field_path"})
 DOWNGRADES = (
     "not_current_cv", "no_content", "line_uncovered", "line_not_in_cv", "quote_not_in_profile",
-    "claim_not_in_quote", "quote_too_thin", "cv_checks_found", "retry_limit",
+    "evidence_wrong_record", "claim_not_in_quote", "quote_too_thin", "cv_checks_found", "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
 # change to what is stored strong: retry_limit counts only weak reviews judged under the current rules.
-RULES = 3  # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites (2); a held
-# line's row is not judged by its quote, comma / dash headers, "portfolio" headings, no dict keys as profile text (3)
+RULES = 4  # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites (2); a held
+# line's row is not judged by its quote, comma / dash headers, "portfolio" headings, no dict keys as profile text (3);
+# a quote comes from the job / project / raw block its line sits under (4, cv_records)
 MAX_LINES = 200
 _CAPS = {"cv_line": 1000, "profile_quote": 2000, "field_path": 200}
 REVIEWER_MAX = 40
@@ -369,29 +372,41 @@ def _raw_header(line: str) -> bool:
             and not s.endswith(_SENTENCE_ENDS) and header_pieces(s) is not None)
 
 
-def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
-    """The profile's records, each the set of its pieces: one role (company, title, dates, location), one project
-    (name, stack), one education or certification entry, one header line of the CV / LinkedIn text. Only
-    :data:`_RECORD_KEYS` values of at most :data:`HEADER_MAX_CHARS` each: a bullet is never a record's piece, so a
-    place a bullet names is never one either."""
+def keyed_records(profile: Any) -> list[tuple[str, frozenset[tuple[str, ...]]]]:
+    """The profile's records as ``(id, pieces)``: one role (company, title, dates, location), one project (name,
+    stack), one education or certification entry, one header line of the CV / LinkedIn text. The id names where it
+    lives (``cv_positions[1]``, ``education[0]``, ``raw_text:7`` = line 7), as ``cv_records.record_texts`` keys it.
+    Only :data:`_RECORD_KEYS` values of at most :data:`HEADER_MAX_CHARS` each: a bullet is never a record's piece, so
+    a place a bullet names is never one either."""
     cv = getattr(profile, "cv_data", None)
-    groups: list[list[tuple[str, bool]]] = []  # (string, may it split into clause pieces)
+    groups: list[tuple[str, list[tuple[str, bool]]]] = []  # (id, [(string, may it split into clause pieces)])
     for name in _RECORD_FIELDS:
-        for r in getattr(cv, name, None) or []:
+        for i, r in enumerate(getattr(cv, name, None) or []):
             if isinstance(r, dict):
                 vals = [s for k, v in r.items() if k in _RECORD_KEYS for s in cv_checks._flat(v)]
-                groups.append([(s, n <= RECORD_SPLIT_MAX_WORDS) for s in vals
-                               if len(s) <= RECORD_VALUE_MAX_CHARS and (n := _word_count(s)) <= RECORD_VALUE_MAX_WORDS])
-    groups += [[(s, True)] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None))
-               if len(s) <= HEADER_MAX_CHARS]
+                groups.append((f"{name}[{i}]", [
+                    (s, n <= RECORD_SPLIT_MAX_WORDS) for s in vals
+                    if len(s) <= RECORD_VALUE_MAX_CHARS and (n := _word_count(s)) <= RECORD_VALUE_MAX_WORDS]))
+    groups += [(f"{n}[{i}]", [(s, True)]) for n in _ONE_LINE_FIELDS
+               for i, s in enumerate(cv_checks._flat(getattr(cv, n, None))) if len(s) <= HEADER_MAX_CHARS]
     for name in ("raw_text", "linkedin_raw_text"):
-        groups += [[(ln, True)] for ln in str(getattr(cv, name, "") or "").splitlines() if _raw_header(ln)]
+        groups += [(f"{name}:{i}", [(ln, True)]) for i, ln in enumerate(str(getattr(cv, name, "") or "").splitlines())
+                   if _raw_header(ln)]
     # each string also in its other place spelling ("Stevenage, United Kingdom" says "Stevenage, UK"): the closed
     # cv_checks.PLACE_ABBREVIATIONS, as rule (d) reads a quote; never another record's piece
-    texts = [[(t, split) for s, split in g for t in (s, cv_checks.place_variant(s)) if t] for g in groups]
-    records = [frozenset(p for s, split in g for p in [*(pieces(s) if split else []), tuple(evidence._words(s))] if p)
-               for g in texts]
-    return [r for r in records if r]
+    out = []
+    for key, g in groups:
+        texts = [(t, split) for s, split in g for t in (s, cv_checks.place_variant(s)) if t]
+        got = frozenset(p for s, split in texts for p in [*(pieces(s) if split else []), tuple(evidence._words(s))]
+                        if p)
+        if got:
+            out.append((key, got))
+    return out
+
+
+def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
+    """The pieces of each of :func:`keyed_records`."""
+    return [r for _, r in keyed_records(profile)]
 
 
 def _word_count(text: str) -> int:
@@ -463,7 +478,12 @@ def quote_sources(profile: Any) -> tuple[str, str]:
     (one job's company and dates, another's title) read as one quote (checker 2026-11-10). Raw lines are never
     joined either: no rule tells a PDF wrap from a new bullet (three join bypasses), so a wrapped sentence is quoted
     from the structured bullet (cv_positions / cv_projects), one whole string (recipes: rules.md "Writing the CV")."""
-    lines = [ln for ln in (_norm(x) for x in cv_checks.profile_source_text(profile).split("\n")) if ln]
+    return sources_from([cv_checks.profile_source_text(profile)])
+
+
+def sources_from(texts: list[str]) -> tuple[str, str]:
+    """:func:`quote_sources` of these texts only (one record's own text: ``cv_records``)."""
+    lines = [ln for ln in (_norm(x) for t in texts for x in t.split("\n")) if ln]
     sep = f" {_SEGMENT} "
     return sep.join(lines), f' {sep.join(" ".join(evidence._words(ln)) for ln in lines)} '
 
@@ -741,7 +761,7 @@ async def verify(
 ) -> tuple[dict[str, Any], dict[str, list[str]]]:
     """:func:`check`'s stored payload, plus WHERE each downgrade code came from (``row N`` = the payload's
     ``lines[N-1]``; ``review line N`` = get_application's ``review.lines[N-1]``), for the reply only, never stored."""
-    from src.services.applications import kit, spine  # noqa: PLC0415
+    from src.services.applications import cv_records, kit, spine  # noqa: PLC0415 - cv_records imports this module
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -777,6 +797,12 @@ async def verify(
     for ln in cv["text"].splitlines():  # the CV's own text decides case, never the entry's copy
         actual.setdefault(line_key(ln), []).append(ln.strip().lstrip(_BULLETS + " \t"))
     content_keys = {line_key(ln) for ln in content}
+    texts = cv_records.record_texts(profile)  # S1: the record each line sits under, and its own text
+    under: dict[str, set[frozenset[str]]] = {}
+    for ln, recs in zip(content, cv_records.line_records(cv["text"], profile)):
+        if recs is not None:
+            under.setdefault(line_key(ln), set()).add(recs)
+    own: dict[frozenset[str], tuple[str, str]] = {}
     book, records = skill_book(profile), profile_records(profile)
     held = quotes_skipped = 0
     for n, e in enumerate(entries, 1):
@@ -796,6 +822,11 @@ async def verify(
             bodies = unheld
         if not quote_in_profile(e["profile_quote"], source, source_words):  # (c), only for a line that needs it
             _at(where, "quote_not_in_profile", row)
+        for recs in under.get(key, ()):  # (f) the quote lies inside the record the line sits under
+            if recs not in own:
+                own[recs] = sources_from([s for k in sorted(recs) for s in texts.get(k, [])])
+            if not quote_in_profile(e["profile_quote"], *own[recs]):
+                _at(where, "evidence_wrong_record", row)
         bank = _quote_bank(e["profile_quote"])
         quote_words = set(evidence._words(bank))
         for body in bodies:  # a row naming no CV line (line_not_in_cv) is judged whole, never held

@@ -290,9 +290,9 @@ async def test_new_shape_attacks_stay_weak(authenticated_async_context, fixture_
              "Northwind Labs title AI Solutions Engineer – R&D Department dates Jun 2025 – Sep 2025 location "
              "Stevenage, United Kingdom"),  # the TRUE comma header: held now, so its (dict-key) quote is not judged
         ):
-            text = f"Ada Lovelace\nEXPERIENCE\n{HELD}\n- {B2}\n{line}\n"  # the current role, as every CV has it
+            text = f"Ada Lovelace\nEXPERIENCE\n{HELD}\n- {B1}\n{line}\n"  # the current role, as every CV has it
             rows = [{"cv_line": HELD, "profile_quote": HELD, "field_path": "x"},
-                    {"cv_line": f"- {B2}", "profile_quote": B2, "field_path": "x"},
+                    {"cv_line": f"- {B1}", "profile_quote": B1, "field_path": "x"},
                     {"cv_line": line, "profile_quote": quote, "field_path": "x"}]
             got = await _verdict(client, text, rows)
             if line.endswith("Stevenage, UK"):  # the TRUE comma header is held now: the key quote is not needed
@@ -303,20 +303,20 @@ async def test_new_shape_attacks_stay_weak(authenticated_async_context, fixture_
         line = "- Northwind Labs AI Solutions Engineer R&D Department Jun 2025 Sep 2025 Stevenage United Kingdom"
         quote = ("Northwind Labs title AI Solutions Engineer – R&D Department dates Jun 2025 – Sep 2025 location "
                  "Stevenage, United Kingdom")
-        text = f"Ada Lovelace\nEXPERIENCE\n{HELD}\n- {B2}\n{line}\n"
+        text = f"Ada Lovelace\nEXPERIENCE\n{HELD}\n- {B1}\n{line}\n"
         got = await _verdict(client, text, [{"cv_line": HELD, "profile_quote": HELD, "field_path": "x"},
-                                            {"cv_line": f"- {B2}", "profile_quote": B2, "field_path": "x"},
+                                            {"cv_line": f"- {B1}", "profile_quote": B1, "field_path": "x"},
                                             {"cv_line": line, "profile_quote": quote, "field_path": "x"}])
         assert got[0] == "weak" and "quote_not_in_profile" in got[1], got
 
 
 @pytest.mark.asyncio
 async def test_rules_two_weak_reviews_no_longer_spend_the_budget(authenticated_async_context, fixture_user_id):
-    """RULES is 3: the reviews these five gaps stored weak under rules 2 stop counting (one fresh budget)."""
+    """Since RULES 3, the reviews these five gaps stored weak under rules 2 stop counting (one fresh budget)."""
     from src.api import dependencies as api_deps
     from src.services.applications import kit, spine
 
-    assert cv_review.RULES == 3
+    assert cv_review.RULES >= 3
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         texts = [OWNER_SHAPES[351].replace("- Built", p) for p in ("- Built", "* Built", "** Built")]
@@ -335,7 +335,7 @@ async def test_rules_two_weak_reviews_no_longer_spend_the_budget(authenticated_a
         v4_id = await _save_cv(client, app_id, v4)
         got = await _stored(client, app_id, {"artifact_id": v4_id, "sha256": _sha(v4), "confidence": "strong",
                                              "lines": _self_rows(v4, _profile()), "reviewer": "fresh helper"})
-        assert (got["confidence"], got["downgraded"], got["rules"]) == ("strong", [], 3)
+        assert (got["confidence"], got["downgraded"], got["rules"]) == ("strong", [], cv_review.RULES)
 
 
 # ── Checker, 2026-11-10 on 6ae101af7: two bypasses, both stored STRONG ────────────────────────
@@ -485,8 +485,10 @@ async def test_joined_raw_lines_are_weak_and_structured_bullets_are_strong(
         _seed(fixture_user_id, _wrap_profile())
         header = "Northwind Labs | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage"
         head = {"cv_line": header, "profile_quote": header, "field_path": "cv_data.raw_text"}
-        text = f"Ada Lovelace\nEXPERIENCE\n{header}\n- {RAG}\n- {CRITIC}\n"
-        rows = [head, {"cv_line": f"- {RAG}", "profile_quote": RAG, "field_path": "cv_data.cv_positions[0].bullets[0]"},
+        project = "Support Agent | LangGraph, MCP"  # S1: a project's sentence sits under its own project
+        text = f"Ada Lovelace\nEXPERIENCE\n{header}\n- {RAG}\n{project}\n- {CRITIC}\n"
+        rows = [head, {"cv_line": project, "profile_quote": "Support Agent", "field_path": "x"},
+                {"cv_line": f"- {RAG}", "profile_quote": RAG, "field_path": "cv_data.cv_positions[0].bullets[0]"},
                 {"cv_line": f"- {CRITIC}", "profile_quote": CRITIC, "field_path": "cv_data.cv_projects[0].description"}]
         assert await _verdict(client, text, rows) == ("strong", [])
         for line in JOIN_ATTACKS[1:]:
