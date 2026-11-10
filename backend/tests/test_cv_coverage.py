@@ -94,7 +94,7 @@ def test_acronym_in_the_profile_supports_the_long_form_in_the_ad():
 
 def test_long_form_in_the_profile_supports_the_acronym_in_the_ad():
     ad = "Experience with LLM tooling."
-    r = coverage("Used LLM daily", ad, _req("LLM"), _profile(raw="Worked with large language models at Acme."))
+    r = coverage("Used LLM daily", ad, _req("LLM"), _profile(raw="Worked with Large Language Models at Acme."))
     assert r["gaps"] == [] and r["covered"] == ["LLM"]
 
 
@@ -129,9 +129,12 @@ def test_only_must_have_supported_terms_form_the_denominator():
     assert r["missing"] == ["Terraform"]
 
 
-def test_zero_must_haves_is_vacuously_ok_but_not_a_no_ad_terms_failure():
+def test_zero_supported_must_haves_blocks_with_no_must_haves():
     r = coverage("x", AD, _req(soft=("Terraform",)), _profile("Terraform"))
-    assert r["ratio"] == 1.0 and r["ok"] is True and r["problems"] == []
+    assert r["ok"] is False and ("no_must_haves", "") in _codes(r)
+    assert r["must_total"] == 0 and r["soft_total"] == 1
+    g = coverage("x", AD, _req("Python"), _profile("Java"))  # only gaps
+    assert g["ok"] is False and ("no_must_haves", "") in _codes(g)
 
 
 def test_no_ad_text_or_no_term_in_the_ad_is_not_ok():
@@ -198,3 +201,114 @@ def test_a_two_letter_acronym_is_not_supported_by_two_unrelated_words():
 def test_an_acronym_does_not_span_a_non_word_token():
     r = coverage("x", "We use LLM here.", _req("LLM"), _profile(raw="large 2024 language models"))
     assert r["gaps"] == ["LLM"]
+
+
+# ── checker attacks (2026-11-10) ────────────────────────────────────────────
+
+
+def _sup(term: str, prof: UserProfile) -> bool:
+    r = coverage(f"x {term} x", f"Need {term}.", [term], prof)
+    return bool(r["covered"] or r["missing"])
+
+
+def test_d1_acronym_is_not_made_of_ordinary_words():
+    assert not _sup("RAG", _profile(raw="I ran a great team"))
+    assert not _sup("AWS", _profile(raw="built a web site"))
+    assert not _sup("ETL", _profile(raw="met everyone. Then lunch"))
+    assert not _sup("NLP", _profile(raw="Nursing; Leadership; Pharmacy"))
+    assert not _sup("AWS", _profile("Agile", "Workshops", "Scrum"))  # across separate skills
+    assert not _sup("SRE", _profile(raw="Sales Recruitment. Experience"))  # across a sentence end
+
+
+def test_d1_capitalised_phrase_supports_an_all_caps_acronym_and_names_it():
+    r = coverage("Used AWS", "Need AWS.", ["AWS"], _profile(raw="Led Amazon Web Services migration"))
+    assert r["covered"] == ["AWS"] and r["support"] == {"AWS": "Amazon Web Services"}
+
+
+def test_d1_a_lowercase_acronym_in_the_ad_is_not_expanded():
+    r = coverage("x", "Need aws.", ["aws"], _profile(raw="Led Amazon Web Services migration"))
+    assert r["gaps"] == ["aws"]
+
+
+def test_d2_a_phrase_acronym_matches_only_capitals_in_the_profile():
+    for phrase in ("Technical Hiring Experience", "Advanced Network Design", "Web Application Security"):
+        assert not _sup(phrase, _profile(raw="I was the lead for the team and staff"))
+    assert _sup("Technical Hiring Experience", _profile(raw="Ran THE programme"))
+
+
+def test_d3_short_terms_compare_original_case():
+    r = coverage("Ready to go live", "Must know Go", ["Go"], _profile("Java"))
+    assert r["gaps"] == ["Go"] and "gap_claimed_in_cv" not in [c for c, _ in _codes(r)]
+    assert not _sup("Go", _profile(raw="I like to go hiking"))
+    assert not _sup("C", _profile(raw="Grade c in maths"))
+    assert _sup("Go", _profile("Go"))
+    c = coverage("Wrote Go services", "Must know Go", ["Go"], _profile("Go"))
+    assert c["covered"] == ["Go"]
+
+
+def test_d4_a_gap_with_attached_markup_is_still_a_claim():
+    ad = "Must have Kubernetes."
+    for cv in (
+        "Kubernetes-based",
+        "Kubernetes\u2011based",
+        "Kubernetes\u2014cluster",
+        "Kubernetes's",
+        "Kubernetes\u2019s",
+        "*Kubernetes*",
+        "#Kubernetes",
+        "<Kubernetes>",
+        "Kuber\u200bnetes",
+        "Kube\u00adrnetes",
+        "\uff2bubernetes",
+        "Kubernetes:cluster",
+        "(Kubernetes)",
+        "KUBERNETES",
+        "Kubernetes\u2026",
+    ):
+        r = coverage(f"Ran {cv} at scale", ad, ["Kubernetes"], _profile("nothing"))
+        assert ("gap_claimed_in_cv", "Kubernetes") in _codes(r), cv
+        assert r["ok"] is False
+
+
+def test_d4_loose_spellings_of_a_gap_are_claims_but_coverage_stays_strict():
+    ad = "Must have Node.js and machine learning."
+    for cv in ("Node JS", "NodeJS", "node.js", "Built Node.js,"):
+        r = coverage(f"Built {cv} apps", ad, ["Node.js"], _profile("nothing"))
+        assert ("gap_claimed_in_cv", "Node.js") in _codes(r), cv
+    r = coverage("Did machine-learning work", ad, ["machine learning"], _profile("nothing"))
+    assert ("gap_claimed_in_cv", "machine learning") in _codes(r)
+    s = coverage("Built NodeJS apps", ad, ["Node.js"], _profile("Node.js"))
+    assert s["missing"] == ["Node.js"] and s["covered"] == []  # supported, but only a variant: not covered
+    assert coverage("Built apps", ad, ["Node.js"], _profile("Node.js"))["missing"] == ["Node.js"]
+
+
+def test_d4_java_stays_a_whole_word_in_the_loose_pass():
+    r = coverage("JavaScript, Javascripts", "Must have Java.", ["Java"], _profile("Python"))
+    assert "gap_claimed_in_cv" not in [c for c, _ in _codes(r)]
+
+
+def test_d5_threshold_is_validated():
+    reqs = _req("Python", "Kubernetes", "Terraform")
+    prof = _profile("Python", "Kubernetes", "Terraform")
+    for bad in (float("nan"), 0, -1, 0.0, None, "0.5", float("inf"), True, 0.2):
+        r = coverage("Python", AD, reqs, prof, threshold=bad)
+        assert r["ok"] is False, bad  # 1/3 never passes: the default or the 0.5 floor applies
+    assert coverage("Python Kubernetes", AD, reqs, prof, threshold=0.5)["ok"] is True
+    assert coverage("Python Kubernetes", AD, reqs, prof, threshold=7)["ok"] is False  # clamped to 1.0
+
+
+def test_d6_odd_requirement_shapes_do_not_raise_or_split_letters():
+    prof = _profile("Python")
+    for odd in (5, "Python", None, {"text": "Python"}, (x for x in ["Python"])):
+        r = coverage("Python", AD, odd, prof)  # type: ignore[arg-type]
+        assert r["problems"] == [{"code": "no_ad_terms", "term": ""}], odd
+    r = coverage(
+        "Python", AD, [5, None, {"text": None}, {"text": ["Python"]}, {"kind": "soft"}, ["Python"], "Python"], prof
+    )
+    assert r["covered"] == ["Python"] and r["problems"] == []
+    assert coverage(5, 123, [{"text": "Python"}], prof)["ok"] is False  # type: ignore[arg-type]
+
+
+def test_the_ads_own_spelling_is_returned_for_hyphenated_and_slashed_terms():
+    r = coverage("x", "We want end-to-end, Python/Java work", ["end-to-end", "java"], _profile("end-to-end", "Java"))
+    assert r["missing"] == ["end-to-end", "Java"]
