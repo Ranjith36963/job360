@@ -18,7 +18,8 @@ from tests.test_application_spine import _second_user_session_cookie, _session_c
 from tests.test_cv_review import CV, _event, _mcp_client, _payload, _review, _save_cv, _seed, _setup, _stored, sha
 
 KEYS = {"id", "job_title", "job_company", "country", "review"}
-REVIEW_KEYS = {"artifact_id", "sha256", "lines", "state", "reviews_used", "tries_left", "last_downgraded"}
+REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
+               "last_where"}
 
 
 async def _get(client: Any, app_id: int, **params: Any):
@@ -62,18 +63,19 @@ async def test_review_view_counts_tries_and_names_the_last_downgrade(authenticat
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client)
-        bad = _review(cv_id, lines=[{"cv_line": "- Not a line of this CV.", "profile_quote": "nothing", "field_path": "x"}])
+        bad = _review(cv_id, lines=[{"n": 2, "verdict": "unsupported", "evidence": []}])
         stored = await _stored(client, app_id, bad)
-        assert stored["downgraded"], stored
+        assert stored["where"] == {"line_uncovered": [1], "line_unsupported": [2], "no_evidence": [2]}, stored
         review = (await _get(client, app_id, view="review")).json()["review"]
         # a re-review of the version just judged is no new try; the NEXT version has the other tries left
         assert (review["reviews_used"], review["tries_left"]) == (0, cv_review.MAX_WEAK)
         assert review["last_downgraded"] == stored["downgraded"] and review["state"] == "weak"
+        assert review["last_where"] == stored["where"]  # the exact lines to rewrite
         v2 = CV.replace("- Data engineer", "* Data engineer")
         await _save_cv(client, app_id, v2)
         review = (await _get(client, app_id, view="review")).json()["review"]
         assert (review["reviews_used"], review["tries_left"]) == (1, cv_review.MAX_WEAK - 1)
-        assert review["last_downgraded"] == [] and review["state"] == "none"
+        assert review["last_downgraded"] == [] and review["last_where"] == {} and review["state"] == "none"
 
 
 @pytest.mark.asyncio

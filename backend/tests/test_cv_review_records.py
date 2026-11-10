@@ -26,8 +26,8 @@ def _cv(*blocks: tuple[str, str]) -> str:
 
 def _rows(text: str, profile: UserProfile) -> list[dict[str, Any]]:
     """Each line quoting itself (a bullet quotes the profile's own sentence, word for word)."""
-    return [{"cv_line": ln, "profile_quote": ln.strip().lstrip(cv_review._BULLETS + " \t"), "field_path": "x"}
-            for ln in cv_review.content_lines(text, profile)]
+    return [{"n": n, "verdict": "supported", "evidence": [ln.strip().lstrip(cv_review._BULLETS + " \t")]}
+            for n, ln in enumerate(cv_review.content_lines(text, profile), 1)]
 
 
 async def _verdict(client: Any, text: str, profile: UserProfile) -> tuple[str, list[str]]:

@@ -20,6 +20,7 @@ Words are scanned one by one (no regex on caller text).
 from __future__ import annotations
 
 import json
+import unicodedata
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import cv_checks
@@ -41,8 +42,14 @@ _RTW_KEYS = ("right_to_work.", "sponsorship.")
 _MAX_PRIOR = 500
 
 
+def clean(text: Any) -> str:
+    """NFKC (fullwidth digits are digits, a no-break space a space) with format characters (zero-width spaces and
+    joiners, Unicode ``Cf``) dropped: "Le\u200bd" is "Led", never a word no list knows (checker 2026-11-10)."""
+    return "".join(c for c in unicodedata.normalize("NFKC", str(text or "")) if unicodedata.category(c) != "Cf")
+
+
 def _words(text: str) -> list[str]:
-    return [w for w in (t.strip(_OUTER).casefold() for t in str(text or "").split()) if w]
+    return [w for w in (t.strip(_OUTER).casefold() for t in clean(text).split()) if w]
 
 
 def _shingles(text: str) -> set[tuple[str, ...]]:
@@ -60,8 +67,11 @@ def claim_tokens(text: str, *, first_word: bool = False) -> list[str]:
     ``first_word`` (a CV line has no sentence grammar: its first word may be "Google")."""
     out: list[str] = []
     start = not first_word
-    for raw in str(text or "").split():
+    for raw in clean(text).split():
         tok = raw.strip(_OUTER)
+        if tok and set(tok) <= {"+", "&"}:  # a bare "+" / "&" between names says nothing
+            start = False
+            continue
         if tok.endswith(("'s", "’s")):
             tok = tok[:-2]
         if tok and (
@@ -86,6 +96,7 @@ def _digit_runs(tok: str) -> list[str]:
 
 def unsupported_tokens(text: str, bank: str, *, first_word: bool = False) -> list[str]:
     """Claim tokens of ``text`` the fact bank never says (numbers by value, words as whole words)."""
+    bank = clean(bank)
     cores = {cv_checks._core(m) for m in _digit_runs(bank)}
     words = set(_words(bank))
     low = " ".join(bank.split()).casefold()

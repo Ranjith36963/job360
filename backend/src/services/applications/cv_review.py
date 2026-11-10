@@ -6,39 +6,28 @@ assistant records it as ``cv_reviewed``. Job360 runs no model (decision 28): it 
 it. ``strong`` is stored only when all of these hold, else ``weak`` with closed :data:`DOWNGRADES` codes:
 
 (a) ``artifact_id`` + ``sha256`` are this application's CURRENT CV, exactly (``not_current_cv``);
-(b) every content line of that CV has an entry whose ``cv_line`` is that line (case, spacing and a leading
-    bullet aside) (``line_uncovered``; an entry naming no CV line is ``line_not_in_cv``; a CV of headers only is
-    ``no_content``). Exempt, and only these: the name line (the FIRST line, every word a word of the profile's
-    name), a contact line (only emails, links and one phone number, with separators; a bare site only when the
-    profile says it; beside them, words of the profile's own location fields; a ``Label:`` word is content), and
-    a section heading (1-4 alphabetic words, one of 4+ letters: ALL CAPS, ``# Heading`` or ``Heading:``; ``&`` is
-    ``and``) whose every word is a section word and a word of the profile source text. A summary line is not.
-    A row for an exempt line, or for a line the profile itself holds (end of (d)), is not judged by (c) or (d);
-(c) each other ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside, or word for word
-    with only outer punctuation aside: every word, number and name exact and in order) (``quote_not_in_profile``);
-(d) every number and capitalised name of a ``cv_line``, its first word too (``evidence.claim_tokens``), is in
-    its own quote (``claim_not_in_quote``); the quote has 3+ words and at least half the line's words of 4+
-    letters (``quote_too_thin``); words are scanned one by one, no regex on caller text. The quote also says
-    what it says in other words: ``&`` is ``and``, and a place of the CLOSED ``cv_checks.PLACE_ABBREVIATIONS``
-    table is its other spelling ("United Kingdom" says "UK"). Two line shapes need no one quote to hold them,
-    because the profile itself does, token for token (production 2026-11-10: 234 of 279 newest reviews weak):
-    a list line ``[Label:] a, b, c`` whose every item is a WHOLE profile skill item under a label of the
-    profile's own group words or closed generic category words, never an employer, title, project or degree
-    word (:func:`list_line_holds`), and a ``|`` header line, or a comma / dash one with a date range (12 pieces,
-    300 characters at most), whose every piece is a whole piece (places read through the same closed table) of ONE
-    profile record: one role, one project, one education entry, one CV text line, never two
-    mixed (:func:`record_line_holds`). One item or piece the profile lacks keeps the line a claim;
-(e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``);
-(f) a quote lies inside the job, project or raw block its line sits under (``cv_records``; ``evidence_wrong_record``):
-    a true number moved to another job is no truth of that job.
+(b) every content line of that CV (``review.lines``; a CV of headers only is ``no_content``) has ONE row
+    ``{n, verdict, evidence}``, ``n`` its 1-based number (``line_uncovered``). Exempt, and only these: the name line
+    (the FIRST line, every word a word of the profile's name), a contact line (only emails, links and one phone
+    number, with separators; a bare site only when the profile says it; beside them, words of the profile's own
+    location fields; a ``Label:`` word is content), and a section heading (1-4 alphabetic words, one of 4+ letters:
+    ALL CAPS, ``# Heading`` or ``Heading:``; ``&`` is ``and``) whose every word is a section word and a word of the
+    profile source text. A summary line is not;
+(c) the rows' verdicts and evidence pass ``review_rows.judge`` (owner 2026-11-10: wording is free and human; hard
+    facts are exact): every quote verbatim in ONE profile field or line and inside the job / project / raw block
+    the line sits under (``cv_records``), every number, name, tool and date of the line in its own quotes. Two line
+    shapes need no evidence, because the profile itself holds them token for token: a list line
+    ``[Label:] a, b, c`` of WHOLE profile skill items under a skills-group label (:func:`list_line_holds`), and a
+    header line whose every piece is a whole piece of ONE profile record (:func:`record_line_holds`);
+(d) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
 After weak reviews of :data:`MAX_WEAK` other CV versions judged under the current :data:`RULES`, a review of a
 new one is weak (``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try. A
 weak review judged under older rules never counts (its rows were not stored, so it cannot be judged again).
 
-The event stores codes and counts, never CV or profile text; the reply names, for a claimed-strong review stored
-weak, each code and the rows / review lines it came from (:func:`weak_warning`). ``may_submit`` reads
+The event stores codes, counts and LINE NUMBERS (``where``: code -> review line numbers), never CV or profile text;
+the reply names the same (:func:`weak_warning`), so one review says what to fix. ``may_submit`` reads
 :func:`review_state` for the exact current CV id + sha, and only with ``assistant_settings.cv_auto_approve`` on,
-in auto mode. The writer avoids rewrites by copying the profile's own sentences word for word (recipes).
+in auto mode. The writer words each line freely from ONE record's facts (recipes).
 """
 from __future__ import annotations
 
@@ -57,19 +46,25 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 EVENT_TYPE = "cv_reviewed"
 STRONG, WEAK, NONE = "strong", "weak", "none"
 PAYLOAD_KEYS = frozenset({"artifact_id", "sha256", "confidence", "lines", "reviewer"})
-LINE_KEYS = frozenset({"cv_line", "profile_quote", "field_path"})
+ROW_KEYS = frozenset({"n", "verdict", "evidence"})
+OLD_ROW_KEYS = frozenset({"cv_line", "profile_quote", "field_path"})  # rules <= 4: refused with a reconnect hint
+VERDICTS = ("supported", "unsupported")
 DOWNGRADES = (
-    "not_current_cv", "no_content", "line_uncovered", "line_not_in_cv", "quote_not_in_profile",
-    "evidence_wrong_record", "claim_not_in_quote", "quote_too_thin", "cv_checks_found", "retry_limit",
+    "not_current_cv", "no_content", "line_uncovered", "line_unsupported", "no_evidence", "quote_not_in_profile",
+    "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "evidence_reused", "cv_checks_found",
+    "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
 # change to what is stored strong: retry_limit counts only weak reviews judged under the current rules.
-RULES = 4  # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites (2); a held
+# 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites (2); a held
 # line's row is not judged by its quote, comma / dash headers, "portfolio" headings, no dict keys as profile text (3);
-# a quote comes from the job / project / raw block its line sits under (4, cv_records)
+# a quote comes from the job / project / raw block its line sits under (4, cv_records); free wording: rows
+# {n, verdict, evidence}, hard facts pinned to the row's quotes, no word-overlap rule (5, review_rows)
+RULES = 5
 MAX_LINES = 200
-_CAPS = {"cv_line": 1000, "profile_quote": 2000, "field_path": 200}
+EVIDENCE_MAX, QUOTE_MIN_CHARS, QUOTE_MAX_CHARS = 3, 3, 600
+WHERE_STORED = 20  # line numbers stored per code
 REVIEWER_MAX = 40
 _BULLETS = "".join(cv_checks._BULLET_STARTS)
 _SEPARATORS = frozenset({"|", "•", "·", "-", "–", "—", ",", "/"})
@@ -506,12 +501,15 @@ def _quote_bank(quote: str) -> str:
 
 
 def missing_warning(stored: dict[str, Any]) -> Optional[str]:
-    """The reply line for a review that quoted too few lines (it is still stored, weak)."""
+    """The reply line for a review that left lines without a row (it is still stored, weak)."""
     if "line_uncovered" not in (stored.get("downgraded") or []):
         return None
     missing = int(stored.get("content_lines") or 0) - int(stored.get("covered") or 0)
-    return (f"cv_reviewed stored weak: {missing} of {stored.get('content_lines')} required lines had no row; "
-            "return ONE row per line in get_application's review.lines (cv_line copied exactly)")
+    return (f"cv_reviewed stored weak: {missing} of {stored.get('content_lines')} review lines had no row; "
+            "return ONE row {n, verdict, evidence} per get_application review.lines item (n = its number from 1)")
+
+
+_SHAPE = "{n, verdict, evidence}"
 
 
 def shape_problems(payload: dict[str, Any]) -> list[str]:
@@ -529,15 +527,27 @@ def shape_problems(payload: dict[str, Any]) -> list[str]:
         problems.append(f"reviewer must be a short label (1-{REVIEWER_MAX} characters)")
     lines = payload.get("lines")
     if not isinstance(lines, list) or not 1 <= len(lines) <= MAX_LINES:
-        problems.append(f"lines must be a list of 1-{MAX_LINES} {{cv_line, profile_quote, field_path}}")
+        problems.append(f"lines must be a list of 1-{MAX_LINES} {_SHAPE}")
         return problems
+    if any(isinstance(r, dict) and OLD_ROW_KEYS & set(r) for r in lines):
+        return [*problems, f"cv_reviewed rows are {_SHAPE} now (n = the line's number in get_application "
+                           'view="review" review.lines); {cv_line, profile_quote, field_path} rows are retired: '
+                           "reconnect the connector and get_recipe(\"doctor\") again"]
+    seen: set[int] = set()
     for i, row in enumerate(lines):
-        if not isinstance(row, dict) or set(row) != LINE_KEYS:
-            problems.append(f"lines[{i}] takes exactly {{cv_line, profile_quote, field_path}}")
+        if not isinstance(row, dict) or set(row) != ROW_KEYS:
+            problems.append(f"lines[{i}] takes exactly {_SHAPE}")
             continue
-        for key, cap in _CAPS.items():
-            if not isinstance(row[key], str) or not row[key].strip() or len(row[key]) > cap:
-                problems.append(f"lines[{i}].{key} must be text of 1-{cap} characters")
+        n, quotes = row["n"], row["evidence"]
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= MAX_LINES or n in seen:
+            problems.append(f"lines[{i}].n must be a review.lines number (1-{MAX_LINES}), once")
+        seen.add(n if isinstance(n, int) else 0)
+        if row["verdict"] not in VERDICTS:
+            problems.append(f'lines[{i}].verdict must be "supported" or "unsupported"')
+        if not isinstance(quotes, list) or len(quotes) > EVIDENCE_MAX or not all(
+                isinstance(q, str) and QUOTE_MIN_CHARS <= len(q.strip()) <= QUOTE_MAX_CHARS for q in quotes):
+            problems.append(f"lines[{i}].evidence must be 0-{EVIDENCE_MAX} profile quotes of "
+                            f"{QUOTE_MIN_CHARS}-{QUOTE_MAX_CHARS} characters")
     return problems
 
 
@@ -683,18 +693,21 @@ REVIEW_LINES_CAP = 200
 
 async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
     """What a review of the NEWEST cv must name: its id, the sha256 ``check`` compares and the lines it requires a
-    quote for, plus ``state`` (:func:`review_state` of that CV) (``None`` when no cv is saved). Same functions
-    as ``check``, so the agent never guesses."""
-    from src.services.applications import kit, spine  # noqa: PLC0415
+    row for (row ``n`` = ``lines[n-1]``), ``held`` (the numbers of lines the profile holds itself: evidence ``[]``),
+    plus ``state`` (:func:`review_state` of that CV) (``None`` when no cv is saved). Same functions as ``check``, so
+    the agent never guesses."""
+    from src.services.applications import kit, review_rows, spine  # noqa: PLC0415 - review_rows imports this module
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     cv = await spine.latest_artifact(db, user_id, application_id, "cv")
     if cv is None:
         return None
-    lines = content_lines(cv["text"], load_profile(user_id) or UserProfile())
+    profile = load_profile(user_id) or UserProfile()
+    lines = content_lines(cv["text"], profile)[:REVIEW_LINES_CAP]
+    held = review_rows.held_numbers(cv["text"], profile)  # the same rule judge() applies (PR #1554)
     sha = kit.sha256_text(cv["text"])
-    return {"artifact_id": cv["id"], "sha256": sha, "lines": lines[:REVIEW_LINES_CAP],
+    return {"artifact_id": cv["id"], "sha256": sha, "lines": lines, "held": held,
             "state": await review_state(db, user_id, application_id, cv["id"], sha)}
 
 
@@ -705,7 +718,8 @@ async def review_view(db: JobDatabase, user_id: str, application_id: int) -> Opt
     """``get_application(view="review")``: ONLY what one review needs (no ad text, no timeline, no contacts or
     asks), ~1 KB instead of 30-130 KB. ``review`` is :func:`inputs` plus ``reviews_used`` / ``tries_left`` (this CV's
     retry budget under the current :data:`RULES`, as ``verify`` counts it: a re-review of an already judged version is
-    no new try) and ``last_downgraded`` (the codes of the newest ``cv_reviewed`` of this CV, ``[]`` if none). ``None``
+    no new try), ``last_downgraded`` (the codes of the newest ``cv_reviewed`` of this CV, ``[]`` if none) and
+    ``last_where`` (its code -> review line numbers: rewrite exactly those lines). ``None``
     for a foreign or unknown id (the route turns that into the usual 404). Read-only."""
     from src.services.applications import kit, spine  # noqa: PLC0415
 
@@ -720,8 +734,11 @@ async def review_view(db: JobDatabase, user_id: str, application_id: int) -> Opt
             used = judged_versions(events, application_id) - {review["artifact_id"]}
             newest = next((e for e in events if e["payload"].get("artifact_id") == review["artifact_id"]), None)
             down = (newest or {"payload": {}})["payload"].get("downgraded")
+            at = (newest or {"payload": {}})["payload"].get("where")
             review = {**review, "reviews_used": len(used), "tries_left": max(0, MAX_WEAK - len(used)),
-                      "last_downgraded": [c for c in down if isinstance(c, str)] if isinstance(down, list) else []}
+                      "last_downgraded": [c for c in down if isinstance(c, str)] if isinstance(down, list) else [],
+                      "last_where": {c: v for c, v in at.items() if c in DOWNGRADES and isinstance(v, list)}
+                      if isinstance(at, dict) else {}}
     except Exception:  # noqa: BLE001 - loud in the log
         logger.exception("cv_review_view_unavailable application=%s", safe_log_value(application_id))
         review = None
@@ -733,12 +750,6 @@ async def review_view(db: JobDatabase, user_id: str, application_id: int) -> Opt
 async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     """The stored payload: the verified confidence, the downgrade codes and counts (never text)."""
     return (await verify(db, user, application_id, payload))[0]
-
-
-def _at(where: dict[str, list[str]], code: str, place: str) -> None:
-    got = where.setdefault(code, [])
-    if place not in got:
-        got.append(place)
 
 
 def judged_versions(reviews: list[dict[str, Any]], application_id: int) -> set[Any]:
@@ -758,19 +769,18 @@ def judged_versions(reviews: list[dict[str, Any]], application_id: int) -> set[A
 
 async def verify(
     db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, list[str]]]:
-    """:func:`check`'s stored payload, plus WHERE each downgrade code came from (``row N`` = the payload's
-    ``lines[N-1]``; ``review line N`` = get_application's ``review.lines[N-1]``), for the reply only, never stored."""
-    from src.services.applications import cv_records, kit, spine  # noqa: PLC0415 - cv_records imports this module
+) -> tuple[dict[str, Any], dict[str, list[Any]]]:
+    """:func:`check`'s stored payload, plus WHERE each downgrade code came from: review line numbers (``n``), or the
+    save-time check codes for ``cv_checks_found``. The stored payload keeps the first :data:`WHERE_STORED` of each."""
+    from src.services.applications import kit, review_rows, spine  # noqa: PLC0415 - review_rows imports this module
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     problems = shape_problems(payload)
     if problems:
         raise SpineError(422, "; ".join(problems))
-    entries: list[dict[str, str]] = payload["lines"]
+    rows: list[dict[str, Any]] = payload["lines"]
     profile = load_profile(user.id) or UserProfile()
-    where: dict[str, list[str]] = {}
     cv = await spine.latest_artifact(db, user.id, application_id, "cv")
     current = bool(cv and cv["id"] == payload["artifact_id"] and kit.sha256_text(cv["text"]) == payload["sha256"])
     if not current or cv is None:
@@ -780,68 +790,19 @@ async def verify(
                        safe_log_value(cv["id"] if cv else None))
         raise SpineError(422, "not_current_cv: this is not the application's newest CV; use get_application's "
                               "review.artifact_id, review.sha256 and review.lines (nothing was stored)")
-    content = content_lines(cv["text"], profile)
-    keys = {line_key(e["cv_line"]) for e in entries}
-    covered = sum(1 for ln in content if line_key(ln) in keys)
+    where, content, held = review_rows.judge(cv["text"], rows, profile)
+    numbered = min(len(content), REVIEW_LINES_CAP)
+    past = sorted(r["n"] for r in rows if r["n"] > numbered)
+    if past:  # a row naming no review line: refused, never stored (it would only look like a review)
+        raise SpineError(422, f"lines n {', '.join(map(str, past[:5]))}: review.lines has {numbered} lines "
+                              "(nothing was stored)")
     if not content:
         where["no_content"] = []
-    for n, ln in enumerate(content, 1):
-        if line_key(ln) not in keys:
-            _at(where, "line_uncovered", f"review line {n}")
     found = cv_checks.check_text("cv", cv["text"], profile)
     if found:
         where["cv_checks_found"] = [i["code"] for i in found]
-    source, source_words = quote_sources(profile)  # (c): inside ONE field value or ONE text line
-    known = set(evidence._words(cv_checks.profile_source_text(profile)))
-    actual: dict[str, list[str]] = {}
-    for ln in cv["text"].splitlines():  # the CV's own text decides case, never the entry's copy
-        actual.setdefault(line_key(ln), []).append(ln.strip().lstrip(_BULLETS + " \t"))
-    content_keys = {line_key(ln) for ln in content}
-    texts = cv_records.record_texts(profile)  # S1: the record each line sits under, and its own text
-    under: dict[str, set[frozenset[str]]] = {}
-    for ln, recs in zip(content, cv_records.line_records(cv["text"], profile)):
-        if recs is not None:
-            under.setdefault(line_key(ln), set()).add(recs)
-    own: dict[frozenset[str], tuple[str, str]] = {}
-    book, records = skill_book(profile), profile_records(profile)
-    held = quotes_skipped = 0
-    for n, e in enumerate(entries, 1):
-        row = f"row {n}"
-        key = line_key(e["cv_line"])
-        if key not in actual:
-            _at(where, "line_not_in_cv", row)
-        bodies = actual.get(key) or [e["cv_line"].strip().lstrip(_BULLETS + " \t")]
-        if key in actual and key not in content_keys:
-            continue  # a row for a line that needs none (the name, a contact line, a section heading) is not judged
-        if key in actual:  # a line the profile itself holds needs no quote: its row's quote is not judged either
-            unheld = [b for b in bodies if not (list_line_holds(b, book) or record_line_holds(b, records))]
-            held += len(bodies) - len(unheld)
-            if not unheld:
-                quotes_skipped += not quote_in_profile(e["profile_quote"], source, source_words)
-                continue
-            bodies = unheld
-        if not quote_in_profile(e["profile_quote"], source, source_words):  # (c), only for a line that needs it
-            _at(where, "quote_not_in_profile", row)
-        for recs in under.get(key, ()):  # (f) the quote lies inside the record the line sits under
-            if recs not in own:
-                own[recs] = sources_from([s for k in sorted(recs) for s in texts.get(k, [])])
-            if not quote_in_profile(e["profile_quote"], *own[recs]):
-                _at(where, "evidence_wrong_record", row)
-        bank = _quote_bank(e["profile_quote"])
-        quote_words = set(evidence._words(bank))
-        for body in bodies:  # a row naming no CV line (line_not_in_cv) is judged whole, never held
-            if evidence.unsupported_tokens(body, bank, first_word=True):
-                _at(where, "claim_not_in_quote", row)
-            content_words = {w for w in evidence._words(body) if len(w) >= 4}
-            if content_words - quote_words - known:  # "kubernetes", "twelve": a long word the profile never says
-                _at(where, "claim_not_in_quote", row)
-            thin = len(set(evidence._words(e["profile_quote"]))) < 3  # the quote's OWN words, never the bank's
-            if thin or 2 * len(content_words & quote_words) < len(content_words):
-                _at(where, "quote_too_thin", row)
-    if held:  # how often a list or record line was held by the profile itself (no CV text logged); quotes_skipped:
-        # held rows whose quote is no span of the profile, each a quote_not_in_profile under rules 2
-        logger.info("cv_reviewed lines_held_by_profile=%s quotes_skipped=%s application=%s", held, quotes_skipped,
-                    safe_log_value(application_id))
+    if held:  # how often a list or record line was held by the profile itself (no CV text logged)
+        logger.info("cv_reviewed lines_held_by_profile=%s application=%s", held, safe_log_value(application_id))
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
     # A legacy review that named no real version (not_current_cv, empty sha) was never a try: it never counts. Nor
     # does a weak review judged under OLDER rules (no or another ``rules``): its verdict may be one these rules fix
@@ -850,16 +811,17 @@ async def verify(
     weak_versions = judged_versions(reviews, application_id)
     if len(weak_versions - {payload["artifact_id"]}) >= MAX_WEAK:  # a re-review of a judged version is no new try
         where["retry_limit"] = []
-    down = set(where)
+    down = [c for c in DOWNGRADES if c in where]
     claimed = payload["confidence"]
-    if claimed == STRONG and down:  # the line that shows a false weak: which codes, never which text
+    covered = len(content) - len(where.get("line_uncovered") or [])
+    if claimed == STRONG and down:  # the line that shows a false weak: which codes and lines, never which text
         logger.info("cv_reviewed downgraded application=%s codes=%s checks=%s content=%s covered=%s",
-                    safe_log_value(application_id), ",".join(c for c in DOWNGRADES if c in down),
+                    safe_log_value(application_id), ",".join(down),
                     ",".join(where.get("cv_checks_found") or []), len(content), covered)
     stored = {
         "artifact_id": payload["artifact_id"], "sha256": payload["sha256"], "claimed": claimed,
-        "confidence": STRONG if claimed == STRONG and not down else WEAK,
-        "downgraded": [c for c in DOWNGRADES if c in down], "lines": len(entries),
+        "confidence": STRONG if claimed == STRONG and not down else WEAK, "downgraded": down,
+        "where": {c: where[c][:WHERE_STORED] for c in down if where[c]}, "lines": len(rows),
         "content_lines": len(content), "covered": covered, "reviewer": _label(payload["reviewer"]),
         "by": actor_for(user), "rules": RULES,
     }
@@ -869,15 +831,16 @@ async def verify(
 _WHERE_LISTED = 10
 
 
-def weak_warning(stored: dict[str, Any], where: dict[str, list[str]]) -> Optional[str]:
-    """The reply line when a CLAIMED strong review was STORED weak: every code and where it came from, so a run
-    never reports "strong" for a weak store."""
+def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optional[str]:
+    """The reply line when a CLAIMED strong review was STORED weak: every code and the review lines it came from, so a
+    run never reports "strong" for a weak store and one rewrite fixes every line named."""
     if stored.get("claimed") != STRONG or stored.get("confidence") == STRONG:
         return None
     parts = []
     for code in stored.get("downgraded") or []:
-        at = where.get(code) or []
+        at = [str(x) for x in where.get(code) or []]
         more = f" (+{len(at) - _WHERE_LISTED} more)" if len(at) > _WHERE_LISTED else ""
-        parts.append(f"{code}: {', '.join(at[:_WHERE_LISTED])}{more}" if at else code)
-    return ("cv_reviewed claimed strong but STORED WEAK: " + "; ".join(parts) + ". Row N = your lines[N-1]; "
-            "review line N = get_application's review.lines[N-1]. Report this CV as weak, never strong.")
+        label = "" if code == "cv_checks_found" else "lines "
+        parts.append(f"{code}: {label}{', '.join(at[:_WHERE_LISTED])}{more}" if at else code)
+    return ("cv_reviewed claimed strong but STORED WEAK: " + "; ".join(parts) + ". Line N = get_application's "
+            "review.lines[N-1] (your row n). Rewrite only those lines; report this CV as weak, never strong.")
