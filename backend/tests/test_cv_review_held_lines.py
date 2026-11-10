@@ -431,6 +431,11 @@ WRAP_RAW = (
     "• Worked at Tidewater as AI/ML Engineer Intern, from\noct 2024 - jan 2025, remote\n"
     "PROJECTS\nlangGraph agents for triage\n"
     "Orbitly (orbitly.uk) | Founder, Feb 2026 - Present\nfounder of nothing else\n\nwhile at Northwind, led 9 engineers\n"
+    # two short unpunctuated bullets of two jobs: never one line (checker on 263dd39be)
+    "\nwrote parsers for Orbitly\nled team of 12 at Northwind\n"
+    # a bullet wrapped over THREE long lines is one line
+    "• Designed the ingestion service that reads vendor feeds every hour and normalises\n"
+    "them into one schema for the warehouse, with retries and alerting on failure for\nevery feed, in Python.\n"
 )
 WRAPPED_TRUE = (
     "Engineered a RAG pipeline with Bedrock, improving relevance by 40%; added Redis caching that cut response time "
@@ -438,6 +443,8 @@ WRAPPED_TRUE = (
     "Built LLM systems in PyTorch, tuning responses to improve engagement; evaluated video models via the Gemini and "
     "OpenAI APIs.",
     "Added a Critic layer that caught 5 of 6 risky replies sent without approval; 148 tests, CI and tracing.",
+    "Designed the ingestion service that reads vendor feeds every hour and normalises them into one schema for the "
+    "warehouse, with retries and alerting on failure for every feed, in Python.",
 )
 WRAP_ATTACKS = (
     "Shipped the billing service. using Stripe webhooks in 2024.",  # the bullet before ended its sentence
@@ -446,6 +453,8 @@ WRAP_ATTACKS = (
     "founder of nothing else while at Northwind, led 9 engineers",  # across a blank line
     "approval; 148 tests, CI and tracing. Shipped the billing service.",  # the joined line plus the next line
     "and tracing. • Shipped the billing service.",
+    "wrote parsers for Orbitly led team of 12",  # the previous line is short: no wrap
+    "while at Northwind, led 9 engineers wrote parsers",
 )
 
 
@@ -487,3 +496,41 @@ async def test_wrapped_bullets_quoting_themselves_are_stored_strong(authenticate
             {"cv_line": bad, "profile_quote": "Shipped the billing service. using Stripe webhooks in 2024.",
              "field_path": "cv_data.raw_text"}])
         assert got[0] == "weak" and "quote_not_in_profile" in got[1], got
+        # checker on 263dd39be: two short bullets of two jobs read as one wrapped line, stored strong
+        bad = "- Wrote parsers for Orbitly led team of 12"
+        got = await _verdict(client, text + bad + "\n", rows + [
+            {"cv_line": bad, "profile_quote": "wrote parsers for Orbitly led team of 12",
+             "field_path": "cv_data.raw_text"}])
+        assert got[0] == "weak" and "quote_not_in_profile" in got[1], got
+
+
+def test_unwrapping_is_linear():
+    import time
+
+    raw = "• " + "x" * 70 + "\n" + ("lowercase continuation of a very long wrapped bullet line, again and again\n" * 20000)
+    start = time.process_time()
+    source, _ = cv_review.quote_sources(UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=raw)))
+    assert time.process_time() - start < 2.0 and source.count(cv_review._SEGMENT) == 0  # ONE wrapped line
+
+
+def test_a_sentence_in_a_record_field_gives_no_clause_pieces():
+    """Checker on 263dd39be: a title that is a sentence was cut into clauses and recombined."""
+    zed = {"company": "Zed Corp", "title": "Led a team of 12 engineers, saving 5 hours a week",
+           "dates": "Jan 2022 – Jan 2023", "location": "Leeds"}
+    long = {"company": "Yew Labs", "title": "Engineer " + "who automated weekly reporting for the finance team " * 3,
+            "dates": "Jan 2020 – Jan 2021"}
+    records = cv_review.profile_records(UserProfile(cv_data=CVData(name="Ada Lovelace", cv_positions=[zed, long])))
+    for line in ("Zed Corp, saving 5 hours a week, Jan 2022 - Jan 2023",
+                 "Zed Corp, Led a team of 12 engineers, Jan 2022 - Jan 2023",
+                 "Zed Corp | saving 5 hours a week | Leeds",
+                 "Yew Labs | Engineer | Jan 2020 - Jan 2021",  # a value over the cap is no piece at all
+                 "Yew Labs, who automated weekly reporting for the finance team, Jan 2020 - Jan 2021"):
+        assert not cv_review.record_line_holds(line, records), line
+    # the whole value, verbatim and in order, is still the record's own title
+    assert cv_review.record_line_holds(
+        "Zed Corp | Led a team of 12 engineers, saving 5 hours a week | Jan 2022 - Jan 2023", records)
+    # the owner's real header fields still split: "R&D" alone, "Stevenage, UK"
+    records = cv_review.profile_records(_profile())
+    assert cv_review.record_line_holds("Stevenage, UK | Northwind Labs | R&D Department", records)
+    assert cv_review.record_line_holds(
+        "Northwind Labs - AI Solutions Engineer, R&D Department, Jun 2025 - Sep 2025, Stevenage, UK", records)

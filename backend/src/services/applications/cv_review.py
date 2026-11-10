@@ -350,6 +350,13 @@ _RECORD_KEYS = frozenset({
     "company", "title", "dates", "start", "end", "start_date", "end_date", "location", "name", "stack",
     "technologies", "tech", "tools", "degree", "institution", "school", "year", "issuer",
 })
+# A header field is short. One of more than RECORD_VALUE_MAX_CHARS / _WORDS is a sentence and no piece at all; one
+# of more than RECORD_SPLIT_MAX_WORDS gives only its WHOLE text as a piece, never its clauses (checker on 263dd39be:
+# title "Led a team of 12 engineers, saving 5 hours a week" held "Zed Corp, saving 5 hours a week, Jan 2022 - ...").
+# The owner's longest field is 5 words ("AI Solutions Engineer – R&D Department", a dash is no word).
+RECORD_VALUE_MAX_CHARS = 100
+RECORD_VALUE_MAX_WORDS = 12
+RECORD_SPLIT_MAX_WORDS = 6
 _SENTENCE_ENDS = (".", "!", "?")
 
 
@@ -368,19 +375,27 @@ def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
     :data:`_RECORD_KEYS` values of at most :data:`HEADER_MAX_CHARS` each: a bullet is never a record's piece, so a
     place a bullet names is never one either."""
     cv = getattr(profile, "cv_data", None)
-    groups: list[list[str]] = []
-    cap = HEADER_MAX_CHARS
+    groups: list[list[tuple[str, bool]]] = []  # (string, may it split into clause pieces)
     for name in _RECORD_FIELDS:
-        groups += [[s for k, v in r.items() if k in _RECORD_KEYS for s in cv_checks._flat(v) if len(s) <= cap]
-                   for r in (getattr(cv, name, None) or []) if isinstance(r, dict)]
-    groups += [[s] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None)) if len(s) <= cap]
+        for r in getattr(cv, name, None) or []:
+            if isinstance(r, dict):
+                vals = [s for k, v in r.items() if k in _RECORD_KEYS for s in cv_checks._flat(v)]
+                groups.append([(s, n <= RECORD_SPLIT_MAX_WORDS) for s in vals
+                               if len(s) <= RECORD_VALUE_MAX_CHARS and (n := _word_count(s)) <= RECORD_VALUE_MAX_WORDS])
+    groups += [[(s, True)] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None))
+               if len(s) <= HEADER_MAX_CHARS]
     for name in ("raw_text", "linkedin_raw_text"):
-        groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines() if _raw_header(ln)]
+        groups += [[(ln, True)] for ln in str(getattr(cv, name, "") or "").splitlines() if _raw_header(ln)]
     # each string also in its other place spelling ("Stevenage, United Kingdom" says "Stevenage, UK"): the closed
     # cv_checks.PLACE_ABBREVIATIONS, as rule (d) reads a quote; never another record's piece
-    texts = [[t for s in g for t in (s, cv_checks.place_variant(s)) if t] for g in groups]
-    records = [frozenset(p for s in g for p in [*pieces(s), tuple(evidence._words(s))] if p) for g in texts]
+    texts = [[(t, split) for s, split in g for t in (s, cv_checks.place_variant(s)) if t] for g in groups]
+    records = [frozenset(p for s, split in g for p in [*(pieces(s) if split else []), tuple(evidence._words(s))] if p)
+               for g in texts]
     return [r for r in records if r]
+
+
+def _word_count(text: str) -> int:
+    return sum(1 for w in evidence._words(text) if not set(w) <= _DASH_TOKENS)
 
 
 def record_line_holds(line: str, records: list[frozenset[tuple[str, ...]]]) -> bool:
@@ -443,6 +458,9 @@ _SEGMENT = "\x00"  # between two profile fields / text lines: a quote never span
 
 _RAW_FIELDS = frozenset({"raw_text", "linkedin_raw_text"})
 _WRAP_STOPS = (".", "!", "?", ":")
+# A line the PDF wrapped is a long one: the owner's three wrapped bullets break after 114, 116 and 125 characters.
+# A short line ("wrote parsers for Calnex", 24) is a whole bullet, so the lowercase line after it is another one.
+WRAP_MIN_CHARS = 60
 
 
 def _unwrapped(text: str) -> list[str]:
@@ -450,20 +468,20 @@ def _unwrapped(text: str) -> list[str]:
     that starts with a lowercase letter continues the line before it, unless that line ends a sentence (``. ! ? :``),
     is a header (:func:`header_pieces`) or a section heading, or a blank line comes between. Line by line, no regex.
     Used for quotes only: a joined line is never a record (:func:`profile_records` reads the raw lines)."""
-    out: list[str] = []
+    out: list[list[str]] = []  # each joined line as its parts, joined once at the end: linear in the text
     last = ""  # the previous physical line, "" after a blank line
     for raw in text.split("\n"):
         line = raw.strip()
         if not line:
             last = ""
             continue
-        if (last and out and line[:1].islower() and not last.endswith(_WRAP_STOPS)
+        if (out and len(last) >= WRAP_MIN_CHARS and line[:1].islower() and not last.endswith(_WRAP_STOPS)
                 and header_pieces(last) is None and not cv_checks._is_section_heading(last) and not is_heading(last)):
-            out[-1] = f"{out[-1]} {line}"
+            out[-1].append(line)
         else:
-            out.append(line)
+            out.append([line])
         last = line
-    return out
+    return [" ".join(parts) for parts in out]
 
 
 def quote_sources(profile: Any) -> tuple[str, str]:
