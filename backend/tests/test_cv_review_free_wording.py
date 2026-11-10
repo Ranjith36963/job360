@@ -158,6 +158,41 @@ async def test_bad_rows_are_refused_and_stored_nowhere(authenticated_async_conte
         assert not [e for e in events if e["event_type"] == "cv_reviewed"]
 
 
+async def _post_rows(client: Any, app_id: int, cv_id: int, rows: list[dict[str, Any]]) -> Any:
+    payload = {"artifact_id": cv_id, "sha256": _sha(HONEST), "confidence": "strong", "reviewer": "fresh helper",
+               "lines": rows}
+    return await client.post(f"/api/applications/{app_id}/events", json={"event_type": "cv_reviewed", "payload": payload})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_n", ["duplicate", 0, 7])
+async def test_duplicate_zero_and_beyond_last_n_are_refused_over_http(authenticated_async_context, fixture_user_id, bad_n):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id, cv_id = await _setup(client, cv=HONEST)
+        rows = _rows(HONEST, EVIDENCE)
+        rows.append({**rows[1]} if bad_n == "duplicate" else {"n": bad_n, "verdict": "supported", "evidence": []})
+        resp = await _post_rows(client, app_id, cv_id, rows)
+        assert resp.status_code == 422, resp.text
+        events = (await client.get(f"/api/applications/{app_id}")).json()["events"]
+        assert not [e for e in events if e["event_type"] == "cv_reviewed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [2, 1])
+async def test_a_line_with_no_row_is_stored_weak_and_named(authenticated_async_context, fixture_user_id, missing):
+    """Line 2 is a bullet (needs evidence); line 1 is a held header. TODAY a held line with no row is WEAK too:
+    ``line_uncovered`` names it (only a line WITH a row is held without evidence)."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id, cv_id = await _setup(client, cv=HONEST)
+        rows = [r for r in _rows(HONEST, EVIDENCE) if r["n"] != missing]
+        got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(HONEST), "confidence": "strong",
+                                             "lines": rows, "reviewer": "fresh helper"})
+    assert (got["confidence"], got["where"]) == ("weak", {"line_uncovered": [missing]})
+    assert got["covered"] == 5
+
+
 def test_judge_is_bounded_on_hostile_text():
     raw = ("Ada Lovelace\n" + ",-( " * 75 + "\n") * 300
     profile = UserProfile(cv_data=CVData(**{**CV_DATA, "raw_text": CV_DATA["raw_text"] + raw}))
