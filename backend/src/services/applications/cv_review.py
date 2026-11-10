@@ -696,7 +696,7 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
     row for (row ``n`` = ``lines[n-1]``), ``held`` (the numbers of lines the profile holds itself: evidence ``[]``),
     plus ``state`` (:func:`review_state` of that CV) (``None`` when no cv is saved). Same functions as ``check``, so
     the agent never guesses."""
-    from src.services.applications import kit, spine  # noqa: PLC0415
+    from src.services.applications import kit, review_rows, spine  # noqa: PLC0415 - review_rows imports this module
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -705,9 +705,7 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
         return None
     profile = load_profile(user_id) or UserProfile()
     lines = content_lines(cv["text"], profile)[:REVIEW_LINES_CAP]
-    book, records = skill_book(profile), profile_records(profile)
-    held = [n for n, ln in enumerate(lines, 1) if list_line_holds(ln.lstrip(_BULLETS + " \t"), book)
-            or record_line_holds(ln.lstrip(_BULLETS + " \t"), records)]
+    held = review_rows.held_numbers(cv["text"], profile)  # the same rule judge() applies (PR #1554)
     sha = kit.sha256_text(cv["text"])
     return {"artifact_id": cv["id"], "sha256": sha, "lines": lines, "held": held,
             "state": await review_state(db, user_id, application_id, cv["id"], sha)}

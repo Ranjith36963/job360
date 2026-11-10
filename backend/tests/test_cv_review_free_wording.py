@@ -241,3 +241,32 @@ def test_symbols_and_fullwidth_digits_are_no_false_weak():
                  "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Built it end to end.",
                  "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Hands-on throughout."):
         assert _judge(_cv((NORTHWIND, line)), {line: [B2]}) == {}, line
+
+
+# ── PR #1554 review [P2]: view="review" `held` and judge() decide "held" with ONE helper ───────────────────────────
+UNDER_JOB = _cv((TIDEWATER, B3), (NORTHWIND, "Agents & LLMs: LangGraph, LangChain, MCP, RAG"))  # Northwind lacks MCP
+UNDER_PROJECT = _cv((TIDEWATER, B3), ("Support Agent | LangGraph, MCP, Gmail, Slack", "LangGraph, MCP"))
+
+
+@pytest.mark.asyncio
+async def test_review_view_held_leaves_out_a_list_its_job_does_not_name(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        held = {}
+        for name, text in (("job", UNDER_JOB), ("project", UNDER_PROJECT)):
+            app_id, _ = await _setup(client, cv=text)
+            held[name] = (await client.get(f"/api/applications/{app_id}", params={"view": "review"})).json()[
+                "review"]["held"]
+    assert 4 not in held["job"] and 4 in held["project"], held
+
+
+def test_every_held_line_verifies_with_no_evidence():
+    from tests.test_cv_review_held_lines import OWNER_SHAPES
+
+    for text in (HONEST, UNDER_JOB, UNDER_PROJECT, *OWNER_SHAPES.values()):
+        held = review_rows.held_numbers(text, _profile())
+        lines = cv_review.content_lines(text, _profile())
+        rows = [{"n": n, "verdict": "supported", "evidence": [] if n in held else [ln.lstrip("- ")]}
+                for n, ln in enumerate(lines, 1)]
+        where = review_rows.judge(text, rows, _profile())[0]
+        assert not set(where.get("no_evidence", [])) & set(held), (text[:60], held, where)

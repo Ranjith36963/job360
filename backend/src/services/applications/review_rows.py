@@ -127,6 +127,26 @@ def hard_facts(body: str, quotes: list[str], names: set[str], free_labels: froze
                 or (first in names and first not in bank_words))
 
 
+def held_numbers(text: str, profile: Any) -> list[int]:
+    """THE rule for "this review line needs no evidence" (``review.held`` and :func:`judge` both read it, so the hint
+    can never disagree with the check, PR #1554): a header line ONE profile record holds, or a skills list the profile
+    holds item by item, which under a job / project header that record's own text must also name (B5)."""
+    lines = cv_review.content_lines(text, profile)[: cv_review.REVIEW_LINES_CAP]
+    recs = cv_records.line_records(text, profile)
+    book, records = cv_review.skill_book(profile), cv_review.profile_records(profile)
+    texts = cv_records.record_texts(profile)
+    out: list[int] = []
+    for n, ln in enumerate(lines, 1):
+        body = ln.strip().lstrip(cv_review._BULLETS + " \t")
+        line_recs = recs[n - 1] if n <= len(recs) else None
+        own = None if line_recs is None else cv_review.sources_from(  # no record: nothing names its items
+            [s for k in sorted(line_recs) for s in texts.get(k, [])])
+        if (cv_review.list_line_holds(body, book) and _list_in_record(body, own)) or cv_review.record_line_holds(
+                body, records):
+            out.append(n)
+    return out
+
+
 def _list_in_record(body: str, record: Optional[tuple[str, str]]) -> bool:
     """A skills list under a job / project header is held only when that record's own text names every item (B5):
     "LangGraph, MCP" under Tidewater is a claim about Tidewater. Free sections (``None``) hold by the profile."""
@@ -159,7 +179,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
         if n not in by_n:
             _at(where, "line_uncovered", n)
     source, source_words = cv_review.quote_sources(profile)
-    book, records = cv_review.skill_book(profile), cv_review.profile_records(profile)
+    book = cv_review.skill_book(profile)
     cv = getattr(profile, "cv_data", None)
     names = {i for i in book.items if " " not in i} | _proper_nouns(cv_checks.profile_source_text(profile)) | set(
         evidence._words(" ".join(
@@ -171,6 +191,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
     texts = cv_records.record_texts(profile)
     own: dict[frozenset[str], tuple[str, str]] = {}
     alone: dict[str, list[int]] = {}  # a quote -> the lines it is the ONLY evidence of
+    held_ns = set(held_numbers(text, profile))
     held = 0
     for n in sorted(k for k in by_n if k <= len(lines)):
         row, body = by_n[n], lines[n - 1].strip().lstrip(cv_review._BULLETS + " \t")
@@ -179,9 +200,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
         line_recs: Optional[frozenset[str]] = recs[n - 1] if n <= len(recs) else None
         if line_recs is not None and line_recs not in own:
             own[line_recs] = cv_review.sources_from([s for k in sorted(line_recs) for s in texts.get(k, [])])
-        if (cv_review.list_line_holds(body, book) and _list_in_record(body, own.get(line_recs) if line_recs is not None
-                                                                          else None)) or cv_review.record_line_holds(
-                body, records):
+        if n in held_ns:
             held += 1
             continue
         quotes: list[str] = row["evidence"]
