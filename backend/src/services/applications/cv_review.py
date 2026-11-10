@@ -598,6 +598,38 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
             "state": await review_state(db, user_id, application_id, cv["id"], sha)}
 
 
+REVIEW_VIEW_KEYS = ("id", "job_title", "job_company", "country", "review")
+
+
+async def review_view(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """``get_application(view="review")``: ONLY what one review needs (no ad text, no timeline, no contacts or
+    asks), ~1 KB instead of 30-130 KB. ``review`` is :func:`inputs` plus ``reviews_used`` / ``tries_left`` (this CV's
+    retry budget under the current :data:`RULES`, as ``verify`` counts it: a re-review of an already judged version is
+    no new try) and ``last_downgraded`` (the codes of the newest ``cv_reviewed`` of this CV, ``[]`` if none). ``None``
+    for a foreign or unknown id (the route turns that into the usual 404). Read-only."""
+    from src.services.applications import kit, spine  # noqa: PLC0415
+
+    app_row = await spine.get_owned_application(db, user_id, application_id)
+    if app_row is None:
+        return None
+    review: Optional[dict[str, Any]] = None
+    try:  # as get_application: a failure here must never break the read
+        review = await inputs(db, user_id, application_id)
+        if review is not None:
+            events = await kit._events(db, user_id, application_id, (EVENT_TYPE,))
+            used = judged_versions(events, application_id) - {review["artifact_id"]}
+            newest = next((e for e in events if e["payload"].get("artifact_id") == review["artifact_id"]), None)
+            down = (newest or {"payload": {}})["payload"].get("downgraded")
+            review = {**review, "reviews_used": len(used), "tries_left": max(0, MAX_WEAK - len(used)),
+                      "last_downgraded": [c for c in down if isinstance(c, str)] if isinstance(down, list) else []}
+    except Exception:  # noqa: BLE001 - loud in the log
+        logger.exception("cv_review_view_unavailable application=%s", safe_log_value(application_id))
+        review = None
+    return {"id": app_row["id"], "job_title": app_row.get("job_title") or "",
+            "job_company": app_row.get("job_company") or "", "country": app_row.get("job_country") or None,
+            "review": review}
+
+
 async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     """The stored payload: the verified confidence, the downgrade codes and counts (never text)."""
     return (await verify(db, user, application_id, payload))[0]
@@ -607,6 +639,21 @@ def _at(where: dict[str, list[str]], code: str, place: str) -> None:
     got = where.setdefault(code, [])
     if place not in got:
         got.append(place)
+
+
+def judged_versions(reviews: list[dict[str, Any]], application_id: int) -> set[Any]:
+    """The CV versions (artifact ids) that spent a try: a weak review that is a real review (:func:`review_valid`)
+    judged under the CURRENT :data:`RULES`. A legacy review (no real version) or an older-rules one never counts:
+    its verdict may be one these rules fix (production 2026-11-10: 3 false-weak reviews had spent apps' whole
+    budget), and its rows were never stored, so it cannot be judged again. Each rules change gives an application
+    MAX_WEAK new tries, never more. ``verify`` and the ``view="review"`` read count tries through this one function."""
+    weak = [e for e in reviews if e["payload"].get("confidence") != STRONG]
+    versions = {e["payload"].get("artifact_id") for e in weak
+                if review_valid(e["payload"]) and e["payload"].get("rules") == RULES}
+    if len(versions) < len({e["payload"].get("artifact_id") for e in weak}):
+        logger.info("cv_reviewed retry_limit ignores legacy or older-rules reviews application=%s",
+                    safe_log_value(application_id))
+    return versions
 
 
 async def verify(
@@ -684,12 +731,7 @@ async def verify(
     # does a weak review judged under OLDER rules (no or another ``rules``): its verdict may be one these rules fix
     # (production 2026-11-10: 3 false-weak reviews had spent apps' whole budget), and its rows were never stored,
     # so it cannot be judged again. Each rules change gives an application MAX_WEAK new tries, never more.
-    weak = [e for e in reviews if e["payload"].get("confidence") != STRONG]
-    weak_versions = {e["payload"].get("artifact_id") for e in weak
-                     if review_valid(e["payload"]) and e["payload"].get("rules") == RULES}
-    if len(weak_versions) < len({e["payload"].get("artifact_id") for e in weak}):
-        logger.info("cv_reviewed retry_limit ignores legacy or older-rules reviews application=%s",
-                    safe_log_value(application_id))
+    weak_versions = judged_versions(reviews, application_id)
     if len(weak_versions - {payload["artifact_id"]}) >= MAX_WEAK:  # a re-review of a judged version is no new try
         where["retry_limit"] = []
     down = set(where)

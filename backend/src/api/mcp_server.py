@@ -1490,7 +1490,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     # parity test (test_mcp_gate_parity.py) checks exactly this.
 
     @mcp.tool()
-    async def get_application(application_id: int, with_artifact_text: bool = False) -> dict[str, Any]:
+    async def get_application(
+        application_id: int, with_artifact_text: bool = False, view: Optional[str] = None,
+    ) -> dict[str, Any]:
         """One application in full: status, the job snapshot, the fit verdict,
         every artifact version (text omitted unless with_artifact_text=true),
         `review` (newest cv's sha256 + lines to quote), the whole event timeline,
@@ -1507,10 +1509,11 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         event_type="lesson"); follow_up → a follow-up date has arrived — chase
         them or record what happened (record_event again clears it once the
         news moves the status). wait / interview / await_outcome / decide /
-        closed need nothing from you."""
+        closed need nothing from you. view="review" returns only id, job_title, job_company, country and `review`
+        (artifact_id, sha256, lines, state, tries_left, last_downgraded): the lean read for a CV review."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.get_application(application_id, with_artifact_text, db, _user())
+                resp = await applications_route.get_application(application_id, with_artifact_text, view, db, _user())
         except HTTPException as exc:
             _audit("get_application", "error", application_id=application_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
