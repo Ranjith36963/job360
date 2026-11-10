@@ -9,20 +9,32 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
 (b) every content line of that CV has an entry whose ``cv_line`` is that line (case, spacing and a leading
     bullet aside) (``line_uncovered``; an entry naming no CV line is ``line_not_in_cv``; a CV of headers only is
     ``no_content``). Exempt, and only these: the name line (the FIRST line, every word a word of the profile's
-    name), a contact line (only emails, links and one phone number, with separators; a ``Label:`` word is
-    content), and a section heading (1-4 alphabetic words, one of 4+ letters: ALL CAPS, ``# Heading`` or
-    ``Heading:``) whose every word is already a word of the profile source text. A summary line is not;
-(c) each ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside)
-    (``quote_not_in_profile``);
+    name), a contact line (only emails, links and one phone number, with separators; a bare site only when the
+    profile says it; beside them, words of the profile's own location fields; a ``Label:`` word is content), and
+    a section heading (1-4 alphabetic words, one of 4+ letters: ALL CAPS, ``# Heading`` or ``Heading:``; ``&`` is
+    ``and``) whose every word is a section word and a word of the profile source text. A summary line is not.
+    A row for an exempt line is not judged by (d);
+(c) each ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside, or word for word
+    with only outer punctuation aside: every word, number and name exact and in order) (``quote_not_in_profile``);
 (d) every number and capitalised name of a ``cv_line``, its first word too (``evidence.claim_tokens``), is in
     its own quote (``claim_not_in_quote``); the quote has 3+ words and at least half the line's words of 4+
-    letters (``quote_too_thin``); words are scanned one by one, no regex on caller text;
+    letters (``quote_too_thin``); words are scanned one by one, no regex on caller text. The quote also says
+    what it says in other words: ``&`` is ``and``, and a place of the CLOSED ``cv_checks.PLACE_ABBREVIATIONS``
+    table is its other spelling ("United Kingdom" says "UK"). Two line shapes need no one quote to hold them,
+    because the profile itself does, token for token (production 2026-11-10: 234 of 279 newest reviews weak):
+    a list line ``[Label:] a, b, c`` whose every item is a WHOLE profile skill item and every label word a
+    section word or a profile word (:func:`list_line_holds`), and a ``|`` header line whose every piece is a
+    whole piece of ONE profile record: one role, one project, one education entry, one CV text line, never two
+    mixed (:func:`record_line_holds`). One item or piece the profile lacks keeps the line a claim;
 (e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
-After weak reviews of :data:`MAX_WEAK` other CV versions on an application, a review of a new one is weak
-(``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try.
+After weak reviews of :data:`MAX_WEAK` other CV versions judged under the current :data:`RULES`, a review of a
+new one is weak (``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try. A
+weak review judged under older rules never counts (its rows were not stored, so it cannot be judged again).
 
-The event stores codes and counts, never CV or profile text. ``may_submit`` reads :func:`review_state` for the
-exact current CV id + sha, and only with ``assistant_settings.cv_auto_approve`` on, in auto mode.
+The event stores codes and counts, never CV or profile text; the reply names, for a claimed-strong review stored
+weak, each code and the rows / review lines it came from (:func:`weak_warning`). ``may_submit`` reads
+:func:`review_state` for the exact current CV id + sha, and only with ``assistant_settings.cv_auto_approve`` on,
+in auto mode. The writer avoids rewrites by copying the profile's own sentences word for word (recipes).
 """
 from __future__ import annotations
 
@@ -46,6 +58,9 @@ DOWNGRADES = (
     "claim_not_in_quote", "quote_too_thin", "cv_checks_found", "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
+# The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
+# change to what is stored strong: retry_limit counts only weak reviews judged under the current rules.
+RULES = 2  # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites
 MAX_LINES = 200
 _CAPS = {"cv_line": 1000, "profile_quote": 2000, "field_path": 200}
 REVIEWER_MAX = 40
@@ -77,16 +92,50 @@ def _is_link(tok: str) -> bool:
     return tok.casefold().startswith(("http://", "https://", "www.", "linkedin.com/", "github.com/"))
 
 
-def is_contact_line(line: str) -> bool:
-    """Only emails, links and ONE phone number (10-15 digits, opening with ``+``, ``(`` or ``0``), with separators."""
+def place_words(profile: Any) -> frozenset[str]:
+    """The words of the profile's OWN location fields (and their :data:`cv_checks.PLACE_ABBREVIATIONS` spelling)."""
+    cv = getattr(profile, "cv_data", None)
+    found = [getattr(cv, "location", "")]
+    for blob in (getattr(cv, "github_identity", None), getattr(cv, "linkedin_contact", None)):
+        found.append(blob.get("location") if isinstance(blob, dict) else "")
+    for name in ("cv_positions", "linkedin_positions"):
+        found += [p.get("location") for p in (getattr(cv, name, None) or []) if isinstance(p, dict)]
+    text = " ".join(f for f in found if isinstance(f, str))
+    return frozenset(evidence._words(text + " " + cv_checks.place_equivalents(text)))
+
+
+def _is_domain(tok: str) -> bool:
+    """A bare site ("job360.uk", "ada.github.io/cv"): letters, digits, ``.-/_~``, a dotted host ending in letters."""
+    host = tok.partition("/")[0]
+    tld = host.rpartition(".")[2]
+    return ("." in host and len(tld) >= 2 and tld.isalpha() and host[:1].isalnum()
+            and all(c.isalnum() or c in ".-/_~" for c in tok))
+
+
+def own_links(profile: Any) -> frozenset[str]:
+    """Every word of the profile's own text and link fields: a bare site counts as a link only when it is one."""
+    cv = getattr(profile, "cv_data", None)
+    found = [cv_checks.profile_source_text(profile), *cv_checks._flat(getattr(cv, "links", None))]
+    for blob in (getattr(cv, "github_identity", None), getattr(cv, "linkedin_contact", None)):
+        found += cv_checks._flat(list(blob.values())) if isinstance(blob, dict) else []
+    return frozenset(evidence._words("\n".join(found)))
+
+
+def is_contact_line(line: str, places: frozenset[str] = frozenset(), links: frozenset[str] = frozenset()) -> bool:
+    """Only emails, links and ONE phone number (10-15 digits, opening with ``+``, ``(`` or ``0``), with separators;
+    a bare site ("job360.uk") only when the profile's own text or links say it (``links``); and, beside an email,
+    link or phone, words of the profile's own location (``places``): "London, UK | +44 ...". A place word alone is
+    never a contact line."""
     rest: list[str] = []
     anchor = False
     for raw in line.split():
         tok = raw.strip(",;")
         if not tok or tok in _SEPARATORS:
             continue
-        if _is_email(tok) or _is_link(tok):
+        if _is_email(tok) or _is_link(tok) or (_is_domain(tok) and tok.strip(".").casefold() in links):
             anchor = True
+        elif tok.strip(".").casefold() in places and tok.replace(".", "").isalpha():
+            continue  # "London", "UK": the profile's own location, never a digit
         else:  # a label word ("CTO:") is content, never a free pass
             rest.append(tok)
     if not rest:
@@ -98,8 +147,8 @@ def is_contact_line(line: str) -> bool:
 
 # A heading is exempt only when every word is a section name: "SENIOR DATA ENGINEER" is a claim, never a heading.
 SECTION_WORDS = frozenset((
-    "about", "achievements", "and", "awards", "career", "certifications", "competencies", "contact", "core",
-    "courses", "education", "employment", "experience", "history", "interests", "key", "languages", "objective",
+    "about", "achievements", "and", "awards", "career", "certification", "certifications", "competencies", "contact",
+    "core", "courses", "education", "employment", "experience", "history", "interests", "key", "languages", "objective",
     "other", "personal", "professional", "profile", "projects", "publications", "qualifications", "references",
     "relevant", "selected", "skills", "summary", "technical", "training", "volunteering", "work",
 ))
@@ -121,21 +170,163 @@ def _name_words(profile: Any) -> set[str]:
     return {w for n in names if isinstance(n, str) for w in evidence._words(n)}
 
 
+def _and_words(words: list[str]) -> set[str]:
+    """Words as a set, ``&`` read as ``and`` (heading grammar, never a fact)."""
+    return {"and" if w == "&" else w for w in words}
+
+
 def content_lines(text: str, profile: Any) -> list[str]:
     """The CV's non-empty lines minus the narrow exemptions (the name line, contact lines, and a heading whose
     every word the profile already says: "AWS SOLUTIONS ARCHITECT" is a claim unless the profile holds it)."""
     lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
     names = _name_words(profile)
-    known = set(evidence._words(cv_checks.profile_source_text(profile)))
+    known = _and_words(evidence._words(cv_checks.profile_source_text(profile)))
+    places, links = place_words(profile), own_links(profile)
     out: list[str] = []
     for i, line in enumerate(lines):
         words = set(evidence._words(line))
-        said = set(evidence._words(line.strip("#*: \t")))
+        said = _and_words(evidence._words(line.strip("#*: \t")))  # "EDUCATION & CERTIFICATION" = "... AND ..."
         heading = is_heading(line) and bool(said) and said <= known and said <= SECTION_WORDS
-        if (i == 0 and names and words and words <= names) or is_contact_line(line) or heading:
+        if (i == 0 and names and words and words <= names) or is_contact_line(line, places, links) or heading:
             continue
         out.append(line)
     return out
+
+
+_SKILL_FIELDS = ("skills", "linkedin_skills", "github_languages", "github_frameworks")
+_LABEL_MAX_WORDS = 4
+_ITEM_MAX_WORDS = 4
+_LABEL_CHARS = frozenset(" &/+-")
+_LABEL_JOINERS = frozenset({"&", "and", "/", "+"})
+
+
+def list_parts(line: str) -> Optional[tuple[list[str], list[str]]]:
+    """``(label words, items)`` of a list line, ``[Label:] item, item | item`` (2+ items of at most
+    :data:`_ITEM_MAX_WORDS` words; a label of at most :data:`_LABEL_MAX_WORDS` words of letters), else ``None``.
+    Split with ``cv_checks._split_items`` (a character scan, no regex on caller text)."""
+    s = line.strip().lstrip(_BULLETS + " \t")
+    label, colon, body = s.partition(":")
+    if not colon:
+        label, body = "", s
+    if not all(c.isalpha() or c in _LABEL_CHARS for c in label):
+        return None
+    words = label.replace("&", " & ").replace("/", " / ").split()
+    items = cv_checks._split_items(body)
+    if len(words) > _LABEL_MAX_WORDS or len(items) < 2 or any(len(i.split()) > _ITEM_MAX_WORDS for i in items):
+        return None
+    return [w.casefold() for w in words], items
+
+
+def profile_items(profile: Any) -> frozenset[str]:
+    """Every whole skill item the profile holds: its skill lists, and the items of its own LABELLED list lines
+    ("Languages: Python, SQL, TypeScript"). Compared whole, case and spacing aside: never a word of an item."""
+    cv = getattr(profile, "cv_data", None)
+    prefs = getattr(profile, "preferences", None)
+    raw = [s for n in _SKILL_FIELDS for s in cv_checks._flat(getattr(cv, n, None))]
+    raw += cv_checks._flat(getattr(prefs, "additional_skills", None))
+    out = {_norm(s) for s in raw} | {_norm(i) for s in raw for i in cv_checks._split_items(s)}
+    for ln in cv_checks.profile_source_text(profile).splitlines():
+        parts = list_parts(ln)
+        if parts and parts[0]:
+            out |= {_norm(i) for i in parts[1]}
+    return frozenset(out - {""})
+
+
+def list_line_holds(line: str, items: frozenset[str], known: set[str]) -> bool:
+    """A skills line the profile holds item by item (production 2026-11-10, apps 848-882): "Backend & Data: Python,
+    SQL, dbt" is true when EVERY item is a whole profile item, whatever their order, and every label word is a
+    section word or a word of the profile. One item the profile lacks ("Kubernetes", "7 years") keeps it a claim."""
+    parts = list_parts(line)
+    if parts is None:
+        return False
+    label, got = parts
+    grammar = SECTION_WORDS | cv_checks._SECTION_WORDS | cv_checks._HEADING_LEADS | _LABEL_JOINERS
+    return all(w in grammar or w in known for w in label) and all(_norm(i) in items for i in got)
+
+
+_PIECE_ENDS = frozenset("|•·;/")
+_HEADER_BARS = frozenset({"|", "•", "·"})
+_DASH_TOKENS = frozenset("-–—‐‑‒―−")
+
+
+def pieces(text: str) -> list[tuple[str, ...]]:
+    """A line cut at a standalone ``|``, ``•``, ``;``, ``/`` or dash, after a word ending ``,`` or ``;``, and around a
+    ``(...)`` group, each piece as its words (case, outer punctuation and ``**`` bold aside; ``&`` is ``and``). A dash
+    after a number joins a range ("Jun 2025 – Sep 2025" is one piece, never half of one). Word by word, no regex."""
+    out: list[list[str]] = []
+    cur: list[str] = []
+    for raw in str(text or "").split():
+        raw = raw.strip("*")
+        if not raw:
+            continue
+        dash = set(raw) <= _DASH_TOKENS
+        after_number = any(c.isdigit() for c in "".join(cur[-1:]))
+        if set(raw) <= _PIECE_ENDS or (dash and not after_number):
+            out.append(cur)
+            cur = []
+            continue
+        if raw.startswith("(") and cur:
+            out.append(cur)
+            cur = []
+        cur.append("-" if dash else "and" if raw == "&" else raw)
+        if raw.endswith((",", ";", ")")):
+            out.append(cur)
+            cur = []
+    out.append(cur)
+    return [p for p in (tuple(evidence._words(" ".join(c))) for c in out) if p]
+
+
+_RECORD_FIELDS = ("cv_positions", "linkedin_positions", "cv_projects", "linkedin_projects")
+_ONE_LINE_FIELDS = ("education", "cv_education_details", "certifications")
+
+
+def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
+    """The profile's records, each the set of its pieces: one role (company, title, dates, location, ...), one
+    project (name, stack, ...), one education or certification entry, one line of the CV / LinkedIn text."""
+    cv = getattr(profile, "cv_data", None)
+    groups: list[list[str]] = []
+    for name in _RECORD_FIELDS:
+        groups += [cv_checks._flat(list(r.values())) for r in (getattr(cv, name, None) or []) if isinstance(r, dict)]
+    groups += [[s] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None))]
+    for name in ("raw_text", "linkedin_raw_text"):
+        groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines() if ln.strip()]
+    records = [frozenset(p for s in g for p in [*pieces(s), tuple(evidence._words(s))] if p) for g in groups]
+    return [r for r in records if r]
+
+
+def record_line_holds(line: str, records: list[frozenset[tuple[str, ...]]]) -> bool:
+    """A header line of pieces joined by a standalone ``|`` or ``•`` ("Calnex Solutions | AI Solutions Engineer,
+    R&D | Jun 2025 - Sep 2025 | Stevenage", "Support Agent | LangGraph, MCP") that ONE profile record holds piece
+    for piece, whole pieces, any order
+    (production 2026-11-10, app 478). Pieces of two records never combine: a title is never moved to another
+    employer, and a piece the record lacks ("Senior", "2018") keeps the line a claim."""
+    if not _HEADER_BARS.intersection(line.split()):  # a comma line is prose or a list: a quote or the list rule
+        return False
+    got = pieces(line.strip().lstrip(_BULLETS + " \t"))
+    return len(set(got)) >= 2 and any(_runs_in(got, r) for r in records)
+
+
+def _runs_in(got: list[tuple[str, ...]], record: frozenset[tuple[str, ...]]) -> bool:
+    """Every piece of ``got`` is a whole piece of ``record``, or a run of neighbouring pieces is one, joined in their
+    order (a separator the CV adds: "R&D | Jun 2025 - Sep 2025" against the PDF's "R&D Jun 2025 – Sep 2025")."""
+    ok = [True] + [False] * len(got)  # ok[i]: got[:i] splits into such runs
+    for end in range(1, len(got) + 1):
+        ok[end] = any(ok[start] and sum(got[start:end], ()) in record for start in range(end))
+    return ok[-1]
+
+
+def quote_in_profile(quote: str, source: str, source_words: str) -> bool:
+    """(c): the quote is in the profile, case and spacing aside, or word for word with only OUTER punctuation aside
+    ("in Docker at 95%" for "in Docker, at 95%"): every word, number and name stays exact and in order."""
+    words = " ".join(evidence._words(quote))
+    return _norm(quote) in source or bool(words and f" {words} " in source_words)
+
+
+def _quote_bank(quote: str) -> str:
+    """The quote plus what it says in other words: ``&`` is ``and``, and a place of the closed
+    :data:`cv_checks.PLACE_ABBREVIATIONS` is its other spelling ("United Kingdom" says "UK")."""
+    extra = " and" if "&" in quote.split() else ""
+    return f"{quote} {cv_checks.place_equivalents(quote)}{extra}"
 
 
 def missing_warning(stored: dict[str, Any]) -> Optional[str]:
@@ -333,6 +524,20 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
 
 async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     """The stored payload: the verified confidence, the downgrade codes and counts (never text)."""
+    return (await verify(db, user, application_id, payload))[0]
+
+
+def _at(where: dict[str, list[str]], code: str, place: str) -> None:
+    got = where.setdefault(code, [])
+    if place not in got:
+        got.append(place)
+
+
+async def verify(
+    db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    """:func:`check`'s stored payload, plus WHERE each downgrade code came from (``row N`` = the payload's
+    ``lines[N-1]``; ``review line N`` = get_application's ``review.lines[N-1]``), for the reply only, never stored."""
     from src.services.applications import kit, spine  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
@@ -342,11 +547,9 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
         raise SpineError(422, "; ".join(problems))
     entries: list[dict[str, str]] = payload["lines"]
     profile = load_profile(user.id) or UserProfile()
-    down: set[str] = set()
+    where: dict[str, list[str]] = {}
     cv = await spine.latest_artifact(db, user.id, application_id, "cv")
     current = bool(cv and cv["id"] == payload["artifact_id"] and kit.sha256_text(cv["text"]) == payload["sha256"])
-    content: list[str] = []
-    covered = 0
     if not current or cv is None:
         # Never stored, never counted toward retry_limit: a review of another CV would only look like a review.
         logger.warning("cv_reviewed refused: not_current_cv application=%s artifact=%s current=%s",
@@ -354,47 +557,93 @@ async def check(db: JobDatabase, user: CurrentUser, application_id: int, payload
                        safe_log_value(cv["id"] if cv else None))
         raise SpineError(422, "not_current_cv: this is not the application's newest CV; use get_application's "
                               "review.artifact_id, review.sha256 and review.lines (nothing was stored)")
-    else:
-        content = content_lines(cv["text"], profile)
-        keys = {line_key(e["cv_line"]) for e in entries}
-        covered = sum(1 for ln in content if line_key(ln) in keys)
-        down |= {"no_content"} if not content else {"line_uncovered"} if covered < len(content) else set()
-        if keys - {line_key(ln) for ln in cv["text"].splitlines()}:
-            down.add("line_not_in_cv")
-        if cv_checks.check_text("cv", cv["text"], profile):
-            down.add("cv_checks_found")
+    content = content_lines(cv["text"], profile)
+    keys = {line_key(e["cv_line"]) for e in entries}
+    covered = sum(1 for ln in content if line_key(ln) in keys)
+    if not content:
+        where["no_content"] = []
+    for n, ln in enumerate(content, 1):
+        if line_key(ln) not in keys:
+            _at(where, "line_uncovered", f"review line {n}")
+    found = cv_checks.check_text("cv", cv["text"], profile)
+    if found:
+        where["cv_checks_found"] = [i["code"] for i in found]
     source = _norm(cv_checks.profile_source_text(profile))
+    source_words = f' {" ".join(evidence._words(source))} '
     known = set(evidence._words(cv_checks.profile_source_text(profile)))
     actual: dict[str, list[str]] = {}
-    for ln in (cv["text"].splitlines() if cv else []):  # the CV's own text decides case, never the entry's copy
+    for ln in cv["text"].splitlines():  # the CV's own text decides case, never the entry's copy
         actual.setdefault(line_key(ln), []).append(ln.strip().lstrip(_BULLETS + " \t"))
-    for e in entries:
-        bodies = actual.get(line_key(e["cv_line"])) or [e["cv_line"].strip().lstrip(_BULLETS + " \t")]
-        if _norm(e["profile_quote"]) not in source:
-            down.add("quote_not_in_profile")
-        quote_words = set(evidence._words(e["profile_quote"]))
+    content_keys = {line_key(ln) for ln in content}
+    items, records = profile_items(profile), profile_records(profile)
+    held = 0
+    for n, e in enumerate(entries, 1):
+        row = f"row {n}"
+        key = line_key(e["cv_line"])
+        if key not in actual:
+            _at(where, "line_not_in_cv", row)
+        bodies = actual.get(key) or [e["cv_line"].strip().lstrip(_BULLETS + " \t")]
+        if not quote_in_profile(e["profile_quote"], source, source_words):
+            _at(where, "quote_not_in_profile", row)
+        if key in actual and key not in content_keys:
+            continue  # a row for a line that needs none (the name, a contact line, a section heading) is not judged
+        bank = _quote_bank(e["profile_quote"])
+        quote_words = set(evidence._words(bank))
         for body in bodies:
-            if evidence.unsupported_tokens(body, e["profile_quote"], first_word=True):
-                down.add("claim_not_in_quote")
+            if list_line_holds(body, items, known) or record_line_holds(body, records):  # no one quote must hold it
+                held += 1
+                continue
+            if evidence.unsupported_tokens(body, bank, first_word=True):
+                _at(where, "claim_not_in_quote", row)
             content_words = {w for w in evidence._words(body) if len(w) >= 4}
             if content_words - quote_words - known:  # "kubernetes", "twelve": a long word the profile never says
-                down.add("claim_not_in_quote")
-            if len(quote_words) < 3 or 2 * len(content_words & quote_words) < len(content_words):
-                down.add("quote_too_thin")
+                _at(where, "claim_not_in_quote", row)
+            thin = len(set(evidence._words(e["profile_quote"]))) < 3  # the quote's OWN words, never the bank's
+            if thin or 2 * len(content_words & quote_words) < len(content_words):
+                _at(where, "quote_too_thin", row)
+    if held:  # how often a list or record line was held by the profile itself (no CV text logged)
+        logger.info("cv_reviewed lines_held_by_profile=%s application=%s", held, safe_log_value(application_id))
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
-    # A legacy review that named no real version (not_current_cv, empty sha) was never a try: it never counts.
+    # A legacy review that named no real version (not_current_cv, empty sha) was never a try: it never counts. Nor
+    # does a weak review judged under OLDER rules (no or another ``rules``): its verdict may be one these rules fix
+    # (production 2026-11-10: 3 false-weak reviews had spent apps' whole budget), and its rows were never stored,
+    # so it cannot be judged again. Each rules change gives an application MAX_WEAK new tries, never more.
     weak = [e for e in reviews if e["payload"].get("confidence") != STRONG]
-    weak_versions = {e["payload"].get("artifact_id") for e in weak if review_valid(e["payload"])}
+    weak_versions = {e["payload"].get("artifact_id") for e in weak
+                     if review_valid(e["payload"]) and e["payload"].get("rules") == RULES}
     if len(weak_versions) < len({e["payload"].get("artifact_id") for e in weak}):
-        logger.info("cv_reviewed retry_limit ignores invalid legacy reviews application=%s",
+        logger.info("cv_reviewed retry_limit ignores legacy or older-rules reviews application=%s",
                     safe_log_value(application_id))
     if len(weak_versions - {payload["artifact_id"]}) >= MAX_WEAK:  # a re-review of a judged version is no new try
-        down.add("retry_limit")
+        where["retry_limit"] = []
+    down = set(where)
     claimed = payload["confidence"]
-    return {
+    if claimed == STRONG and down:  # the line that shows a false weak: which codes, never which text
+        logger.info("cv_reviewed downgraded application=%s codes=%s checks=%s content=%s covered=%s",
+                    safe_log_value(application_id), ",".join(c for c in DOWNGRADES if c in down),
+                    ",".join(where.get("cv_checks_found") or []), len(content), covered)
+    stored = {
         "artifact_id": payload["artifact_id"], "sha256": payload["sha256"], "claimed": claimed,
         "confidence": STRONG if claimed == STRONG and not down else WEAK,
         "downgraded": [c for c in DOWNGRADES if c in down], "lines": len(entries),
         "content_lines": len(content), "covered": covered, "reviewer": _label(payload["reviewer"]),
-        "by": actor_for(user),
+        "by": actor_for(user), "rules": RULES,
     }
+    return stored, where
+
+
+_WHERE_LISTED = 10
+
+
+def weak_warning(stored: dict[str, Any], where: dict[str, list[str]]) -> Optional[str]:
+    """The reply line when a CLAIMED strong review was STORED weak: every code and where it came from, so a run
+    never reports "strong" for a weak store."""
+    if stored.get("claimed") != STRONG or stored.get("confidence") == STRONG:
+        return None
+    parts = []
+    for code in stored.get("downgraded") or []:
+        at = where.get(code) or []
+        more = f" (+{len(at) - _WHERE_LISTED} more)" if len(at) > _WHERE_LISTED else ""
+        parts.append(f"{code}: {', '.join(at[:_WHERE_LISTED])}{more}" if at else code)
+    return ("cv_reviewed claimed strong but STORED WEAK: " + "; ".join(parts) + ". Row N = your lines[N-1]; "
+            "review line N = get_application's review.lines[N-1]. Report this CV as weak, never strong.")

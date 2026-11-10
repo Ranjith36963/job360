@@ -232,6 +232,7 @@ async def test_a_verified_strong_review_clears_cv_not_seen_through_http_and_mcp(
     assert stored == {
         "artifact_id": cv_id, "sha256": sha(CV), "claimed": "strong", "confidence": "strong", "downgraded": [],
         "lines": 2, "content_lines": 2, "covered": 2, "reviewer": "fresh helper", "by": "token:claude-code",
+        "rules": cv_review.RULES,
     }
     assert "Snowflake" not in json.dumps(stored), "no CV or profile text is stored"
     # cv_not_seen is cleared; the next ask is the practice run (nothing else is cleared).
