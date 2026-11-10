@@ -1910,6 +1910,51 @@
         "title": "ApplicationReceiptOut",
         "type": "object"
       },
+      "ApplicationReviewViewOut": {
+        "description": "`get_application(view=\"review\")`: only what one CV review needs (about 1 KB).",
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CvReviewViewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "job_title",
+          "job_company"
+        ],
+        "title": "ApplicationReviewViewOut",
+        "type": "object"
+      },
       "ApplicationSummaryOut": {
         "properties": {
           "ad_posted_at": {
@@ -5830,6 +5875,61 @@
           "lines"
         ],
         "title": "CvReviewInputsOut",
+        "type": "object"
+      },
+      "CvReviewViewOut": {
+        "description": "`view=\"review\"`: the inputs plus this CV's retry budget under the current rules.",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "last_downgraded": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Last Downgraded",
+            "type": "array"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "reviews_used": {
+            "title": "Reviews Used",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "state": {
+            "default": "none",
+            "enum": [
+              "none",
+              "weak",
+              "strong"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "tries_left": {
+            "title": "Tries Left",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "sha256",
+          "lines",
+          "reviews_used",
+          "tries_left"
+        ],
+        "title": "CvReviewViewOut",
         "type": "object"
       },
       "CvSeenRequest": {
@@ -21095,6 +21195,24 @@
             }
           },
           {
+            "description": "\"review\": only what a CV review needs",
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "\"review\": only what a CV review needs",
+              "title": "View"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -21132,7 +21250,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationDetailOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ApplicationDetailOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApplicationReviewViewOut"
+                    }
+                  ],
+                  "title": "Response Get Application Api Applications  Application Id  Get"
                 }
               }
             },

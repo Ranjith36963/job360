@@ -911,6 +911,27 @@ class CvReviewInputsOut(BaseModel):
     state: Literal["none", "weak", "strong"] = "none"
 
 
+class CvReviewViewOut(CvReviewInputsOut):
+    """`view="review"`: the inputs plus this CV's retry budget under the current rules."""
+
+    reviews_used: int
+    tries_left: int
+    last_downgraded: list[str] = []
+
+
+class ApplicationReviewViewOut(BaseModel):
+    """`get_application(view="review")`: only what one CV review needs (about 1 KB)."""
+
+    id: int
+    job_title: str
+    job_company: str
+    country: Optional[str] = None
+    review: Optional[CvReviewViewOut] = None
+
+
+APPLICATION_VIEWS = ("review",)
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -2609,13 +2630,24 @@ async def get_job(
     return application_job_response(app_row, dict(row))
 
 
-@router.get("/applications/{application_id}", response_model=ApplicationDetailOut, dependencies=AUTH_FIRST)
+@router.get(
+    "/applications/{application_id}", response_model=Union[ApplicationDetailOut, ApplicationReviewViewOut],
+    dependencies=AUTH_FIRST,
+)
 async def get_application(
     application_id: int,
     with_artifact_text: bool = Query(False),
+    view: Optional[str] = Query(None, description='"review": only what a CV review needs'),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    if view is not None and view not in APPLICATION_VIEWS:
+        raise HTTPException(status_code=422, detail=f"unknown view; use one of: {', '.join(APPLICATION_VIEWS)}")
+    if view == "review":
+        lean = await cv_review_service.review_view(db, user.id, application_id)
+        if lean is None:
+            raise HTTPException(status_code=404, detail="application not found")
+        return lean
     detail = await spine.get_application_detail(
         db, user.id, application_id, with_artifact_text=with_artifact_text
     )
