@@ -415,67 +415,62 @@ async def test_both_bypasses_are_stored_weak(authenticated_async_context, fixtur
         assert await _verdict(client, base, [{**cur, "profile_quote": "anything at all"}]) == ("strong", [])
 
 
-# ── Wrapped raw bullets (coordinator yes, 2026-11-10): apps 345 / 478 copied PDF bullets that wrap ─────────
-# Inside ONE raw text, a line starting lowercase continues the line before it, unless that line ends a sentence
-# (. ! ? :), is a header or a section heading, or a blank line comes between. Never a record.
+# ── Wrapped raw bullets (coordinator decision, 2026-11-10, after three join bypasses): NO joining ──────────
+# A quote lies in ONE field value or ONE physical raw line. A length or case heuristic cannot tell a PDF wrap from a
+# new bullet (checker: a 76-char Calnex bullet + a lowercase Northwind bullet stored strong), so a sentence the PDF
+# wrapped is quoted from the STRUCTURED bullet (cv_positions / cv_projects), which is one whole string.
 
 WRAP_RAW = (
     "Ada Lovelace\nEXPERIENCE\nNorthwind Labs | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage\n"
     "• Engineered a RAG pipeline with Bedrock, improving relevance by 40%; added Redis caching\n"
     "that cut response time from 3.2s to 0.8s.\n"
-    "• Built LLM systems in PyTorch, tuning responses to improve engagement; evaluated\n"
-    "video models via the Gemini and OpenAI APIs.\n"
     "• Added a Critic layer that caught 5 of 6 risky replies sent without\n"
     "approval; 148 tests, CI and tracing.\n"
     "• Shipped the billing service.\nusing Stripe webhooks in 2024.\n"
     "• Worked at Tidewater as AI/ML Engineer Intern, from\noct 2024 - jan 2025, remote\n"
-    "PROJECTS\nlangGraph agents for triage\n"
-    "Orbitly (orbitly.uk) | Founder, Feb 2026 - Present\nfounder of nothing else\n\nwhile at Northwind, led 9 engineers\n"
-    # two short unpunctuated bullets of two jobs: never one line (checker on 263dd39be)
-    "\nwrote parsers for Orbitly\nled team of 12 at Northwind\n"
-    # a bullet wrapped over THREE long lines is one line
-    "• Designed the ingestion service that reads vendor feeds every hour and normalises\n"
-    "them into one schema for the warehouse, with retries and alerting on failure for\nevery feed, in Python.\n"
+    "wrote parsers for Orbitly\nled team of 12 at Northwind\n"
+    "• Wrote parsers for the Calnex test equipment evaluation platform and tooling\nled team of 12 at Orbitly\n"
 )
-WRAPPED_TRUE = (
-    "Engineered a RAG pipeline with Bedrock, improving relevance by 40%; added Redis caching that cut response time "
-    "from 3.2s to 0.8s.",
-    "Built LLM systems in PyTorch, tuning responses to improve engagement; evaluated video models via the Gemini and "
-    "OpenAI APIs.",
+RAG = ("Engineered a RAG pipeline with Bedrock, improving relevance by 40%; added Redis caching that cut response time "
+       "from 3.2s to 0.8s.")
+CRITIC = "A Critic layer caught 5 of 6 risky replies sent without approval; 148 tests, CI and tracing."
+JOIN_ATTACKS = (
+    RAG,  # a true sentence, but only as two raw lines: quote the structured bullet instead
     "Added a Critic layer that caught 5 of 6 risky replies sent without approval; 148 tests, CI and tracing.",
-    "Designed the ingestion service that reads vendor feeds every hour and normalises them into one schema for the "
-    "warehouse, with retries and alerting on failure for every feed, in Python.",
-)
-WRAP_ATTACKS = (
-    "Shipped the billing service. using Stripe webhooks in 2024.",  # the bullet before ended its sentence
-    "PROJECTS langGraph agents for triage",  # after a section heading
-    "Founder, Feb 2026 - Present founder of nothing else",  # after a header line
-    "founder of nothing else while at Northwind, led 9 engineers",  # across a blank line
-    "approval; 148 tests, CI and tracing. Shipped the billing service.",  # the joined line plus the next line
-    "and tracing. • Shipped the billing service.",
-    "wrote parsers for Orbitly led team of 12",  # the previous line is short: no wrap
-    "while at Northwind, led 9 engineers wrote parsers",
+    "Shipped the billing service. using Stripe webhooks in 2024.",
+    "wrote parsers for Orbitly led team of 12",  # checker on 263dd39be
+    "Wrote parsers for the Calnex test equipment evaluation platform and tooling led team of 12",  # on 1fbff6b3d
+    "Wrote parsers for the Calnex test equipment evaluation platform and tooling led team",
+    "approval; 148 tests, CI and tracing. Shipped the billing service.",
 )
 
 
 def _wrap_profile() -> UserProfile:
-    return UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=WRAP_RAW))
+    return UserProfile(cv_data=CVData(
+        name="Ada Lovelace", raw_text=WRAP_RAW,
+        cv_positions=[{"company": "Northwind Labs", "title": "AI Solutions Engineer, R&D", "dates": "Jun 2025 – Sep 2025",
+                       "location": "Stevenage", "bullets": [RAG]}],
+        cv_projects=[{"name": "Support Agent", "description": f"Support agent that drafts replies. {CRITIC}",
+                      "technologies": ["LangGraph", "MCP"]}]))
 
 
-def test_a_wrapped_raw_bullet_is_one_quote_and_nothing_more():
-    source, words = cv_review.quote_sources(_wrap_profile())
-    for line in WRAPPED_TRUE:
-        assert cv_review.quote_in_profile(line, source, words), line
-    for quote in WRAP_ATTACKS:
+def test_a_quote_never_joins_two_raw_lines():
+    source, words = cv_review.quote_sources(UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=WRAP_RAW)))
+    for quote in JOIN_ATTACKS:
         assert not cv_review.quote_in_profile(quote, source, words), quote
-    # the same lines in two DIFFERENT fields never join (raw_text and linkedin_raw_text are separate texts)
-    split = UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text="• Shipped the billing service with\n",
-                                       linkedin_raw_text="stripe webhooks in 2024\n"))
-    source, words = cv_review.quote_sources(split)
-    assert not cv_review.quote_in_profile("Shipped the billing service with stripe webhooks", source, words)
+    for one in ("approval; 148 tests, CI and tracing.", "led team of 12 at Northwind",
+                "Wrote parsers for the Calnex test equipment evaluation platform and tooling"):  # one physical line
+        assert cv_review.quote_in_profile(one, source, words), one
 
 
-def test_a_joined_line_is_never_a_header_record():
+def test_each_structured_bullet_and_description_is_quotable_whole():
+    source, words = cv_review.quote_sources(_wrap_profile())
+    for whole in (RAG, f"Support agent that drafts replies. {CRITIC}", CRITIC):
+        assert cv_review.quote_in_profile(whole, source, words), whole
+    assert not cv_review.quote_in_profile(f"{RAG} Support agent that drafts replies.", source, words)  # two fields
+
+
+def test_a_raw_line_pair_is_never_a_header_record():
     records = cv_review.profile_records(_wrap_profile())
     assert not cv_review.record_line_holds(
         "Worked at Tidewater as AI/ML Engineer Intern, from oct 2024 - jan 2025, remote", records)
@@ -483,34 +478,31 @@ def test_a_joined_line_is_never_a_header_record():
 
 
 @pytest.mark.asyncio
-async def test_wrapped_bullets_quoting_themselves_are_stored_strong(authenticated_async_context, fixture_user_id):
+async def test_joined_raw_lines_are_weak_and_structured_bullets_are_strong(
+    authenticated_async_context, fixture_user_id,
+):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id, _wrap_profile())
         header = "Northwind Labs | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage"
-        text = "Ada Lovelace\nEXPERIENCE\n" + header + "\n" + "".join(f"- {s}\n" for s in WRAPPED_TRUE)
-        rows = [{"cv_line": header, "profile_quote": header, "field_path": "cv_data.raw_text"}] + [
-            {"cv_line": f"- {s}", "profile_quote": s, "field_path": "cv_data.raw_text"} for s in WRAPPED_TRUE]
+        head = {"cv_line": header, "profile_quote": header, "field_path": "cv_data.raw_text"}
+        text = f"Ada Lovelace\nEXPERIENCE\n{header}\n- {RAG}\n- {CRITIC}\n"
+        rows = [head, {"cv_line": f"- {RAG}", "profile_quote": RAG, "field_path": "cv_data.cv_positions[0].bullets[0]"},
+                {"cv_line": f"- {CRITIC}", "profile_quote": CRITIC, "field_path": "cv_data.cv_projects[0].description"}]
         assert await _verdict(client, text, rows) == ("strong", [])
-        bad = "- Shipped the billing service using Stripe webhooks in 2024."
-        got = await _verdict(client, text + bad + "\n", rows + [
-            {"cv_line": bad, "profile_quote": "Shipped the billing service. using Stripe webhooks in 2024.",
-             "field_path": "cv_data.raw_text"}])
-        assert got[0] == "weak" and "quote_not_in_profile" in got[1], got
-        # checker on 263dd39be: two short bullets of two jobs read as one wrapped line, stored strong
-        bad = "- Wrote parsers for Orbitly led team of 12"
-        got = await _verdict(client, text + bad + "\n", rows + [
-            {"cv_line": bad, "profile_quote": "wrote parsers for Orbitly led team of 12",
-             "field_path": "cv_data.raw_text"}])
-        assert got[0] == "weak" and "quote_not_in_profile" in got[1], got
+        for line in JOIN_ATTACKS[1:]:
+            cv = f"Ada Lovelace\nEXPERIENCE\n{header}\n- {line}\n"
+            got = await _verdict(client, cv, [head, {"cv_line": f"- {line}", "profile_quote": line,
+                                                     "field_path": "cv_data.raw_text"}])
+            assert got[0] == "weak" and "quote_not_in_profile" in got[1], (line, got)
 
 
-def test_unwrapping_is_linear():
+def test_quote_sources_is_linear():
     import time
 
-    raw = "• " + "x" * 70 + "\n" + ("lowercase continuation of a very long wrapped bullet line, again and again\n" * 20000)
+    raw = "lowercase line of a very long text that goes on and on, again and again\n" * 20000
     start = time.process_time()
     source, _ = cv_review.quote_sources(UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=raw)))
-    assert time.process_time() - start < 2.0 and source.count(cv_review._SEGMENT) == 0  # ONE wrapped line
+    assert time.process_time() - start < 2.0 and source.count(cv_review._SEGMENT) == 19999  # one segment per line
 
 
 def test_a_sentence_in_a_record_field_gives_no_clause_pieces():

@@ -174,9 +174,11 @@ RULES:
    user's own product. Never undersell (no "1.5 years" when they built more).
 3. Summary: 2 lines, specific (what they build, for whom, with what proof).
    No filler words: results-driven, passionate, hard-working, team player.
-4. Bullets: COPY the profile's own sentences word for word (cv_positions /
-   cv_projects bullets or `raw`): select and order them; never reword, merge
-   two or trim one (the CV review stores a reworded bullet weak). 2-4 per role,
+4. Bullets: COPY the profile's own sentences word for word from its STRUCTURED
+   cv_positions bullets and cv_projects descriptions, each bullet whole; never
+   from `raw` PDF text lines (a PDF wraps a bullet across lines, and the CV
+   review quotes ONE field or ONE line, so a wrapped one is stored weak).
+   Select and order them; never reword, merge two or trim one. 2-4 per role,
    1-2 per project. No duplicate bullets; the summary must not repeat bullets.
 5. Tailor: mirror the job's real keywords where they are TRUE; put the most
    relevant role/project bullets first. Do not keyword-stuff.

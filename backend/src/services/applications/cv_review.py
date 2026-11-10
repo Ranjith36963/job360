@@ -456,43 +456,14 @@ def _runs_in(got: list[tuple[str, ...]], record: frozenset[tuple[str, ...]]) -> 
 _SEGMENT = "\x00"  # between two profile fields / text lines: a quote never spans it
 
 
-_RAW_FIELDS = frozenset({"raw_text", "linkedin_raw_text"})
-_WRAP_STOPS = (".", "!", "?", ":")
-# A line the PDF wrapped is a long one: the owner's three wrapped bullets break after 114, 116 and 125 characters.
-# A short line ("wrote parsers for Calnex", 24) is a whole bullet, so the lowercase line after it is another one.
-WRAP_MIN_CHARS = 60
-
-
-def _unwrapped(text: str) -> list[str]:
-    """The lines of ONE raw text, a PDF-wrapped bullet joined back into one line (apps 345 / 478, 2026-11-10): a line
-    that starts with a lowercase letter continues the line before it, unless that line ends a sentence (``. ! ? :``),
-    is a header (:func:`header_pieces`) or a section heading, or a blank line comes between. Line by line, no regex.
-    Used for quotes only: a joined line is never a record (:func:`profile_records` reads the raw lines)."""
-    out: list[list[str]] = []  # each joined line as its parts, joined once at the end: linear in the text
-    last = ""  # the previous physical line, "" after a blank line
-    for raw in text.split("\n"):
-        line = raw.strip()
-        if not line:
-            last = ""
-            continue
-        if (out and len(last) >= WRAP_MIN_CHARS and line[:1].islower() and not last.endswith(_WRAP_STOPS)
-                and header_pieces(last) is None and not cv_checks._is_section_heading(last) and not is_heading(last)):
-            out[-1].append(line)
-        else:
-            out.append([line])
-        last = line
-    return [" ".join(parts) for parts in out]
-
-
 def quote_sources(profile: Any) -> tuple[str, str]:
-    """``(source, source_words)`` for :func:`quote_in_profile`: each field value and each text line (a wrapped raw
-    bullet as one line, :func:`_unwrapped`) normalised on its own, joined by :data:`_SEGMENT`, so a quote must lie
-    inside ONE field value or ONE line. Joined plainly, "Calnex Solutions ... Stevenage ... Founder & AI-Native
-    Engineer" (one job's company and dates, another's title) read as one quote (checker 2026-11-10)."""
-    found: list[str] = []
-    for name, text in cv_checks.profile_source_parts(profile):
-        found += _unwrapped(text) if name in _RAW_FIELDS else text.split("\n")
-    lines = [ln for ln in (_norm(x) for x in found) if ln]
+    """``(source, source_words)`` for :func:`quote_in_profile`: each field value and each PHYSICAL text line of
+    ``cv_checks.profile_source_text`` normalised on its own, joined by :data:`_SEGMENT`, so a quote must lie inside
+    ONE field value or ONE line. Joined plainly, "Calnex Solutions ... Stevenage ... Founder & AI-Native Engineer"
+    (one job's company and dates, another's title) read as one quote (checker 2026-11-10). Raw lines are never
+    joined either: no rule tells a PDF wrap from a new bullet (three join bypasses), so a wrapped sentence is quoted
+    from the structured bullet (cv_positions / cv_projects), one whole string (recipes: rules.md "Writing the CV")."""
+    lines = [ln for ln in (_norm(x) for x in cv_checks.profile_source_text(profile).split("\n")) if ln]
     sep = f" {_SEGMENT} "
     return sep.join(lines), f' {sep.join(" ".join(evidence._words(ln)) for ln in lines)} '
 

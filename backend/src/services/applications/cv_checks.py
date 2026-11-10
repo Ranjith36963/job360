@@ -197,24 +197,18 @@ def profile_source_text(profile: Any, *, include_targets: bool = True) -> str:
 
     ``include_targets=False`` leaves out ``target_job_titles``: those are roles the user
     WANTS, not roles they held, so they cannot vouch for a CV line (provenance view)."""
-    return "\n".join(s for _, s in profile_source_parts(profile, include_targets=include_targets))
-
-
-def profile_source_parts(profile: Any, *, include_targets: bool = True) -> list[tuple[str, str]]:
-    """:func:`profile_source_text` as ``(field name, string)`` pairs, in the same order: a reader that must know
-    where one field ends (``cv_review.quote_sources``) reads these."""
     cv = getattr(profile, "cv_data", None)
     if cv is None:
-        return []
-    parts: list[tuple[str, str]] = []
+        return ""
+    parts: list[str] = []
     for name in _SOURCE_FIELDS:
-        parts.extend((name, s) for s in field_strings(name, getattr(cv, name, None)))
+        parts.extend(field_strings(name, getattr(cv, name, None)))
     prefs = getattr(profile, "preferences", None)
     if prefs is not None:
         names = ("additional_skills", "about_me") + (("target_job_titles",) if include_targets else ())
         for name in names:
-            parts.extend((name, s) for s in _flat(getattr(prefs, name, None)))
-    return parts
+            parts.extend(_flat(getattr(prefs, name, None)))
+    return "\n".join(parts)
 
 
 # Closed and hard-coded, never caller-supplied, never fuzzy (production 2026-11-10, CV review apps 353-389): a
