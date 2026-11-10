@@ -74,8 +74,11 @@ def test_sentence_start_capitals_are_no_claims():
     ("Lifted relevance by 40% in 2023 with a RAG pipeline on Bedrock and ChromaDB.", "claim_not_in_quote"),  # date
     ("Lifted relevance by 40% for twelve teams with a RAG pipeline on Bedrock.", "claim_not_in_quote"),  # number word
     ("Lifted relevance by 40% with a RAG pipeline on Bedrock and kubernetes.", "claim_not_in_quote"),  # lowercase
-    ("Snowflake pipeline lifted relevance by 40% on Bedrock and ChromaDB.", "first_word_unknown"),
-    ("Led the RAG pipeline work on Bedrock and ChromaDB, lifting relevance by 40%.", "first_word_unknown"),  # a role
+    ("LangChain pipeline lifted relevance by 40% on Bedrock and ChromaDB.", "claim_not_in_quote"),  # a profile name
+    ("Led the RAG pipeline work on Bedrock and ChromaDB, lifting relevance by 40%.", "claim_not_in_quote"),  # a role
+    ("Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB, and led the migration.",
+     "claim_not_in_quote"),  # a role claim mid-sentence
+    ("Senior work on a RAG pipeline on Bedrock and ChromaDB lifted relevance by 40%.", "claim_not_in_quote"),
 ])
 def test_an_invented_fact_in_a_reworded_line_is_weak(line, code):
     assert code in _judge(_cv((NORTHWIND, line)), {line: [B2]}), line
@@ -92,7 +95,19 @@ def test_one_generic_quote_for_every_line_is_weak():
     text = "Ada Lovelace\nSUMMARY\n" + "".join(f"{ln}\n" for ln in lines)
     got = _judge(text, {ln: [SUMMARY] for ln in lines})
     assert got["evidence_reused"] == [1, 2, 3, 4], got
-    assert "evidence_unrelated" in got, got
+
+
+def test_natural_openers_are_free_and_a_quoted_role_is_strong():
+    lead = "Led a team of 4 building the memory layer for an AI agent, storing profiles and history."
+    positions = [{**CV_DATA["cv_positions"][0], "bullets": [B1, lead]}, *CV_DATA["cv_positions"][1:]]
+    profile = UserProfile(cv_data=CVData(**{**CV_DATA, "cv_positions": positions}))
+    for line, quote in (("Hands-on engineer who builds the memory layer an AI agent keeps profiles and history in.", B1),
+                        ("Across the product, kept profiles and history in an AI agent's memory layer.", B1),
+                        ("Led a team of 4 on an AI agent's memory layer for profiles and history.", lead)):
+        assert _judge(_cv((ORBITLY, line)), {line: [quote]}, profile) == {}, line
+    # no shared words is no rule: a hard fact missing from an unrelated quote still is
+    line = "Lifted relevance by 40% on Bedrock."
+    assert _judge(_cv((NORTHWIND, line)), {line: [B3]}) == {"claim_not_in_quote": [2], "evidence_wrong_record": [2]}
 
 
 def test_each_rule_names_its_line():

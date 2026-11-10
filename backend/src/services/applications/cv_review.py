@@ -51,8 +51,8 @@ OLD_ROW_KEYS = frozenset({"cv_line", "profile_quote", "field_path"})  # rules <=
 VERDICTS = ("supported", "unsupported")
 DOWNGRADES = (
     "not_current_cv", "no_content", "line_uncovered", "line_unsupported", "no_evidence", "quote_not_in_profile",
-    "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "first_word_unknown", "evidence_unrelated",
-    "evidence_reused", "cv_checks_found", "retry_limit",
+    "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "evidence_reused", "cv_checks_found",
+    "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every

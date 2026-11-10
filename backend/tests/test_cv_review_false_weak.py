@@ -221,7 +221,7 @@ async def test_attacks_stay_weak(authenticated_async_context, fixture_user_id):
             ("Backend & Data: Python, SQL, Kubernetes", "Languages: Python, SQL, TypeScript"),
             ("Languages: Python (7 years), SQL", "Languages: Python, SQL, TypeScript"),
             ("Staff Engineer at Google: Python, SQL", "Languages: Python, SQL, TypeScript"),
-            ("Microsoft: Python, SQL", "Languages: Python, SQL, TypeScript"),
+            ("Languages at Microsoft: Python, SQL", "Languages: Python, SQL, TypeScript"),  # an opening word is free
             ("Led the Snowflake migration, cut costs, Python", ETL),
             ("Calnex Solutions | Data Engineer | Jun 2025 - Sep 2025", "Calnex Solutions"),
             ("Calnex Solutions | Lead AI Solutions Engineer, R&D", "AI Solutions Engineer, R&D"),
@@ -272,7 +272,7 @@ async def test_a_claimed_strong_stored_weak_reply_names_codes_and_rows(authentic
         assert resp.status_code == 201, resp.text
         warned = [w for w in resp.json()["warnings"] if "STORED WEAK" in w]
         assert len(warned) == 1, resp.json()["warnings"]
-        assert "claim_not_in_quote: lines 2" in warned[0] and "first_word_unknown: lines 2" in warned[0]
+        assert "claim_not_in_quote: lines 2" in warned[0] and "cv_checks_found: unsupported_numbers" in warned[0]
         assert "cv_checks_found: unsupported_numbers" in warned[0] and "never strong" in warned[0]
         assert "12 engineers" not in warned[0], "no CV text in the reply"
         # an uncovered line is named by its review.lines number
