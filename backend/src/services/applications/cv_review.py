@@ -343,19 +343,39 @@ def pieces(text: str) -> list[tuple[str, ...]]:
 
 _RECORD_FIELDS = ("cv_positions", "linkedin_positions", "cv_projects", "linkedin_projects")
 _ONE_LINE_FIELDS = ("education", "cv_education_details", "certifications")
+# Closed: the HEADER facts of a role, project, school or certificate. Never a free-text list or paragraph (bullets,
+# achievements, description): a record of its clauses would hold "Built X, Jan 2019 - May 2025, saving 10 hours"
+# (checker 2026-11-10), and a held line's row skips (c) and (d), so this list IS the gate for such a line.
+_RECORD_KEYS = frozenset({
+    "company", "title", "dates", "start", "end", "start_date", "end_date", "location", "name", "stack",
+    "technologies", "tech", "tools", "degree", "institution", "school", "year", "issuer",
+})
+_SENTENCE_ENDS = (".", "!", "?")
+
+
+def _raw_header(line: str) -> bool:
+    """A CV / LinkedIn text line that is itself a header (the PDF's "Co | Title, R&D Jun 2025 – Sep 2025 |
+    Stevenage"): header-shaped (:func:`header_pieces`), at most :data:`RAW_RECORD_MAX_CHARS`, never a bullet or a
+    sentence (no bullet start, no closing ``.`` ``!`` ``?``)."""
+    s = line.strip()
+    return (bool(s) and len(s) <= RAW_RECORD_MAX_CHARS and not s.startswith(cv_checks._BULLET_STARTS)
+            and not s.endswith(_SENTENCE_ENDS) and header_pieces(s) is not None)
 
 
 def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
-    """The profile's records, each the set of its pieces: one role (company, title, dates, location, ...), one
-    project (name, stack, ...), one education or certification entry, one line of the CV / LinkedIn text."""
+    """The profile's records, each the set of its pieces: one role (company, title, dates, location), one project
+    (name, stack), one education or certification entry, one header line of the CV / LinkedIn text. Only
+    :data:`_RECORD_KEYS` values of at most :data:`HEADER_MAX_CHARS` each: a bullet is never a record's piece, so a
+    place a bullet names is never one either."""
     cv = getattr(profile, "cv_data", None)
     groups: list[list[str]] = []
+    cap = HEADER_MAX_CHARS
     for name in _RECORD_FIELDS:
-        groups += [cv_checks._flat(list(r.values())) for r in (getattr(cv, name, None) or []) if isinstance(r, dict)]
-    groups += [[s] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None))]
+        groups += [[s for k, v in r.items() if k in _RECORD_KEYS for s in cv_checks._flat(v) if len(s) <= cap]
+                   for r in (getattr(cv, name, None) or []) if isinstance(r, dict)]
+    groups += [[s] for n in _ONE_LINE_FIELDS for s in cv_checks._flat(getattr(cv, n, None)) if len(s) <= cap]
     for name in ("raw_text", "linkedin_raw_text"):
-        groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines()
-                   if ln.strip() and len(ln) <= RAW_RECORD_MAX_CHARS]
+        groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines() if _raw_header(ln)]
     # each string also in its other place spelling ("Stevenage, United Kingdom" says "Stevenage, UK"): the closed
     # cv_checks.PLACE_ABBREVIATIONS, as rule (d) reads a quote; never another record's piece
     texts = [[t for s in g for t in (s, cv_checks.place_variant(s)) if t] for g in groups]
@@ -371,18 +391,26 @@ def record_line_holds(line: str, records: list[frozenset[tuple[str, ...]]]) -> b
     employer, and a piece the record lacks ("Senior", "2018") keeps the line a claim. A comma / dash header ("Co -
     Title, R&D Department, Jun 2025 - Sep 2025, Stevenage, UK", app 353) is one too when it has 3+ pieces and one is
     a date range (:func:`_dated_header`); a plain comma line without dates still needs a quote."""
+    got = header_pieces(line)
+    return got is not None and any(_runs_in(got, r) for r in records)
+
+
+def header_pieces(line: str) -> Optional[list[tuple[str, ...]]]:
+    """The pieces of a header-shaped line, else ``None``: at most :data:`HEADER_MAX_CHARS` and
+    :data:`HEADER_MAX_PIECES` pieces (never an unbounded scan), 2+ distinct pieces joined by a standalone ``|`` /
+    ``•``, or 3+ joined by commas / dashes with one a date range (:func:`_dated_header`)."""
     if len(line) > HEADER_MAX_CHARS:
-        return False
+        return None
     toks = line.split()
     barred = bool(_HEADER_BARS.intersection(toks))
     if not barred and not any(t.endswith(",") or set(t) <= _DASH_TOKENS for t in toks):
-        return False
+        return None
     got = pieces(line.strip().lstrip(_BULLETS + " \t"))
-    if len(got) > HEADER_MAX_PIECES or len(set(got)) < 2:  # a header has a few pieces; never an unbounded scan
-        return False
+    if len(got) > HEADER_MAX_PIECES or len(set(got)) < 2:
+        return None
     if not barred and not _dated_header(got):
-        return False
-    return any(_runs_in(got, r) for r in records)
+        return None
+    return got
 
 
 def _dated_header(got: list[tuple[str, ...]]) -> bool:
@@ -409,9 +437,25 @@ def _runs_in(got: list[tuple[str, ...]], record: frozenset[tuple[str, ...]]) -> 
     return ok[-1]
 
 
+_SEGMENT = "\x00"  # between two profile fields / text lines: a quote never spans it
+
+
+def quote_sources(profile: Any) -> tuple[str, str]:
+    """``(source, source_words)`` for :func:`quote_in_profile`: each field value and each text line of
+    ``cv_checks.profile_source_text`` normalised on its own, joined by :data:`_SEGMENT`, so a quote must lie inside
+    ONE field value or ONE line. Joined plainly, "Calnex Solutions ... Stevenage ... Founder & AI-Native Engineer"
+    (one job's company and dates, another's title) read as one quote (checker 2026-11-10)."""
+    lines = [ln for ln in (_norm(x) for x in cv_checks.profile_source_text(profile).split("\n")) if ln]
+    sep = f" {_SEGMENT} "
+    return sep.join(lines), f' {sep.join(" ".join(evidence._words(ln)) for ln in lines)} '
+
+
 def quote_in_profile(quote: str, source: str, source_words: str) -> bool:
     """(c): the quote is in the profile, case and spacing aside, or word for word with only OUTER punctuation aside
-    ("in Docker at 95%" for "in Docker, at 95%"): every word, number and name stays exact and in order."""
+    ("in Docker at 95%" for "in Docker, at 95%"): every word, number and name stays exact and in order. A quote
+    holding the :data:`_SEGMENT` separator (JSON can send ``\u0000``) is never a profile quote."""
+    if _SEGMENT in quote:
+        return False
     words = " ".join(evidence._words(quote))
     return _norm(quote) in source or bool(words and f" {words} " in source_words)
 
@@ -662,8 +706,7 @@ async def verify(
     found = cv_checks.check_text("cv", cv["text"], profile)
     if found:
         where["cv_checks_found"] = [i["code"] for i in found]
-    source = _norm(cv_checks.profile_source_text(profile))
-    source_words = f' {" ".join(evidence._words(source))} '
+    source, source_words = quote_sources(profile)  # (c): inside ONE field value or ONE text line
     known = set(evidence._words(cv_checks.profile_source_text(profile)))
     actual: dict[str, list[str]] = {}
     for ln in cv["text"].splitlines():  # the CV's own text decides case, never the entry's copy

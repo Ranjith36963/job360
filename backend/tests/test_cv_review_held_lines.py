@@ -336,3 +336,80 @@ async def test_rules_two_weak_reviews_no_longer_spend_the_budget(authenticated_a
         got = await _stored(client, app_id, {"artifact_id": v4_id, "sha256": _sha(v4), "confidence": "strong",
                                              "lines": _self_rows(v4, _profile()), "reviewer": "fresh helper"})
         assert (got["confidence"], got["downgraded"], got["rules"]) == ("strong", [], 3)
+
+
+# ── Checker, 2026-11-10 on 6ae101af7: two bypasses, both stored STRONG ────────────────────────
+# A held line's row skips (c) and (d) ENTIRELY, so record_line_holds / list_line_holds ARE the gate for such a line:
+# what a record may hold has to be a header's facts, never a sentence.
+
+BYP_POSITIONS = [
+    {"company": "Calnex Solutions", "title": "AI Solutions Engineer, R&D", "dates": "Jun 2025 – Sep 2025",
+     "location": "Stevenage", "bullets": ["Built agent evals for test equipment, UK."]},  # a bullet naming a place
+    {"company": "Orbitly (orbitly.uk)", "title": "Founder & AI-Native Engineer", "dates": "Feb 2026 – Present",
+     "location": "Berlin, Germany"},
+    {"company": "Northwind Analytics", "title": "Data Engineer", "dates": "Jan 2019 – May 2025", "location": "London",
+     "bullets": ["Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.",
+                 "Automated weekly reporting, saving 10 hours a week.", "Led a team of 5, mentoring juniors."]},
+]
+BYP_RAW = ("Ada Lovelace\nEXPERIENCE\nCalnex Solutions | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage\n"
+           "Built agent evals for test equipment, UK.\n"
+           "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
+           "Led a team of 5, Jan 2019 - May 2025, cutting costs.\n")  # a raw bullet with dates is no header
+CURRENT = "Orbitly (orbitly.uk) | Founder & AI-Native Engineer | Feb 2026 - Present"
+# Bypass 1: clauses of one job's bullets (or of two bullets) recombined into a "header"
+CLAUSE_ATTACKS = (
+    "Built ETL pipelines in Python and Snowflake, Jan 2019 - May 2025, saving 10 hours a week.",
+    "Led a team of 5, Jan 2019 - May 2025, cutting warehouse costs 30%.",
+    "Northwind Analytics - Data Engineer, Jan 2019 - May 2025, mentoring juniors",
+    "Built ETL pipelines in Python and Snowflake | saving 10 hours a week.",
+    "Calnex Solutions | AI Solutions Engineer, R&D | UK",  # "UK" only a bullet says
+    "Led a team of 5 | Jan 2019 - May 2025 | cutting costs",  # clauses of a raw bullet line
+)
+# Bypass 2: one quote spanning two fields / two records (Calnex's company and dates, Orbitly's title)
+SPAN_QUOTE = ("Calnex Solutions AI Solutions Engineer, R&D Jun 2025 – Sep 2025 Stevenage Built agent evals for test "
+              "equipment, UK. Orbitly (orbitly.uk) Founder & AI-Native Engineer")
+SPAN_ATTACKS = ("Calnex Solutions - Founder & AI-Native Engineer, Jun 2025 - Sep 2025, Stevenage",
+                "Calnex Solutions | Founder Jun 2025 - Sep 2025")
+
+
+def _byp_profile() -> UserProfile:
+    return UserProfile(cv_data=CVData(name="Ada Lovelace", raw_text=BYP_RAW, cv_positions=BYP_POSITIONS))
+
+
+def test_a_record_holds_only_header_facts_never_bullet_clauses():
+    records = cv_review.profile_records(_byp_profile())
+    for line in CLAUSE_ATTACKS:
+        assert not cv_review.record_line_holds(line, records), line
+    for line in (CURRENT, "Calnex Solutions | AI Solutions Engineer, R&D | Jun 2025 - Sep 2025 | Stevenage",
+                 "Northwind Analytics - Data Engineer, Jan 2019 - May 2025, London",
+                 "Calnex Solutions - AI Solutions Engineer, R&D, Jun 2025 - Sep 2025, Stevenage"):  # the raw header
+        assert cv_review.record_line_holds(line, records), line
+
+
+def test_a_quote_lies_inside_one_field_or_one_line():
+    profile = _byp_profile()
+    source, words = cv_review.quote_sources(profile)
+    assert not cv_review.quote_in_profile(SPAN_QUOTE, source, words)
+    assert not cv_review.quote_in_profile("Stevenage Built agent evals", source, words)  # two fields
+    assert not cv_review.quote_in_profile("Calnex Solutions \x00 Founder", source, words)  # the separator is no text
+    for one in ("Led a team of 5, mentoring juniors.", "Founder & AI-Native Engineer", "Built agent evals for test",
+                "Calnex Solutions | AI Solutions Engineer, R&D Jun 2025 – Sep 2025 | Stevenage"):
+        assert cv_review.quote_in_profile(one, source, words), one
+
+
+@pytest.mark.asyncio
+async def test_both_bypasses_are_stored_weak(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id, _byp_profile())
+        base = f"Ada Lovelace\nEXPERIENCE\n{CURRENT}\n"
+        cur = {"cv_line": CURRENT, "profile_quote": "Founder & AI-Native Engineer", "field_path": "x"}
+        for line in CLAUSE_ATTACKS:
+            got = await _verdict(client, base + line + "\n", [
+                cur, {"cv_line": line, "profile_quote": "Northwind Analytics", "field_path": "x"}])
+            assert got[0] == "weak" and set(got[1]) - {"cv_checks_found"}, (line, got)
+        for line in SPAN_ATTACKS:
+            got = await _verdict(client, base + line + "\n", [
+                cur, {"cv_line": line, "profile_quote": SPAN_QUOTE, "field_path": "x"}])
+            assert got[0] == "weak" and "quote_not_in_profile" in got[1], (line, got)
+        # the true current-role header is still strong with no quote that holds it
+        assert await _verdict(client, base, [{**cur, "profile_quote": "anything at all"}]) == ("strong", [])
