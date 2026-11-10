@@ -13,8 +13,8 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
     profile says it; beside them, words of the profile's own location fields; a ``Label:`` word is content), and
     a section heading (1-4 alphabetic words, one of 4+ letters: ALL CAPS, ``# Heading`` or ``Heading:``; ``&`` is
     ``and``) whose every word is a section word and a word of the profile source text. A summary line is not.
-    A row for an exempt line is not judged by (d);
-(c) each ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside, or word for word
+    A row for an exempt line, or for a line the profile itself holds (end of (d)), is not judged by (c) or (d);
+(c) each other ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside, or word for word
     with only outer punctuation aside: every word, number and name exact and in order) (``quote_not_in_profile``);
 (d) every number and capitalised name of a ``cv_line``, its first word too (``evidence.claim_tokens``), is in
     its own quote (``claim_not_in_quote``); the quote has 3+ words and at least half the line's words of 4+
@@ -24,8 +24,9 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
     because the profile itself does, token for token (production 2026-11-10: 234 of 279 newest reviews weak):
     a list line ``[Label:] a, b, c`` whose every item is a WHOLE profile skill item under a label of the
     profile's own group words or closed generic category words, never an employer, title, project or degree
-    word (:func:`list_line_holds`), and a ``|`` header line (12 pieces, 300 characters at most) whose every piece is a
-    whole piece of ONE profile record: one role, one project, one education entry, one CV text line, never two
+    word (:func:`list_line_holds`), and a ``|`` header line, or a comma / dash one with a date range (12 pieces,
+    300 characters at most), whose every piece is a whole piece (places read through the same closed table) of ONE
+    profile record: one role, one project, one education entry, one CV text line, never two
     mixed (:func:`record_line_holds`). One item or piece the profile lacks keeps the line a claim;
 (e) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
 After weak reviews of :data:`MAX_WEAK` other CV versions judged under the current :data:`RULES`, a review of a
@@ -62,7 +63,8 @@ DOWNGRADES = (
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
 # change to what is stored strong: retry_limit counts only weak reviews judged under the current rules.
-RULES = 2  # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites
+RULES = 3  # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites (2); a held
+# line's row is not judged by its quote, comma / dash headers, "portfolio" headings, no dict keys as profile text (3)
 MAX_LINES = 200
 _CAPS = {"cv_line": 1000, "profile_quote": 2000, "field_path": 200}
 REVIEWER_MAX = 40
@@ -157,8 +159,8 @@ def is_contact_line(line: str, places: frozenset[str] = frozenset(), links: froz
 SECTION_WORDS = frozenset((
     "about", "achievements", "and", "awards", "career", "certification", "certifications", "competencies", "contact",
     "core", "courses", "education", "employment", "experience", "history", "interests", "key", "languages", "objective",
-    "other", "personal", "professional", "profile", "projects", "publications", "qualifications", "references",
-    "relevant", "selected", "skills", "summary", "technical", "training", "volunteering", "work",
+    "other", "personal", "portfolio", "professional", "profile", "projects", "publications", "qualifications",
+    "references", "relevant", "selected", "skills", "summary", "technical", "training", "volunteering", "work",
 ))
 
 
@@ -253,7 +255,7 @@ def skill_book(profile: Any) -> SkillBook:
     SQL, TypeScript"); items compared whole, case and spacing aside, never a word of an item."""
     cv = getattr(profile, "cv_data", None)
     prefs = getattr(profile, "preferences", None)
-    raw = [s for n in _SKILL_FIELDS for s in cv_checks._flat(getattr(cv, n, None))]
+    raw = [s for n in _SKILL_FIELDS for s in cv_checks.field_strings(n, getattr(cv, n, None))]
     raw += cv_checks._flat(getattr(prefs, "additional_skills", None))
     out = {_norm(s) for s in raw} | {_norm(i) for s in raw for i in cv_checks._split_items(s)}
     groups: dict[frozenset[str], set[str]] = {}
@@ -354,7 +356,10 @@ def profile_records(profile: Any) -> list[frozenset[tuple[str, ...]]]:
     for name in ("raw_text", "linkedin_raw_text"):
         groups += [[ln] for ln in str(getattr(cv, name, "") or "").splitlines()
                    if ln.strip() and len(ln) <= RAW_RECORD_MAX_CHARS]
-    records = [frozenset(p for s in g for p in [*pieces(s), tuple(evidence._words(s))] if p) for g in groups]
+    # each string also in its other place spelling ("Stevenage, United Kingdom" says "Stevenage, UK"): the closed
+    # cv_checks.PLACE_ABBREVIATIONS, as rule (d) reads a quote; never another record's piece
+    texts = [[t for s in g for t in (s, cv_checks.place_variant(s)) if t] for g in groups]
+    records = [frozenset(p for s in g for p in [*pieces(s), tuple(evidence._words(s))] if p) for g in texts]
     return [r for r in records if r]
 
 
@@ -363,13 +368,26 @@ def record_line_holds(line: str, records: list[frozenset[tuple[str, ...]]]) -> b
     R&D | Jun 2025 - Sep 2025 | Stevenage", "Support Agent | LangGraph, MCP") that ONE profile record holds piece
     for piece, whole pieces, any order
     (production 2026-11-10, app 478). Pieces of two records never combine: a title is never moved to another
-    employer, and a piece the record lacks ("Senior", "2018") keeps the line a claim."""
-    if len(line) > HEADER_MAX_CHARS or not _HEADER_BARS.intersection(line.split()):  # a comma line: a quote
+    employer, and a piece the record lacks ("Senior", "2018") keeps the line a claim. A comma / dash header ("Co -
+    Title, R&D Department, Jun 2025 - Sep 2025, Stevenage, UK", app 353) is one too when it has 3+ pieces and one is
+    a date range (:func:`_dated_header`); a plain comma line without dates still needs a quote."""
+    if len(line) > HEADER_MAX_CHARS:
+        return False
+    toks = line.split()
+    barred = bool(_HEADER_BARS.intersection(toks))
+    if not barred and not any(t.endswith(",") or set(t) <= _DASH_TOKENS for t in toks):
         return False
     got = pieces(line.strip().lstrip(_BULLETS + " \t"))
     if len(got) > HEADER_MAX_PIECES or len(set(got)) < 2:  # a header has a few pieces; never an unbounded scan
         return False
+    if not barred and not _dated_header(got):
+        return False
     return any(_runs_in(got, r) for r in records)
+
+
+def _dated_header(got: list[tuple[str, ...]]) -> bool:
+    """A comma / dash header: 3+ distinct pieces, one of them a date range ("Jun 2025 - Sep 2025")."""
+    return len(set(got)) >= 3 and any(cv_checks._date_range(" ".join(p)) is not None for p in got)
 
 
 def _runs_in(got: list[tuple[str, ...]], record: frozenset[tuple[str, ...]]) -> bool:
@@ -652,23 +670,27 @@ async def verify(
         actual.setdefault(line_key(ln), []).append(ln.strip().lstrip(_BULLETS + " \t"))
     content_keys = {line_key(ln) for ln in content}
     book, records = skill_book(profile), profile_records(profile)
-    held = 0
+    held = quotes_skipped = 0
     for n, e in enumerate(entries, 1):
         row = f"row {n}"
         key = line_key(e["cv_line"])
         if key not in actual:
             _at(where, "line_not_in_cv", row)
         bodies = actual.get(key) or [e["cv_line"].strip().lstrip(_BULLETS + " \t")]
-        if not quote_in_profile(e["profile_quote"], source, source_words):
-            _at(where, "quote_not_in_profile", row)
         if key in actual and key not in content_keys:
             continue  # a row for a line that needs none (the name, a contact line, a section heading) is not judged
+        if key in actual:  # a line the profile itself holds needs no quote: its row's quote is not judged either
+            unheld = [b for b in bodies if not (list_line_holds(b, book) or record_line_holds(b, records))]
+            held += len(bodies) - len(unheld)
+            if not unheld:
+                quotes_skipped += not quote_in_profile(e["profile_quote"], source, source_words)
+                continue
+            bodies = unheld
+        if not quote_in_profile(e["profile_quote"], source, source_words):  # (c), only for a line that needs it
+            _at(where, "quote_not_in_profile", row)
         bank = _quote_bank(e["profile_quote"])
         quote_words = set(evidence._words(bank))
-        for body in bodies:
-            if list_line_holds(body, book) or record_line_holds(body, records):  # no one quote must hold it
-                held += 1
-                continue
+        for body in bodies:  # a row naming no CV line (line_not_in_cv) is judged whole, never held
             if evidence.unsupported_tokens(body, bank, first_word=True):
                 _at(where, "claim_not_in_quote", row)
             content_words = {w for w in evidence._words(body) if len(w) >= 4}
@@ -677,8 +699,10 @@ async def verify(
             thin = len(set(evidence._words(e["profile_quote"]))) < 3  # the quote's OWN words, never the bank's
             if thin or 2 * len(content_words & quote_words) < len(content_words):
                 _at(where, "quote_too_thin", row)
-    if held:  # how often a list or record line was held by the profile itself (no CV text logged)
-        logger.info("cv_reviewed lines_held_by_profile=%s application=%s", held, safe_log_value(application_id))
+    if held:  # how often a list or record line was held by the profile itself (no CV text logged); quotes_skipped:
+        # held rows whose quote is no span of the profile, each a quote_not_in_profile under rules 2
+        logger.info("cv_reviewed lines_held_by_profile=%s quotes_skipped=%s application=%s", held, quotes_skipped,
+                    safe_log_value(application_id))
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
     # A legacy review that named no real version (not_current_cv, empty sha) was never a try: it never counts. Nor
     # does a weak review judged under OLDER rules (no or another ``rules``): its verdict may be one these rules fix
