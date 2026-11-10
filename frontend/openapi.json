@@ -5841,11 +5841,19 @@
         "type": "object"
       },
       "CvReviewInputsOut": {
-        "description": "The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed).",
+        "description": "The newest cv's review inputs: copy `sha256`; one row {n, verdict, evidence} per line, n = its number from 1.",
         "properties": {
           "artifact_id": {
             "title": "Artifact Id",
             "type": "integer"
+          },
+          "held": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Held",
+            "type": "array"
           },
           "lines": {
             "items": {
@@ -5884,6 +5892,14 @@
             "title": "Artifact Id",
             "type": "integer"
           },
+          "held": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Held",
+            "type": "array"
+          },
           "last_downgraded": {
             "default": [],
             "items": {
@@ -5891,6 +5907,24 @@
             },
             "title": "Last Downgraded",
             "type": "array"
+          },
+          "last_where": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Last Where",
+            "type": "object"
           },
           "lines": {
             "items": {

@@ -1510,7 +1510,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         them or record what happened (record_event again clears it once the
         news moves the status). wait / interview / await_outcome / decide /
         closed need nothing from you. view="review" returns only id, job_title, job_company, country and `review`
-        (artifact_id, sha256, lines, state, tries_left, last_downgraded): the lean read for a CV review."""
+        (artifact_id, sha256, lines, held, state, tries_left, last_downgraded, last_where): the lean read for a CV
+        review."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application(application_id, with_artifact_text, view, db, _user())
@@ -1950,8 +1951,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Unsure: outcome_suggested.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
-        is proof.
+        furthest stage wins (only corrects_event_id moves back).
         `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
 
         Outreach: `contact_id` + `channel` with outreach_sent,
@@ -1973,7 +1973,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail, evidence?}, stop;
         unblocked {resolution: retried|user_did_it|skipped|own_browser, note?}.
         proof_text {text, page_host}; simulation {};
-        process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, lines, reviewer};
+        process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, reviewer,
+        lines: [{n, verdict, evidence}]};
         answer_corrected {key|question, was_source}. Payloads, 403/409: rules recipe, Events.
         Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.

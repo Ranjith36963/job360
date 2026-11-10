@@ -19,7 +19,7 @@ import pytest
 
 from src.services.applications import cv_checks, cv_review
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
-from tests.test_cv_review import _save_cv, _setup, _stored
+from tests.test_cv_review import _save_cv, _setup, _stored, rows
 
 RAW = (
     "Ada Lovelace\nLondon, United Kingdom | +44 7700 900123 | ada@example.com\nAI Engineer | Agentic Systems\n"
@@ -93,10 +93,10 @@ OWNER_SHAPES = {
 }
 
 
-def _self_rows(text: str, profile: UserProfile) -> list[dict[str, str]]:
-    """Every required line quoting itself, as a reviewer that copies the CV gives it."""
-    return [{"cv_line": ln, "profile_quote": ln.strip().lstrip(cv_review._BULLETS + " \t"),
-             "field_path": "cv_data.raw_text"} for ln in cv_review.content_lines(text, profile)]
+def _self_rows(text: str, profile: UserProfile) -> list[dict[str, Any]]:
+    """Every review line quoting itself, as a reviewer that copies the CV gives it (rules 5 rows)."""
+    return [{"n": n, "verdict": "supported", "evidence": [ln.strip().lstrip(cv_review._BULLETS + " \t")]}
+            for n, ln in enumerate(cv_review.content_lines(text, profile), 1)]
 
 
 def _seed(user_id: str, profile: UserProfile | None = None) -> None:
@@ -236,10 +236,10 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-async def _verdict(client: Any, text: str, rows: list[dict[str, str]]) -> tuple[str, list[str]]:
+async def _verdict(client: Any, text: str, pairs: list[dict[str, str]]) -> tuple[str, list[str]]:
     app_id, cv_id = await _setup(client, cv=text)
     got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(text), "confidence": "strong",
-                                         "lines": rows, "reviewer": "fresh helper"})
+                                         "lines": rows(text, pairs, _profile()), "reviewer": "fresh helper"})
     return got["confidence"], got["downgraded"]
 
 
@@ -269,11 +269,14 @@ async def test_the_held_row_skip_never_passes_another_line(authenticated_async_c
         # the claim's row quoting the held header: judged, and weak
         got = await _verdict(client, text, [held_row, {"cv_line": CLAIM, "profile_quote": HELD, "field_path": "x"}])
         assert got[0] == "weak" and {"quote_not_in_profile", "claim_not_in_quote"} <= set(got[1]), got
-        # a held-shaped row naming a line the CV lacks is still line_not_in_cv, and its quote is still judged
-        other = "Tidewater | AI/ML Engineer Intern | United Kingdom (Remote) | Oct 2024 - Jan 2025"
+        # a row naming a line the review lacks is refused (rules 5: n past review.lines), never stored
         text = f"Ada Lovelace\nEXPERIENCE\n{HELD}\n"
-        got = await _verdict(client, text, [held_row, {"cv_line": other, "profile_quote": other, "field_path": "x"}])
-        assert got == ("weak", ["line_not_in_cv", "quote_not_in_profile"]), got
+        app_id, cv_id = await _setup(client, cv=text)
+        other = {"n": 2, "verdict": "supported", "evidence": [HELD]}
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "cv_reviewed", "payload": {
+            "artifact_id": cv_id, "sha256": _sha(text), "confidence": "strong", "reviewer": "fresh helper",
+            "lines": rows(text, [held_row], _profile()) + [other]}})
+        assert resp.status_code == 422 and "review.lines has 1 lines" in resp.text, resp.text
 
 
 @pytest.mark.asyncio

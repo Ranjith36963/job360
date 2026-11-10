@@ -902,11 +902,12 @@ class KitHoldOut(BaseModel):
 
 
 class CvReviewInputsOut(BaseModel):
-    """The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed)."""
+    """The newest cv's review inputs: copy `sha256`; one row {n, verdict, evidence} per line, n = its number from 1."""
 
     artifact_id: int
     sha256: str
     lines: list[str]
+    held: list[int] = []  # numbers of lines the profile holds itself (a skills list, a header): evidence []
     # This CV's newest VALID stored review (2026-11-09): "none" = no valid review yet, so review it.
     state: Literal["none", "weak", "strong"] = "none"
 
@@ -917,6 +918,7 @@ class CvReviewViewOut(CvReviewInputsOut):
     reviews_used: int
     tries_left: int
     last_downgraded: list[str] = []
+    last_where: dict[str, list[Union[int, str]]] = {}  # code -> review line numbers (check codes for cv_checks_found)
 
 
 class ApplicationReviewViewOut(BaseModel):

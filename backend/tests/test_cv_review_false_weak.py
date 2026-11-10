@@ -204,12 +204,13 @@ async def test_the_owners_true_lines_are_stored_strong(authenticated_async_conte
         # a quote that dropped a comma of the profile's sentence (app 579) is still the profile's sentence
         line = "- Built ETL pipelines in Python and Snowflake cutting warehouse costs 30%."
         assert await _verdict(client, line, line[2:]) == ("strong", [])
-        # the London, UK header and the heading: a row the reviewer still sends is not judged (no row needed)
+        # the London, UK header and the heading are no review lines: no row needed, and a row for them is refused
         cv = BASE + "London, UK | +44 7700 900123 | ada@example.com\nEDUCATION AND CERTIFICATION\n"
         app_id, cv_id = await _setup(client, cv=cv)
-        got = await _stored(client, app_id, _review(cv_id, cv, lines=[ETL_ROW, *[
-            {"cv_line": ln, "profile_quote": "London", "field_path": "cv_data.location"} for ln in cv.splitlines()[3:]]]))
+        got = await _stored(client, app_id, _review(cv_id, cv, lines=[ETL_ROW]))
         assert (got["confidence"], got["downgraded"], got["content_lines"]) == ("strong", [], 1)
+        extra = {"n": 2, "verdict": "supported", "evidence": ["London, United Kingdom"]}
+        assert (await _event(client, app_id, "cv_reviewed", _review(cv_id, cv, lines=[ETL_ROW, extra]))).status_code == 422
 
 
 @pytest.mark.asyncio
@@ -271,12 +272,12 @@ async def test_a_claimed_strong_stored_weak_reply_names_codes_and_rows(authentic
         assert resp.status_code == 201, resp.text
         warned = [w for w in resp.json()["warnings"] if "STORED WEAK" in w]
         assert len(warned) == 1, resp.json()["warnings"]
-        assert "claim_not_in_quote: row 2" in warned[0] and "quote_too_thin: row 2" in warned[0]
+        assert "claim_not_in_quote: lines 2" in warned[0] and "first_word_unknown: lines 2" in warned[0]
         assert "cv_checks_found: unsupported_numbers" in warned[0] and "never strong" in warned[0]
         assert "12 engineers" not in warned[0], "no CV text in the reply"
         # an uncovered line is named by its review.lines number
         resp = await _event(client, app_id, "cv_reviewed", _review(cv_id, cv, lines=[ETL_ROW]))
-        assert "line_uncovered: review line 2" in " ".join(resp.json()["warnings"])
+        assert "line_uncovered: lines 2" in " ".join(resp.json()["warnings"])
         # a strong store says nothing of the kind
         cv2 = BASE
         app2, cv2_id = await _setup(client, cv=cv2)

@@ -7,7 +7,7 @@ import pytest
 
 from src.services.applications import cv_review, kit
 from src.services.profile.models import CVData, UserProfile
-from tests.test_cv_review import CV, L1, L2, RAW, _seed, _setup, _stored, sha
+from tests.test_cv_review import CV, L1, L2, RAW, _seed, _setup, _stored, rows, sha
 
 CV2 = CV + "- Worked on the warehouse migration and cut storage costs in half.\n"
 
@@ -26,7 +26,7 @@ async def test_review_carries_the_checks_own_sha_and_lines(authenticated_async_c
         profile = UserProfile(cv_data=CVData(raw_text=RAW, name="Ada Lovelace"))
         for params in ({}, {"with_artifact_text": True}):
             review = (await _detail(client, app_id, **params))["review"]
-            assert review == {"artifact_id": cv_id, "sha256": kit.sha256_text(CV), "state": "none", "lines": [
+            assert review == {"artifact_id": cv_id, "sha256": kit.sha256_text(CV), "state": "none", "held": [], "lines": [
                 "- Data engineer at Northwind since 2019.",
                 "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%."]}
             assert review["lines"] == cv_review.content_lines(CV, profile)
@@ -43,9 +43,10 @@ async def test_a_review_built_from_review_is_strong_and_an_older_sha_is_not(auth
         app_id, cv_id = await _setup(client)
         review = (await _detail(client, app_id))["review"]
         quotes = {cv_review.line_key(x["cv_line"]): x["profile_quote"] for x in (L1, L2)}
-        rows = [{"cv_line": ln, "profile_quote": quotes[cv_review.line_key(ln)], "field_path": "cv_data.raw_text"} for ln in review["lines"]]
+        built = [{"n": n, "verdict": "supported", "evidence": [quotes[cv_review.line_key(ln)]]}
+                 for n, ln in enumerate(review["lines"], 1)]
         good = {"artifact_id": review["artifact_id"], "sha256": review["sha256"], "confidence": "strong",
-                "lines": rows, "reviewer": "fresh helper"}
+                "lines": built, "reviewer": "fresh helper"}
         got = await _stored(client, app_id, good)
         assert (got["confidence"], got["downgraded"], got["covered"], got["content_lines"]) == ("strong", [], 2, 2)
         for bad in ({**good, "sha256": sha("an older text")}, {**good, "sha256": ""}):
@@ -62,10 +63,11 @@ async def test_missing_lines_are_named_in_the_reply(authenticated_async_context,
         app_id, _ = await _setup(client)
         review = (await _detail(client, app_id))["review"]
         short = {"artifact_id": review["artifact_id"], "sha256": review["sha256"], "confidence": "strong",
-                 "lines": [L1], "reviewer": "fresh helper"}
+                 "lines": rows(CV, [L1]), "reviewer": "fresh helper"}
         resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "cv_reviewed", "payload": short})
         assert resp.status_code == 201, resp.text
-        assert any("1 of 2 required lines" in w and "review.lines" in w for w in resp.json()["warnings"])
+        assert any("1 of 2 review lines had no row" in w and "review.lines" in w for w in resp.json()["warnings"])
+        assert any("line_uncovered: lines 2" in w for w in resp.json()["warnings"])
 
 
 @pytest.mark.asyncio

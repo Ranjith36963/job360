@@ -25,12 +25,9 @@ CV = (
     "Ada Lovelace\nEXPERIENCE\n- Data engineer at Northwind since 2019.\n"
     "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
 )
-LINES = [
-    {"cv_line": "- Data engineer at Northwind since 2019.", "profile_quote": "Data engineer at Northwind since 2019.",
-     "field_path": "cv_data.raw_text"},
-    {"cv_line": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.",
-     "profile_quote": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.",
-     "field_path": "cv_data.raw_text"},
+LINES = [  # one row per review line (rules 5): {n, verdict, evidence}
+    {"n": 1, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]},
+    {"n": 2, "verdict": "supported", "evidence": ["Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%."]},
 ]
 CV_AUTO = "assistant_settings.cv_auto_approve"
 AGENT = "token:claude-code"
