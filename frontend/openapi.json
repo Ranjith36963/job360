@@ -6074,6 +6074,17 @@
             ],
             "title": "Cv Saved At"
           },
+          "cv_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Text"
+          },
           "jd_requirements": {
             "default": [],
             "items": {
