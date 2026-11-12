@@ -23,6 +23,7 @@ and people are left out. Nothing is judged by its words: a real "Simulation Engi
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -161,32 +162,54 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
     return {"by_actor": by_actor, "by_kind": by_kind, "job_ids": [i for _, i, _ in mine], "job_ids_by_kind": by_ids}
 
 
-async def needs_you_count(db: JobDatabase, user_id: str) -> dict[str, Any]:
+PHASES = ("tests", "asks", "contacts", "blockers", "suggestions", "settings", "inbox", "answer_once", "pc_idle")
+
+
+async def needs_you_count(
+    db: JobDatabase, user_id: str, timings: Optional[dict[str, float]] = None,
+) -> dict[str, Any]:
     """``n`` = jobs + other. ``jobs`` = the jobs whose first blocker is the user (= ``jobs_waiting_on_you``);
     ``by_actor`` / ``by_kind`` count every open job once by its first blocker, so the badge, the dashboard
-    headline and the Needs-you chips all read this one answer."""
+    headline and the Needs-you chips all read this one answer.
+
+    ``timings``: when given, it is filled with the milliseconds each step took (the keys are ``PHASES``).
+    Durations only, never a value: the route sends them as a ``Server-Timing`` header, so a slow badge
+    (2026-11-12: 6 s on a large account) can be read step by step from outside."""
+    lap = time.perf_counter()
+
+    def mark(phase: str) -> None:
+        nonlocal lap
+        now = time.perf_counter()
+        if timings is not None:
+            timings[phase] = round((now - lap) * 1000, 1)
+        lap = now
+
     tests = await test_marker.test_app_ids(db, user_id)
+    mark("tests")
     tied, general = await _open_job_asks(db, user_id, tests)
+    mark("asks")
     _, connections = await _unsent_contacts(db, user_id)
+    mark("contacts")
     first = await jobs_by_first_blocker(db, user_id, tests)
+    mark("blockers")
     jobs = first["by_actor"]["you"]
     rows = set(first["job_ids"])
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other
     suggestions, _ = await outcome_suggestions.open_suggestions(db, user_id, settings.OUTCOME_SUGGESTIONS_LIST_MAX)
-    other = (
-        general
-        + len(other_ask_ids)
-        + len(setting_requests.list_waiting(user_id))
-        + len(suggestions)
-        + min(await inbox_items.count_open(db, user_id), MAIL_LIST_MAX)
-        + connections
-    )
+    mark("suggestions")
+    waiting_settings = len(setting_requests.list_waiting(user_id))
+    mark("settings")
+    open_mail = min(await inbox_items.count_open(db, user_id), MAIL_LIST_MAX)
+    mark("inbox")
+    other = general + len(other_ask_ids) + waiting_settings + len(suggestions) + open_mail + connections
     # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
     answer_once = ask_once.open_questions(user_id)
+    mark("answer_once")
     # Owner #12: one line for the jobs on the user's PC when no session in their own browser worked the queue.
     from src.services.applications import own_browser  # noqa: PLC0415 - own_browser -> contacts -> this package
 
     pc_idle = await own_browser.pc_idle(db, user_id, datetime.now(timezone.utc), first["by_actor"]["your_pc"])
+    mark("pc_idle")
     return {
         "n": jobs + other + (1 if answer_once else 0), "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
         "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first, "pc_idle": pc_idle,
