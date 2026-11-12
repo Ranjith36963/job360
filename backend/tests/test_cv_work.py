@@ -29,7 +29,7 @@ from tests.test_cv_review import (
 )
 
 ITEM_KEYS = {"application_id", "job_title", "job_company", "country", "browser", "ad", "ad_truncated",
-             "jd_requirements", "review", "cv_saved_at"}
+             "jd_requirements", "review", "cv_saved_at", "cv_text"}
 REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
                "last_where"}
 LINKEDIN = "https://www.linkedin.com/jobs/view/"
@@ -128,6 +128,9 @@ async def test_items_are_exactly_the_queued_rows_needing_cv_work_in_the_cv_tasks
         by_id = {i["application_id"]: i for i in got["items"]}
         assert by_id[no_cv]["review"] is None and by_id[no_cv]["cv_saved_at"] is None
         assert by_id[weak]["review"]["state"] == "weak"
+        # only a weak review's CV comes back whole (a fix round edits it); an unreviewed one costs no tokens
+        assert by_id[weak]["cv_text"] == text(3)
+        assert by_id[first]["cv_text"] is None and by_id[own]["cv_text"] is None
 
 
 @pytest.mark.asyncio
@@ -343,3 +346,38 @@ async def test_a_test_application_is_never_cv_work(authenticated_async_context, 
         assert real in ids
         assert test_id not in ids
         assert out["total_needing_work"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cv_text_is_the_newest_cv_exactly_and_matches_the_review_artifact(
+    authenticated_async_context, fixture_user_id
+):
+    """Production 2026-11-12: a fix round rebuilt the CV from review.lines and lost the name, contact line and
+    headings, because cv_work gave only content lines. Each item now carries the whole newest CV."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        old = CV + "\nolder version\n"
+        newest = CV + "\nnewest version\n"
+        app_id = await _job(client, "text", cv=old)
+        await _save_cv(client, app_id, newest)
+        unreviewed = next(i for i in (await _cv_work(client))["items"] if i["application_id"] == app_id)
+        assert unreviewed["cv_text"] is None  # nothing to fix yet: the reviewer reads review.lines
+        art = unreviewed["review"]["artifact_id"]
+        await _stored(client, app_id, _review(art, newest, confidence="weak"))
+        item = next(i for i in (await _cv_work(client))["items"] if i["application_id"] == app_id)
+        assert item["cv_text"] == newest
+        assert item["cv_text"].startswith(CV0.splitlines()[0])  # the name / heading line is there, not only lines
+        lean = (await client.get(f"/api/applications/{app_id}", params={"view": "review"})).json()["review"]
+        assert item["review"]["artifact_id"] == lean["artifact_id"]
+        detail = (await client.get(f"/api/applications/{app_id}")).json()
+        saved = [a for a in detail["artifacts"] if a["id"] == item["review"]["artifact_id"]]
+        assert len(saved) == 1
+
+
+@pytest.mark.asyncio
+async def test_cv_text_is_null_when_there_is_no_cv(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        no_cv = await _job(client, "nocvtext", cv=None)
+        item = next(i for i in (await _cv_work(client))["items"] if i["application_id"] == no_cv)
+        assert "cv_text" in item and item["cv_text"] is None and item["review"] is None

@@ -6244,6 +6244,8 @@ export interface components {
             country?: string | null;
             /** Cv Saved At */
             cv_saved_at?: string | null;
+            /** Cv Text */
+            cv_text?: string | null;
             /**
              * Jd Requirements
              * @default []
