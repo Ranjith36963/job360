@@ -946,6 +946,7 @@ class CvWorkItemOut(BaseModel):
     jd_requirements: list[str] = []
     review: Optional[CvReviewViewOut] = None
     cv_saved_at: Optional[str] = None
+    cv_text: Optional[str] = None
 
 
 class CvWorkOut(BaseModel):

@@ -12,6 +12,9 @@ word, a profile name opening the line, a capitalised name opening a later senten
 ASCII letters, missing from its quotes; text is read NFKC with format characters dropped), ``evidence_reused`` (one
 quote the only evidence of more than ``CV_REVIEW_QUOTE_REUSE_MAX`` lines). Every other opening word is free. A skills
 list under a job header is held only when that job's own text names every item.
+Rules 7 (owner 2026-11-12): a TOP line (headline / summary, ``cv_records.top_lines``) pitches the whole career: it
+needs no quote (its quotes must still be in the profile), and its hard facts are judged against the WHOLE profile;
+the headline may also use the ad's title words, never a :data:`SENIORITY_WORDS` word or a number.
 Word by word, no regex on caller text; inputs capped by ``cv_review.shape_problems`` and the 64 KB payload cap.
 """
 from __future__ import annotations
@@ -29,7 +32,7 @@ ROLE_FAMILIES = tuple(frozenset(f.split()) for f in (
     "owned owner owners owns ownership", "head heads headed", "directed director directors directs",
     "supervised supervises supervising supervisor supervisors", "spearheaded spearheads spearheading",
     "chair chairs chaired chairing chairman chairperson", "hired hires hiring", "promoted promotion",
-    "principal", "senior", "chief", "architect architects architected architecting", "staff", "vp", "president",
+    "principal", "senior sr snr", "chief", "architect architects architected architecting", "staff", "vp", "president",
     "cto", "ceo", "coo", "cfo", "oversaw oversee oversees overseeing", "leadership", "managerial", "charge",
     "responsible",
 ))
@@ -49,6 +52,8 @@ first second fourth fifth sixth seventh eighth ninth tenth doubling doubles trip
 fortnight january february march april june july august september october november december
 """.split())  # lowercase "may" is left out: it is far more often the verb
 _OUTER = ".,;:!?()[]{}\"'‘’“”"
+# Closed: ad-title words a headline may NOT borrow from the ad (rules 7): the profile must hold them itself.
+SENIORITY_WORDS = frozenset("senior sr snr lead principal staff head manager director chief vp".split())
 
 
 def _at(where: dict[str, list[Any]], code: str, n: int) -> None:
@@ -135,13 +140,14 @@ def hard_facts(body: str, quotes: list[str], names: set[str], free_labels: froze
 
 def held_numbers(text: str, profile: Any) -> list[int]:
     """THE rule for "this review line needs no evidence" (``review.held`` and :func:`judge` both read it, so the hint
-    can never disagree with the check, PR #1554): a header line ONE profile record holds, or a skills list the profile
-    holds item by item, which under a job / project header that record's own text must also name (B5)."""
+    can never disagree with the check, PR #1554): a TOP line (rules 7), a header line ONE profile record holds, or a
+    skills list the profile holds item by item, which under a job / project header that record's own text must also
+    name (B5)."""
     lines = cv_review.content_lines(text, profile)[: cv_review.REVIEW_LINES_CAP]
     recs = cv_records.line_records(text, profile)
     book, records = cv_review.skill_book(profile), cv_review.profile_records(profile)
     texts = cv_records.record_texts(profile)
-    out: list[int] = []
+    out = list(cv_records.top_lines(text, profile)[0])  # rules 7: judged on facts alone, no quote asked
     for n, ln in enumerate(lines, 1):
         body = ln.strip().lstrip(cv_review._BULLETS + " \t")
         line_recs = recs[n - 1] if n <= len(recs) else None
@@ -150,7 +156,7 @@ def held_numbers(text: str, profile: Any) -> list[int]:
         if (cv_review.list_line_holds(body, book) and _list_in_record(body, own)) or cv_review.record_line_holds(
                 body, records):
             out.append(n)
-    return out
+    return sorted(set(out))
 
 
 def _list_in_record(body: str, record: Optional[tuple[str, str]]) -> bool:
@@ -186,9 +192,20 @@ def profile_terms(profile: Any) -> tuple[set[str], frozenset[str], set[str]]:
     return names, free_labels, set(evidence._words(cv_checks.profile_source_text(profile)))
 
 
-def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str, list[Any]], list[str], int]:
+def _title_bank(job_title: str) -> str:
+    """The ad's title words a headline may use (rules 7): never a :data:`SENIORITY_WORDS` or :data:`ROLE_FAMILIES`
+    word ("Sr", "Leader", "Founding"), a number word or a word with a digit ("III" aside, "2")."""
+    never = SENIORITY_WORDS | _ROLE_WORDS.keys() | NUMBER_WORDS | {"i", "ii", "iii", "iv"}
+    keep = [t for t in str(job_title or "").split() if (w := t.strip(_OUTER).casefold()) and not any(
+        c.isdigit() for c in w) and not set(_parts(w)) & never]
+    return " ".join(keep)
+
+
+def judge(text: str, rows: list[dict[str, Any]], profile: Any,
+          job_title: str = "") -> tuple[dict[str, list[Any]], list[str], int]:
     """``(where, content lines, held count)``: each code with the line numbers it came from, in line order. Rows whose
-    ``n`` is past ``review.lines`` are the caller's 422 (``cv_review.verify``), never judged here."""
+    ``n`` is past ``review.lines`` are the caller's 422 (``cv_review.verify``), never judged here. ``job_title``: the
+    ad's title, whose words the headline may use (rules 7)."""
     content = cv_review.content_lines(text, profile)
     lines = content[: cv_review.REVIEW_LINES_CAP]
     recs = cv_records.line_records(text, profile)
@@ -202,7 +219,11 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
     texts = cv_records.record_texts(profile)
     own: dict[frozenset[str], tuple[str, str]] = {}
     alone: dict[str, list[int]] = {}  # a quote -> the lines it is the ONLY evidence of
+    top_alone: dict[str, list[int]] = {}  # the same for TOP lines, counted apart: they never sweep in a bullet
     held_ns = set(held_numbers(text, profile))
+    top, headline = cv_records.top_lines(text, profile)
+    whole = cv_checks.profile_source_text(profile, include_targets=False)  # roles held, never roles wanted
+    title = _title_bank(job_title)
     held = 0
     for n in sorted(k for k in by_n if k <= len(lines)):
         row, body = by_n[n], lines[n - 1].strip().lstrip(cv_review._BULLETS + " \t")
@@ -211,10 +232,20 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
         line_recs: Optional[frozenset[str]] = recs[n - 1] if n <= len(recs) else None
         if line_recs is not None and line_recs not in own:
             own[line_recs] = cv_review.sources_from([s for k in sorted(line_recs) for s in texts.get(k, [])])
+        quotes: list[str] = row["evidence"]
+        if n in top:  # rules 7: no quote asked; a quote given is still the profile's, every fact is somewhere in it
+            held += 1
+            if any(not cv_review.quote_in_profile(q, source, source_words) for q in quotes):
+                _at(where, "quote_not_in_profile", n)
+            if not cv_review.is_heading(body) and hard_facts(  # a top heading is "PROFESSIONAL SUMMARY": no fact
+                    body, [whole, *([title] if n == headline and title else [])], names, free_labels, known):
+                _at(where, "claim_not_in_quote", n)
+            if len(quotes) == 1:  # one quote stamped on many lines is still no review
+                top_alone.setdefault(cv_review._norm(quotes[0]), []).append(n)
+            continue
         if n in held_ns:
             held += 1
             continue
-        quotes: list[str] = row["evidence"]
         if not quotes:
             _at(where, "no_evidence", n)
             continue
@@ -229,7 +260,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
             _at(where, "claim_not_in_quote", n)
         if len(quotes) == 1:
             alone.setdefault(cv_review._norm(quotes[0]), []).append(n)
-    for ns in alone.values():
+    for ns in [*alone.values(), *top_alone.values()]:
         if len(ns) > settings.CV_REVIEW_QUOTE_REUSE_MAX:
             for n in ns:
                 _at(where, "evidence_reused", n)

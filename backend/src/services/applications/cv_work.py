@@ -104,14 +104,15 @@ async def cv_work(
         rows = {int(r["id"]): dict(r) for r in await cur.fetchall()}
         newest = await cv_review.newest_cv_ids(db, user_id, page)
         cur = await db._db.execute(
-            "SELECT id, created_at FROM application_artifacts WHERE user_id = ? "  # noqa: S608 - placeholders only
+            "SELECT id, created_at, text FROM application_artifacts WHERE user_id = ? "  # noqa: S608 - placeholders only
             f"AND id IN ({','.join('?' for _ in newest) or '0'})",
             (user_id, *newest.values()),
         )
-        made = {int(r[0]): r[1] for r in await cur.fetchall()}
-        saved = {app_id: made[art_id] for app_id, art_id in newest.items() if art_id in made}
+        found = {int(r[0]): (r[1], r[2]) for r in await cur.fetchall()}
+        saved = {app_id: found[art_id][0] for app_id, art_id in newest.items() if art_id in found}
+        texts = {app_id: str(found[art_id][1] or "") for app_id, art_id in newest.items() if art_id in found}
     else:
-        saved = {}
+        saved, texts = {}, {}
     items = []
     for app_id in page:
         row = rows[app_id]
@@ -125,6 +126,9 @@ async def cv_work(
             "jd_requirements": [str(r.get("text") or "") if isinstance(r, dict) else str(r) for r in reqs if r],
             "review": view.get("review"),
             "cv_saved_at": str(saved[app_id]) if app_id in saved else None,
+            # The whole newest CV (name, contact line, headings) when its review is weak: a fix round edits it, never
+            # rebuilds it from lines. Unreviewed CVs carry none (the reviewer reads review.lines): tokens per run.
+            "cv_text": texts.get(app_id) if (view.get("review") or {}).get("state") == "weak" else None,
         })
     out: dict[str, Any] = {
         "items": items, "total_needing_work": len(ids),
@@ -134,5 +138,6 @@ async def cv_work(
         out["profile"] = compact_profile(user_id)
     get_audit_logger().info(
         "cv_work", extra={"event": "cv_work", "user_id": safe_log_value(user_id), "queued": len(queue_order),
-                          "needing": len(ids), "returned": len(items), "after": safe_log_value(after), "result": "ok"})
+                          "needing": len(ids), "returned": len(items), "after": safe_log_value(after), "result": "ok",
+                          "with_cv_text": sum(1 for i in items if i["cv_text"] is not None)})
     return out

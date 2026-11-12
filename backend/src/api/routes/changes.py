@@ -30,6 +30,8 @@ parity table has no row for it. It writes nothing: no audit line, so polling nev
 from __future__ import annotations
 
 import hashlib
+import logging
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
@@ -42,6 +44,11 @@ from src.repositories.database import JobDatabase
 from src.services.applications import sent_alone
 from src.services.applications.needs_you_count import needs_you_count
 from src.utils.logger import get_audit_logger, safe_log_value
+
+logger = logging.getLogger("job360.changes")
+
+# The menu badge runs on every page: past this a warning names the slow step (ids and milliseconds only).
+SLOW_BADGE_MS = 1000
 
 router = APIRouter(tags=["changes"])
 
@@ -192,7 +199,17 @@ async def needs_you_count_route(
     """The number "N things need you" shows, for the menu badge on every page. Read-only: no audit
     line is written, so a navigation never moves ``/api/changes``."""
     response.headers["Cache-Control"] = "no-store"
-    return NeedsYouCountOut(**await needs_you_count(db, user.id))
+    timings: dict[str, float] = {}
+    started = time.perf_counter()
+    out = NeedsYouCountOut(**await needs_you_count(db, user.id, timings))
+    total_ms = round((time.perf_counter() - started) * 1000, 1)
+    # How long each step took, in the standard header browsers show in their network panel. Durations only.
+    response.headers["Server-Timing"] = ", ".join(
+        [f"{phase};dur={ms}" for phase, ms in timings.items()] + [f"total;dur={total_ms}"]
+    )
+    if total_ms >= SLOW_BADGE_MS:
+        logger.warning("needs_you_count_slow user=%s total_ms=%s phases=%s", user.id, total_ms, timings)
+    return out
 
 
 class SentSource(BaseModel):
