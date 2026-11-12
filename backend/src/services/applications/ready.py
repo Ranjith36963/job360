@@ -182,10 +182,17 @@ async def answer_flags_for(
     approvals = await job_approvals_many(db, user_id, list(fills))
     out: dict[int, list[dict[str, Any]]] = {}
     uploads_by_app = await uploads_service.uploads_since_last_receipt_many(db, user_id, list(fills))
+    # Production 2026-11-12: on a large account this loop cost ~1.5 s (b_flags) because the kit and every
+    # answer's conflict scan were rebuilt per fill. Both depend only on this call's one profile, overlay and
+    # the job's country (+ company): read each once per call. Local to this call, never kept across requests.
+    have_by_country: dict[Optional[str], dict[str, dict[str, Any]]] = {}
+    memo: dict[Any, Any] = {}
     for app_id, f in fills.items():
         country = (str(f.get("job_country") or "").strip().upper()) or None
-        blocks, _missing = kit.compute_answers(profile, overlay, country)
-        have = {i["key"]: i for block in blocks.values() for i in block}
+        if country not in have_by_country:
+            blocks, _missing = kit.compute_answers(profile, overlay, country)
+            have_by_country[country] = {i["key"]: i for block in blocks.values() for i in block}
+        have = have_by_country[country]
         typed = [
             a for a in f["answers"]
             if isinstance(a, dict) and "question" in a and ("answer" in a or a.get("redacted"))
@@ -193,7 +200,7 @@ async def answer_flags_for(
         company = _company_key(str(f.get("job_company") or ""))
         mine = with_job_approvals(profile, approvals.get(app_id, []))
         ups = uploads_by_app.get(app_id, [])
-        out[app_id] = _answer_rows(typed, have, saved, mine, company, f["filled_at"], country, ups)[1]
+        out[app_id] = _answer_rows(typed, have, saved, mine, company, f["filled_at"], country, ups, memo=memo)[1]
     return out
 
 
@@ -298,7 +305,7 @@ def _job_country(app_row: dict[str, Any]) -> Optional[str]:
 
 def _approved_record(
     profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None,
-    country: Optional[str] = None,
+    country: Optional[str] = None, *, memo: Optional[dict[Any, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """The user's approved answer RECORD to ``question`` (or one of its other wordings), for this
     company or any company, resolved exactly as the kit and check_form resolve it
@@ -311,13 +318,11 @@ def _approved_record(
     answers that disagree (``answer_match.conflicting_topics``) however it was worded (2026-11-03).
     The user's own Verify / Edit on THIS application (``job_only``, :func:`with_job_approvals`) comes
     first, by topic or wording: it is their word for this job, so no saved answer outranks it and a
-    consent.* / certify.* row (never REUSED from memory) still verifies for the job it was given on."""
-    from src.services.profile.answer_match import (  # noqa: PLC0415
-        conflicting_topics,
-        normalize_question,
-        resolve_answer,
-        topic_key,
-    )
+    consent.* / certify.* row (never REUSED from memory) still verifies for the job it was given on.
+    ``memo``: a caller's per-call dict for ONE base profile. The saved-answer reading (:func:`_saved_record`)
+    reads only the non-``job_only`` records, so it is kept per (question, company, topic, country) and its
+    conflict scan per (country, company) instead of being redone per answer and per fill."""
+    from src.services.profile.answer_match import normalize_question, topic_key  # noqa: PLC0415
 
     records: list[dict[str, Any]] = [
         rec for rec in kit._records(profile.user_info.answers)
@@ -334,11 +339,39 @@ def _approved_record(
             hit: dict[str, Any] = job
             return hit
     records = [r for r in records if not r.get("job_only")]
+    if memo is None:
+        return _saved_record(records, question, company_key, topic, country, {})
+    # The saved (non-job_only) records are the same for every call sharing ``memo``: one answer per question.
+    # A company no saved answer is scoped to reads exactly like no company (answer_match._in_scope drops every
+    # company-scoped record for both), so fills for different unscoped employers share one reading.
+    if "companies" not in memo:
+        memo["companies"] = {
+            kit.normalized_company_key(str(r.get("company")).strip()) for r in records
+            if str(r.get("company") or "").strip()
+        }
+    company_key = company_key if company_key in memo["companies"] else None
+    key = ("saved", question, company_key, topic, country)
+    if key not in memo:
+        memo[key] = _saved_record(records, question, company_key, topic, country, memo)
+    hit_saved: Optional[dict[str, Any]] = memo[key]
+    return hit_saved
+
+
+def _saved_record(
+    records: list[dict[str, Any]], question: str, company_key: Optional[str], topic: Optional[str],
+    country: Optional[str], memo: dict[Any, Any],
+) -> Optional[dict[str, Any]]:
+    """:func:`_approved_record`'s reading of the saved answers (``records``, no ``job_only``)."""
+    from src.services.profile.answer_match import conflicting_topics, resolve_answer, topic_key  # noqa: PLC0415
+
     rec, note = resolve_answer(records, topic=topic or None, question=question, company_key=company_key,
                                country=country)
     if rec is None or note:
         return None  # nothing saved, or two saved answers disagree: never pick one (the user is asked)
-    if topic_key(rec.get("topic")) in conflicting_topics(records, country=country, company_key=company_key):
+    if ("conflicts", country, company_key) not in memo:
+        memo[("conflicts", country, company_key)] = conflicting_topics(records, country=country,
+                                                                         company_key=company_key)
+    if topic_key(rec.get("topic")) in memo[("conflicts", country, company_key)]:
         return None
     return rec
 
@@ -446,12 +479,13 @@ def _memory_text(profile: Any, key: str) -> Optional[str]:
 def _user_check(
     a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]], company_key: Optional[str],
     have: dict[str, dict[str, Any]], filled_at: Any = None, country: Optional[str] = None,
+    *, memo: Optional[dict[Any, Any]] = None,
 ) -> tuple[bool, Optional[str], Optional[str]]:
     """(verified, changed_to, changed_reason) for one typed answer, read from the user's OWN word:
     their approved answer to this question, else a memory row they saved on the web
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed; ``changed_reason`` says whose act made it differ (see OWNER_EDIT)."""
-    rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None, country)
+    rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None, country, memo=memo)
     if rec is not None and not rec.get("job_only") and a.get("source") == "memory" and str(a.get("key")) in have:
         rec = None  # Memory first (owner 2026-11-05): a saved answer never overrides a Memory answer
     if rec is not None:
@@ -523,9 +557,12 @@ def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
     profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
     country: Optional[str] = None, uploads: Sequence[dict[str, Any]] = (),
+    *, memo: Optional[dict[Any, Any]] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(answers with saved_by / saved_at / verified / changed_to / changed_reason, the flags they
-    raise). ``filled_at`` is when the fill was recorded: only a web save after it is an owner edit."""
+    raise). ``filled_at`` is when the fill was recorded: only a web save after it is an owner edit.
+    ``memo`` (see :func:`_approved_record`) may be shared by fills read against the same base profile."""
+    memo = {} if memo is None else memo
     answers: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
     for a in typed:
@@ -538,7 +575,7 @@ def _answer_rows(
             if src == "memory":
                 by, at = saved.get(_BLOCK_PATH.get(str(key).split(".", 1)[0], ""), (None, at))
         verified, changed_to, reason = (
-            _user_check(a, profile, saved, company_key, have, filled_at, country) if profile is not None
+            _user_check(a, profile, saved, company_key, have, filled_at, country, memo=memo) if profile is not None
             else (False, None, None)
         )
         if changed_to is not None and is_file_answer(a, uploads):
