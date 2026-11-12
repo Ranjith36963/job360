@@ -35,8 +35,12 @@ const SESSION_COOKIE = "job360_session";
 // Backend origin used to VERIFY the session (same value the /api proxy forwards to).
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://localhost:8000";
 
-// A slow backend must not hang page loads (S17): past this, treat it as an outage.
-const VERIFY_TIMEOUT_MS = 5000;
+// A dead backend must not hang page loads forever (S17): past this, treat it as
+// an outage. 20 s, not 5: the backend is ONE worker, and a slow data call ahead
+// of this check can hold it for 6-16 s on a large account (measured on prod,
+// 2026-11-12). At 5 s that threw signed-in users to /login with "couldn't reach
+// the server"; waiting for the page is the lesser harm.
+const VERIFY_TIMEOUT_MS = 20000;
 
 type Verdict = "valid" | "rejected" | "unavailable";
 
