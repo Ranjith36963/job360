@@ -26,7 +26,8 @@ export const toast = {
         return;
       }
       if (e.isUnauthorized) {
-        sonnerToast.error("Session expired — please log in again", {
+        // The AuthProvider's session-ended handler also sends the user to sign in.
+        sonnerToast.error("Your session ended. Sign in again to continue.", {
           duration: 5000,
         });
         return;

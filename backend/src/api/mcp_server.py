@@ -263,6 +263,7 @@ PAUSE_REFUSED_ROUTES: dict[tuple[str, str], Optional[str]] = {
     ("POST", "applications.add_contacts_batch"): None,
     ("PATCH", "applications.update_contact"): "update_contact",
     ("POST", "applications.record_outreach"): None,  # a message version or a sent mark
+    ("POST", "applications.record_outreach_review"): "record_event",  # an outreach_reviewed (cold contact door)
     ("PATCH", "applications.update_job_facts"): "update_job",
     ("GET", "applications.outreach_check"): "check_outreach",
     ("GET", "applications.auto_email_check"): "check_auto_email",
@@ -1966,18 +1967,18 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         channel: Optional[str] = None,
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """`source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email.
-        Unsure: outcome_suggested.
+        """source {kind, message_id, thread_id?, sender, subject, received_at, quote?}: the email.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (only corrects_event_id moves back).
-        `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
+        furthest stage wins (corrects_event_id moves back).
+        scheduled_at only on interview_requested/_scheduled.
 
-        Outreach: `contact_id` + `channel` with outreach_sent,
+        Outreach: contact_id + channel with outreach_sent,
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
-        outreach_bounced; no application_id if cold.
+        outreach_bounced; no application_id if cold. outreach_reviewed
+        {message_id, sha256, confidence, lines, reviewer} + contact_id.
 
-        Events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
+        form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
@@ -1987,18 +1988,37 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         email_drafted {to, subject, attachments, gmail_draft_id};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
-        Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
+        blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail, evidence?}, stop;
         unblocked {resolution: retried|user_did_it|skipped|own_browser, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, reviewer,
         lines: [{n, verdict, evidence}], jd?: [{term, must, have, evidence, n}]};
-        answer_corrected {key|question, was_source}. Payloads, 403/409: rules recipe.
+        answer_corrected {key|question, was_source}. 403/409: rules recipe.
         Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
-        if contact_id is not None:
+        if contact_id is not None and event_type == "outreach_reviewed" and application_id is None:
+            # Owner 2026-11-09: a cold contact's review has no job; the contact door verifies and stores it (M5).
+            try:
+                review_body = applications_route.RecordOutreachReviewRequest(
+                    payload=payload or {}, client_key=client_key
+                )
+            except ValidationError as exc:
+                raise _validation_error(exc, tool="record_event", contact_id=contact_id) from None
+            if corrects_event_id is not None or source or scheduled_at or follow_up_on is not None or detail:
+                raise _refuse("record_event", 422, "outreach_reviewed takes only contact_id and payload",
+                              contact_id=contact_id)
+            try:
+                async with _request_db() as db:
+                    resp = await applications_route.record_outreach_review(contact_id, review_body, db, _user())
+            except HTTPException as exc:
+                _audit_refused("record_event", exc, contact_id=contact_id)
+                raise _tool_error(exc) from None
+            _audit("record_event", "ok", contact_id=contact_id, event_type=event_type)
+            return resp
+        if contact_id is not None and event_type != "outreach_reviewed":
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
             # route: neither the cold outreach door nor the linked branch
             # below has anywhere to put corrects_event_id/payload/
@@ -2631,9 +2651,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
 
     @mcp.tool()
     async def check_outreach(contact_id: int, message_id: int, session: str = "") -> dict[str, Any]:
-        """Call right before pressing Send on an outreach email, or on a LinkedIn message.
+        """Call right before pressing Send on an outreach email or a LinkedIn message.
         `message_id` = the `artifact_id` save_artifact(kind="outreach", contact_id=...)
-        returned. send = go; ask = email: save a Gmail draft, no ask_user; LinkedIn needs_owner_click: do not send;
+        returned. send = go; ask = email: save a Gmail draft, no ask_user; LinkedIn: do not send;
         stop = don't send. Read-only; after sending, record `outreach_sent` (record_event with
         contact_id + channel; email: Gmail message id as `source`). LinkedIn is send only when the user pressed
         Send on that person's card for this draft (owner_clicked; connect_no_note = Connect, Send without a note,
@@ -2648,8 +2668,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         invite_limit_reached, weekly_invite_cap_reached, linkedin_daily_cap_reached, too_soon,
         claimed_by_other_session, needs_claim, daily_outreach_cap_reached, company_cap_reached,
         network_hourly_cap_reached. Ask: email_guessed, mode_not_auto, no_found_via, unlinked_contact,
-        unsupported_numbers (a number or years claim the profile lacks: fix or ask), unsupported_claims,
-        sensitive_topic (visa, salary, age, health), needs_owner_click.
+        unsupported_numbers, unsupported_claims, sensitive_topic (visa, salary, age, health), needs_owner_click,
+        outreach_not_reviewed (auto_mode, auto_after_accept, auto_follow_up need a strong outreach_reviewed of
+        this draft: list_people `review`).
         Send: auto_mode, owner_clicked, connect_no_note, auto_connect, auto_after_accept, auto_follow_up. `sent_today`
         (all sends today) splits into `job_sent_today` (a contact with an application) and `network_sent_today`;
         the user's limits are get_profile `settings`."""

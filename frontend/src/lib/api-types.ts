@@ -2262,12 +2262,35 @@ export interface paths {
          *     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
          *     kind="outreach"`` created), plus today's recorded sends, then answers
          *     through ``settings_rules.may_send_outreach`` - the same function for this
-         *     route and the MCP ``check_outreach`` tool. Read-only: it records nothing
-         *     except one audit line. 404 for a contact that is not the caller's (rule #12).
+         *     route and the MCP ``check_outreach`` tool. An automatic send (``outreach_review.AUTO_SEND_REASONS``) also needs
+         *     a strong ``outreach_reviewed`` of exactly this draft, else ``ask`` ``outreach_not_reviewed``. Read-only: it
+         *     records nothing except one audit line. 404 for a contact that is not the caller's (rule #12).
          */
         get: operations["outreach_check_api_contacts__contact_id__outreach_check_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contacts/{contact_id}/outreach-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Outreach Review
+         * @description A fresh reviewer's verdict on the person's NEWEST outreach draft, verified by Job360 (outreach_review.py):
+         *     the door for any contact, a cold one too (the record_event tool calls it with no ``application_id``).
+         *     422 for a review of another draft or sha (nothing stored); 404 for a contact that is not the caller's.
+         */
+        post: operations["record_outreach_review_api_contacts__contact_id__outreach_review_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8408,6 +8431,21 @@ export interface components {
             /** Version No */
             version_no: number | null;
         };
+        /**
+         * OutreachReviewOut
+         * @description What an ``outreach_reviewed`` of the person's NEWEST draft must name (outreach_review.inputs): its id, the
+         *     sha256 Job360 compares, the lines needing a profile quote, and the newest stored review's state.
+         */
+        OutreachReviewOut: {
+            /** Lines */
+            lines: string[];
+            /** Message Id */
+            message_id: number;
+            /** Sha256 */
+            sha256: string;
+            /** State */
+            state: string;
+        };
         /** OwnBrowserTaskItemOut */
         OwnBrowserTaskItemOut: {
             /** Application Id */
@@ -8611,6 +8649,7 @@ export interface components {
             reachable: boolean;
             /** Relationship */
             relationship?: string | null;
+            review?: components["schemas"]["OutreachReviewOut"] | null;
             /** Role */
             role: string;
             send_browser?: components["schemas"]["BrowserLabelOut"] | null;
@@ -9785,6 +9824,18 @@ export interface components {
             /** Follow Up On */
             follow_up_on: string | null;
             outreach: components["schemas"]["OutreachEntryOut"];
+        };
+        /**
+         * RecordOutreachReviewRequest
+         * @description ``POST /api/contacts/{contact_id}/outreach-review`` - one ``outreach_reviewed`` (owner 2026-11-09).
+         */
+        RecordOutreachReviewRequest: {
+            /** Client Key */
+            client_key?: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -15559,6 +15610,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutreachCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_outreach_review_api_contacts__contact_id__outreach_review_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordOutreachReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordEventResponse"];
                 };
             };
             /** @description Validation Error */

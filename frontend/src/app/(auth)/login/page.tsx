@@ -10,6 +10,7 @@ import { z } from "zod";
 import { login, requestMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
 import { safeNext, safeNextOrUndefined } from "@/lib/safe-next";
+import { useAuth } from "@/components/layout/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -117,6 +118,7 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
 
 function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
   const router = useRouter();
+  const { signedIn } = useAuth();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
   // M2 — set after /register. The message is deliberately neutral: it does NOT
@@ -134,10 +136,11 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
   const onSubmit = handleSubmit(async (data) => {
     setServerError(null);
     try {
-      await login(data.email, data.password);
+      // Tell the app who signed in BEFORE leaving, or the shell stays signed out.
+      signedIn(await login(data.email, data.password));
       router.push(safeNext(next));
     } catch (err) {
-      setServerError(friendlyAuthError(err, "Login failed. Please try again."));
+      setServerError(friendlyAuthError(err, "Login failed. Please try again.", { login: true }));
     }
   });
 
@@ -218,9 +221,20 @@ function LoginForm() {
   // F4): the user was redirected here even though their session may be fine.
   // Explain that, so the bounce doesn't read as "you were logged out".
   const serviceDown = searchParams.get("error") === "service_unavailable";
+  const expired = searchParams.get("reason") === "expired";
+  const { status } = useAuth();
 
   return (
     <>
+      {expired && (
+        <p
+          role="status"
+          data-testid="session-ended"
+          className="mb-4 rounded-md border border-border bg-muted p-3 text-sm"
+        >
+          Your session ended. Sign in again to continue.
+        </p>
+      )}
       {serviceDown && (
         <p
           role="alert"
@@ -230,7 +244,10 @@ function LoginForm() {
           signed in. Please try again in a moment.
         </p>
       )}
-      {mode === "magic" ? (
+      {/* A signed-in visitor is sent on, so they get no form. While the session
+          is still loading (or the service is slow) the form shows: a slow check
+          must never leave a blank sign-in page. */}
+      {status === "signedIn" ? null : mode === "magic" ? (
         <MagicLinkForm onUsePassword={() => setMode("password")} />
       ) : (
         <PasswordForm onUseMagic={() => setMode("magic")} />

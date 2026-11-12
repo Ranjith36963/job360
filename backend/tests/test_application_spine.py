@@ -476,6 +476,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "cv_sent_on_review", "cv_wrong_fact",
         # Owner 2026-11-07 - a job site's emailed one-time code was used (host and time only, never the code).
         "email_code_used",
+        # Owner 2026-11-09 - a fresh reviewer's verdict on one outreach draft, verified by Job360.
+        "outreach_reviewed",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

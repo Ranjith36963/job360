@@ -86,8 +86,13 @@ def _odd_letters(word: str) -> bool:
     return any(c.isalpha() and not c.isascii() for c in word) and any(c.isascii() and c.isalpha() for c in word)
 
 
-def _grammar(w: str, names: set[str], known: set[str]) -> bool:
-    return w in _FUNCTION_WORDS or w.endswith(("ed", "ing", "s")) or (w in known and w not in names)
+# Closed: the word before one of these is a subject, never an -s / -ed / -ing verb: "Kubernetes is ..." names a tool.
+_SUBJECT_VERBS = frozenset("is was are were has had have will would can could does did".split())
+
+
+def _grammar(w: str, names: set[str], known: set[str], subject: bool = False) -> bool:
+    return (w in _FUNCTION_WORDS or (not subject and w.endswith(("ed", "ing", "s")))
+            or (w in known and w not in names))
 
 
 def _new_sentence_names(body: str, bank_words: set[str], names: set[str], known: set[str]) -> bool:
@@ -95,11 +100,12 @@ def _new_sentence_names(body: str, bank_words: set[str], names: set[str], known:
     it." A function word, one ending -ed / -ing / -s ("Works with ..."), or a plain word of the profile that is no
     name of it ("Built it end to end.") is grammar."""
     toks = evidence.clean(body).split()
-    for prev, raw in zip(toks, toks[1:]):
+    for prev, raw, nxt in zip(toks, toks[1:], [*toks[2:], ""]):
         tok = raw.strip(_OUTER)
         w = tok.casefold()
+        subject = nxt.strip(_OUTER).casefold() in _SUBJECT_VERBS  # "Kubernetes is ...": a subject is a noun
         if (prev.rstrip("\"')’”").endswith((".", "!", "?", ":")) and tok[:1].isupper() and w not in bank_words
-                and not all(_grammar(p, names, known) for p in _parts(w))):  # "Hands-on" is grammar, part by part
+                and not all(_grammar(p, names, known, subject) for p in _parts(w))):  # "Hands-on": part by part
             return True
     return False
 
@@ -167,6 +173,19 @@ def _proper_nouns(text: str) -> set[str]:
     return out
 
 
+def profile_terms(profile: Any) -> tuple[set[str], frozenset[str], set[str]]:
+    """:func:`hard_facts`' profile arguments ``(names, free_labels, known)``; the outreach review reads them too."""
+    book = cv_review.skill_book(profile)
+    cv = getattr(profile, "cv_data", None)
+    names = {i for i in book.items if " " not in i} | _proper_nouns(cv_checks.profile_source_text(profile)) | set(
+        evidence._words(" ".join(
+            str(r.get("company") or r.get("name") or "") for f in cv_review._RECORD_FIELDS
+            for r in getattr(cv, f, None) or [] if isinstance(r, dict))))
+    # a generic label word ("Skills:") is free unless the profile names its own group with it ("Agents & LLMs:")
+    free_labels = cv_review.GENERIC_LABEL_WORDS - frozenset().union(*(k for k, _ in book.groups))
+    return names, free_labels, set(evidence._words(cv_checks.profile_source_text(profile)))
+
+
 def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str, list[Any]], list[str], int]:
     """``(where, content lines, held count)``: each code with the line numbers it came from, in line order. Rows whose
     ``n`` is past ``review.lines`` are the caller's 422 (``cv_review.verify``), never judged here."""
@@ -179,15 +198,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any) -> tuple[dict[str
         if n not in by_n:
             _at(where, "line_uncovered", n)
     source, source_words = cv_review.quote_sources(profile)
-    book = cv_review.skill_book(profile)
-    cv = getattr(profile, "cv_data", None)
-    names = {i for i in book.items if " " not in i} | _proper_nouns(cv_checks.profile_source_text(profile)) | set(
-        evidence._words(" ".join(
-            str(r.get("company") or r.get("name") or "") for f in cv_review._RECORD_FIELDS
-            for r in getattr(cv, f, None) or [] if isinstance(r, dict))))
-    # a generic label word ("Skills:") is free unless the profile names its own group with it ("Agents & LLMs:")
-    free_labels = cv_review.GENERIC_LABEL_WORDS - frozenset().union(*(k for k, _ in book.groups))
-    known = set(evidence._words(cv_checks.profile_source_text(profile)))
+    names, free_labels, known = profile_terms(profile)
     texts = cv_records.record_texts(profile)
     own: dict[frozenset[str], tuple[str, str]] = {}
     alone: dict[str, list[int]] = {}  # a quote -> the lines it is the ONLY evidence of

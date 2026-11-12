@@ -33,6 +33,7 @@ vi.mock("next/navigation", () => ({
 
 const consumeMagicLinkMock = vi.fn();
 
+vi.mock("@/components/layout/AuthProvider", () => ({ useAuth: () => ({ signedIn: vi.fn() }) }));
 vi.mock("@/lib/api", () => ({
   consumeMagicLink: (...args: unknown[]) => consumeMagicLinkMock(...args),
 }));

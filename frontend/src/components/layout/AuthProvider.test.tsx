@@ -13,6 +13,8 @@ import { render, waitFor, act, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import { ApiError } from "@/lib/api-error";
+import { hardNavigate, hardReload } from "@/lib/navigate";
+import { toast } from "@/lib/toast";
 
 // AuthProvider reads the query cache (to drop one account's data when a
 // different account signs in), so every render needs a QueryClientProvider —
@@ -35,10 +37,11 @@ function renderAuth(children: React.ReactNode = "child") {
 // ---------------------------------------------------------------------------
 
 const mockPush = vi.fn();
+const mockReplace = vi.fn();
 let mockPathname = "/profile";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
   usePathname: () => mockPathname,
 }));
 
@@ -48,7 +51,17 @@ vi.mock("posthog-js", () => ({
 
 // Capture the listener AuthProvider registers + expose an unsubscribe spy.
 let capturedListener: (() => void) | null = null;
+let capturedUnauthorized: (() => void) | null = null;
 const unsubscribeSpy = vi.fn();
+
+// The hard navigation is the one side effect jsdom cannot do; spy on it.
+vi.mock("@/lib/navigate", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/navigate")>()),
+  hardNavigate: vi.fn(),
+  hardReload: vi.fn(),
+}));
+
+vi.mock("@/lib/toast", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   // Keep the REAL AuthUnknownError so instanceof in AuthProvider works.
@@ -59,6 +72,10 @@ vi.mock("@/lib/api", async (importOriginal) => ({
   onEmailNotVerified: (listener: () => void) => {
     capturedListener = listener;
     return unsubscribeSpy;
+  },
+  onUnauthorized: (listener: () => void) => {
+    capturedUnauthorized = listener;
+    return () => {};
   },
 }));
 
@@ -272,5 +289,198 @@ describe("AuthProvider — transient me() failure is not a logout", () => {
       await vi.advanceTimersByTimeAsync(700);
     });
     expect(meMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Point 3 — the app always knows who is signed in (U3, U4, U5 + sign-in entry).
+// ---------------------------------------------------------------------------
+
+describe("AuthProvider — session lifecycle", () => {
+  const USER_A = { id: "user-a", email: "a@example.com" };
+  let ctx: ReturnType<typeof useAuth>;
+  function Grab() {
+    ctx = useAuth();
+    return <span>{`${ctx.status}:${ctx.user?.email ?? "none"}`}</span>;
+  }
+
+  async function meMock() {
+    const { me } = await import("@/lib/api");
+    const m = me as ReturnType<typeof vi.fn>;
+    m.mockReset();
+    return m;
+  }
+
+  beforeEach(() => {
+    capturedUnauthorized = null;
+    mockPathname = "/applications/123";
+    window.history.replaceState(null, "", "/applications/123?tab=cv");
+  });
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+    vi.clearAllMocks();
+  });
+
+  it("U3: a 401 clears the cache and hard-navigates ONCE to the expired login", async () => {
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    testQueryClient.setQueryData(["jobs"], [1]);
+
+    act(() => {
+      capturedUnauthorized!();
+      capturedUnauthorized!();
+    });
+
+    expect(hardNavigate).toHaveBeenCalledTimes(1);
+    expect(hardNavigate).toHaveBeenCalledWith(
+      "/login?reason=expired&next=%2Fapplications%2F123%3Ftab%3Dcv"
+    );
+    expect(testQueryClient.getQueryData(["jobs"])).toBeUndefined();
+    expect(screen.getByText("signedOut:none")).toBeTruthy();
+  });
+
+  it("does not redirect from a public page", async () => {
+    window.history.replaceState(null, "", "/privacy");
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    act(() => capturedUnauthorized!());
+    expect(hardNavigate).not.toHaveBeenCalled();
+  });
+
+  it("S11: a 401 on the signed-in home page reloads into sign-in (no dashboard left behind)", async () => {
+    window.history.replaceState(null, "", "/");
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    act(() => capturedUnauthorized!());
+    expect(hardNavigate).toHaveBeenCalledWith("/login?reason=expired");
+  });
+
+  it("U4: a focus refresh that turns a known user into null redirects the same way", async () => {
+    const m = await meMock();
+    m.mockResolvedValueOnce(USER_A).mockResolvedValueOnce(null);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() =>
+      expect(hardNavigate).toHaveBeenCalledWith(
+        "/login?reason=expired&next=%2Fapplications%2F123%3Ftab%3Dcv"
+      )
+    );
+  });
+
+  it("U5: logout clears everything and hard-navigates to sign in", async () => {
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    testQueryClient.setQueryData(["jobs"], [1]);
+
+    await act(async () => {
+      await ctx.logout();
+    });
+
+    expect(hardNavigate).toHaveBeenCalledWith("/login");
+    expect(testQueryClient.getQueryData(["jobs"])).toBeUndefined();
+    expect(screen.getByText("signedOut:none")).toBeTruthy();
+  });
+
+  it("U5b: a logout the server never confirmed says so and does NOT pretend to sign out", async () => {
+    (await meMock()).mockResolvedValue(USER_A);
+    const { logout } = await import("@/lib/api");
+    (logout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+
+    await act(async () => {
+      await expect(ctx.logout()).resolves.toBeUndefined();
+    });
+
+    // The cookie is HttpOnly: only the server can end the session. Sending the
+    // user to /login here would bounce them straight back in, silently.
+    expect(hardNavigate).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      "We could not sign you out. Check your connection and try again."
+    );
+    expect(screen.getByText("signedIn:a@example.com")).toBeTruthy();
+  });
+
+  it("U5c: a logout answered 401 (session already gone) still lands on sign in", async () => {
+    (await meMock()).mockResolvedValue(USER_A);
+    const { logout } = await import("@/lib/api");
+    (logout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("authentication required"), { status: 401 })
+    );
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    await act(async () => {
+      await ctx.logout();
+    });
+    expect(hardNavigate).toHaveBeenCalledWith("/login");
+  });
+
+  it("a slow /me from BEFORE sign-in cannot sign the new user out", async () => {
+    const m = await meMock();
+    let answer!: (u: null) => void;
+    m.mockReturnValueOnce(new Promise<null>((r) => (answer = r)));
+    renderAuth(<Grab />);
+    act(() => ctx.signedIn(USER_A));
+    await act(async () => {
+      answer(null);
+    });
+    expect(hardNavigate).not.toHaveBeenCalled();
+    expect(screen.getByText("signedIn:a@example.com")).toBeTruthy();
+  });
+
+  it("a signed-in user on /login?next=/login goes to the default page, not a blank card", async () => {
+    mockPathname = "/login";
+    window.history.replaceState(null, "", "/login?next=%2Flogin");
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/needs-you"));
+  });
+
+  it("signedIn(user) sets the user without another /me request", async () => {
+    const m = await meMock();
+    m.mockResolvedValue(null);
+    renderAuth(<Grab />);
+    await screen.findByText("signedOut:none");
+    act(() => ctx.signedIn(USER_A));
+    expect(screen.getByText("signedIn:a@example.com")).toBeTruthy();
+    expect(m).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends a signed-in user on /login to safeNext(next)", async () => {
+    mockPathname = "/login";
+    window.history.replaceState(null, "", "/login?next=%2Fprofile");
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/profile"));
+  });
+
+  it("a private page restored by Back is reloaded, so the gatekeeper decides (S14)", async () => {
+    (await meMock()).mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    });
+    expect(hardReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("a public page restored by Back only re-checks the session", async () => {
+    window.history.replaceState(null, "", "/privacy");
+    const m = await meMock();
+    m.mockResolvedValue(USER_A);
+    renderAuth(<Grab />);
+    await screen.findByText("signedIn:a@example.com");
+    await act(async () => {
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    });
+    await waitFor(() => expect(m).toHaveBeenCalledTimes(2));
+    expect(hardReload).not.toHaveBeenCalled();
   });
 });
