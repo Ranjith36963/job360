@@ -235,6 +235,7 @@ async def _stored_payload(client: Any, app_id: int) -> dict[str, Any]:
 @pytest.mark.parametrize("line", [
     "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Amazon adopted it.",  # B1 2nd sentence
     "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB: Amazon adopted it.",
+    "Lifted relevance by 40% with a RAG pipeline on Bedrock and ChromaDB. Kubernetes is its home.",  # a name ending -s
     "Lifted relevance by 40% as a staff engineer on a RAG pipeline on Bedrock and ChromaDB.",  # B2
     "Oversaw a RAG pipeline on Bedrock and ChromaDB, lifting relevance by 40%.",
     "Lifted relevance by 40% as the person responsible for a RAG pipeline on Bedrock and ChromaDB.",

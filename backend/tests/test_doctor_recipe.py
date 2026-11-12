@@ -77,7 +77,7 @@ def test_apply_batch_and_rules_point_to_second_look():
 
 
 _KINDS = ["Fit and bring", "Still open", "Form answers", "Applied proof", "Email match", "People", "CV review",
-          "Profile writes",
+          "Outreach review", "Profile writes",
           "Facts and rounds", "Lessons"]
 
 
@@ -218,7 +218,7 @@ _POINTER_RECIPES = ("hunt", "research", "apply", "batch", "forms", "reach", "dai
                     "review", "own_browser", "setup", "rules")
 _ROWS_NAMED = {"hunt": {"Fit and bring"}, "research": {"Still open", "Facts and rounds"},
                "apply": {"Applied proof", "Still open", "Form answers", "CV review"}, "batch": {"Applied proof"},
-               "forms": {"Form answers"}, "reach": {"People"}, "daily": {"Email match"},
+               "forms": {"Form answers"}, "reach": {"People", "Outreach review"}, "daily": {"Email match"},
                "feedback": {"Email match", "Lessons"}, "debrief": {"Facts and rounds"},
                "review": {"Facts and rounds", "Lessons"}, "setup": {"Profile writes"}}
 

@@ -424,6 +424,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # Owner 2026-11-07: a one-time code the job site emailed was typed {host, sender_host, received_at, purpose}.
     # Only with assistant_settings.use_email_codes on; checked in services/applications/email_codes.py. Never the code.
     "email_code_used",
+    # Owner 2026-11-09: a fresh reviewer's verdict on one outreach draft {message_id, sha256, confidence, lines,
+    # reviewer}, recorded with contact_id. Job360 VERIFIES it and stores codes and counts on the contact's ledger;
+    # a linked contact's job gets this event too (services/applications/outreach_review.py).
+    "outreach_reviewed",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # S9: process records, kept out of the user's timeline and Activity BY TYPE (never by words).

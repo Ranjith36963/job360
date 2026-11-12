@@ -16,6 +16,7 @@ from src.repositories import pgsync
 from src.services.applications import blockers
 from src.services.profile import assistant_settings as rules
 from src.services.profile.models import AssistantSettings, CVData, UserPreferences, UserProfile
+from tests._outreach_review import seed_strong_review
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
 _AD = {
@@ -90,6 +91,7 @@ async def _messaged_person(client: AsyncClient) -> tuple[int, int]:
     cid = int((await _post(client, f"/api/applications/{app_id}/contacts", body, 201))["contact"]["id"])
     assert (await client.patch(f"/api/contacts/{cid}", json={"linkedin_state": "not_connected"})).status_code == 200
     mid = await _draft(client, app_id, cid, MESSAGE)
+    seed_strong_review(cid)  # owner 2026-11-09: an automatic message needs a strong review of this draft
     await _post(client, f"/api/contacts/{cid}/own-browser-send", {"message_id": mid, "decision": "approve"})
     assert await _take(client, cid) == "task"
     await _post(client, "/api/own-browser/release", {"session": "desk", "task_id": f"contact:{cid}", "reason": "invited"})
@@ -121,6 +123,7 @@ async def test_a_follow_up_is_due_after_six_days_and_never_a_second_time(authent
         follow = await _draft(client, app_id, cid, FOLLOW)
         assert await _follow_up_blockers(fixture_user_id, app_id) == []  # drafted: no longer the assistant's job
         assert cid in await _queued(client)  # due: the drafted follow-up waits on the user's PC
+        seed_strong_review(cid)
         assert await _check(client, cid, follow) == ("stop", "needs_claim")
         assert await _take(client, cid) == "task"
         assert await _check(client, cid, follow) == ("send", "auto_follow_up")  # the approved request carries
@@ -189,6 +192,7 @@ async def test_a_person_with_no_job_shows_the_follow_up_on_their_card(authentica
         assert (await client.patch(f"/api/contacts/{cid}", json={"linkedin_state": "not_connected"})).status_code == 200
         draft = {"entry": "message", "channel": "linkedin", "text": MESSAGE, "draft_kind": "after_connect"}
         mid = int((await _post(client, f"/api/contacts/{cid}/outreach", draft, 201))["outreach"]["id"])
+        seed_strong_review(cid)
         await _post(client, f"/api/contacts/{cid}/own-browser-send", {"message_id": mid, "decision": "approve"})
         assert await _take(client, cid) == "task"
         released = {"session": "desk", "task_id": f"contact:{cid}", "reason": "invited"}
@@ -207,6 +211,7 @@ async def test_a_person_with_no_job_shows_the_follow_up_on_their_card(authentica
         assert await due() is True
         follow = dict(draft, text=FOLLOW)
         fid = int((await _post(client, f"/api/contacts/{cid}/outreach", follow, 201))["outreach"]["id"])
+        seed_strong_review(cid)
         assert await due() is False
         assert await _take(client, cid) == "task"
         assert await _check(client, cid, fid) == ("send", "auto_follow_up")
