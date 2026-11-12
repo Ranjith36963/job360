@@ -376,9 +376,11 @@ test.describe("session ends during a visit", () => {
 
     await page.goto("/");
 
-    // The fix may land on the landing page or on /login; either way the
-    // dashboard (and its "Could not load ..." cards) must not be what the
-    // user is left with. expect() polls, so a slow redirect still passes.
+    // Wait for the positive end state FIRST: the dashboard's own 401 sends the
+    // user to sign in. Only then check nothing private is left. (Asserting
+    // "no dashboard" straight after goto would pass before anything rendered.)
+    await expect(page).toHaveURL(/\/login\?reason=expired$/);
+    await expect(page.getByTestId("session-ended")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Progress dashboard" })).toHaveCount(0);
     await expect(page.getByText(/Could not load/)).toHaveCount(0);
   });
