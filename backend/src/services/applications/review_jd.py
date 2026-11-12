@@ -21,7 +21,9 @@ Skill words (production 2026-11-12, owner: "Python coding and Python language ar
 copied whole ad lines ("Python – Strong knowledge"), so a CV saying "Python" covered nothing. The ad check stays on the
 FULL term; the CV checks (named line, gap claimed), duplicates and the stored gap use :func:`core`, the term cut at a
 spaced dash, "(" or ":" with closed :data:`FILLER` words trimmed at its ends; a core listing several skills ("RAG and
-Vector Databases", "FastAPI / REST API") is in a CV line when ANY of them is (:func:`parts`). An empty core or one of
+Vector Databases", "LoRA / QLoRA") is in a CV line when ALL the skills "and" / "&" / "," join are, for ANY of
+the alternatives "or" / a spaced "/" separate (:func:`groups`; checker: "COBOL and Python" never rides on Python, and
+"PL/SQL" is one skill). An empty core or one of
 more than 4 words is a 422. The judged list is stored as ``terms`` ``[{term: core, must}]`` (the ad's words); a
 re-review of the application must list every earlier must-term again as a must, else ``jd_terms_dropped`` (apps 793,
 150 shrank the list to pass). Ad text but no ``jd`` (or ``[]``) = ``jd_not_judged`` (weak). No ad text =
@@ -47,7 +49,7 @@ FILLER = frozenset((
     "expertise", "skills", "skill", "coding", "programming", "language", "languages", "development", "preferred",
     "required", "ability", "able", "to", "a", "an", "the", "using", "use"))
 _DASHES = frozenset(("-", "–", "—"))
-_JOINS = frozenset(("and", "or", "&", "/"))
+_ALL, _ANY = frozenset(("and", "&")), frozenset(("or", "/"))
 _SENTENCE = "jd[{i}] is a sentence, not one requirement: give the skill's own words from the ad (1-4 words)"
 
 
@@ -75,20 +77,29 @@ def core(term: Any) -> str:
     return " ".join(words)
 
 
-def parts(core_term: str) -> list[str]:
-    """The skills a core lists ("RAG and Vector Databases" -> RAG, Vector Databases): split at and / or / & / "/"
-    and a trailing comma; one skill is itself."""
-    out: list[list[str]] = [[]]
-    for w in core_term.replace("/", " / ").split():
+def groups(core_term: str) -> list[list[str]]:
+    """The alternatives a core names, each the skills it needs ALL of: "or" and a spaced "/" separate alternatives,
+    "and" / "&" / a trailing comma join skills ("Python, Java or Go" -> [[Python, Java], [Go]]). A slash inside a
+    word stays one skill ("PL/SQL", "CI/CD"). Word by word."""
+    alts: list[list[list[str]]] = [[[]]]
+    for w in core_term.split():
         bare = w.rstrip(",;")
-        if bare.casefold() in _JOINS:
-            out.append([])
+        if bare.casefold() in _ANY:
+            alts.append([[]])
+            continue
+        if bare.casefold() in _ALL:
+            alts[-1].append([])
             continue
         if bare:
-            out[-1].append(bare)
+            alts[-1][-1].append(bare)
         if bare != w:
-            out.append([])
-    return [" ".join(p) for p in out if p]
+            alts[-1].append([])
+    out = [[" ".join(p) for p in alt if p] for alt in alts]
+    return [alt for alt in out if alt]
+
+
+def _says(skills: list[list[str]], test: Any) -> bool:
+    return any(all(test(s) for s in alt) for alt in skills)
 
 
 def _words(core_term: str) -> int:
@@ -164,10 +175,10 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, s
             where.setdefault("jd_term_not_in_ad", []).append(i)
             continue
         skill = core(term) or term
-        ad_words, skills = ad.match(skill) or skill, parts(skill) or [skill]
+        ad_words, skills = ad.match(skill) or skill, groups(skill) or [[skill]]
         terms.append({"term": ad_words, "must": bool(item["must"])})
         if not item["have"]:
-            if any(cv.claims(s) for s in skills):
+            if _says(skills, cv.claims):
                 where.setdefault("jd_gap_claimed", []).append(i)
             if ad_words not in gaps:
                 gaps.append(ad_words)
@@ -176,7 +187,7 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, s
         shown = bool(quotes) and all(cv_review.quote_in_profile(q, source, source_words) for q in quotes)
         if not shown:
             where.setdefault("jd_evidence_not_in_profile", []).append(i)
-        named = [n for n in item["n"] if n <= len(lines) and any(Tokens(lines[n - 1]).match(s) for s in skills)]
+        named = [n for n in item["n"] if n <= len(lines) and _says(skills, Tokens(lines[n - 1]).match)]
         if item["n"] and not named:
             where.setdefault("jd_term_not_in_cv", []).append(i)
         if item["must"]:

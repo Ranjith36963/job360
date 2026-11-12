@@ -35,6 +35,9 @@ def test_whole_ad_lines_as_terms_are_covered_by_their_skill_words():
           _item("RAG and Vector Databases", evidence=["RAG"], n=[2]),
           _item("FastAPI / REST API Development", evidence=["FastAPI"], n=[1])]
     where, stored = _judge(jd)
+    # checker 2026-11-12: "and" lists skills that must ALL be in the line; this CV never says vector databases
+    assert (where, stored["must"], stored["covered"]) == ({"jd_term_not_in_cv": [2], "jd_coverage_low": []}, 3, 2)
+    where, stored = _judge(jd, lines=[LINES[0], "- Engineered a RAG pipeline on vector databases."])
     assert (where, stored["must"], stored["covered"]) == ({}, 3, 3)
     assert stored["terms"] == [{"term": "Python", "must": True}, {"term": "RAG and Vector Databases", "must": True},
                                {"term": "FastAPI / REST API", "must": True}]
@@ -44,6 +47,33 @@ def test_whole_ad_lines_as_terms_are_covered_by_their_skill_words():
 def test_python_coding_and_python_language_are_the_same_capability(term):
     where, stored = _judge([_item(term, evidence=["Python"], n=[1])], ad=f"Must have: {term}.")
     assert (where, stored["covered"], stored["terms"]) == ({}, 1, [{"term": "Python", "must": True}])
+
+
+@pytest.mark.parametrize(("term", "line"), [
+    ("PL/SQL", "Skills: SQL"), ("CI/CD", "Used CI for builds"), ("TCP/IP", "uses IP addresses"), ("C/C++", "C"),
+    ("Python and COBOL", "Skills: Python"), ("Python, Java", "Skills: Python"), ("Python & COBOL", "Skills: Python"),
+])
+def test_a_skill_the_cv_lacks_is_never_covered_by_one_it_has(term, line):
+    """Checker 2026-11-12: a slash inside a word names ONE skill (PL/SQL); "and" / "&" / "," list skills that ALL
+    must be in the line, so a missing skill cannot ride on one the CV has ("COBOL and Python")."""
+    where, stored = _judge([_item(term, evidence=["Python"], n=[1])], ad=f"Must have {term} today", lines=[line])
+    assert (where["jd_term_not_in_cv"], stored["covered"]) == ([1], 0)
+
+
+@pytest.mark.parametrize(("term", "line"), [
+    ("Python or COBOL", "Skills: Python"), ("LoRA / QLoRA", "Fine-tuned with LoRA"),
+    ("RAG and Vector Databases", "Built RAG on vector databases"), ("Python, Java", "Python and Java"),
+])
+def test_alternatives_need_one_and_a_list_needs_all(term, line):
+    where, stored = _judge([_item(term, evidence=["Python"], n=[1])], ad=f"Must have {term} today", lines=[line])
+    assert (where, stored["covered"]) == ({}, 1)
+
+
+def test_a_gap_listing_skills_is_claimed_only_when_the_cv_names_all_of_them():
+    where, _ = _judge([_item("Python and COBOL", have=False)], ad="Python and COBOL", lines=["Skills: Python"])
+    assert "jd_gap_claimed" not in where
+    where, _ = _judge([_item("Python and COBOL", have=False)], ad="Python and COBOL", lines=["Python, COBOL"])
+    assert where["jd_gap_claimed"] == [1]
 
 
 def test_java_still_never_matches_javascript():
