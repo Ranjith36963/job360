@@ -336,8 +336,9 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     groups: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
     closed_job: list[dict[str, Any]] = []
     applied_job: list[dict[str, Any]] = []
+    by_id = await _get_asks(db, user_id, [int(r["id"]) for r in rows])  # one read, never one per ask
     for r in rows:
-        ask = await _get_ask(db, user_id, int(r["id"]))
+        ask = by_id.get(int(r["id"]))
         if ask is None:
             continue
         if r["app_status"] in APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
@@ -593,6 +594,16 @@ async def _get_ask(db: JobDatabase, user_id: str, ask_id: int) -> Optional[dict[
     cur = await db._db.execute(_SELECT + "WHERE k.id = ? AND k.user_id = ?", (ask_id, user_id))
     row = await cur.fetchone()
     return _serialize(dict(row)) if row else None
+
+
+async def _get_asks(db: JobDatabase, user_id: str, ask_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """``{ask id: ask}`` as :func:`_get_ask` reads each one, for many ids in ONE query (2026-11-12: the page
+    paid one round trip per open ask). An id that is not this user's is absent. Scoped by ``user_id``."""
+    if not ask_ids:
+        return {}
+    marks = ",".join("?" for _ in ask_ids)
+    cur = await db._db.execute(_SELECT + f"WHERE k.user_id = ? AND k.id IN ({marks})", (user_id, *ask_ids))  # noqa: S608
+    return {int(r["id"]): _serialize(dict(r)) for r in await cur.fetchall()}
 
 
 async def count_open_asks(db: JobDatabase, user_id: str, *, exclude_test: bool = False) -> int:

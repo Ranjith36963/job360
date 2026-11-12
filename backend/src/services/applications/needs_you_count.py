@@ -24,7 +24,7 @@ and people are left out. Nothing is judged by its words: a real "Simulation Engi
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import asks as asks_service
@@ -129,10 +129,11 @@ async def _unsent_contacts(db: JobDatabase, user_id: str) -> tuple[set[int], int
 ACTORS = ("you", "your_pc", "assistant", "job360", "employer")
 
 
-async def jobs_by_first_blocker(db: JobDatabase, user_id: str) -> dict[str, Any]:
+async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[set[int]] = None) -> dict[str, Any]:
     """Every open application counted ONCE, under the actor and kind of its first blocker (``blockers_for``
     orders them, so the first is what waits next): ``by_actor``, ``by_kind``, and for the jobs that wait on the
-    user ``job_ids`` (oldest first blocker first) and ``job_ids_by_kind``. One batch call, no per-job loop."""
+    user ``job_ids`` (oldest first blocker first) and ``job_ids_by_kind``. One batch call, no per-job loop.
+    ``tests``: the caller's own ``test_marker.test_app_ids`` answer (None = read it once, in ``blockers_for``)."""
     from src.services.applications import blockers  # lazy: blockers imports this module
 
     closed = tuple(settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES)
@@ -145,7 +146,7 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str) -> dict[str, Any]
     by_actor = dict.fromkeys(ACTORS, 0)
     by_kind: dict[str, int] = {}
     mine: list[tuple[str, int, str]] = []
-    for app_id, lst in (await blockers.blockers_for(db, user_id, ids)).items():
+    for app_id, lst in (await blockers.blockers_for(db, user_id, ids, tests=tests)).items():
         if not lst:
             continue
         first = lst[0]
@@ -167,7 +168,7 @@ async def needs_you_count(db: JobDatabase, user_id: str) -> dict[str, Any]:
     tests = await test_marker.test_app_ids(db, user_id)
     tied, general = await _open_job_asks(db, user_id, tests)
     _, connections = await _unsent_contacts(db, user_id)
-    first = await jobs_by_first_blocker(db, user_id)
+    first = await jobs_by_first_blocker(db, user_id, tests)
     jobs = first["by_actor"]["you"]
     rows = set(first["job_ids"])
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other

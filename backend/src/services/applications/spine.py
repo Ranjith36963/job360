@@ -2752,18 +2752,35 @@ def _pay_advertised_for(app_row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     return {k: facts[k] for k in ("amount", "evidence", "period", "currency", "min", "max", "equity")}
 
 
-async def _count(db: JobDatabase, table: str, col: str, value: Any) -> int:
-    cur = await db._db.execute(f"SELECT COUNT(*) FROM {table} WHERE {col} = ?", (value,))  # noqa: S608 — table/col are constants
-    row = await cur.fetchone()
-    return int(row[0]) if row else 0
-
-
-async def _artifact_counts_by_kind(db: JobDatabase, application_id: int) -> dict[str, int]:
+async def _event_counts_by_app(db: JobDatabase, app_ids: list[int]) -> dict[int, int]:
+    """``{application_id: how many events}`` for the whole page in ONE grouped read (never one COUNT per row:
+    2026-11-12, 200 rows cost 200 round trips). An application with none is absent: read it as 0."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
     cur = await db._db.execute(
-        "SELECT kind, COUNT(*) FROM application_artifacts WHERE application_id = ? GROUP BY kind",
-        (application_id,),
+        f"SELECT application_id, COUNT(*) FROM application_events WHERE application_id IN ({marks}) "  # noqa: S608
+        "GROUP BY application_id",
+        app_ids,
     )
-    return {r[0]: int(r[1]) for r in await cur.fetchall()}
+    return {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+
+
+async def _artifact_counts_by_app(db: JobDatabase, app_ids: list[int]) -> dict[int, dict[str, int]]:
+    """``{application_id: {kind: count}}`` for the whole page in ONE grouped read. An application with no
+    artifact is absent: read it as ``{}``."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        f"SELECT application_id, kind, COUNT(*) FROM application_artifacts WHERE application_id IN ({marks}) "  # noqa: S608
+        "GROUP BY application_id, kind",
+        app_ids,
+    )
+    out: dict[int, dict[str, int]] = {}
+    for r in await cur.fetchall():
+        out.setdefault(int(r[0]), {})[r[1]] = int(r[2])
+    return out
 
 
 async def _approval_holds(
@@ -3069,12 +3086,14 @@ async def list_applications(
         outreach = await own_browser.queued_outreach(db, user_id, datetime.now(timezone.utc))
         merged = own_browser.merged_order({i: queued_at[i] for i in queue_order}, outreach)
         summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg, browsers, outreach)
+    event_counts = await _event_counts_by_app(db, app_ids)
+    artifact_counts_by_app = await _artifact_counts_by_app(db, app_ids)
     out = []
     for r in rows:
         app_id = r["id"]
         signal = r.get("visa_signal") or "unknown"
         country = r.get("visa_country") or ""
-        artifact_counts = await _artifact_counts_by_kind(db, app_id)
+        artifact_counts = artifact_counts_by_app.get(app_id, {})
         receipts_count = receipt_count_by_app.get(app_id, 0)
         follow_up_on = r.get("follow_up_on")
         follow_up_due = _follow_up_due(follow_up_on, r["status"], today_iso)
@@ -3089,7 +3108,7 @@ async def list_applications(
                 "needs_sponsorship": visa_service.needs_sponsorship(signal, country, countries),
                 **_job_facts_for(r),
                 "priority": job_priority.place_priority(rtw, r.get("job_country"), r.get("job_remote")),
-                "events": await _count(db, "application_events", "application_id", app_id),
+                "events": event_counts.get(app_id, 0),
                 "artifacts": artifact_counts,
                 "receipts": receipts_count,
                 "last_receipt_at": last_receipt_at_by_app.get(app_id),

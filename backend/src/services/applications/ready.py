@@ -163,10 +163,12 @@ async def newest_cv_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) ->
 
 
 async def answer_flags_for(
-    db: JobDatabase, user_id: str, fills: dict[int, dict[str, Any]]
+    db: JobDatabase, user_id: str, fills: dict[int, dict[str, Any]],
+    *, loaded: Optional[tuple[Any, list[dict[str, Any]]]] = None,
 ) -> dict[int, list[dict[str, Any]]]:
     """The card's flags (:func:`_answer_rows`, the SAME reading as the card) for many fills at once, one profile
-    load for all. ``fills``: ``{application_id: {job_country, job_company, filled_at, answers}}``."""
+    load for all. ``fills``: ``{application_id: {job_country, job_company, filled_at, answers}}``. ``loaded`` is
+    the caller's own ``load_profile_with_overlay`` answer for this request (None = read it here)."""
     import asyncio  # noqa: PLC0415
 
     from src.services.profile.models import UserProfile  # noqa: PLC0415
@@ -174,8 +176,8 @@ async def answer_flags_for(
 
     if not fills:
         return {}
-    loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
-    profile = loaded or UserProfile()
+    stored, overlay = loaded if loaded is not None else await asyncio.to_thread(load_profile_with_overlay, user_id)
+    profile = stored or UserProfile()
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
     approvals = await job_approvals_many(db, user_id, list(fills))
     out: dict[int, list[dict[str, Any]]] = {}
