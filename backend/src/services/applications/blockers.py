@@ -19,6 +19,7 @@ time-to-live reads ``Send`` again; the finer fingerprint (changed cover letter, 
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import datetime, timezone
@@ -169,9 +170,12 @@ def _answer_blockers(
 
 async def blockers_for(
     db: JobDatabase, user_id: str, application_ids: list[int], *, now: Optional[datetime] = None,
+    tests: Optional[set[int]] = None,
 ) -> dict[int, list[Blocker]]:
     """``{application_id: ordered blockers}`` for the caller's own applications among ``application_ids``
-    (others are left out of the result). ``[]`` = nothing waits. A fixed number of queries, never one per id."""
+    (others are left out of the result). ``[]`` = nothing waits. A fixed number of queries, never one per id,
+    and at most two profile reads (the score line's, one shared by the rest). ``tests``: the caller's own
+    ``test_marker.test_app_ids`` answer (None = read it here)."""
     started = time.monotonic()
     now = now or datetime.now(timezone.utc)
     wanted = sorted({int(i) for i in application_ids})
@@ -187,7 +191,8 @@ async def blockers_for(
     result: dict[int, list[Blocker]] = {i: [] for i in ids}
     if not ids:
         return result
-    tests = await test_marker.test_app_ids(db, user_id)
+    if tests is None:
+        tests = await test_marker.test_app_ids(db, user_id)
     ids = [i for i in ids if i not in tests and apps[i]["status"] not in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES]
     if ids:
         await _fill(db, user_id, ids, apps, result, now)
@@ -259,10 +264,17 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 "job_country": a.get("job_country"), "job_company": a.get("job_company"),
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
             }
-    flags = await ready.answer_flags_for(db, user_id, fills)
     # Owner 2026-11-09: a strong review of the exact newest CV clears "approve the CV" (cv_auto_approve on).
     unseen = {i: state[i]["cv"] for i in ids if state[i]["cv"] and not state[i]["seen"]}
-    reviewed = await kit.reviews_clearing(db, user_id, unseen)
+    # ONE profile read for the answer flags and the CV-review rule (2026-11-12: each read its own, a fresh
+    # connection each, on the menu badge of every page); none when neither has anything to judge.
+    loaded: Optional[tuple[Any, list[dict[str, Any]]]] = None
+    if fills or unseen:
+        from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
+
+        loaded = await asyncio.to_thread(load_profile_with_overlay, user_id)
+    flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
+    reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded))
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
@@ -345,6 +357,16 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and reason == blocked.ALREADY_APPLIED:
             # The site says the user already applied: only their answer waits ("mark it applied"), nothing else.
             out[:] = [b for b in out if b["kind"] in ("confirm_sent", "site_step")]
+
+
+def _or_empty(loaded: Optional[tuple[Any, list[dict[str, Any]]]]) -> Any:
+    """The profile of a ``load_profile_with_overlay`` answer (an empty one when the user has none); None when
+    nothing was read, so the reader reads it itself."""
+    if loaded is None:
+        return None
+    from src.services.profile.models import UserProfile  # noqa: PLC0415 - profile imports spine
+
+    return loaded[0] or UserProfile()
 
 
 def settings_line_side(score: Optional[int], line: Optional[int]) -> str:

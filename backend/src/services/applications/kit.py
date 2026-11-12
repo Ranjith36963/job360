@@ -287,8 +287,22 @@ def _who(event: dict[str, Any]) -> dict[str, Any]:
 # ── Duplicates ───────────────────────────────────────────────────────────────
 
 
+_RECEIPTS_SQL = (
+    "SELECT r.application_id, r.job_id, r.job_apply_url, r.sent_at, a.status "
+    "FROM application_receipts r LEFT JOIN applications a ON a.id = r.application_id "
+    "WHERE r.user_id = ? ORDER BY r.id DESC LIMIT 1000"
+)
+
+
+async def recent_receipts(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+    """The user's newest 1000 receipts as :func:`duplicate_facts` reads them: one read a whole page can share."""
+    cur = await db._db.execute(_RECEIPTS_SQL, (user_id,))
+    return [dict(x) for x in await cur.fetchall()]
+
+
 async def duplicate_facts(
-    db: JobDatabase, user_id: str, app_row: dict[str, Any], now: datetime, *, include_self: bool = False
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], now: datetime, *, include_self: bool = False,
+    receipts: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """The duplicate picture for one application. ``same_job``: ANOTHER
     application of the user's (never this one) whose receipt has the same job id
@@ -301,17 +315,14 @@ async def duplicate_facts(
     ``same_company_30d``: OTHER
     applications of the user's with an ``applied`` event inside the window at the
     same company (the rule-1 ``normalized_company`` key; blank / ``unknown`` skipped).
-    Flag: same_job beats same_role beats same_company beats ''. Never blocks anything."""
+    Flag: same_job beats same_role beats same_company beats ''. Never blocks anything.
+    ``receipts``: the caller's :func:`recent_receipts` read, shared by a whole page (None = read it here)."""
     application_id = int(app_row["id"])
-    cur = await db._db.execute(
-        "SELECT r.application_id, r.job_id, r.job_apply_url, r.sent_at, a.status "
-        "FROM application_receipts r LEFT JOIN applications a ON a.id = r.application_id "
-        "WHERE r.user_id = ? ORDER BY r.id DESC LIMIT 1000",
-        (user_id,),
-    )
+    if receipts is None:
+        receipts = await recent_receipts(db, user_id)
     mine = norm_url(str(app_row.get("job_url") or ""))
     same_job: Optional[dict[str, Any]] = None
-    for r in (dict(x) for x in await cur.fetchall()):
+    for r in receipts:
         if r["application_id"] == application_id and not include_self:
             continue  # an application is never a duplicate of itself
         hit = r["job_id"] == app_row.get("job_id") or (
@@ -1043,19 +1054,21 @@ async def _gate_cv_review(
 
 async def reviews_clearing(
     db: JobDatabase, user_id: str, cvs: dict[int, dict[str, Any]], *, log: bool = False, auto_only: bool = True,
+    profile: Any = None,
 ) -> dict[int, dict[str, Any]]:
     """THE rule for "a strong review clears this CV" (owner 2026-11-09), shared by the gate's receipt check
     (:func:`cv_cleared_by`), the ``approve_cv`` blocker, the Needs-you card and the batch's due rule. ``cvs`` is
     ``{application_id: {artifact_id, sha}}``; returns ``{application_id: the strong cv_reviewed event}`` for those
     cleared: ``cv_auto_approve`` on in auto mode, the newest stored review of exactly that CV (id + sha) is
     ``strong``, and the CV's save-time checks name no unsupported numbers or terms. Three queries at most,
-    however many applications. ``log`` writes the per-application decision event (decision points only)."""
+    however many applications. ``log`` writes the per-application decision event (decision points only).
+    ``profile``: the caller's profile already read for this request (None = read it here)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     if not cvs:
         return {}
-    cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    cfg = settings_rules.effective((profile or load_profile(user_id) or UserProfile()).assistant_settings)
     # The cards are for auto mode only, as the gate (confirm mode asks every submit, so the user still approves
     # the CV). The gate and the receipt decide the mode themselves and pass ``auto_only=False``.
     # Edge: the gate also resolves a per-job override and a counted auto grant; the cards use the user's own

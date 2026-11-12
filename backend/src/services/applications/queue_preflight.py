@@ -258,6 +258,7 @@ async def preflight_rows(
     cleared = await _cleared(db, user_id, ids)
     waiting = await _open_ask_apps(db, user_id, ids)
     reviews = await cv_review.states_for_apps(db, user_id, ids)
+    receipts = await kit.recent_receipts(db, user_id)  # the same rows for every row: read once, not once per row
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         app_id = int(r["id"])
@@ -266,7 +267,7 @@ async def preflight_rows(
         flags = ready._missing_flags(profile, missing, country)
         app_row = {"id": app_id, "job_id": r.get("job_id"), "job_url": r.get("job_url"),
                    "job_company": r.get("job_company")}
-        dup = await kit.duplicate_facts(db, user_id, app_row, now)
+        dup = await kit.duplicate_facts(db, user_id, app_row, now, receipts=receipts)
         flag = str(dup["flag"] or "")
         if flag == "same_job" and app_id in cleared:
             flag = ""
