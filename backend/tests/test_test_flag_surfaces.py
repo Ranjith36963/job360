@@ -148,6 +148,8 @@ NOT_A_LIST: dict[str, str] = {
     "/api/people/duplicates": "the user's own duplicate marks, for Undo (S11b); a mark they made stays undoable",
     "/api/schedule/problems": "duty runs, no applications",
     "/api/schedule/status": "duty runs, no applications",
+    "/api/applications/cv-work": "the CV task's queue read, queued rows only (the seed queues none); leaves tests "
+                                 "out, pinned by test_cv_work::test_a_test_application_is_never_cv_work",
 }
 
 _PREFIXES = (
