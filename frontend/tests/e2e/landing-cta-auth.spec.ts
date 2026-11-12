@@ -12,9 +12,9 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
  *   2. Returning    → sign in  → /profile
  *   3. Already in   → straight to /profile
  *
- * Hermetic: middleware only checks for the PRESENCE of the job360_session
- * cookie (validity is enforced server-side), and AuthProvider never redirects
- * on a failed /api/auth/me — so we fake the cookie and mock the auth endpoints
+ * Hermetic: in E2E mode the middleware trusts a PRESENT job360_session cookie
+ * (validity is enforced server-side), and a present cookie on /login or
+ * /register sends the visitor on — so we fake the cookie and mock the auth endpoints
  * rather than depending on a live backend (CI runs the frontend only). The real
  * cookie-minting + credential checks are covered by the backend test suite.
  */
@@ -123,25 +123,52 @@ test.describe("Landing CTA → profile journeys", () => {
     await expect(page.getByRole("heading", { name: /job tracker your ai assistant/i })).toHaveCount(0);
   });
 
+  // ── Gatekeeper: a signed-in visitor never sees a sign-in page (point 3, S4) ──
+
+  for (const { from, to } of [
+    { from: "/login?next=%2Fprofile", to: /\/profile$/ },
+    { from: "/register?next=%2Fprofile", to: /\/profile$/ },
+    { from: "/forgot-password", to: /\/needs-you$/ },
+  ]) {
+    test(`a signed-in visitor opening ${from} is sent on, not shown the form`, async ({
+      page,
+      context,
+    }) => {
+      await signedIn(context);
+      await mockAuthedApis(page);
+      await page.goto(from, { timeout: 40_000 });
+      await expect(page).toHaveURL(to);
+    });
+  }
+
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
 
   test("returning user signing in on the gated /login lands on /profile", async ({
     page,
     context,
   }) => {
-    // The server would set this cookie on a successful login; we pre-seed it so
-    // middleware passes when the form pushes to /profile. The assertion under
-    // test is the navigation contract (the form honours ?next), not cookie
-    // minting.
-    await signedIn(context);
+    // Signed OUT until the form is submitted: a signed-in visitor never sees
+    // /login (the middleware sends them on to `next`). The login mock mints the
+    // cookie, as the server would, so the middleware passes when the form pushes
+    // to /profile. Under test: the form honours ?next, not cookie minting.
+    let loggedIn = false;
     await mockAuthedApis(page);
-    await page.route("**/api/auth/login**", (route) =>
+    await page.route("**/api/auth/me**", (route) =>
       route.fulfill({
+        status: loggedIn ? 200 : 401,
+        contentType: "application/json",
+        body: JSON.stringify(loggedIn ? USER : { detail: "authentication required" }),
+      })
+    );
+    await page.route("**/api/auth/login**", async (route) => {
+      loggedIn = true;
+      await signedIn(context);
+      await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(USER),
-      })
-    );
+      });
+    });
 
     await page.goto("/login?next=%2Fprofile");
     // The form defaults to magic-link; switch to the password form FIRST — each
@@ -157,12 +184,15 @@ test.describe("Landing CTA → profile journeys", () => {
 
   // ── Journey 1: new visitor → create account → /profile ────────────────────
 
-  test("new visitor creating an account is sent to sign in", async ({
-    page,
-    context,
-  }) => {
-    await signedIn(context);
-    await mockAuthedApis(page);
+  test("new visitor creating an account is sent to sign in", async ({ page }) => {
+    // A new visitor has no session: register does not sign anyone in (M2).
+    await page.route("**/api/auth/me**", (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "authentication required" }),
+      })
+    );
     await page.route("**/api/auth/register**", (route) =>
       route.fulfill({
         status: 201,

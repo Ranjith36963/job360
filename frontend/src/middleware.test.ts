@@ -7,10 +7,11 @@
  * deliberately unlike a 401 bounce — WITHOUT deleting the cookie (the outage is
  * ours; the session may be perfectly valid once the backend recovers).
  */
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { middleware } from "./middleware";
+import { config, middleware } from "./middleware";
 
 // /profile stands in as "any protected route" here (PROTECTED_PATHS).
 function protectedRequest(): NextRequest {
@@ -189,5 +190,248 @@ describe("middleware — E2E bypass fails closed in production (F2)", () => {
     const res = await middleware(protectedRequest());
     expect(fetchMock).toHaveBeenCalled(); // bypass did NOT short-circuit
     expect(res.status).toBe(307);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auth lifecycle (point 3, PR 2 "the gatekeeper"): causes C4, C5, C7, S17.
+// ---------------------------------------------------------------------------
+
+const COOKIE = { cookie: "job360_session=some-session-value" };
+
+function locationPath(res: Response): string {
+  const loc = new URL(res.headers.get("location")!);
+  return loc.pathname + loc.search;
+}
+
+describe("middleware — expired-session bounce (C7: S7, S12)", () => {
+  beforeEach(() => vi.stubEnv("E2E_TEST_MODE", ""));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("U7: a rejected cookie keeps the query string and says why", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/applications/123?tab=cv", { headers: COOKIE })
+    );
+    expect(res.status).toBe(307);
+    expect(locationPath(res)).toBe(
+      "/login?reason=expired&next=%2Fapplications%2F123%3Ftab%3Dcv"
+    );
+  });
+
+  it("no cookie at all: no reason, just the full return path", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(new NextRequest("http://localhost:3000/profile?tab=cv"));
+    expect(locationPath(res)).toBe("/login?next=%2Fprofile%3Ftab%3Dcv");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("middleware — verify fetch timeout (S17)", () => {
+  beforeEach(() => vi.stubEnv("E2E_TEST_MODE", ""));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("aborts the /api/auth/me call after 5 s and takes the service-unavailable path", async () => {
+    const timedOut = new AbortController();
+    timedOut.abort(new DOMException("timed out", "TimeoutError"));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timedOut.signal);
+    // A backend that never answers: the fetch only settles when its signal aborts.
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            // No signal means it would hang forever (the bug); fail fast instead.
+            reject(new Error("verify fetch has no abort signal"));
+            return;
+          }
+          if (signal.aborted) reject(signal.reason);
+          signal.addEventListener("abort", () => reject(signal.reason));
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/profile", { headers: COOKIE })
+    );
+    expect(timeoutSpy).toHaveBeenCalledWith(5000);
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(timedOut.signal);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/login");
+    expect(loc.searchParams.get("error")).toBe("service_unavailable");
+    expect(res.headers.get("set-cookie") ?? "").not.toMatch(/job360_session=;/);
+  });
+});
+
+describe("middleware — auth pages for a signed-in user (C4: S4)", () => {
+  beforeEach(() => vi.stubEnv("E2E_TEST_MODE", ""));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("U6: the matcher now runs on /login, /register, /forgot-password and /", () => {
+    for (const url of ["/login", "/login?next=%2Fprofile", "/register", "/forgot-password", "/"]) {
+      expect(unstable_doesMiddlewareMatch({ config, url }), url).toBe(true);
+    }
+    for (const url of ["/api/auth/me", "/_next/static/chunk.js", "/favicon.ico"]) {
+      expect(unstable_doesMiddlewareMatch({ config, url }), url).toBe(false);
+    }
+  });
+
+  it("U6: a verified cookie on /login?next=/profile goes to /profile", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/login?next=%2Fprofile", { headers: COOKIE })
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).origin).toBe("http://localhost:3000");
+    expect(locationPath(res)).toBe("/profile");
+  });
+
+  it.each(["/register", "/forgot-password"])(
+    "a verified cookie on %s goes to the default /needs-you",
+    async (path) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+      const res = await middleware(new NextRequest(`http://localhost:3000${path}`, { headers: COOKIE }));
+      expect(res.status).toBe(307);
+      expect(locationPath(res)).toBe("/needs-you");
+    }
+  );
+
+  it.each([
+    "https://evil.example",
+    "//evil.example",
+    "/\\evil.example",
+    // Dot segments: the URL parser folds these to "//evil.example", which the
+    // browser reads as another site once Next makes the Location relative.
+    "/..//evil.example",
+    "/.//evil.example",
+    "/x/..//evil.example",
+    "/%2e%2e//evil.example",
+  ])(
+    "open-redirect safe: next=%s from a signed-in /login lands on /needs-you",
+    async (next) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+      const res = await middleware(
+        new NextRequest(`http://localhost:3000/login?next=${encodeURIComponent(next)}`, {
+          headers: COOKIE,
+        })
+      );
+      expect(res.status).toBe(307);
+      const loc = new URL(res.headers.get("location")!);
+      expect(loc.origin).toBe("http://localhost:3000");
+      expect(loc.pathname + loc.search).toBe("/needs-you");
+    }
+  );
+
+  it.each(["/login", "/register?x=1", "/forgot-password"])(
+    "no redirect loop: next=%s from a signed-in /login lands on /needs-you",
+    async (next) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+      const res = await middleware(
+        new NextRequest(`http://localhost:3000/login?next=${encodeURIComponent(next)}`, {
+          headers: COOKIE,
+        })
+      );
+      expect(res.status).toBe(307);
+      expect(locationPath(res)).toBe("/needs-you");
+    }
+  );
+
+  it("a rejected cookie on /login: delete it and show the page", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    const res = await middleware(new NextRequest("http://localhost:3000/login", { headers: COOKIE }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie") ?? "").toMatch(/job360_session=;/);
+  });
+
+  it("an outage on /login: show the page, keep the cookie, no redirect loop", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+    const res = await middleware(new NextRequest("http://localhost:3000/login", { headers: COOKIE }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie") ?? "").not.toMatch(/job360_session=;/);
+  });
+
+  it("no cookie on /login: show the page without calling the backend", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(new NextRequest("http://localhost:3000/login?next=%2Fprofile"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("E2E bypass: a present cookie on /login is trusted like the protected branch", async () => {
+    vi.stubEnv("E2E_TEST_MODE", "1");
+    vi.stubEnv("RAILWAY_ENVIRONMENT", "");
+    vi.stubEnv("APP_ENV", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/login?next=%2Fprofile", { headers: COOKIE })
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(307);
+    expect(locationPath(res)).toBe("/profile");
+  });
+});
+
+describe("middleware — '/' with a dead cookie (C5: S11)", () => {
+  beforeEach(() => vi.stubEnv("E2E_TEST_MODE", ""));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("a rejected cookie: delete it and hide it from the page so the landing renders", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/", { headers: { cookie: "job360_session=dead; ph=1" } })
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie") ?? "").toMatch(/job360_session=;/);
+    // app/page.tsx reads cookies() from the forwarded request headers: the
+    // session must be gone there too, or "/" still renders the dashboard.
+    expect(res.headers.get("x-middleware-override-headers")).not.toBeNull();
+    expect(res.headers.get("x-middleware-request-cookie")).toBe("ph=1");
+  });
+
+  it("a valid cookie: unchanged, the dashboard keeps its cookie", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+    const res = await middleware(new NextRequest("http://localhost:3000/", { headers: COOKIE }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(res.headers.get("x-middleware-override-headers")).toBeNull();
+  });
+
+  it("an outage: '/' stays public, no redirect, cookie kept", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+    const res = await middleware(new NextRequest("http://localhost:3000/", { headers: COOKIE }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("no cookie: no backend call, no added latency", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(new NextRequest("http://localhost:3000/"));
+    expect(res.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
