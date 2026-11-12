@@ -190,8 +190,18 @@ async def needs_you_count(
     mark("asks")
     _, connections = await _unsent_contacts(db, user_id)
     mark("contacts")
-    first = await jobs_by_first_blocker(db, user_id, tests)
+    # The blockers step also reports its own parts (``b_<part>``), so a slow one can be named.
+    from src.services.applications import blockers  # noqa: PLC0415 - lazy: blockers imports this module
+
+    parts: dict[str, float] = {}
+    token = blockers.SUBSTEPS.set(parts if timings is not None else None)
+    try:
+        first = await jobs_by_first_blocker(db, user_id, tests)
+    finally:
+        blockers.SUBSTEPS.reset(token)
     mark("blockers")
+    if timings is not None:
+        timings.update({f"b_{part}": ms for part, ms in parts.items()})
     jobs = first["by_actor"]["you"]
     rows = set(first["job_ids"])
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other
