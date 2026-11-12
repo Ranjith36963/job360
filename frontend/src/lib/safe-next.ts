@@ -12,9 +12,20 @@
  * browser and Next's router use) treats "\" as "/" for http(s) and strips
  * tab/CR/LF BEFORE parsing, so "/\evil.com" and "/\t/evil.com" both resolve
  * to https://evil.com/ — a leading-slash check alone is not enough.
+ *
+ * Dot segments are the third trap: "/..//evil.com" starts with one slash, but
+ * the parser folds it to "//evil.com", which a browser reads as another site.
+ * So the path is also resolved the way the browser will, and must still be a
+ * single-slash path afterwards.
  */
 function isSafePath(p: string | null | undefined): p is string {
-  return !!p && p.startsWith("/") && !p.startsWith("//") && !/[\\\t\n\r]/.test(p);
+  if (!p || !p.startsWith("/") || p.startsWith("//") || /[\\\t\n\r]/.test(p)) return false;
+  try {
+    const resolved = new URL(p, "http://job360.invalid");
+    return resolved.host === "job360.invalid" && !resolved.pathname.startsWith("//");
+  } catch {
+    return false;
+  }
 }
 
 /**
