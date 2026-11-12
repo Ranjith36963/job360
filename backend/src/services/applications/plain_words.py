@@ -38,7 +38,7 @@ MCP_TOOL_NAMES = frozenset({
     "whats_new", "export_history", "add_contact", "update_contact", "list_people", "update_job",
     "update_profile", "check_submit", "check_outreach", "check_auto_email", "report_missing_tool",
     "report_capabilities", "get_application_kit", "check_form", "get_proof_upload_link", "get_recipe",
-    "ask_user", "answer_ask",
+    "ask_user", "answer_ask", "cv_work",
 })
 _NUMBERED = frozenset({"artifact", "artifacts", "event", "events"})
 

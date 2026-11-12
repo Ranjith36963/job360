@@ -316,3 +316,25 @@ async def test_size_cv_work_is_a_small_fraction_of_the_three_reads_it_replaces(
         assert new < 60_000, new
         assert new * 4 < replaced, (new, old_list, old_profile, old_apps)
         assert all(i in ids for i in [x["application_id"] for x in mine["items"]])
+
+
+async def test_a_test_application_is_never_cv_work(authenticated_async_context, fixture_user_id):
+    """Owner 2026-10-29: a test application stays off every list. cv_work replaced list_applications(queued=true)
+    for the CV task, which leaves tests out; open_queue does not, so cv_work must (CI #1556 surfaces check)."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        assert (await client.patch("/api/profile", json={"edits": [
+            {"path": "assistant_settings.cv_auto_approve", "value": False}]})).status_code == 200
+        real = await _job(client, "real", cv=None)
+        body = {"title": "Data Engineer t", "company": "Testco", "location": "London", "country": "GB",
+                "remote": False, "apply_url": "https://careers.example/t", "description": AD, "test": True}
+        brought = await client.post("/api/jobs/bring", json=body)
+        assert brought.status_code == 200, brought.text
+        test_id = int(brought.json()["application_id"])
+        await _save_cv(client, test_id, CV)  # a CV waiting on approval: the path that reads open_queue
+        assert (await _event(client, test_id, "queued", {})).status_code == 201
+        out = await _cv_work(client)
+        ids = [i["application_id"] for i in out["items"]]
+        assert real in ids
+        assert test_id not in ids
+        assert out["total_needing_work"] == 1
