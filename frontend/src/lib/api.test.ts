@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getHealth, onEmailNotVerified, submittedBlocked } from "./api";
+import { getHealth, login, onEmailNotVerified, onUnauthorized, submittedBlocked } from "./api";
 import { ApiError } from "./api-error";
 
 function mock403(body: unknown) {
@@ -133,5 +133,36 @@ describe("submittedBlocked (\"I submitted it\")", () => {
     expect(url).toMatch(/\/api\/applications\/7\/blocked\/submitted$/);
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ confirmation: "APP-48213" }));
+  });
+});
+
+describe("request() — a 401 tells the app the session ended (point 3)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stub401() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ detail: "authentication required" }), { status: 401 }))
+    );
+  }
+
+  it("emits on a 401 from an app route, and not on a 403", async () => {
+    const ended = vi.fn();
+    const unsubscribe = onUnauthorized(ended);
+    stub401();
+    await getHealth().catch(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => mock403({ detail: "forbidden" })));
+    await getHealth().catch(() => {});
+    unsubscribe();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT emit for an /api/auth/ route (a wrong password is not an expiry)", async () => {
+    const ended = vi.fn();
+    const unsubscribe = onUnauthorized(ended);
+    stub401();
+    await login("a@example.com", "wrong-password").catch(() => {});
+    unsubscribe();
+    expect(ended).not.toHaveBeenCalled();
   });
 });

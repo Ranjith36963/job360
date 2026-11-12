@@ -52,8 +52,9 @@ export class ApiError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 
+  /** Not signed in (401). A 403 is a signed-in user who may not do this. */
   get isUnauthorized() {
-    return this.status === 401 || this.status === 403;
+    return this.status === 401;
   }
 
   /**
@@ -104,10 +105,13 @@ export function apiErrorMessage(
  */
 export function friendlyAuthError(
   err: unknown,
-  fallback = "Something went wrong. Please try again."
+  fallback = "Something went wrong. Please try again.",
+  { login = false }: { login?: boolean } = {}
 ): string {
   if (err instanceof ApiError) {
-    if (err.status === 401 || err.status === 403) {
+    // Only the password login's 401 means wrong credentials; elsewhere a 401
+    // or 403 has its own reason (expired link, unverified email).
+    if (login && err.status === 401) {
       return "Incorrect email or password.";
     }
     if (err.status === 409) {

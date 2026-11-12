@@ -21,6 +21,7 @@ import { consumeMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
 import { useScrubbedUrlParams } from "@/lib/useScrubbedUrlParams";
 import { safeNext } from "@/lib/safe-next";
+import { useAuth } from "@/components/layout/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -28,6 +29,7 @@ type State = "confirm" | "submitting" | "error";
 
 function MagicBody() {
   const router = useRouter();
+  const { signedIn } = useAuth();
   // Read once, then the token and next leave the address bar (analytics/Sentry).
   const params = useScrubbedUrlParams(["token", "next"]);
   const token = params.token ?? "";
@@ -42,7 +44,8 @@ function MagicBody() {
   async function signIn() {
     setState("submitting");
     try {
-      await consumeMagicLink(token);
+      // Tell the app who signed in BEFORE leaving, or the shell stays signed out.
+      signedIn(await consumeMagicLink(token));
       router.replace(safeNext(next));
     } catch (err) {
       setState("error");

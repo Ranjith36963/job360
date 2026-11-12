@@ -57,6 +57,24 @@ function emitEmailNotVerified(): void {
   for (const listener of emailNotVerifiedListeners) listener();
 }
 
+// Session-ended notifier (point 3): same shape. Any 401 from an app route
+// means the session is gone; ONE handler (AuthProvider) clears the page and
+// sends the user to sign in. /api/auth/* 401s (a wrong password, /me while
+// signed out) are answers, not an ended session, so they never emit.
+const unauthorizedListeners = new Set<() => void>();
+
+/** Subscribe to "the session ended" (an app route answered 401). Returns an unsubscribe fn. */
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
+
+export function emitUnauthorized(): void {
+  for (const listener of unauthorizedListeners) listener();
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -105,6 +123,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // throw the typed error so foreground callers can catch it too.
     if (err.isEmailNotVerified) {
       emitEmailNotVerified();
+    }
+    if (res.status === 401 && !path.startsWith("/api/auth/")) {
+      emitUnauthorized();
     }
 
     throw err;

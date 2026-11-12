@@ -11,6 +11,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api-types";
+import { emitUnauthorized } from "./api";
 
 type ChangesOut = components["schemas"]["ChangesOut"];
 export type ChangeArea = keyof ChangesOut["areas"];
@@ -125,7 +126,10 @@ export function startLiveChanges(fetchImpl: typeof fetch = (...a) => fetch(...a)
         headers: cursor ? { "If-None-Match": `"${cursor}"` } : {},
       });
       if (stopped) return;
-      if (res.status === 401) return stop();
+      if (res.status === 401) {
+        stop();
+        return emitUnauthorized(); // the session ended: the AuthProvider takes over
+      }
       if (res.status === 304) {
         failures = 0;
         setActivity({ offline: false });
