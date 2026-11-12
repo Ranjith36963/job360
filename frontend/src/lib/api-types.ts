@@ -6239,8 +6239,8 @@ export interface components {
         CvWorkOut: {
             /** Items */
             items: components["schemas"]["CvWorkItemOut"][];
-            /** Next Offset */
-            next_offset?: number | null;
+            /** Next After */
+            next_after?: number | null;
             /** Profile */
             profile?: {
                 [key: string]: unknown;
@@ -11752,7 +11752,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description cursor: the last application_id of the previous page */
+                after?: number | null;
                 include_profile?: boolean;
             };
             header?: {

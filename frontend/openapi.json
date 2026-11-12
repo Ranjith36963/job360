@@ -6121,7 +6121,7 @@
             "title": "Items",
             "type": "array"
           },
-          "next_offset": {
+          "next_after": {
             "anyOf": [
               {
                 "type": "integer"
@@ -6130,7 +6130,7 @@
                 "type": "null"
               }
             ],
-            "title": "Next Offset"
+            "title": "Next After"
           },
           "profile": {
             "anyOf": [
@@ -20665,14 +20665,22 @@
             }
           },
           {
+            "description": "cursor: the last application_id of the previous page",
             "in": "query",
-            "name": "offset",
+            "name": "after",
             "required": false,
             "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "cursor: the last application_id of the previous page",
+              "title": "After"
             }
           },
           {

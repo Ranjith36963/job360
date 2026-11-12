@@ -24,6 +24,8 @@ _BROWSER_RANK = {"job360": 0, "own_browser": 1}
 _PROFILE_PATHS = ("cv_data.name", "cv_data.headline", "cv_data.location", "cv_data.summary", "cv_data.skills",
                   "cv_data.education", "cv_data.certifications", "cv_data.cv_positions", "cv_data.cv_projects",
                   "cv_data.links", "user_info.contact")
+_CONTACT_KEYS = ("email", "phone", "linkedin_url", "address_city", "address_country")
+# (the closed contact schema has no github or website key)
 _ITEM_COLUMNS = ("id, job_title, job_company, job_country, job_description_snapshot, fit_recorded_at, "
                  "fit_jd_requirements")
 
@@ -39,6 +41,7 @@ def compact_profile(user_id: str) -> Optional[dict[str, Any]]:
     values = profile_edits.field_values(profile, _PROFILE_PATHS)
     out = {path.split(".", 1)[1]: v for path, v in values.items() if v not in ("", None, [], {})}
     contact = out.pop("contact", None)
+    contact = {k: contact[k] for k in _CONTACT_KEYS if isinstance(contact, dict) and contact.get(k)}  # no DOB, street
     return {**out, **({"contact": contact} if contact else {})}
 
 
@@ -51,7 +54,9 @@ async def _needing_work(db: JobDatabase, user_id: str, queue_order: list[int]) -
     if not queue_order:
         return []
     no_cv = {int(r["id"]) for r in await queue_preflight.cv_rows(db, user_id)} & set(queue_order)
-    have_cv = [i for i in queue_order if i not in no_cv]
+    skip = await queue_preflight.cv_skip_ids(db, user_id, queue_order)
+    no_cv -= skip
+    have_cv = [i for i in queue_order if i not in no_cv and i not in skip]
     states = await cv_review.states_for_apps(db, user_id, have_cv)
     candidates = [i for i in have_cv if states.get(i) != cv_review.STRONG]
     waiting = await blockers_service.blockers_for(db, user_id, candidates)
@@ -61,27 +66,34 @@ async def _needing_work(db: JobDatabase, user_id: str, queue_order: list[int]) -
 
 
 async def cv_work(
-    db: JobDatabase, user_id: str, *, limit: int = LIMIT_DEFAULT, offset: int = 0, include_profile: bool = True,
+    db: JobDatabase, user_id: str, *, limit: int = LIMIT_DEFAULT, after: Optional[int] = None,
+    include_profile: bool = True,
 ) -> dict[str, Any]:
-    """The next ``limit`` queued applications needing CV work from ``offset``; see the module docstring."""
+    """The next ``limit`` queued applications needing CV work after the cursor ``after`` (an application id);
+    see the module docstring."""
     from src.services.applications import queue_preflight  # noqa: PLC0415
     from src.services.applications.fit_record import fit_view  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
 
     if not 1 <= int(limit) <= LIMIT_MAX:
         raise spine.SpineError(422, f"limit must be between 1 and {LIMIT_MAX}")
-    if int(offset) < 0:
-        raise spine.SpineError(422, "offset must be 0 or more")
     queue_order, _queued_at = await spine.open_queue(db, user_id, load_profile(user_id))
     position = {app_id: n for n, app_id in enumerate(queue_order, start=1)}
     ids = await _needing_work(db, user_id, queue_order)
-    browsers = await queue_preflight.queue_browsers(db, user_id, ids)
+    cursor = after if after is not None and after in position else None
+    browsers = await queue_preflight.queue_browsers(db, user_id, ids + ([cursor] if cursor is not None else []))
 
     def kind(app_id: int) -> str:
         return str(browsers.get(app_id, {}).get("kind") or "")
 
-    ids.sort(key=lambda i: (_BROWSER_RANK.get(kind(i), 2), position[i]))
-    page = ids[offset:offset + limit]
+    def sort_key(i: int) -> tuple[int, int]:
+        return _BROWSER_RANK.get(kind(i), 2), position[i]
+
+    ids.sort(key=sort_key)
+    # The cursor is the last id the caller saw: continue with what sorts AFTER it NOW (that row may have left
+    # the list since). A cursor that is no longer queued has no place to sort: start over, never skip a row.
+    start = sum(1 for i in ids if cursor is not None and sort_key(i) <= sort_key(cursor))
+    page = ids[start:start + limit]
     rows: dict[int, dict[str, Any]] = {}
     if page:
         cur = await db._db.execute(
@@ -114,13 +126,13 @@ async def cv_work(
             "review": view.get("review"),
             "cv_saved_at": str(saved[app_id]) if app_id in saved else None,
         })
-    nxt = offset + limit
     out: dict[str, Any] = {
-        "items": items, "total_needing_work": len(ids), "next_offset": nxt if nxt < len(ids) else None,
+        "items": items, "total_needing_work": len(ids),
+        "next_after": page[-1] if page and start + limit < len(ids) else None,
     }
     if include_profile:
         out["profile"] = compact_profile(user_id)
     get_audit_logger().info(
         "cv_work", extra={"event": "cv_work", "user_id": safe_log_value(user_id), "queued": len(queue_order),
-                          "needing": len(ids), "returned": len(items), "offset": offset, "result": "ok"})
+                          "needing": len(ids), "returned": len(items), "after": after, "result": "ok"})
     return out

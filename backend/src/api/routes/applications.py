@@ -952,7 +952,7 @@ class CvWorkOut(BaseModel):
 
     items: list[CvWorkItemOut]
     total_needing_work: int
-    next_offset: Optional[int] = None
+    next_after: Optional[int] = None
     profile: Optional[dict[str, Any]] = None
 
 
@@ -2658,7 +2658,7 @@ async def get_job(
             dependencies=AUTH_FIRST)
 async def cv_work(
     limit: int = Query(10, ge=1, le=20),
-    offset: int = Query(0, ge=0),
+    after: Optional[int] = Query(None, ge=1, description="cursor: the last application_id of the previous page"),
     include_profile: bool = Query(True),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
@@ -2668,7 +2668,7 @@ async def cv_work(
 
     try:
         return await cv_work_service.cv_work(
-            db, user.id, limit=limit, offset=offset, include_profile=include_profile)
+            db, user.id, limit=limit, after=after, include_profile=include_profile)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

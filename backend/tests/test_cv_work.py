@@ -1,7 +1,7 @@
 """cv_work: the lean queue read for the scheduled CV write-and-review task (production 2026-11-10/11).
 
 Each run read list_applications(queued=true) in 3 pages (~310 KB), get_profile(full, raw) and one 30-130 KB
-get_application per job before writing anything, so it cleared 2-5 CVs. ``cv_work(limit, offset, include_profile)``
+get_application per job before writing anything, so it cleared 2-5 CVs. ``cv_work(limit, after, include_profile)``
 returns, SERVER-SIDE selected, the next queued rows that need CV work (waiting on the user's CV approval, the
 newest CV's review not strong, tries left; or no CV yet), each with its capped ad and exactly the
 ``view="review"`` block, plus ONE compact profile. Real doors (HTTP + MCP), values asserted (rule #21).
@@ -117,7 +117,7 @@ async def test_items_are_exactly_the_queued_rows_needing_cv_work_in_the_cv_tasks
         ids = [i["application_id"] for i in got["items"]]
         # Job360-browser rows first, then own-browser, then queue position (first queued first)
         assert ids == [first, weak, no_cv, own], (ids, {"first": first, "weak": weak, "no_cv": no_cv, "own": own})
-        assert got["total_needing_work"] == 4 and got["next_offset"] is None
+        assert got["total_needing_work"] == 4 and got["next_after"] is None
         assert not {strong, spent, not_queued, theirs} & set(ids)
         assert [i["browser"] for i in got["items"]] == ["job360", "job360", "job360", "own_browser"]
         for item in got["items"]:
@@ -188,21 +188,77 @@ async def test_include_profile_false_omits_it_and_the_profile_is_compact_and_raw
 
 
 @pytest.mark.asyncio
-async def test_paging_limit_bounds_and_next_offset(authenticated_async_context, fixture_user_id):
+async def test_paging_uses_a_cursor_and_limit_bounds(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         made = [await _job(client, f"p{i}", cv=CV + "\n" * i) for i in range(5)]
         page1 = await _cv_work(client, limit=2, include_profile=False)
         assert [i["application_id"] for i in page1["items"]] == made[:2]
-        assert (page1["total_needing_work"], page1["next_offset"]) == (5, 2)
-        page3 = await _cv_work(client, limit=2, offset=4, include_profile=False)
-        assert [i["application_id"] for i in page3["items"]] == made[4:] and page3["next_offset"] is None
+        assert (page1["total_needing_work"], page1["next_after"]) == (5, made[1])
+        page3 = await _cv_work(client, limit=2, after=made[3], include_profile=False)
+        assert [i["application_id"] for i in page3["items"]] == made[4:] and page3["next_after"] is None
         for bad in (0, 21, -1):
             assert (await client.get("/api/applications/cv-work", params={"limit": bad})).status_code == 422
-        assert (await client.get("/api/applications/cv-work", params={"offset": -1})).status_code == 422
         for bad in (0, 21):  # the MCP tool calls the route function: the same bound holds there
             with pytest.raises(Exception, match="limit"):
                 await _tool_call(fixture_user_id, limit=bad)
+
+
+@pytest.mark.asyncio
+async def test_a_cursor_survives_rows_turning_strong_between_pages(authenticated_async_context, fixture_user_id):
+    """D1: with an offset, rows 1-2 turning strong made offset=2 skip rows 3-4."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        assert (await client.patch("/api/profile", json={"edits": [
+            {"path": "assistant_settings.cv_auto_approve", "value": False}]})).status_code == 200
+        text = lambda i: CV + "\n" * i  # noqa: E731
+        made = [await _job(client, f"c{i}", cv=text(i + 1)) for i in range(4)]
+        page1 = await _cv_work(client, limit=2, include_profile=False)
+        assert [i["application_id"] for i in page1["items"]] == made[:2] and page1["next_after"] == made[1]
+        for n, item in enumerate(page1["items"], start=1):
+            await _stored(client, item["application_id"], _review(item["review"]["artifact_id"], text(n)))
+        page2 = await _cv_work(client, limit=2, after=page1["next_after"], include_profile=False)
+        assert [i["application_id"] for i in page2["items"]] == made[2:] and page2["next_after"] is None
+        # the cursor row itself is gone from the list: continue from where it would sort
+        gone = await _cv_work(client, limit=2, after=made[0], include_profile=False)
+        assert [i["application_id"] for i in gone["items"]] == made[2:]
+
+
+@pytest.mark.asyncio
+async def test_a_closed_posting_or_a_live_hold_excludes_a_row_whatever_its_cv(
+    authenticated_async_context, fixture_user_id
+):
+    """D2: cv_rows skips these for no-CV rows; a weak/unreviewed-CV row ignored them."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        weak = await _job(client, "closedweak", cv=CV + "\n\n")
+        no_cv = await _job(client, "closednocv", cv=None)
+        open_row = await _job(client, "open", cv=CV + "\n\n\n")
+        for app_id in (weak, no_cv):
+            resp = await _event(client, app_id, "blocked", {"reason": "posting_closed", "evidence": "http_404"})
+            assert resp.status_code == 201, resp.text
+        got = await _cv_work(client, include_profile=False)
+        assert [i["application_id"] for i in got["items"]] == [open_row] and got["total_needing_work"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_profile_contact_carries_only_what_a_cv_contact_line_needs(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        contact = {"email": "ada@example.com", "phone": "+44 7700 900123", "linkedin_url": "https://linkedin.com/in/ada",
+                   "address_city": "London", "address_country": "GB", "date_of_birth": "1815-12-10",
+                   "address_lines": ["1 Secret Street"], "address_postcode": "N1 1AA", "residence_country": "GB",
+                   "legal_first_name": "Augusta", "legal_last_name": "King"}
+        assert (await client.patch("/api/profile", json={"edits": [
+            {"path": "user_info.contact", "value": contact}]})).status_code == 200
+        await _job(client, "contact")
+        got = (await _cv_work(client))["profile"]["contact"]
+        assert got == {"email": "ada@example.com", "phone": "+44 7700 900123",
+                       "linkedin_url": "https://linkedin.com/in/ada", "address_city": "London",
+                       "address_country": "GB"}
+        assert "1815" not in json.dumps(got) and "Secret Street" not in json.dumps(got)
 
 
 @pytest.mark.asyncio
@@ -226,7 +282,7 @@ async def test_a_stranger_sees_nothing_and_a_new_user_gets_an_empty_page(authent
     cookie = await _second_user_session_cookie("cv-work-stranger@example.com")
     async with _session_client(cookie) as stranger:
         got = await _cv_work(stranger)
-        assert got["items"] == [] and got["total_needing_work"] == 0 and got["next_offset"] is None
+        assert got["items"] == [] and got["total_needing_work"] == 0 and got["next_after"] is None
 
 
 async def _seed_many(client: Any, user_id: str, n: int, *, events: int, ad_chars: int, queued: bool = True) -> list[int]:
@@ -251,7 +307,7 @@ async def test_size_cv_work_is_a_small_fraction_of_the_three_reads_it_replaces(
         old_list = len(json.dumps(queue))
         old_profile = len(json.dumps((await client.get("/api/profile")).json()))
         mine = (await _cv_work(client, limit=10))
-        assert len(mine["items"]) == 10 and mine["total_needing_work"] == 50 and mine["next_offset"] == 10
+        assert len(mine["items"]) == 10 and mine["total_needing_work"] == 50 and mine["next_after"] == mine["items"][-1]["application_id"]
         old_apps = 0
         for x in mine["items"]:
             old_apps += len(json.dumps((await client.get(f"/api/applications/{x['application_id']}")).json()))
