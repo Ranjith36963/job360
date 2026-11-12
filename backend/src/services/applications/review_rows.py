@@ -32,7 +32,7 @@ ROLE_FAMILIES = tuple(frozenset(f.split()) for f in (
     "owned owner owners owns ownership", "head heads headed", "directed director directors directs",
     "supervised supervises supervising supervisor supervisors", "spearheaded spearheads spearheading",
     "chair chairs chaired chairing chairman chairperson", "hired hires hiring", "promoted promotion",
-    "principal", "senior", "chief", "architect architects architected architecting", "staff", "vp", "president",
+    "principal", "senior sr snr", "chief", "architect architects architected architecting", "staff", "vp", "president",
     "cto", "ceo", "coo", "cfo", "oversaw oversee oversees overseeing", "leadership", "managerial", "charge",
     "responsible",
 ))
@@ -53,7 +53,7 @@ fortnight january february march april june july august september october novemb
 """.split())  # lowercase "may" is left out: it is far more often the verb
 _OUTER = ".,;:!?()[]{}\"'‘’“”"
 # Closed: ad-title words a headline may NOT borrow from the ad (rules 7): the profile must hold them itself.
-SENIORITY_WORDS = frozenset("senior lead principal staff head manager director chief vp".split())
+SENIORITY_WORDS = frozenset("senior sr snr lead principal staff head manager director chief vp".split())
 
 
 def _at(where: dict[str, list[Any]], code: str, n: int) -> None:
@@ -193,10 +193,11 @@ def profile_terms(profile: Any) -> tuple[set[str], frozenset[str], set[str]]:
 
 
 def _title_bank(job_title: str) -> str:
-    """The ad's title words a headline may use (rules 7): never a :data:`SENIORITY_WORDS` word, a number word or a
-    word with a digit ("Senior", "III" aside, "2")."""
+    """The ad's title words a headline may use (rules 7): never a :data:`SENIORITY_WORDS` or :data:`ROLE_FAMILIES`
+    word ("Sr", "Leader", "Founding"), a number word or a word with a digit ("III" aside, "2")."""
+    never = SENIORITY_WORDS | _ROLE_WORDS.keys() | NUMBER_WORDS | {"i", "ii", "iii", "iv"}
     keep = [t for t in str(job_title or "").split() if (w := t.strip(_OUTER).casefold()) and not any(
-        c.isdigit() for c in w) and not set(_parts(w)) & (SENIORITY_WORDS | NUMBER_WORDS | {"i", "ii", "iii", "iv"})]
+        c.isdigit() for c in w) and not set(_parts(w)) & never]
     return " ".join(keep)
 
 
@@ -218,6 +219,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
     texts = cv_records.record_texts(profile)
     own: dict[frozenset[str], tuple[str, str]] = {}
     alone: dict[str, list[int]] = {}  # a quote -> the lines it is the ONLY evidence of
+    top_alone: dict[str, list[int]] = {}  # the same for TOP lines, counted apart: they never sweep in a bullet
     held_ns = set(held_numbers(text, profile))
     top, headline = cv_records.top_lines(text, profile)
     whole = cv_checks.profile_source_text(profile, include_targets=False)  # roles held, never roles wanted
@@ -235,10 +237,11 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
             held += 1
             if any(not cv_review.quote_in_profile(q, source, source_words) for q in quotes):
                 _at(where, "quote_not_in_profile", n)
-            if hard_facts(body, [whole, *([title] if n == headline and title else [])], names, free_labels, known):
+            if not cv_review.is_heading(body) and hard_facts(  # a top heading is "PROFESSIONAL SUMMARY": no fact
+                    body, [whole, *([title] if n == headline and title else [])], names, free_labels, known):
                 _at(where, "claim_not_in_quote", n)
             if len(quotes) == 1:  # one quote stamped on many lines is still no review
-                alone.setdefault(cv_review._norm(quotes[0]), []).append(n)
+                top_alone.setdefault(cv_review._norm(quotes[0]), []).append(n)
             continue
         if n in held_ns:
             held += 1
@@ -257,7 +260,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
             _at(where, "claim_not_in_quote", n)
         if len(quotes) == 1:
             alone.setdefault(cv_review._norm(quotes[0]), []).append(n)
-    for ns in alone.values():
+    for ns in [*alone.values(), *top_alone.values()]:
         if len(ns) > settings.CV_REVIEW_QUOTE_REUSE_MAX:
             for n in ns:
                 _at(where, "evidence_reused", n)

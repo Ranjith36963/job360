@@ -13,8 +13,8 @@ stored strong under rules 3. A CV line's evidence must come from the job, projec
   none sets ``frozenset()``: no quote can come from it. A raw block and the role / project its header names are one
   job. A header line itself is ``None``; outside such a section nothing is constrained (a held headline is no job).
 * :func:`top_lines`: the CV's TOP lines (rules 7, owner 2026-11-12): its headline and summary, the content lines
-  before the first job / project header line or any heading other than a summary one. They pitch the whole career,
-  so ``review_rows.judge`` asks no quote for them, only that each hard fact is somewhere in the profile.
+  before the first job / project header line, bullet or heading other than a summary one. They pitch the whole
+  career, so ``review_rows.judge`` asks no quote for them, only that each hard fact is somewhere in the profile.
 Education and certification entries never constrain (their lines are often listed without headers). Word by word,
 no regex on caller text; bounded by the CV's and profile's line counts.
 """
@@ -135,16 +135,20 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
         if not line or n >= len(content):
             continue
         is_content = line == content[n]
+        if line[0] in cv_review._BULLETS:  # a bullet is a record's line, never the headline or summary
+            break
         if cv_review.is_heading(line):
             words = cv_review._and_words(evidence._words(line.strip("#*: \t").replace("/", " ")))
             if not (words <= _TOP_HEADING_WORDS and words & _TOP_SECTION_WORDS):
                 break
             seen_heading = True
+            if is_content:  # "PROFESSIONAL SUMMARY" kept as a line: a top line, never the headline
+                out.append(n + 1)
         elif cv_review._raw_header(line) and (
                 any(cv_review._runs_in(cv_review.header_pieces(line) or [], r) for r in keyed)
                 or _named(profile, line)):
             break
-        elif is_content and not _skills_list(line) and recs[n] is None:
+        elif is_content and not _skills_list(line, first=not out and not seen_heading) and recs[n] is None:
             out.append(n + 1)
             if len(out) == 1 and not seen_heading:
                 headline = n + 1
@@ -152,8 +156,9 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
     return frozenset(out), headline
 
 
-def _skills_list(line: str) -> bool:
+def _skills_list(line: str, first: bool = False) -> bool:
     """A labelled or comma list ("Skills: Python, SQL", "Python, SQL, Docker"); a bar-joined unlabelled line ("AI
-    Engineer | Agentic Systems") is a headline."""
+    Engineer | Agentic Systems") is a headline, and so is any unlabelled ``first`` line ("AI Engineer, Agentic
+    Systems")."""
     parts = cv_review.list_parts(line)
-    return parts is not None and (bool(parts[0]) or not cv_review._HEADER_BARS.intersection(line.split()))
+    return parts is not None and (bool(parts[0]) or not (first or cv_review._HEADER_BARS.intersection(line.split())))

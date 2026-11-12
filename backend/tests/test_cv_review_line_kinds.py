@@ -168,3 +168,53 @@ async def test_through_the_door_the_ads_title_frees_the_headline(authenticated_a
     got = next(e["payload"] for e in events if e["id"] == resp.json()["event_id"])
     assert (got["confidence"], got["downgraded"], got["rules"]) == ("strong", [], cv_review.RULES), got
     assert cv_review.RULES == 7
+
+
+# Checker round 1 (2026-11-12): the TOP is the headline and summary only; a bullet is never one.
+LIE = "Cut model training time by 40%."  # Tidewater's "model training" + Calnex's "40%": a cross-record lie
+
+
+@pytest.mark.parametrize("before", [
+    "",  # straight after the summary
+    "Highlights\n",  # a heading no rule knows
+    "AI Solutions Engineer\n",  # a title-only header line
+    "Work History\n",
+    "Selected Projects\n",
+])
+def test_a_bullet_before_any_known_header_is_no_top_line(before):
+    text = f"Ada Lovelace\n{HEADLINE}\n{SUMMARY}\n{before}- {LIE}\nEXPERIENCE\n{CALNEX_H}\n- {CALNEX_B}\n"
+    n = cv_review.content_lines(text, _profile()).index(f"- {LIE}") + 1
+    got = _judge(text, {f"- {LIE}": []}, "AI Product Engineer")
+    assert n in got.get("no_evidence", []), got
+    assert n not in review_rows.held_numbers(text, _profile())
+
+
+@pytest.mark.parametrize("headline", ["AI Engineer, Agentic Systems", "AI Engineer (Agentic Systems)"])
+def test_a_headline_with_a_comma_or_brackets_is_the_headline(headline):
+    from src.services.applications import cv_records
+
+    assert cv_records.top_lines(_cv(headline=headline), _profile()) == (frozenset({1, 2}), 1)
+    assert _judge(_cv(headline=headline), job_title="AI Engineer") == {}
+
+
+@pytest.mark.parametrize("heading", ["PROFESSIONAL SUMMARY", "PROFILE"])
+def test_a_summary_heading_is_a_top_line(heading):
+    for text in (f"Ada Lovelace\n{HEADLINE}\n{heading}\n{SUMMARY}\nEXPERIENCE\n{CALNEX_H}\n- {CALNEX_B}\n",
+                 f"Ada Lovelace\n{heading}\n{SUMMARY}\nEXPERIENCE\n{CALNEX_H}\n- {CALNEX_B}\n"):
+        assert _judge(text, job_title="AI Product Engineer") == {}, text
+
+
+def test_top_lines_reusing_a_quote_never_sweep_in_a_quoted_bullet():
+    third = "I build RAG pipelines in Python."
+    text = f"Ada Lovelace\n{HEADLINE}\n{SUMMARY}\n{third}\nEXPERIENCE\n{CALNEX_H}\n- {CALNEX_B}\n"
+    got = _judge(text, {HEADLINE: [CALNEX_B], SUMMARY: [CALNEX_B], third: [CALNEX_B]}, "AI Product Engineer")
+    assert 5 not in got.get("evidence_reused", []), got
+
+
+@pytest.mark.parametrize(("headline", "title"), [
+    ("Sr AI Engineer", "Sr AI Engineer"), ("Sr. AI Engineer", "Sr. AI Engineer"), ("Sr AI Engineer", ""),
+    ("Snr AI Engineer", "Snr AI Engineer"), ("Leader AI Engineer", "Leader AI Engineer"),
+    ("Founding AI Engineer", "Founding AI Engineer"),
+])
+def test_the_headline_never_borrows_a_seniority_or_role_word_from_the_ad(headline, title):
+    assert _judge(_cv(headline=headline), job_title=title) == {"claim_not_in_quote": [1]}, headline
