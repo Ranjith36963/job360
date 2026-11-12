@@ -368,3 +368,22 @@ async def test_an_open_proof_ask_on_a_ghosted_job_counts_in_other_and_is_listed(
         assert body["job_ids"] == [] and body["jobs"] == 0
         assert body["other_ask_ids"] == [proof]
         assert body["other"] == 1 and body["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_badge_reports_how_long_each_step_took(authenticated_async_context):
+    """2026-11-12: the badge took 6 s on a large account and nothing outside the server could say which
+    step. The route now sends a ``Server-Timing`` header: every step by name, durations only."""
+    from src.services.applications.needs_you_count import PHASES
+
+    async with authenticated_async_context() as client:
+        resp = await client.get("/api/needs-you-count")
+    assert resp.status_code == 200, resp.text
+    entries = [e.strip() for e in resp.headers["server-timing"].split(",")]
+    names = [e.split(";dur=")[0] for e in entries]
+    assert names == [*PHASES, "total"]
+    durations = [float(e.split(";dur=")[1]) for e in entries]
+    assert all(d >= 0 for d in durations)
+    assert durations[-1] >= max(durations[:-1])  # the total covers every step
+    # Durations only: no letter outside the fixed step names can ride in the header.
+    assert all(e.split(";dur=")[1].replace(".", "", 1).isdigit() for e in entries)
