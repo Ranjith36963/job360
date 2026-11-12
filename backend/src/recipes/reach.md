@@ -43,8 +43,8 @@ steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `ma
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `settings.outreach_send` from `get_profile` (its `effective`; the Gmail
    mode `preferences.daily_check` never allows sending).
-   - `auto`, channel `email`: right before Send,
-     call `check_outreach(contact_id, message_id)` (`message_id` = the
+   - `auto`, channel `email`: a strong `outreach_reviewed` first (`get_recipe("doctor")`, row Outreach review), then
+     right before Send call `check_outreach(contact_id, message_id)` (`message_id` = the
      `artifact_id` `save_artifact` gave you). It checks the user's settings,
      an earlier send or reply (the Gmail Sent folder too: look there first),
      the user's own limits (settings: per company, network per hour, a day per channel).
@@ -53,7 +53,7 @@ steps 1-4 with `add_contact` WITHOUT `application_id` (pass `company`), then `ma
        draft. No browser control: treat it as `ask`. Then record
        `outreach_sent` at once.
      - `ask`: save a Gmail draft; the saved message shows under People to
-       reach on Needs you (no `ask_user`); the user sends.
+       reach on Needs you (no `ask_user`); the user sends (`outreach_not_reviewed` too).
      - `stop`: do not send; tell the user its `detail` in one line.
    - `draft_only` (the default): draft only. The user sends it.
      Never send it yourself.

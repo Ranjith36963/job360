@@ -17,6 +17,7 @@ from src.repositories import pgsync
 from src.services.applications import cv_checks
 from src.services.profile import assistant_settings as rules
 from src.services.profile.models import AssistantSettings, CVData, UserPreferences, UserProfile
+from tests._outreach_review import seed_strong_review
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
 SEND = "assistant_settings.outreach_send"
@@ -301,6 +302,7 @@ async def test_after_the_users_send_on_the_request_the_message_goes_once_accepte
         _seed_profile(fixture_user_id)
         app_id, cid = await _person(client)
         mid = await _draft(client, app_id, cid)
+        seed_strong_review(cid)  # owner 2026-11-09: the automatic message needs a strong review
         await _click(client, cid, mid)
         await _invite(client, cid, mid)
         assert all(t.get("contact_id") != cid for t in await _tasks(client))  # pending: not queued
@@ -365,6 +367,7 @@ async def test_a_sensitive_or_unsupported_message_after_acceptance_waits_for_the
         assert (await _release(client, f"contact:{cid}", "draft_rewritten")).status_code == 200
         _age_sends()
         fine = await _draft(client, app_id, cid, "Hi Priya, I worked at Acme Data as a Python data engineer.")
+        seed_strong_review(cid)  # owner 2026-11-09: the automatic message needs a strong review
         assert await _check(client, cid, fine) == ("stop", "needs_claim")
         assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, fine) == ("send", "auto_after_accept")
@@ -431,6 +434,7 @@ async def test_with_auto_the_request_and_the_message_both_land_in_sent_on_its_ow
         await _auto(client)
         app_id, cid = await _person(client)
         mid = await _draft(client, app_id, cid)
+        seed_strong_review(cid)  # owner 2026-11-09: the automatic message needs a strong review
         await _invite(client, cid, mid)
         await _state(client, cid, "connected")
         assert (await _take(client, cid))["status"] == "task"

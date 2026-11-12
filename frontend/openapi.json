@@ -11289,6 +11289,38 @@
         "title": "OutreachEntryOut",
         "type": "object"
       },
+      "OutreachReviewOut": {
+        "description": "What an ``outreach_reviewed`` of the person's NEWEST draft must name (outreach_review.inputs): its id, the\nsha256 Job360 compares, the lines needing a profile quote, and the newest stored review's state.",
+        "properties": {
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "sha256",
+          "lines",
+          "state"
+        ],
+        "title": "OutreachReviewOut",
+        "type": "object"
+      },
       "OwnBrowserTaskItemOut": {
         "properties": {
           "application_id": {
@@ -11831,6 +11863,16 @@
               }
             ],
             "title": "Relationship"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutreachReviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "role": {
             "title": "Role",
@@ -14823,6 +14865,33 @@
           "follow_up_on"
         ],
         "title": "RecordOutreachResponse",
+        "type": "object"
+      },
+      "RecordOutreachReviewRequest": {
+        "additionalProperties": false,
+        "description": "``POST /api/contacts/{contact_id}/outreach-review`` - one ``outreach_reviewed`` (owner 2026-11-09).",
+        "properties": {
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "payload"
+        ],
+        "title": "RecordOutreachReviewRequest",
         "type": "object"
       },
       "RegisterRequest": {
@@ -28568,7 +28637,7 @@
     },
     "/api/contacts/{contact_id}/outreach-check": {
       "get": {
-        "description": "THE one gate before pressing Send on an outreach email, or on a LinkedIn message after the user's\nclick on that person's card (feature 10). ``session`` is the caller's own session label: a LinkedIn\nperson another session holds reads as ``claimed_by_other_session``.\n\nReads the user's settings (``assistant_settings.outreach_send`` decides send vs\nask; the Gmail mode never does), this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
+        "description": "THE one gate before pressing Send on an outreach email, or on a LinkedIn message after the user's\nclick on that person's card (feature 10). ``session`` is the caller's own session label: a LinkedIn\nperson another session holds reads as ``claimed_by_other_session``.\n\nReads the user's settings (``assistant_settings.outreach_send`` decides send vs\nask; the Gmail mode never does), this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. An automatic send (``outreach_review.AUTO_SEND_REASONS``) also needs\na strong ``outreach_reviewed`` of exactly this draft, else ``ask`` ``outreach_not_reviewed``. Read-only: it\nrecords nothing except one audit line. 404 for a contact that is not the caller's (rule #12).",
         "operationId": "outreach_check_api_contacts__contact_id__outreach_check_get",
         "parameters": [
           {
@@ -28656,6 +28725,91 @@
           }
         },
         "summary": "Outreach Check",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/contacts/{contact_id}/outreach-review": {
+      "post": {
+        "description": "A fresh reviewer's verdict on the person's NEWEST outreach draft, verified by Job360 (outreach_review.py):\nthe door for any contact, a cold one too (the record_event tool calls it with no ``application_id``).\n422 for a review of another draft or sha (nothing stored); 404 for a contact that is not the caller's.",
+        "operationId": "record_outreach_review_api_contacts__contact_id__outreach_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordOutreachReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordEventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Outreach Review",
         "tags": [
           "applications"
         ]

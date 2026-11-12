@@ -18,6 +18,7 @@ from src.core import settings
 from src.repositories import pg
 from src.repositories.database import JobDatabase
 from src.services.profile.models import UserPreferences
+from tests._outreach_review import seed_strong_review
 
 STEM = "0074_contact_email_source"
 INBOX = "assistant_settings.outreach_send"
@@ -293,6 +294,7 @@ async def test_check_outreach_asks_on_pattern_guess(authenticated_async_context,
         )
         cid = resp.json()["contact"]["id"]
         mid = await _draft(client, app_id, cid)
+        seed_strong_review(cid)  # owner 2026-11-09: an automatic send needs a strong review of this draft
         verdict = await _check(client, cid, mid)
         assert (verdict["decision"], verdict["reason"]) == ("ask", "email_guessed")
         assert (await client.patch(f"/api/contacts/{cid}", json={"email_source": "user_gave"})).status_code == 200
@@ -416,6 +418,7 @@ async def test_check_outreach_stops_on_bounced_address_and_new_address_clears_it
         moved = await client.patch(f"/api/contacts/{cid}", json={"email": "rita.new@northwind.example"})
         assert moved.status_code == 200
         mid2 = await _draft(client, app_id, cid)
+        seed_strong_review(cid)
         verdict = await _check(client, cid, mid2)
         assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
         app2 = await _bring(client, _AD2)

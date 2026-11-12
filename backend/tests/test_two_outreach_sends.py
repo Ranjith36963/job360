@@ -17,6 +17,7 @@ from src.core import settings
 from src.services.profile import assistant_settings as rules
 from src.services.profile import schedule
 from src.services.profile.models import AssistantSettings
+from tests._outreach_review import seed_strong_review
 from tests.test_outreach_gate import _AD, _auto_ready, _bring, _check, _contact, _draft, _patch, _sent
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -63,7 +64,9 @@ async def test_five_job_sends_to_one_company_pass_and_the_sixth_stops(authentica
         app_id, _cid, _mid = await _auto_ready(client, fixture_user_id)
         for n in range(5):
             person = await _contact(client, app_id, email=f"p{n}@northwind.example", name=f"Person {n}")
-            verdict = await _check(client, person, await _draft(client, app_id, person))
+            draft = await _draft(client, app_id, person)
+            seed_strong_review(person)  # owner 2026-11-09: an automatic send needs a strong review
+            verdict = await _check(client, person, draft)
             assert (n, verdict["decision"], verdict["reason"]) == (n, "send", "auto_mode")
             await _sent(client, person)
         sixth = await _contact(client, app_id, email="p6@northwind.example", name="Person Six")
