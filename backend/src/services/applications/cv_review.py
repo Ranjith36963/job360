@@ -306,7 +306,10 @@ def list_line_holds(line: str, book: SkillBook) -> bool:
     for w in label:
         named = w in group_words
         generic = w in GENERIC_LABEL_WORDS or w in book.items  # "Python and APIs:" names a skill (rules 7)
-        if w in _NEVER_LABEL_WORDS or not (named or generic) or (w in book.entities and not named):
+        # a closed generic word is never an employer, even when a certificate says it ("AWS Certified AI
+        # Practitioner" keeps "AI and LLMs:" a skills group; dry run 2026-11-12)
+        if w in _NEVER_LABEL_WORDS or not (named or generic) or (
+                w in book.entities and not named and w not in GENERIC_LABEL_WORDS):
             return False
     got = {_norm(i) for i in parts[1]}
     if not got <= book.items:
@@ -491,7 +494,7 @@ def quote_sources(profile: Any) -> tuple[str, str]:
 
 def sources_from(texts: list[str]) -> tuple[str, str]:
     """:func:`quote_sources` of these texts only (one record's own text: ``cv_records``)."""
-    lines = [ln for ln in (_norm(x) for t in texts for x in t.split("\n")) if ln]
+    lines = [ln for ln in (_bare_urls(_norm(x)) for t in texts for x in t.split("\n")) if ln]
     sep = f" {_SEGMENT} "
     return sep.join(lines), f' {sep.join(" ".join(evidence._words(ln)) for ln in lines)} '
 
@@ -502,8 +505,28 @@ def quote_in_profile(quote: str, source: str, source_words: str) -> bool:
     holding the :data:`_SEGMENT` separator (JSON can send ``\u0000``) is never a profile quote."""
     if _SEGMENT in quote:
         return False
+    quote = _bare_urls(_norm(quote))
     words = " ".join(evidence._words(quote))
-    return _norm(quote) in source or bool(words and f" {words} " in source_words)
+    return quote in source or bool(words and f" {words} " in source_words)
+
+
+_URL_SCHEMES = ("https://", "http://")
+
+
+def _bare_urls(text: str) -> str:
+    """``_norm`` text with each word's URL scheme and leading ``www.`` dropped, word by word (no regex): the
+    profile's "github.com/x" and a quote's "https://github.com/x" (compact profile ``cv_data.links``) are one
+    link, dry run 2026-11-12. Every other character stays, so a link the profile lacks still fails."""
+    out = []
+    for word in text.split(" "):
+        lead = len(word) - len(word.lstrip(evidence._OUTER))
+        head, rest = word[:lead], word[lead:]
+        for scheme in _URL_SCHEMES:
+            if rest.startswith(scheme):
+                rest = rest[len(scheme):]
+                break
+        out.append(head + (rest[4:] if rest.startswith("www.") and len(rest) > 4 else rest))
+    return " ".join(out)
 
 
 def _quote_bank(quote: str) -> str:

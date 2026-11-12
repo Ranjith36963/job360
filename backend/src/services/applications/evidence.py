@@ -94,6 +94,11 @@ def _digit_runs(tok: str) -> list[str]:
     return [r for r in runs if r]
 
 
+def _word_in_bank(tok: str, words: set[str], low: str) -> bool:
+    t = tok.casefold()
+    return t in words or (("+" in t or "#" in t) and t in low)
+
+
 def unsupported_tokens(text: str, bank: str, *, first_word: bool = False) -> list[str]:
     """Claim tokens of ``text`` the fact bank never says (numbers by value, words as whole words)."""
     bank = clean(bank)
@@ -106,8 +111,10 @@ def unsupported_tokens(text: str, bank: str, *, first_word: bool = False) -> lis
         if runs:
             ok = all(cv_checks._core(r) in cores for r in runs)
         else:
-            t = tok.casefold()
-            ok = t in words or (("+" in t or "#" in t) and t in low)
+            ok = _word_in_bank(tok, words, low)
+            if not ok and "-" in tok:  # "AI-enabled": each part that is itself a claim ("AI") is in the bank
+                claims = [p for part in tok.split("-") for p in claim_tokens(part, first_word=True)]
+                ok = bool(claims) and all(_word_in_bank(p, words, low) for p in claims)
         if not ok and tok not in bad:
             bad.append(tok)
     return bad

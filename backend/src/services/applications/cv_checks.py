@@ -177,6 +177,7 @@ _SOURCE_FIELDS = (
     "github_profile_readme",
     "about_me_inferred_skills",
     "cv_languages",
+    "links",  # the user's own links: cv_work's compact profile sends them, so reviewers quote them (dry run 2026-11-12)
 )
 
 
