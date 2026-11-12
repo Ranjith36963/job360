@@ -20,21 +20,23 @@ from httpx import ASGITransport, AsyncClient
 from src.services.applications import cv_review
 from src.services.profile import assistant_settings as rules
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
-
-pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+from tests._cv_review import ATS_LINES, ATS_RAW, ATS_TAIL, ats_pairs, blank_ad
 
 FORM = "https://careers.northwind.example/apply/7"
-RAW = (
+RAW0 = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
     "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
     "Worked on the warehouse migration and cut storage costs in half.\n"
     "CERTIFICATIONS\nGoogle Cloud Professional Data Engineer, 2022."
 )
-CV = (
+RAW = RAW0 + "\n" + ATS_RAW  # rules 6: the profile says the ATS tail too
+CV0 = (
     "Ada Lovelace\nada@example.com | +44 7700 900123 | linkedin.com/in/ada\nEXPERIENCE\n"
     "- Data engineer at Northwind since 2019.\n"
     "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
 )
+CV = CV0 + ATS_TAIL  # ATS-ready (rules 6): the 2 lines below, then the tail's len(ATS_LINES) more
+N = 2 + len(ATS_LINES)  # review lines of CV
 L1 = {"cv_line": "- Data engineer at Northwind since 2019.", "profile_quote": "data engineer at  Northwind since 2019.",
       "field_path": "cv_data.raw_text"}
 L2 = {"cv_line": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.",
@@ -75,6 +77,7 @@ async def _setup(client: AsyncClient, *, auto: bool = True, cv_auto: bool = True
     brought = await client.post("/api/jobs/bring", json=ad)
     assert brought.status_code == 200, brought.text
     app_id = int(brought.json()["application_id"])
+    await blank_ad(app_id)  # rules 6: no ad text = jd_no_ad (the ad's requirements: test_cv_review_benchmark.py)
     fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})
     assert fit.status_code == 200, fit.text
     return app_id, await _save_cv(client, app_id, cv)
@@ -99,9 +102,10 @@ def rows(text: str, pairs: list[dict[str, Any]], profile: Any = None) -> list[di
     review.lines (rules 5). A pair whose line is not in the review is left as it is (a shape error)."""
     keys = [cv_review.line_key(x) for x in cv_review.content_lines(
         text, profile or UserProfile(cv_data=CVData(raw_text=RAW, name="Ada Lovelace")))]
+    tail = [p for p in ats_pairs() if p["cv_line"] in text and p["cv_line"] not in {q.get("cv_line") for q in pairs}]
     return [{"n": keys.index(cv_review.line_key(p["cv_line"])) + 1, "verdict": "supported",
              "evidence": [p["profile_quote"]]} if "cv_line" in p and cv_review.line_key(p["cv_line"]) in keys else p
-            for p in pairs]
+            for p in [*pairs, *tail]]  # the ATS tail's lines are always quoted (they are never what a test is about)
 
 
 def _review(cv_id: int, text: str = CV, lines: Any = None, confidence: str = "strong") -> dict[str, Any]:
@@ -243,8 +247,8 @@ async def test_a_verified_strong_review_clears_cv_not_seen_through_http_and_mcp(
         body = await _gate(client, app_id)
     assert stored == {
         "artifact_id": cv_id, "sha256": sha(CV), "claimed": "strong", "confidence": "strong", "downgraded": [],
-        "where": {}, "lines": 2, "content_lines": 2, "covered": 2, "reviewer": "fresh helper", "by": "token:claude-code",
-        "rules": cv_review.RULES, "jd": {"state": "jd_no_ad"},  # rules 6: the jd block (patched here, see conftest)
+        "where": {}, "lines": N, "content_lines": N, "covered": N, "reviewer": "fresh helper", "by": "token:claude-code",
+        "rules": cv_review.RULES, "jd": {"state": "jd_no_ad"},  # rules 6: the ad is blank (blank_ad in _setup)
     }
     assert "Snowflake" not in json.dumps(stored), "no CV or profile text is stored"
     # cv_not_seen is cleared; the next ask is the practice run (nothing else is cleared).
@@ -276,7 +280,7 @@ async def test_each_check_forces_weak_with_its_code(authenticated_async_context,
         assert await downgraded(app_id, _review(cv_id, lines=[L1])) == ["line_uncovered"]
         assert await downgraded(other_app, _review(other_cv, summary)) == ["line_uncovered"]
         # a row naming no review line is refused, never stored (rules 5: rows name lines by number)
-        stray = {"n": 3, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]}
+        stray = {"n": N + 1, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]}
         assert (await _event(client, app_id, "cv_reviewed", _review(cv_id, lines=[L1, L2, stray]))).status_code == 422
         # (c) a fabricated quote
         fake = {**L2, "profile_quote": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 60%."}
@@ -363,7 +367,7 @@ async def test_after_three_weak_reviews_a_fourth_is_weak(authenticated_async_con
         v3 = CV.replace("- Built", "* Built")
         v3_id = await _save_cv(client, app_id, v3)
         assert (await _stored(client, app_id, _review(v3_id, v3, confidence="weak")))["downgraded"] == []
-        v4 = CV.replace("- Built", "** Built")
+        v4 = CV.replace("- Built", "• Built")
         v4_id = await _save_cv(client, app_id, v4)
         fourth = await _stored(client, app_id, _review(v4_id, v4))
         assert (fourth["confidence"], fourth["downgraded"]) == ("weak", ["retry_limit"])
@@ -438,7 +442,7 @@ async def test_thin_quotes_unchecked_first_words_and_stretches_are_weak(authenti
         # owner 2026-11-07: a capitalised name inside a line the profile lacks ("Cloud Certified", "Administrator")
         # is also a save-time check finding now.
         for heading, want in (("AWS SOLUTIONS ARCHITECT", ["line_uncovered"]),
-                              ("# Google Cloud Certified", ["line_uncovered", "cv_checks_found"]),
+                              ("# Google Cloud Certified", ["line_uncovered", "cv_checks_found", "ats_format"]),  # a "#" is markup_left
                               ("Kubernetes Administrator:", ["line_uncovered", "cv_checks_found"]),
                               ("CTO: ada@example.com", ["line_uncovered"])):
             cv = CV + heading + "\n"
@@ -479,15 +483,16 @@ async def test_the_cv_text_decides_case_and_a_word_the_profile_never_says_is_wea
 async def test_honest_lines_stay_strong(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        cv = ("Ada Lovelace\nEXPERIENCE\n- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
+        cv = ("Ada Lovelace\nada@example.com | +44 7700 900123 | linkedin.com/in/ada\n"
+              "EXPERIENCE\n- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
               "- In Python and Snowflake, built ETL pipelines, cutting warehouse costs 30%.\n"
               "- Built ETL pipelines in Python and Snowflake.\nCERTIFICATIONS\n"
-              "Google Cloud Professional Data Engineer, 2022\n")
+              "Google Cloud Professional Data Engineer, 2022\n" + ATS_TAIL)
         app_id, cv_id = await _setup(client, cv=cv)
         full = L2["profile_quote"]  # one quote may vouch for two lines; the third quotes a shorter span of it
-        lines = [{**L2, "cv_line": ln, "profile_quote": full} for ln in cv.splitlines()[2:4]] + [
-            {**L2, "cv_line": cv.splitlines()[4], "profile_quote": "Built ETL pipelines in Python and Snowflake"}] + [
+        lines = [{**L2, "cv_line": ln, "profile_quote": full} for ln in cv.splitlines()[3:5]] + [
+            {**L2, "cv_line": cv.splitlines()[5], "profile_quote": "Built ETL pipelines in Python and Snowflake"}] + [
             {"cv_line": "Google Cloud Professional Data Engineer, 2022",
              "profile_quote": "Google Cloud Professional Data Engineer, 2022.", "field_path": "cv_data.raw_text"}]
         got = await _stored(client, app_id, _review(cv_id, cv, lines=lines))
-        assert (got["confidence"], got["downgraded"], got["covered"], got["content_lines"]) == ("strong", [], 4, 4)
+        assert (got["confidence"], got["downgraded"], got["covered"], got["content_lines"]) == ("strong", [], 4 + len(ATS_LINES), 4 + len(ATS_LINES))

@@ -15,21 +15,22 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.services.applications import cv_review, sent_alone
-
-pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+from tests._cv_review import ATS_LINES, ATS_RAW, ATS_TAIL, ats_rows, blank_ad
 
 FORM = "https://careers.northwind.example/apply/7"
 RAW = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
-    "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%."
+    "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n" + ATS_RAW  # rules 6: the tail is true
 )
 CV = (
     "Ada Lovelace\nEXPERIENCE\n- Data engineer at Northwind since 2019.\n"
-    "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
-)
+    "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n" + ATS_TAIL
+).replace("Ada Lovelace\n", "Ada Lovelace\nada@example.com | +44 7700 900123 | linkedin.com/in/ada\n", 1)  # ATS-ready (rules 6)
+N = 2 + len(ATS_LINES)  # review lines
 LINES = [  # one row per review line (rules 5): {n, verdict, evidence}
     {"n": 1, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]},
     {"n": 2, "verdict": "supported", "evidence": ["Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%."]},
+    *ats_rows(3),
 ]
 CV_AUTO = "assistant_settings.cv_auto_approve"
 AGENT = "token:claude-code"
@@ -61,6 +62,7 @@ async def _reviewed_app(
     })
     assert brought.status_code == 200, brought.text
     app_id = int(brought.json()["application_id"])
+    await blank_ad(app_id)  # rules 6: no ad text = jd_no_ad (the ad's requirements: test_cv_review_benchmark.py)
     saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": CV})
     assert saved.status_code == 201, saved.text
     cv_id = int(saved.json()["artifact_id"])
@@ -105,8 +107,8 @@ async def test_a_strong_cleared_cv_is_listed_with_its_review(authenticated_async
         assert item["answer"] == f"CV version 1 (artifact {cv_id})"
         assert item["sources"] == [
             {"label": "Review", "text": "strong (by fresh helper)"},
-            {"label": "Lines covered", "text": "2 of 2 CV lines quoted from your profile"},
-            {"label": "Lines checked", "text": "2"},
+            {"label": "Lines covered", "text": f"{N} of {N} CV lines quoted from your profile"},
+            {"label": "Lines checked", "text": str(N)},
         ]
         assert item["reported_wrong"] is False
         assert body["cv_sample"] == [item["id"]]

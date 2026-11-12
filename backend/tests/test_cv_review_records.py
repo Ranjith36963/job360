@@ -12,18 +12,21 @@ import pytest
 
 from src.services.applications import cv_records, cv_review
 from src.services.profile.models import CVData, UserProfile
+from tests._cv_review import ats_cv
 from tests.test_cv_review import _setup, _stored
 from tests.test_cv_review_held_lines import B1, B2, B3, CV_DATA, RAW, _seed, _sha
-
-pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
 
 ORBITLY = "Orbitly (orbitly.uk) | Founder & AI-Native Engineer | United Kingdom | Feb 2026 - Present"
 NORTHWIND = "Northwind Labs | AI Solutions Engineer – R&D Department | Stevenage, United Kingdom | Jun 2025 - Sep 2025"
 TIDEWATER = "Tidewater | AI/ML Engineer Intern | United Kingdom (Remote) | Oct 2024 - Jan 2025"
 
 
-def _cv(*blocks: tuple[str, str]) -> str:
+def _body(*blocks: tuple[str, str]) -> str:
     return "Ada Lovelace\nEXPERIENCE\n" + "".join(f"{h}\n- {b}\n" for h, b in blocks)
+
+
+def _cv(*blocks: tuple[str, str]) -> str:
+    return ats_cv(_body(*blocks))  # rules 6: ATS-ready, the blocks' own lines keep their review line numbers
 
 
 def _rows(text: str, profile: UserProfile) -> list[dict[str, Any]]:
@@ -62,7 +65,7 @@ async def test_quote_inside_own_record_stays_strong(authenticated_async_context,
 async def test_bullet_under_an_unheld_experience_header_is_weak(authenticated_async_context, fixture_user_id):
     profile = UserProfile(cv_data=CVData(**CV_DATA))
     unheld = "Zenith Robotics | Founder & AI-Native Engineer | Feb 2026 - Present"  # an invented employer
-    assert cv_records.line_records(_cv((unheld, B1)), profile) == [None, frozenset()]
+    assert cv_records.line_records(_body((unheld, B1)), profile) == [None, frozenset()]
     async with authenticated_async_context() as client:
         _seed(fixture_user_id, profile)
         got = await _verdict(client, _cv((unheld, B1)), profile)
