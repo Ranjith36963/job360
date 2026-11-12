@@ -16,6 +16,8 @@ from httpx import ASGITransport, AsyncClient
 
 from src.services.applications import cv_review, sent_alone
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 FORM = "https://careers.northwind.example/apply/7"
 RAW = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"

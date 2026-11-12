@@ -663,3 +663,16 @@ def pytest_sessionfinish(session, exitstatus):
     own schemas and never a blanket ``t_%``/``mem_%`` sweep.
     """
     _drop_own_schemas()
+
+
+@pytest.fixture
+def rules5_review_checks(monkeypatch):
+    """For modules that prove the cv_reviewed ROW checks (rules <= 5) on short CVs with no ``jd``: the rules-6 checks
+    (ATS format, the ad's requirements: ``cv_review.ats_and_jd``) report nothing, so each test still proves only its
+    own rule. Those checks are proven end to end in tests/test_cv_review_benchmark.py (never patched there)."""
+    from src.services.applications import cv_review
+
+    async def _nothing(*_args, **_kwargs):
+        return {}, {"state": "jd_no_ad"}
+
+    monkeypatch.setattr(cv_review, "ats_and_jd", _nothing)

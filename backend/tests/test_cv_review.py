@@ -21,6 +21,8 @@ from src.services.applications import cv_review
 from src.services.profile import assistant_settings as rules
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 FORM = "https://careers.northwind.example/apply/7"
 RAW = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
@@ -242,7 +244,7 @@ async def test_a_verified_strong_review_clears_cv_not_seen_through_http_and_mcp(
     assert stored == {
         "artifact_id": cv_id, "sha256": sha(CV), "claimed": "strong", "confidence": "strong", "downgraded": [],
         "where": {}, "lines": 2, "content_lines": 2, "covered": 2, "reviewer": "fresh helper", "by": "token:claude-code",
-        "rules": cv_review.RULES,
+        "rules": cv_review.RULES, "jd": {"state": "jd_no_ad"},  # rules 6: the jd block (patched here, see conftest)
     }
     assert "Snowflake" not in json.dumps(stored), "no CV or profile text is stored"
     # cv_not_seen is cleared; the next ask is the practice run (nothing else is cleared).

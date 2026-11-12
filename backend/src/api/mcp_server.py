@@ -1958,11 +1958,11 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
         outreach_bounced; no application_id if cold.
 
-        Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
+        Events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
-        chat adds user_words (reply verbatim), asked;
+        chat adds user_words, asked;
         submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         email_drafted {to, subject, attachments, gmail_draft_id};
@@ -1974,8 +1974,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         unblocked {resolution: retried|user_did_it|skipped|own_browser, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, reviewer,
-        lines: [{n, verdict, evidence}]};
-        answer_corrected {key|question, was_source}. Payloads, 403/409: rules recipe, Events.
+        lines: [{n, verdict, evidence}], jd?: [{term, must, have, evidence, n}]};
+        answer_corrected {key|question, was_source}. Payloads, 403/409: rules recipe.
         Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)

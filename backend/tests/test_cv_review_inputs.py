@@ -9,6 +9,8 @@ from src.services.applications import cv_review, kit
 from src.services.profile.models import CVData, UserProfile
 from tests.test_cv_review import CV, L1, L2, RAW, _seed, _setup, _stored, rows, sha
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 CV2 = CV + "- Worked on the warehouse migration and cut storage costs in half.\n"
 
 

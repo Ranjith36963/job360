@@ -17,6 +17,8 @@ import pytest
 from src.services.applications import spine
 from tests.test_cv_review import CV, _event, _review, _save_cv, _seed, _setup, _stored, sha
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 
 def _legacy(cv_id: int, sha256: str) -> dict[str, Any]:
     """A pre-#1539 review as production stored it: weak, downgraded for naming a non-current CV."""

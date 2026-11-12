@@ -15,6 +15,8 @@ from src.services.profile.models import CVData, UserProfile
 from tests.test_cv_review import _setup, _stored
 from tests.test_cv_review_held_lines import B1, B2, B3, CV_DATA, RAW, _seed, _sha
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 ORBITLY = "Orbitly (orbitly.uk) | Founder & AI-Native Engineer | United Kingdom | Feb 2026 - Present"
 NORTHWIND = "Northwind Labs | AI Solutions Engineer – R&D Department | Stevenage, United Kingdom | Jun 2025 - Sep 2025"
 TIDEWATER = "Tidewater | AI/ML Engineer Intern | United Kingdom (Remote) | Oct 2024 - Jan 2025"

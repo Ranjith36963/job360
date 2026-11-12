@@ -1176,6 +1176,9 @@ KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"
 # CV benchmark S2 (owner 2026-11-10): one profile quote may be the ONLY evidence of at most this many CV lines in a
 # cv_reviewed; more is evidence_reused (a generic quote cannot vouch for a whole CV).
 CV_REVIEW_QUOTE_REUSE_MAX = int(os.getenv("CV_REVIEW_QUOTE_REUSE_MAX", "2"))
+# CV benchmark (owner 2026-11-10): the share of the ad's must-haves the user HAS that a strong CV names, word for word
+# (cv_reviewed ``jd``; below it the review is stored weak, jd_coverage_low; services/applications/review_jd.py).
+CV_REVIEW_JD_BAR = float(os.getenv("CV_REVIEW_JD_BAR", "0.8"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
 # Autonomy bar (owner plan 2026-11-02): "Approve CV" / "Send" leave Needs you for one kind (essay, fixed, cv)

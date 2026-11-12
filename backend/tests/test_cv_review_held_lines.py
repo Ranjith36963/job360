@@ -21,6 +21,8 @@ from src.services.applications import cv_checks, cv_review
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
 from tests.test_cv_review import _save_cv, _setup, _stored, rows
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 RAW = (
     "Ada Lovelace\nLondon, United Kingdom | +44 7700 900123 | ada@example.com\nAI Engineer | Agentic Systems\n"
     "SUMMARY\nAI engineer building agentic systems with LangGraph and MCP.\nEXPERIENCE\n"

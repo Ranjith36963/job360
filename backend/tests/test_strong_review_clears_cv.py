@@ -15,6 +15,8 @@ from httpx import AsyncClient
 
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 RAW = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
     "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"

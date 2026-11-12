@@ -19,7 +19,11 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
     shapes need no evidence, because the profile itself holds them token for token: a list line
     ``[Label:] a, b, c`` of WHOLE profile skill items under a skills-group label (:func:`list_line_holds`), and a
     header line whose every piece is a whole piece of ONE profile record (:func:`record_line_holds`);
-(d) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``).
+(d) ``cv_checks.check_text("cv")`` finds nothing for that CV (``cv_checks_found``);
+(e) it is ATS-ready: ``cv_format.format_findings`` finds nothing (``ats_format``, where = ``code[:detail][@lines]``);
+(f) the ad's requirements (optional ``jd``, ``review_jd``): each term word for word in the frozen ad, a had one
+    shown by profile quotes and named in its CV lines, a gap never in the CV, had must-haves covered at
+    ``settings.CV_REVIEW_JD_BAR``; no ad text stores ``jd_no_ad`` (never weak).
 After weak reviews of :data:`MAX_WEAK` other CV versions judged under the current :data:`RULES`, a review of a
 new one is weak (``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try. A
 weak review judged under older rules never counts (its rows were not stored, so it cannot be judged again).
@@ -45,14 +49,15 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 
 EVENT_TYPE = "cv_reviewed"
 STRONG, WEAK, NONE = "strong", "weak", "none"
-PAYLOAD_KEYS = frozenset({"artifact_id", "sha256", "confidence", "lines", "reviewer"})
+PAYLOAD_KEYS = frozenset({"artifact_id", "sha256", "confidence", "lines", "reviewer"})  # plus optional "jd"
 ROW_KEYS = frozenset({"n", "verdict", "evidence"})
 OLD_ROW_KEYS = frozenset({"cv_line", "profile_quote", "field_path"})  # rules <= 4: refused with a reconnect hint
 VERDICTS = ("supported", "unsupported")
 DOWNGRADES = (
     "not_current_cv", "no_content", "line_uncovered", "line_unsupported", "no_evidence", "quote_not_in_profile",
     "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "evidence_reused", "cv_checks_found",
-    "retry_limit",
+    "ats_format", "jd_not_judged", "jd_term_not_in_ad", "jd_evidence_not_in_profile", "jd_term_not_in_cv",
+    "jd_gap_claimed", "jd_coverage_low", "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
@@ -60,8 +65,9 @@ MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # 2026-11-10: place abbreviations, "&" = "and", list lines, one-record header lines, own sites (2); a held
 # line's row is not judged by its quote, comma / dash headers, "portfolio" headings, no dict keys as profile text (3);
 # a quote comes from the job / project / raw block its line sits under (4, cv_records); free wording: rows
-# {n, verdict, evidence}, hard facts pinned to the row's quotes, no word-overlap rule (5, review_rows)
-RULES = 5
+# {n, verdict, evidence}, hard facts pinned to the row's quotes, no word-overlap rule (5, review_rows); ATS format and
+# the ad's requirements (6, cv_format + review_jd)
+RULES = 6
 MAX_LINES = 200
 EVIDENCE_MAX, QUOTE_MIN_CHARS, QUOTE_MAX_CHARS = 3, 3, 600
 WHERE_STORED = 20  # line numbers stored per code
@@ -514,9 +520,11 @@ _SHAPE = "{n, verdict, evidence}"
 
 def shape_problems(payload: dict[str, Any]) -> list[str]:
     """Every shape problem (422); the verification of a well-formed payload never refuses, it downgrades."""
-    problems: list[str] = []
-    if set(payload) != PAYLOAD_KEYS:
-        problems.append("cv_reviewed takes exactly {artifact_id, sha256, confidence, lines, reviewer}")
+    from src.services.applications import review_jd  # noqa: PLC0415
+
+    problems = review_jd.shape_problems(payload.get("jd"), MAX_LINES)
+    if set(payload) - {"jd"} != PAYLOAD_KEYS:
+        problems.append("cv_reviewed takes exactly {artifact_id, sha256, confidence, lines, reviewer} and optional jd")
     artifact_id = payload.get("artifact_id")
     if isinstance(artifact_id, bool) or not isinstance(artifact_id, int) or not isinstance(payload.get("sha256"), str):
         problems.append("needs artifact_id (a whole number) and sha256 (text)")
@@ -767,6 +775,28 @@ def judged_versions(reviews: list[dict[str, Any]], application_id: int) -> set[A
     return versions
 
 
+async def ats_and_jd(
+    db: JobDatabase, user_id: str, application_id: int, jd: Any, cv_text: str, lines: list[str], profile: Any,
+) -> tuple[dict[str, list[Any]], dict[str, Any]]:
+    """(e) and (f) of the module docstring (rules 6): ``(where, stored jd block)``. ``ats_format`` holds closed codes,
+    details and line numbers only (``code[:detail][@lines]``), never CV text; ``jd`` is ``review_jd.judge`` on the
+    frozen ad."""
+    from src.services.applications import cv_format, review_jd, spine  # noqa: PLC0415 - both import this module
+
+    where: dict[str, list[Any]] = {}
+    fmt = cv_format.format_findings(cv_text, profile)
+    if fmt:
+        where["ats_format"] = [f["code"] + (f":{f['detail']}" if f.get("detail") else "")
+                               + ("@" + ",".join(map(str, f["lines"][:5])) if f.get("lines") else "") for f in fmt]
+    app_row = await spine.get_owned_application(db, user_id, application_id) or {}
+    jd_where, stored = review_jd.judge(jd, str(app_row.get("job_description_snapshot") or ""), lines, cv_text, profile)
+    where.update(jd_where)
+    logger.info("cv_reviewed ats_jd application=%s ats=%s jd=%s must=%s covered=%s codes=%s",
+                safe_log_value(application_id), len(fmt), stored["state"], stored.get("must"), stored.get("covered"),
+                ",".join(jd_where))
+    return where, stored
+
+
 async def verify(
     db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, list[Any]]]:
@@ -801,6 +831,9 @@ async def verify(
     found = cv_checks.check_text("cv", cv["text"], profile)
     if found:
         where["cv_checks_found"] = [i["code"] for i in found]
+    ats_jd, jd = await ats_and_jd(db, user.id, application_id, payload.get("jd"), cv["text"], content[:numbered],
+                                  profile)
+    where.update(ats_jd)
     if held:  # how often a list or record line was held by the profile itself (no CV text logged)
         logger.info("cv_reviewed lines_held_by_profile=%s application=%s", held, safe_log_value(application_id))
     reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
@@ -823,7 +856,7 @@ async def verify(
         "confidence": STRONG if claimed == STRONG and not down else WEAK, "downgraded": down,
         "where": {c: where[c][:WHERE_STORED] for c in down if where[c]}, "lines": len(rows),
         "content_lines": len(content), "covered": covered, "reviewer": _label(payload["reviewer"]),
-        "by": actor_for(user), "rules": RULES,
+        "by": actor_for(user), "rules": RULES, "jd": jd,
     }
     return stored, where
 
@@ -840,7 +873,11 @@ def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optiona
     for code in stored.get("downgraded") or []:
         at = [str(x) for x in where.get(code) or []]
         more = f" (+{len(at) - _WHERE_LISTED} more)" if len(at) > _WHERE_LISTED else ""
-        label = "" if code == "cv_checks_found" else "lines "
+        label = "" if code in ("cv_checks_found", "ats_format") else "jd items " if code.startswith("jd_") else "lines "
+        jd = stored.get("jd") or {}
+        if code == "jd_coverage_low":
+            at = [f"{jd.get('covered')} of {jd.get('must')} had must-haves named, bar {jd.get('bar')}"]
         parts.append(f"{code}: {label}{', '.join(at[:_WHERE_LISTED])}{more}" if at else code)
     return ("cv_reviewed claimed strong but STORED WEAK: " + "; ".join(parts) + ". Line N = get_application's "
-            "review.lines[N-1] (your row n). Rewrite only those lines; report this CV as weak, never strong.")
+            "review.lines[N-1] (your row n); jd item N = your jd[N-1]. Rewrite only those lines; report this CV as "
+            "weak, never strong.")

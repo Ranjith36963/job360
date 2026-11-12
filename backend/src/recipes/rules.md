@@ -182,6 +182,8 @@ RULES:
    1-2 per project. No duplicate bullets; the summary must not repeat bullets.
 5. Tailor: use the ad's own words where the profile supports them; a gap stays
    out; put the most relevant role/project bullets first. Do not keyword-stuff.
+   The review checks this (`cv_reviewed` `jd`): at least 80% of the must-haves
+   the user has, word for word, and the sections above (ATS format).
 6. Skills: 3 grouped lines (e.g. "Agents & LLMs:", "ML & Engineering:",
    "Cloud & Ops:"), only items the profile lists, each spelled as it does, most
    relevant first. Entry and project lines: company, title, dates, place and tech

@@ -17,6 +17,8 @@ from src.services.applications import cv_review
 from tests.test_application_spine import _second_user_session_cookie, _session_client
 from tests.test_cv_review import CV, _event, _mcp_client, _payload, _review, _save_cv, _seed, _setup, _stored, sha
 
+pytestmark = pytest.mark.usefixtures("rules5_review_checks")  # rules-6 checks: test_cv_review_benchmark.py
+
 KEYS = {"id", "job_title", "job_company", "country", "review"}
 REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
                "last_where"}
