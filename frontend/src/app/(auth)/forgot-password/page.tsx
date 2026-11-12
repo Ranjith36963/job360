@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import { requestPasswordReset } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
+import { useAuth } from "@/components/layout/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +30,7 @@ const forgotSchema = z.object({
 type ForgotSchema = z.infer<typeof forgotSchema>;
 
 export default function ForgotPasswordPage() {
+  const { status } = useAuth();
   const [submitted, setSubmitted] = useState(false);
   const [submittedEmail, setSubmittedEmail] = useState("");
   const [serverError, setServerError] = useState<string | null>(null);
@@ -83,7 +85,7 @@ export default function ForgotPasswordPage() {
                 </Link>
               </p>
             </div>
-          ) : (
+          ) : status === "signedIn" ? null /* a signed-in visitor is sent on */ : (
             <form onSubmit={onSubmit} noValidate className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>

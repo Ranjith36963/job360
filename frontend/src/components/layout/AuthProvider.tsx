@@ -15,18 +15,34 @@ import {
   me,
   logout as apiLogout,
   onEmailNotVerified,
+  onUnauthorized,
   AuthUnknownError,
 } from "@/lib/api";
 import type { User } from "@/lib/api";
 import { syncReplayConsent } from "@/lib/sentry-replay";
+import { safeNext } from "@/lib/safe-next";
+import { toast } from "@/lib/toast";
+import {
+  expiredLoginUrl,
+  hardNavigate,
+  hardReload,
+  isAuthOrPublicPath,
+  SIGNED_OUT_ONLY_PAGES,
+} from "@/lib/navigate";
 
 // ---------------------------------------------------------------------------
 // Context shape
 // ---------------------------------------------------------------------------
 
+export type AuthStatus = "loading" | "signedIn" | "signedOut";
+
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
+  status: AuthStatus;
+  /** Set the user from a login / magic-link response (no extra /me request). */
+  signedIn: (user: User) => void;
+  refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -74,10 +90,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // The ONE response to "the session ended" (any app-route 401, the live
+  // poller's 401, or a refresh that turns a known user into null). Clear what
+  // belonged to the account, then a HARD navigation to sign in: it drops the
+  // router cache and component state, so no private data stays on screen.
+  const endedRef = useRef(false);
+  // Bumped whenever the session is settled by something OTHER than refresh()
+  // (sign-in, sign-out, session ended). A /me answer that was asked for before
+  // the bump is stale and must be dropped: without this, a slow "401" from
+  // before sign-in lands after it and signs the new user straight out.
+  const epochRef = useRef(0);
+  const sessionEnded = useCallback(() => {
+    if (posthog.__loaded) posthog.reset();
+    queryClient.clear();
+    epochRef.current++;
+    lastUserIdRef.current = null;
+    setUser(null);
+    setLoading(false);
+    const { pathname: path, search } = window.location;
+    if (endedRef.current || isAuthOrPublicPath(path)) return;
+    endedRef.current = true;
+    console.info("[auth] session ended; sending the user to sign in");
+    hardNavigate(expiredLoginUrl(path + search));
+  }, [queryClient]);
+
   const refresh = useCallback(async () => {
     // One refresh chain at a time: focus events during a retry wait are skipped.
     if (fetchingRef.current) return;
     fetchingRef.current = true;
+    const epoch = epochRef.current;
     let resolved = false;
     try {
       let data: User | null = null;
@@ -93,6 +134,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await new Promise((r) => setTimeout(r, retryDelayMs(attempt, err)));
           if (!mountedRef.current) return;
         }
+      }
+      if (epochRef.current !== epoch) {
+        // Sign-in or sign-out settled the session while this was in flight.
+        resolved = true;
+        return;
       }
       resolved = true;
       const nextId = data?.id ?? null;
@@ -110,6 +156,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // `undefined` means "not resolved yet" (first load, nothing cached), so
       // only a CHANGE between two known values wipes the cache. Same id must
       // not, or every alt-tab focus would trigger a full refetch storm.
+      if (typeof prevId === "string" && nextId === null) {
+        sessionEnded();
+        return;
+      }
       const identityChanged = prevId !== undefined && prevId !== nextId;
       if (identityChanged) {
         queryClient.clear();
@@ -130,7 +180,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // no previous user, so the UI never flashes "Log in" at a signed-in user.
       if (resolved || lastUserIdRef.current) setLoading(false);
     }
-  }, [queryClient]);
+  }, [queryClient, sessionEnded]);
+
+  const signedIn = useCallback(
+    (u: User) => {
+      const prevId = lastUserIdRef.current;
+      if (typeof prevId === "string" && prevId !== u.id) {
+        queryClient.clear();
+        if (posthog.__loaded) posthog.reset();
+      }
+      epochRef.current++;
+      lastUserIdRef.current = u.id;
+      endedRef.current = false;
+      setUser(u);
+      setLoading(false);
+      if (posthog.__loaded) posthog.identify(u.id, { email: u.email });
+    },
+    [queryClient]
+  );
+
+  useEffect(() => onUnauthorized(sessionEnded), [sessionEnded]);
 
   // Initial fetch on mount
   useEffect(() => {
@@ -150,9 +219,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Re-validate when the window regains focus (tab switch, alt-tab)
   useEffect(() => {
     const handleFocus = () => void refresh();
+    // A page the browser restored from its back-forward cache (Back after
+    // logout or expiry) comes back with its old state, private rows included.
+    // A private page is reloaded so the middleware decides; a public one only
+    // re-checks who is signed in.
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      if (isAuthOrPublicPath(window.location.pathname)) void refresh();
+      else hardReload();
+    };
     window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+    };
   }, [refresh]);
+
+  const status: AuthStatus = loading ? "loading" : user ? "signedIn" : "signedOut";
+
+  // A signed-in user who reaches /login, /register or /forgot-password by a
+  // client navigation goes where they were heading (the middleware covers loads).
+  useEffect(() => {
+    if (status !== "signedIn" || !SIGNED_OUT_ONLY_PAGES.includes(pathname ?? "")) return;
+    const target = safeNext(new URLSearchParams(window.location.search).get("next"));
+    // next=/login would leave a signed-in user on an empty sign-in card.
+    const targetPath = new URL(target, window.location.origin).pathname;
+    router.replace(SIGNED_OUT_ONLY_PAGES.includes(targetPath) ? safeNext(null) : target);
+  }, [status, pathname, router]);
 
   // Top-level decision point for email-not-verified auth failures (M16). The
   // fetch client no longer navigates itself; it notifies here. This is the ONE
@@ -167,22 +261,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const logout = useCallback(async () => {
-    await apiLogout();
+    try {
+      await apiLogout();
+    } catch (err) {
+      // 401 = the session is already gone: carry on to sign in. Anything else
+      // (offline, 5xx) means the server never ended the session. The cookie is
+      // HttpOnly, so this tab cannot end it either: say so and stay, never
+      // show a sign-in page to someone who is in fact still signed in.
+      if ((err as { status?: number } | null)?.status !== 401) {
+        console.warn("[auth] logout was not confirmed by the server; still signed in", err);
+        toast.error("We could not sign you out. Check your connection and try again.");
+        return;
+      }
+    }
+    epochRef.current++;
     // Disassociate the PostHog session from the logged-out user.
     if (posthog.__loaded) {
       posthog.reset();
     }
-    // Drop every cached row belonging to the account that just left. Without
-    // this, signing in as someone else in the SAME tab renders the previous
-    // account's jobs and profile until each query happens to refetch.
+    // Drop every cached row belonging to the account that just left.
     queryClient.clear();
     lastUserIdRef.current = null;
     setUser(null);
-    router.push("/login");
-  }, [router, queryClient]);
+    // Hard navigation: Back cannot replay a cached private page.
+    hardNavigate("/login");
+  }, [queryClient]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
+    <AuthContext.Provider value={{ user, loading, status, signedIn, refresh, logout }}>
       {children}
     </AuthContext.Provider>
   );

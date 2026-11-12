@@ -25,8 +25,8 @@ describe("ApiError", () => {
     expect(new ApiError(401, "").isUnauthorized).toBe(true);
   });
 
-  it("isUnauthorized for 403", () => {
-    expect(new ApiError(403, "").isUnauthorized).toBe(true);
+  it("U8: a 403 is NOT unauthorized (signed in, but not allowed)", () => {
+    expect(new ApiError(403, "x").isUnauthorized).toBe(false);
   });
 
   it("isNotFound for 404", () => {
@@ -88,13 +88,17 @@ describe("friendlyAuthError", () => {
     expect(msg).not.toMatch(/API error \d+/);
   });
 
-  it("maps 401/403 to a generic credentials message", () => {
-    expect(friendlyAuthError(new ApiError(401, "invalid credentials"))).toBe(
-      "Incorrect email or password."
-    );
-    expect(friendlyAuthError(new ApiError(403, "forbidden"))).toBe(
-      "Incorrect email or password."
-    );
+  it("maps the login endpoint's 401 to a generic credentials message", () => {
+    expect(
+      friendlyAuthError(new ApiError(401, "invalid credentials"), undefined, { login: true })
+    ).toBe("Incorrect email or password.");
+  });
+
+  it("never says 'Incorrect email or password' outside the login form, or for a 403", () => {
+    expect(friendlyAuthError(new ApiError(401, "link expired"))).toBe("link expired");
+    expect(
+      friendlyAuthError(new ApiError(403, "email_not_verified"), undefined, { login: true })
+    ).toBe("email_not_verified");
   });
 
   it("maps 429 to a rate-limit message", () => {

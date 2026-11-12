@@ -27,8 +27,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  login: vi.fn().mockResolvedValue({}),
+  login: vi.fn().mockResolvedValue({ id: "u1", email: "u1@example.com" }),
   requestMagicLink: vi.fn().mockResolvedValue(undefined),
+}));
+
+const mockSignedIn = vi.fn();
+let mockStatus = "signedOut";
+vi.mock("@/components/layout/AuthProvider", () => ({
+  useAuth: () => ({ status: mockStatus, signedIn: mockSignedIn }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -219,5 +225,62 @@ describe("LoginPage — ?registered=1", () => {
 
     expect(screen.getByRole("button", { name: /email me a sign-in link/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/^password$/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Point 3 — U2 (the provider learns who signed in) and U10 (expiry banner).
+// ---------------------------------------------------------------------------
+
+describe("LoginPage — session lifecycle", () => {
+  beforeEach(() => {
+    mockPush.mockClear();
+    mockSignedIn.mockClear();
+    mockGet.mockReset();
+    mockStatus = "signedOut";
+  });
+
+  function mockParams(values: Record<string, string | null>) {
+    mockGet.mockImplementation((key: string) => values[key] ?? null);
+  }
+
+  it("U2: calls signedIn(user) with the login response before navigating", async () => {
+    mockParams({ next: "/profile" });
+    renderPage();
+    await fillAndSubmit();
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/profile"));
+    expect(mockSignedIn).toHaveBeenCalledWith({ id: "u1", email: "u1@example.com" });
+    expect(mockSignedIn.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPush.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("U10: reason=expired shows the session-ended status", () => {
+    mockParams({ reason: "expired", next: "/profile" });
+    renderPage();
+    expect(screen.getByTestId("session-ended")).toHaveTextContent(
+      "Your session ended. Sign in again to continue."
+    );
+    expect(screen.getByTestId("session-ended")).toHaveAttribute("role", "status");
+  });
+
+  it("no banner without reason=expired", () => {
+    mockParams({});
+    renderPage();
+    expect(screen.queryByTestId("session-ended")).toBeNull();
+  });
+
+  it("renders no form for a signed-in visitor (they are sent on)", () => {
+    mockStatus = "signedIn";
+    mockParams({});
+    renderPage();
+    expect(screen.queryByLabelText(/email/i)).toBeNull();
+  });
+
+  it("still shows the form while the session check is slow (never a blank page)", () => {
+    mockStatus = "loading";
+    mockParams({});
+    renderPage();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 });

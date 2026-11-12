@@ -10,6 +10,7 @@ import posthog from "posthog-js";
 
 import { register as registerUser } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
+import { useAuth } from "@/components/layout/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +43,7 @@ type RegisterSchema = z.infer<typeof registerSchema>;
 
 function RegisterForm() {
   const router = useRouter();
+  const { status } = useAuth();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
 
@@ -67,6 +69,9 @@ function RegisterForm() {
       setServerError(friendlyAuthError(err, "Sign-up failed. Please try again."));
     }
   });
+
+  // A signed-in visitor is sent on, so they get no form.
+  if (status === "signedIn") return null;
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4">

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CHANGES_EVENT, ERROR_MS, POLL_MS, THROTTLE_MS, startLiveChanges } from "./live-changes";
 import type { ChangesDetail } from "./live-changes";
+import { onUnauthorized } from "./api";
 
 // The one live poller (PR 6): fake timers, a mocked fetch, a settable tab visibility.
 
@@ -132,14 +133,18 @@ describe("live-changes poller", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("stops for good on 401, even on focus", async () => {
+  it("U9: a 401 tells the app the session ended, then stops for good, even on focus", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    const ended = vi.fn();
+    const unsubscribe = onUnauthorized(ended);
     stop = startLiveChanges(fetchMock);
     await vi.advanceTimersByTimeAsync(ERROR_MS * 3);
     window.dispatchEvent(new Event("focus"));
     await vi.advanceTimersByTimeAsync(POLL_MS);
+    unsubscribe();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(events).toEqual([]);
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 
   it("the stop function ends polling", async () => {

@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: (k: string) => params[k] ?? null }),
 }));
 const consume = vi.fn();
+vi.mock("@/components/layout/AuthProvider", () => ({ useAuth: () => ({ signedIn: vi.fn() }) }));
 vi.mock("@/lib/api", () => ({ consumeMagicLink: (...a: unknown[]) => consume(...a) }));
 
 beforeEach(() => {
