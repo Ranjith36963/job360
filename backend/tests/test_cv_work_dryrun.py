@@ -3,7 +3,8 @@
 1. ``jd_terms_dropped`` was near-certain on every fix round: ``review_jd.judge`` requires every earlier must-term of
    the application to come back as a must, but neither ``cv_work`` nor ``get_application(view="review")`` gave the
    earlier terms, so a NEW reviewer picked fresh ones (454 dropped 10). The review block now carries ``jd_terms``:
-   the ``terms`` of the newest ``cv_reviewed`` of the application that has them (any CV version), else ``[]``.
+   the terms of every ``cv_reviewed`` of the application (any CV version), one per term, a must if any review had
+   it as one, else ``[]``.
 2. The compact profile left out the LinkedIn skills and GitHub languages, so true skills read as gaps. They are in it
    now (empty fields still left out, rule #29), and they are quote sources and skill-book items.
 Real doors (HTTP), values asserted (rule #21). Helpers are the CV review tests' own.
@@ -62,6 +63,27 @@ async def test_a_re_review_that_re_lists_jd_terms_stores_no_jd_terms_dropped(
         judged = {x["term"]: x for x in HONEST_JD}
         second = [{**judged[t["term"]], "must": t["must"]} for t in listed]
         got = await _stored(client, app_id, _payload(cv_id, HONEST, second))
+        assert "jd_terms_dropped" not in got["downgraded"] and (got["confidence"], got["downgraded"]) == ("strong", [])
+
+
+@pytest.mark.asyncio
+async def test_jd_terms_keep_a_must_an_earlier_round_dropped_so_re_listing_them_is_strong(
+    authenticated_async_context, fixture_user_id
+):
+    """``judge`` holds a re-review to the musts of EVERY earlier review; ``jd_terms`` must list all of them (checker
+    2026-11-12: after a round dropped RAG, the newest event's terms lacked it and every later honest round was weak)."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id, cv_id = await _app(client, HONEST)
+        assert (await _stored(client, app_id, _payload(cv_id, HONEST, HONEST_JD)))["confidence"] == "strong"
+        shed = [x for x in HONEST_JD if x["term"] != "RAG"]
+        assert "jd_terms_dropped" in (await _stored(client, app_id, _payload(cv_id, HONEST, shed)))["downgraded"]
+        listed = (await _view(client, app_id))["jd_terms"]
+        assert {"term": "RAG", "must": True} in listed
+        assert sorted(t["term"] for t in listed) == sorted(x["term"] for x in HONEST_JD)
+        judged = {x["term"]: x for x in HONEST_JD}
+        third = [{**judged[t["term"]], "must": t["must"]} for t in listed]
+        got = await _stored(client, app_id, _payload(cv_id, HONEST, third))
         assert "jd_terms_dropped" not in got["downgraded"] and (got["confidence"], got["downgraded"]) == ("strong", [])
 
 

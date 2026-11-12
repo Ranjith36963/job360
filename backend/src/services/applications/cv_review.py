@@ -756,16 +756,25 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
 
 
 def jd_terms(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The judged ``terms`` ``[{term, must}]`` of the NEWEST ``cv_reviewed`` (newest first, any CV version) that has
-    them, else ``[]``: exactly what ``review_jd.judge`` compares a re-review with (dry run 2026-11-12, app 454: a new
-    reviewer never saw them and dropped 10)."""
+    """Every judged term ``[{term, must}]`` of every ``cv_reviewed`` (newest first, any CV version), one per
+    ``same_term``, ``must`` if any review had it as a must, else ``[]``: exactly what ``review_jd.judge`` holds a
+    re-review to (it reads the terms of EVERY earlier review). Dry run 2026-11-12, app 454: a new reviewer never saw
+    them and dropped 10; the newest review alone was not enough once a round had dropped a must (checker, same day)."""
+    from src.services.applications.cv_coverage import same_term  # noqa: PLC0415
+
+    out: list[dict[str, Any]] = []
     for e in reviews:
         jd = e["payload"].get("jd")
         terms = jd.get("terms") if isinstance(jd, dict) else None
-        if isinstance(terms, list) and terms:
-            return [{"term": t["term"], "must": t.get("must") is True} for t in terms
-                    if isinstance(t, dict) and isinstance(t.get("term"), str)]
-    return []
+        for t in terms if isinstance(terms, list) else []:
+            if not (isinstance(t, dict) and isinstance(t.get("term"), str)):
+                continue
+            seen = next((o for o in out if same_term(o["term"], t["term"])), None)
+            if seen is None:
+                out.append({"term": t["term"], "must": t.get("must") is True})
+            elif t.get("must") is True:
+                seen["must"] = True
+    return out
 
 
 REVIEW_VIEW_KEYS = ("id", "job_title", "job_company", "country", "review")
