@@ -291,12 +291,16 @@ async def open_blocks(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict
     if not app_ids:
         return {}
     marks = ",".join("?" for _ in app_ids)
+    # ONE pass: the newest blocked/unblocked id of each application (a single grouped scan), joined back
+    # by primary key. Never a correlated ``e.id = (SELECT MAX(..) WHERE .. = e.application_id)``: Postgres
+    # re-runs that per row, so the cost grew with the SQUARE of the history (6 s on prod, 2026-11-12).
     cur = await db._db.execute(
-        f"SELECT e.id, e.application_id, e.payload FROM application_events e WHERE e.user_id = ? "  # noqa: S608
-        f"AND e.application_id IN ({marks}) AND e.event_type = 'blocked' "
-        "AND e.id = (SELECT MAX(y.id) FROM application_events y WHERE y.application_id = e.application_id "
-        "AND y.user_id = e.user_id AND y.event_type IN ('blocked', 'unblocked'))",
-        (user_id, *app_ids),
+        "SELECT e.id, e.application_id, e.payload FROM application_events e JOIN ("  # noqa: S608
+        "SELECT y.application_id, MAX(y.id) AS last_id FROM application_events y WHERE y.user_id = ? "
+        f"AND y.application_id IN ({marks}) AND y.event_type IN ('blocked', 'unblocked') "
+        "GROUP BY y.application_id) m ON m.last_id = e.id "
+        "WHERE e.user_id = ? AND e.event_type = 'blocked'",
+        (user_id, *app_ids, user_id),
     )
     out: dict[int, dict[str, Any]] = {}
     for row in await cur.fetchall():
