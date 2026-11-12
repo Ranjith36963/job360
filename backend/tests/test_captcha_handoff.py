@@ -99,7 +99,7 @@ async def test_a_handed_off_captcha_stops_counting_as_a_failure(authenticated_as
     async with authenticated_async_context() as client:
         app_id = await _queued_job(client, "count")
         await _cloud_block(client, app_id, "captcha")
-        assert (await _rows(client))[app_id]["preflight"]["blocked_count"] == 1
+        assert (await _rows(client))[app_id]["preflight"]["blocked_count"] == 0  # handed off from the start (2026-11-12)
         # the user's own browser takes over: a later event stamped own_browser
         resp = await client.post(f"/api/applications/{app_id}/events", json={
             "event_type": "form_checked", "payload": {"questions_count": 3, "answered": 3, "missing": 0,
@@ -149,8 +149,10 @@ async def _own_event(client: AsyncClient, app_id: int) -> None:
     assert resp.status_code == 201, resp.text
 
 
+# 2026-11-12: CAPTCHA and bot check are never a failure, however often the cloud meets them
+# (was: a returning captcha counted; bulk apply then unqueued 13 CAPTCHA jobs as "failed twice").
 @pytest.mark.asyncio
-async def test_only_one_handed_off_captcha_is_free_a_return_counts(authenticated_async_context):
+async def test_a_handed_off_captcha_that_returns_never_counts(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _queued_job(client, "loop")
         await _cloud_block(client, app_id, "captcha")
@@ -158,11 +160,8 @@ async def test_only_one_handed_off_captcha_is_free_a_return_counts(authenticated
         await _pc_unblocks(client, app_id)
         assert (await _rows(client))[app_id]["preflight"]["blocked_count"] == 0
         await _cloud_block(client, app_id, "captcha")  # the cloud meets it again
-        await _own_event(client, app_id)
-        assert (await _rows(client))[app_id]["preflight"]["blocked_count"] == 1
         await _cloud_block(client, app_id, "bot_check")
-        await _own_event(client, app_id)
-        assert (await _rows(client))[app_id]["preflight"]["blocked_count"] == 2
+        assert (await _rows(client))[app_id]["preflight"]["blocked_count"] == 0
 
 
 @pytest.mark.asyncio

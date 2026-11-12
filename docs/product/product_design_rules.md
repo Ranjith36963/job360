@@ -1,5 +1,5 @@
 # Product Design Rules
-<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-11-12 by the red-checks fix (re-read against VISION.md rule 4 and decision 27; uk_gate.py gone; test_visa_signal.py present) -->
 
 Owner-set rules that shape every feature. Each rule records WHY it exists so
 a future session applies it rather than rediscovering it. When code

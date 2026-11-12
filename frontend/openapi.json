@@ -6027,6 +6027,135 @@
         "title": "CvToApproveRow",
         "type": "object"
       },
+      "CvWorkItemOut": {
+        "properties": {
+          "ad": {
+            "title": "Ad",
+            "type": "string"
+          },
+          "ad_truncated": {
+            "title": "Ad Truncated",
+            "type": "boolean"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "browser": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "cv_saved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Saved At"
+          },
+          "jd_requirements": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Jd Requirements",
+            "type": "array"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CvReviewViewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "application_id",
+          "job_title",
+          "job_company",
+          "ad",
+          "ad_truncated"
+        ],
+        "title": "CvWorkItemOut",
+        "type": "object"
+      },
+      "CvWorkOut": {
+        "description": "`cv_work`: the next queued applications that need CV work, plus one compact profile.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CvWorkItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "total_needing_work": {
+            "title": "Total Needing Work",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total_needing_work"
+        ],
+        "title": "CvWorkOut",
+        "type": "object"
+      },
       "Disagreement": {
         "properties": {
           "application_id": {
@@ -20582,6 +20711,113 @@
           }
         },
         "summary": "List Applications",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/cv-work": {
+      "get": {
+        "description": "The lean read for the scheduled CV write-and-review task: only the queued rows that need CV work.",
+        "operationId": "cv_work_api_applications_cv_work_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "cursor: the last application_id of the previous page",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "cursor: the last application_id of the previous page",
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_profile",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Profile",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CvWorkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cv Work",
         "tags": [
           "applications"
         ]
