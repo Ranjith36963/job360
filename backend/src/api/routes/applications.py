@@ -3143,8 +3143,7 @@ async def record_outreach_review(
         try:
             return await outreach_review_service.record(db, user, contact_id, body.payload)
         except SpineError as exc:
-            _raise(exc)
-            raise AssertionError("unreachable")  # pragma: no cover
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
     key_body = {**_key_body(body), "contact_id": contact_id}
     return await _client_key_once(db, user, "record_event", body.client_key, key_body, _write)
