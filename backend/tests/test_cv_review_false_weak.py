@@ -18,6 +18,7 @@ import pytest
 
 from src.services.applications import cv_review
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
+from tests._cv_review import ATS_LINES, ATS_RAW, ats_cv, ats_rows
 from tests.test_cv_review import _event, _review, _save_cv, _setup, _stored
 
 RAW = (
@@ -31,6 +32,7 @@ RAW = (
     "EDUCATION & CERTIFICATION\nMSc Computer Science | University of Leeds | 2018\n"
     # app 478's profile: the PDF reader joined the title and the dates ("Intern Oct 2024")
     "Nethermind | AI/ML Engineer Intern Oct 2024 – Jan 2025 | Remote\n"
+    + ATS_RAW  # rules 6: the profile says the ATS tail every test CV ends with (ats_cv)
 )
 CV_DATA = {
     "name": "Ada Lovelace", "raw_text": RAW, "location": "London, United Kingdom",
@@ -75,7 +77,7 @@ def _seed(user_id: str) -> None:
 
 async def _verdict(client: Any, line: str, quote: str) -> tuple[str, list[str]]:
     """One CV = BASE + ``line``, reviewed strong with ``quote`` for that line: the stored verdict."""
-    cv = BASE + line + "\n"
+    cv = ats_cv(BASE + line + "\n")
     app_id, cv_id = await _setup(client, cv=cv)
     got = await _stored(client, app_id, _review(cv_id, cv, lines=[
         ETL_ROW, {"cv_line": line, "profile_quote": quote, "field_path": "cv_data.raw_text"}]))
@@ -205,12 +207,14 @@ async def test_the_owners_true_lines_are_stored_strong(authenticated_async_conte
         line = "- Built ETL pipelines in Python and Snowflake cutting warehouse costs 30%."
         assert await _verdict(client, line, line[2:]) == ("strong", [])
         # the London, UK header and the heading are no review lines: no row needed, and a row for them is refused
-        cv = BASE + "London, UK | +44 7700 900123 | ada@example.com\nEDUCATION AND CERTIFICATION\n"
+        cv = ats_cv(BASE + "London, UK | +44 7700 900123 | ada@example.com\nEDUCATION AND CERTIFICATION\n")
         app_id, cv_id = await _setup(client, cv=cv)
-        got = await _stored(client, app_id, _review(cv_id, cv, lines=[ETL_ROW]))
-        assert (got["confidence"], got["downgraded"], got["content_lines"]) == ("strong", [], 1)
-        extra = {"n": 2, "verdict": "supported", "evidence": ["London, United Kingdom"]}
-        assert (await _event(client, app_id, "cv_reviewed", _review(cv_id, cv, lines=[ETL_ROW, extra]))).status_code == 422
+        etl = {"n": 1, "verdict": "supported", "evidence": [ETL]}  # the London header is no review line: n counts without it
+        good = {**_review(cv_id, cv, lines=[ETL_ROW]), "lines": [etl, *ats_rows(2)]}
+        got = await _stored(client, app_id, good)
+        assert (got["confidence"], got["downgraded"], got["content_lines"]) == ("strong", [], 1 + len(ATS_LINES))
+        extra = {"n": 2 + len(ATS_LINES), "verdict": "supported", "evidence": ["London, United Kingdom"]}
+        assert (await _event(client, app_id, "cv_reviewed", {**good, "lines": [*good["lines"], extra]})).status_code == 422
 
 
 @pytest.mark.asyncio
@@ -245,7 +249,7 @@ async def test_job_places_beside_an_email_need_a_row_and_a_one_line_raw_text_hol
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         for line in ("Stevenage, UK | ada@example.com", "Remote | ada@example.com"):
-            cv = BASE + line + "\n"
+            cv = ats_cv(BASE + line + "\n")
             app_id, cv_id = await _setup(client, cv=cv)
             got = await _stored(client, app_id, _review(cv_id, cv, lines=[ETL_ROW]))
             assert (got["confidence"], got["downgraded"]) == ("weak", ["line_uncovered"]), line
@@ -264,7 +268,7 @@ async def test_a_claimed_strong_stored_weak_reply_names_codes_and_rows(authentic
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         line = "- Led a team of 12 engineers."
-        cv = BASE + line + "\n"
+        cv = ats_cv(BASE + line + "\n")
         app_id, cv_id = await _setup(client, cv=cv)
         payload = _review(cv_id, cv, lines=[ETL_ROW, {"cv_line": line, "profile_quote": "Built agent evals",
                                                      "field_path": "cv_data.raw_text"}])
@@ -279,7 +283,7 @@ async def test_a_claimed_strong_stored_weak_reply_names_codes_and_rows(authentic
         resp = await _event(client, app_id, "cv_reviewed", _review(cv_id, cv, lines=[ETL_ROW]))
         assert "line_uncovered: lines 2" in " ".join(resp.json()["warnings"])
         # a strong store says nothing of the kind
-        cv2 = BASE
+        cv2 = ats_cv(BASE)
         app2, cv2_id = await _setup(client, cv=cv2)
         resp = await _event(client, app2, "cv_reviewed", _review(cv2_id, cv2, lines=[ETL_ROW]))
         assert not [w for w in resp.json()["warnings"] if "STORED WEAK" in w]
@@ -306,13 +310,13 @@ async def test_old_rules_false_weaks_do_not_spend_the_retry_budget(authenticated
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         line = TRUE_LINES[0]
-        texts = [BASE + line + "\n", BASE.replace("- Built", "* Built") + line + "\n",
-                 BASE.replace("- Built", "** Built") + line + "\n"]
+        texts = [ats_cv(BASE + line + "\n"), ats_cv(BASE.replace("- Built", "* Built") + line + "\n"),
+                 ats_cv(BASE.replace("- Built", "▪ Built") + line + "\n")]
         app_id, cv_id = await _setup(client, cv=texts[0])
         ids = [cv_id] + [await _save_cv(client, app_id, t) for t in texts[1:]]
         for art, text in zip(ids, texts):
             await _old_weak(app_id, fixture_user_id, art, kit.sha256_text(text))
-        v4 = BASE.replace("- Built", "• Built") + line + "\n"
+        v4 = ats_cv(BASE.replace("- Built", "• Built") + line + "\n")
         v4_id = await _save_cv(client, app_id, v4)
         row = {"cv_line": line, "profile_quote": "Calnex Solutions", "field_path": "cv_data.cv_positions"}
         got = await _stored(client, app_id, _review(v4_id, v4, lines=[ETL_ROW, row]))
@@ -324,15 +328,15 @@ async def test_three_weak_reviews_under_these_rules_still_hit_retry_limit(authen
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         bad = "- Led a team of 12 engineers."
-        texts = [BASE + bad + "\n", BASE.replace("- Built", "* Built") + bad + "\n",
-                 BASE.replace("- Built", "** Built") + bad + "\n"]
+        texts = [ats_cv(BASE + bad + "\n"), ats_cv(BASE.replace("- Built", "* Built") + bad + "\n"),
+                 ats_cv(BASE.replace("- Built", "▪ Built") + bad + "\n")]
         app_id, cv_id = await _setup(client, cv=texts[0])
         row = {"cv_line": bad, "profile_quote": ETL, "field_path": "cv_data.raw_text"}
         for n, text in enumerate(texts):
             art = cv_id if n == 0 else await _save_cv(client, app_id, text)  # each version reviewed while newest
             got = await _stored(client, app_id, _review(art, text, lines=[ETL_ROW, row]))
             assert got["confidence"] == "weak" and "retry_limit" not in got["downgraded"]
-        v4 = BASE.replace("- Built", "• Built")
+        v4 = ats_cv(BASE.replace("- Built", "• Built"))
         v4_id = await _save_cv(client, app_id, v4)
         fourth = await _stored(client, app_id, _review(v4_id, v4, lines=[ETL_ROW]))
         assert (fourth["confidence"], fourth["downgraded"]) == ("weak", ["retry_limit"])

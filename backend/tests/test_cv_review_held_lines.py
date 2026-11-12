@@ -19,6 +19,7 @@ import pytest
 
 from src.services.applications import cv_checks, cv_review
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
+from tests._cv_review import ATS_LINES, ATS_RAW, ats_cv
 from tests.test_cv_review import _save_cv, _setup, _stored, rows
 
 RAW = (
@@ -32,7 +33,9 @@ RAW = (
     "Developed data preprocessing pipelines to streamline model training workflows.\n"
     "PORTFOLIO PROJECTS\nSupport Agent | LangGraph, MCP, Gmail, Slack\n"
     "SKILLS\nAgents & LLMs: LangGraph, LangChain, MCP, RAG\n"
+    "EDUCATION\nBSc Computer Science, University of Leeds, 2024\n"  # rules 6: an ATS-ready CV has an education section
 )
+EDU = "BSc Computer Science, University of Leeds, 2024"
 POSITIONS = [
     {"company": "Orbitly (orbitly.uk)", "title": "Founder & AI-Native Engineer", "dates": "Feb 2026 – Present",
      "location": "United Kingdom", "bullets": ["Built the memory layer for an AI agent, storing profiles and history."]},
@@ -65,7 +68,8 @@ def _cv(name: str, headers: tuple[str, str, str], projects_heading: str = "PROJE
     return (f"{name}\nLondon, United Kingdom | +44 7700 900123 | ada@example.com\n"
             "github.com/ada | linkedin.com/in/ada\nAI Engineer | Agentic Systems\nSUMMARY\n"
             f"{SUMMARY}\nEXPERIENCE\n{h1}\n- {B1}\n{h2}\n- {B2}\n{h3}\n- {B3}\n{projects_heading}\n"
-            "Support Agent | LangGraph, MCP, Gmail, Slack\nSKILLS\nAgents & LLMs: LangGraph, LangChain, MCP, RAG\n")
+            "Support Agent | LangGraph, MCP, Gmail, Slack\nSKILLS\nAgents & LLMs: LangGraph, LangChain, MCP, RAG\n"
+            f"EDUCATION\n{EDU}\n")
 
 
 # The five production CVs' SHAPES (app number: its header lines, each verbatim in shape).
@@ -102,7 +106,9 @@ def _self_rows(text: str, profile: UserProfile) -> list[dict[str, Any]]:
 def _seed(user_id: str, profile: UserProfile | None = None) -> None:
     from src.services.profile.storage import save_assistant_settings, save_profile
 
-    save_profile(profile or _profile(), user_id, source_action="cv_upload")
+    profile = profile or _profile()
+    profile.cv_data.raw_text = (profile.cv_data.raw_text or "") + "\n" + ATS_RAW  # rules 6: the ATS tail is true
+    save_profile(profile, user_id, source_action="cv_upload")
     save_assistant_settings(user_id, AssistantSettings(apply_min_score=50, above_line="auto", below_line="auto"), "seed")
 
 
@@ -237,6 +243,7 @@ def _sha(text: str) -> str:
 
 
 async def _verdict(client: Any, text: str, pairs: list[dict[str, str]]) -> tuple[str, list[str]]:
+    text = ats_cv(text)  # rules 6: a contact line and the SUMMARY / SKILLS / EDUCATION tail (rows added by rows())
     app_id, cv_id = await _setup(client, cv=text)
     got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(text), "confidence": "strong",
                                          "lines": rows(text, pairs, _profile()), "reviewer": "fresh helper"})
@@ -270,13 +277,13 @@ async def test_the_held_row_skip_never_passes_another_line(authenticated_async_c
         got = await _verdict(client, text, [held_row, {"cv_line": CLAIM, "profile_quote": HELD, "field_path": "x"}])
         assert got[0] == "weak" and {"quote_not_in_profile", "claim_not_in_quote"} <= set(got[1]), got
         # a row naming a line the review lacks is refused (rules 5: n past review.lines), never stored
-        text = f"Ada Lovelace\nEXPERIENCE\n{HELD}\n"
+        text = ats_cv(f"Ada Lovelace\nEXPERIENCE\n{HELD}\n")
         app_id, cv_id = await _setup(client, cv=text)
-        other = {"n": 2, "verdict": "supported", "evidence": [HELD]}
+        other = {"n": 2 + len(ATS_LINES), "verdict": "supported", "evidence": [HELD]}
         resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "cv_reviewed", "payload": {
             "artifact_id": cv_id, "sha256": _sha(text), "confidence": "strong", "reviewer": "fresh helper",
             "lines": rows(text, [held_row], _profile()) + [other]}})
-        assert resp.status_code == 422 and "review.lines has 1 lines" in resp.text, resp.text
+        assert resp.status_code == 422 and f"review.lines has {1 + len(ATS_LINES)} lines" in resp.text, resp.text
 
 
 @pytest.mark.asyncio
@@ -322,7 +329,7 @@ async def test_rules_two_weak_reviews_no_longer_spend_the_budget(authenticated_a
     assert cv_review.RULES >= 3
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        texts = [OWNER_SHAPES[351].replace("- Built", p) for p in ("- Built", "* Built", "** Built")]
+        texts = [OWNER_SHAPES[351].replace("- Built", p) for p in ("- Built", "* Built", "▪ Built")]
         app_id, cv_id = await _setup(client, cv=texts[0])
         ids = [cv_id] + [await _save_cv(client, app_id, t) for t in texts[1:]]
         db = await api_deps.get_db()

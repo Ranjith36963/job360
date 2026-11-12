@@ -95,10 +95,10 @@ async def test_legacy_not_current_reviews_never_count_toward_retry_limit(authent
         v3 = CV.replace("- Built", "* Built")
         v3_id = await _save_cv(client, app_id, v3)
         assert (await _stored(client, app_id, _review(v3_id, v3, confidence="weak")))["downgraded"] == []
-        v4 = CV.replace("- Built", "** Built")
+        v4 = CV.replace("- Built", "• Built")
         v4_id = await _save_cv(client, app_id, v4)
         assert (await _stored(client, app_id, _review(v4_id, v4, confidence="weak")))["downgraded"] == []
-        v5 = CV.replace("- Built", "*** Built")
+        v5 = CV.replace("- Built", "▪ Built")
         v5_id = await _save_cv(client, app_id, v5)
         got = await _stored(client, app_id, _review(v5_id, v5))
         assert (got["confidence"], got["downgraded"]) == ("strong", [])

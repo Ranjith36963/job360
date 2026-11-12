@@ -1967,18 +1967,18 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         channel: Optional[str] = None,
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """`source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email.
+        """source {kind, message_id, thread_id?, sender, subject, received_at, quote?}: the email.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (only corrects_event_id moves back).
-        `scheduled_at` only on interview_requested/_scheduled.
+        furthest stage wins (corrects_event_id moves back).
+        scheduled_at only on interview_requested/_scheduled.
 
-        Outreach: `contact_id` + `channel` with outreach_sent,
+        Outreach: contact_id + channel with outreach_sent,
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
         outreach_bounced; no application_id if cold. outreach_reviewed
         {message_id, sha256, confidence, lines, reviewer} + contact_id.
 
-        Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
+        form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
@@ -1988,13 +1988,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         email_drafted {to, subject, attachments, gmail_draft_id};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
-        Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
+        blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail, evidence?}, stop;
         unblocked {resolution: retried|user_did_it|skipped|own_browser, note?}.
         proof_text {text, page_host}; simulation {};
         process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, reviewer,
-        lines: [{n, verdict, evidence}]};
+        lines: [{n, verdict, evidence}], jd?: [{term, must, have, evidence, n}]};
         answer_corrected {key|question, was_source}. 403/409: rules recipe.
         Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.

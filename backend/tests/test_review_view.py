@@ -15,7 +15,7 @@ import pytest
 
 from src.services.applications import cv_review
 from tests.test_application_spine import _second_user_session_cookie, _session_client
-from tests.test_cv_review import CV, _event, _mcp_client, _payload, _review, _save_cv, _seed, _setup, _stored, sha
+from tests.test_cv_review import CV, N, _event, _mcp_client, _payload, _review, _save_cv, _seed, _setup, _stored, sha
 
 KEYS = {"id", "job_title", "job_company", "country", "review"}
 REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
@@ -51,7 +51,7 @@ async def test_review_view_is_lean_and_carries_the_full_views_review_lines(
         for k in ("artifact_id", "sha256", "lines", "state"):
             assert lean["review"][k] == full["review"][k]
         assert lean["review"]["artifact_id"] == cv_id and lean["review"]["sha256"] == sha(CV)
-        assert len(lean["review"]["lines"]) == 2
+        assert len(lean["review"]["lines"]) == N
         assert (lean["review"]["reviews_used"], lean["review"]["tries_left"], lean["review"]["last_downgraded"]) == (
             0, cv_review.MAX_WEAK, [])
         small, big = len(json.dumps(lean)), len(json.dumps(full))

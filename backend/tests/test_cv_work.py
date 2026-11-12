@@ -15,9 +15,11 @@ from typing import Any
 import pytest
 
 from src.services.applications import cv_review
+from tests._cv_review import blank_ad
 from tests.test_application_spine import _second_user_session_cookie, _session_client
 from tests.test_cv_review import (
     CV,
+    CV0,
     RAW,
     _event,
     _review,
@@ -91,6 +93,7 @@ async def test_items_are_exactly_the_queued_rows_needing_cv_work_in_the_cv_tasks
         own = await _job(client, "own", url=LINKEDIN + "1", cv=text(2))      # own browser
         weak = await _job(client, "weak", cv=text(3))                        # job360, a weak review, tries left
         strong = await _job(client, "strong", cv=text(4))                    # job360, strong review: done
+        await blank_ad(strong)  # rules 6: no ad text = jd_no_ad, so a strong review can stand (test_cv_review_benchmark)
         spent = await _job(client, "spent", cv=text(5))                      # job360, every try used
         no_cv = await _job(client, "nocv", cv=None)                          # job360, no CV yet
         not_queued = await _job(client, "off", cv=text(6), queue=False)      # has a CV, not on the queue
@@ -213,6 +216,8 @@ async def test_a_cursor_survives_rows_turning_strong_between_pages(authenticated
             {"path": "assistant_settings.cv_auto_approve", "value": False}]})).status_code == 200
         text = lambda i: CV + "\n" * i  # noqa: E731
         made = [await _job(client, f"c{i}", cv=text(i + 1)) for i in range(4)]
+        for app_id in made[:2]:  # the rows reviewed strong below (rules 6: no ad text = jd_no_ad)
+            await blank_ad(app_id)
         page1 = await _cv_work(client, limit=2, include_profile=False)
         assert [i["application_id"] for i in page1["items"]] == made[:2] and page1["next_after"] == made[1]
         for n, item in enumerate(page1["items"], start=1):
@@ -290,7 +295,7 @@ async def _seed_many(client: Any, user_id: str, n: int, *, events: int, ad_chars
     ids: list[int] = []
     for i in range(n):
         ad = (f"Role {i}. " + "Responsibilities include building and running data pipelines in Python. " * 120)[:ad_chars]
-        app_id = await _job(client, f"s{i}", ad=ad, cv=CV + "\n" * i, queue=queued)
+        app_id = await _job(client, f"s{i}", ad=ad, cv=CV0 + "\n" * i, queue=queued)  # main's CV: same measure
         for k in range(events):
             assert (await _event(client, app_id, "note", {"detail": f"note {k} " + "x" * 300})).status_code == 201
         ids.append(app_id)

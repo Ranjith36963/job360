@@ -12,6 +12,7 @@ import pytest
 
 from src.services.applications import cv_review, review_rows
 from src.services.profile.models import CVData, UserProfile
+from tests._cv_review import ATS_LINES, ats_cv
 from tests.test_cv_review import _setup, _stored
 from tests.test_cv_review_held_lines import B1, B2, B3, CV_DATA, SUMMARY, _seed, _sha
 
@@ -45,17 +46,21 @@ def _judge(text: str, evidence: dict[str, list[str]], profile: UserProfile | Non
 
 HONEST = _cv((ORBITLY, R1), (NORTHWIND, R2), (TIDEWATER, R3))
 EVIDENCE = {R1: [B1], R2: [B2], R3: [B3]}
+# Through the door (rules 6): the same CV, ATS-ready; the tail's lines quote themselves, after the CV's own 6 lines.
+ATS_HONEST = ats_cv(HONEST)
+ATS_EVIDENCE = {**EVIDENCE, **{ln: [ln] for ln in ATS_LINES}}
+N = 6 + len(ATS_LINES)
 
 
 @pytest.mark.asyncio
 async def test_a_reworded_true_bullet_is_strong(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        app_id, cv_id = await _setup(client, cv=HONEST)
-        got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(HONEST), "confidence": "strong",
-                                             "lines": _rows(HONEST, EVIDENCE), "reviewer": "fresh helper"})
+        app_id, cv_id = await _setup(client, cv=ATS_HONEST)
+        got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(ATS_HONEST), "confidence": "strong",
+                                             "lines": _rows(ATS_HONEST, ATS_EVIDENCE), "reviewer": "fresh helper"})
     assert (got["confidence"], got["downgraded"], got["where"], got["rules"]) == ("strong", [], {}, cv_review.RULES)
-    assert (got["lines"], got["content_lines"], got["covered"]) == (6, 6, 6)
+    assert (got["lines"], got["content_lines"], got["covered"]) == (N, N, N)
 
 
 def test_sentence_start_capitals_are_no_claims():
@@ -147,9 +152,9 @@ def test_shape_is_closed_and_small():
 async def test_bad_rows_are_refused_and_stored_nowhere(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        app_id, cv_id = await _setup(client, cv=HONEST)
-        base = {"artifact_id": cv_id, "sha256": _sha(HONEST), "confidence": "strong", "reviewer": "fresh helper"}
-        for rows in ([{"n": 7, "verdict": "supported", "evidence": []}],  # review.lines has 6
+        app_id, cv_id = await _setup(client, cv=ATS_HONEST)
+        base = {"artifact_id": cv_id, "sha256": _sha(ATS_HONEST), "confidence": "strong", "reviewer": "fresh helper"}
+        for rows in ([{"n": N + 1, "verdict": "supported", "evidence": []}],  # review.lines has N lines
                      [{"n": n, "verdict": "supported", "evidence": ["q" * 600] * 3} for n in range(1, 40)]):  # 64 KB+
             resp = await client.post(f"/api/applications/{app_id}/events",
                                      json={"event_type": "cv_reviewed", "payload": {**base, "lines": rows}})
@@ -159,18 +164,18 @@ async def test_bad_rows_are_refused_and_stored_nowhere(authenticated_async_conte
 
 
 async def _post_rows(client: Any, app_id: int, cv_id: int, rows: list[dict[str, Any]]) -> Any:
-    payload = {"artifact_id": cv_id, "sha256": _sha(HONEST), "confidence": "strong", "reviewer": "fresh helper",
+    payload = {"artifact_id": cv_id, "sha256": _sha(ATS_HONEST), "confidence": "strong", "reviewer": "fresh helper",
                "lines": rows}
     return await client.post(f"/api/applications/{app_id}/events", json={"event_type": "cv_reviewed", "payload": payload})
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_n", ["duplicate", 0, 7])
+@pytest.mark.parametrize("bad_n", ["duplicate", 0, N + 1])
 async def test_duplicate_zero_and_beyond_last_n_are_refused_over_http(authenticated_async_context, fixture_user_id, bad_n):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        app_id, cv_id = await _setup(client, cv=HONEST)
-        rows = _rows(HONEST, EVIDENCE)
+        app_id, cv_id = await _setup(client, cv=ATS_HONEST)
+        rows = _rows(ATS_HONEST, ATS_EVIDENCE)
         rows.append({**rows[1]} if bad_n == "duplicate" else {"n": bad_n, "verdict": "supported", "evidence": []})
         resp = await _post_rows(client, app_id, cv_id, rows)
         assert resp.status_code == 422, resp.text
@@ -185,12 +190,12 @@ async def test_a_line_with_no_row_is_stored_weak_and_named(authenticated_async_c
     ``line_uncovered`` names it (only a line WITH a row is held without evidence)."""
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        app_id, cv_id = await _setup(client, cv=HONEST)
-        rows = [r for r in _rows(HONEST, EVIDENCE) if r["n"] != missing]
-        got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(HONEST), "confidence": "strong",
+        app_id, cv_id = await _setup(client, cv=ATS_HONEST)
+        rows = [r for r in _rows(ATS_HONEST, ATS_EVIDENCE) if r["n"] != missing]
+        got = await _stored(client, app_id, {"artifact_id": cv_id, "sha256": _sha(ATS_HONEST), "confidence": "strong",
                                              "lines": rows, "reviewer": "fresh helper"})
     assert (got["confidence"], got["where"]) == ("weak", {"line_uncovered": [missing]})
-    assert got["covered"] == 5
+    assert got["covered"] == N - 1
 
 
 def test_judge_is_bounded_on_hostile_text():
@@ -211,11 +216,11 @@ async def test_many_reviews_go_in_one_record_events_call_under_the_same_check(
     came from outside Job360). Each item is verified exactly as record_event verifies it."""
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        moved = _cv((ORBITLY, R1), (TIDEWATER, R2))
-        (a1, c1), (a2, c2) = await _setup(client, cv=HONEST), await _setup(client, cv=moved)
+        moved = ats_cv(_cv((ORBITLY, R1), (TIDEWATER, R2)))
+        (a1, c1), (a2, c2) = await _setup(client, cv=ATS_HONEST), await _setup(client, cv=moved)
         items = [{"application_id": a, "event_type": "cv_reviewed", "payload": {
             "artifact_id": c, "sha256": _sha(t), "confidence": "strong", "reviewer": "fresh helper",
-            "lines": _rows(t, EVIDENCE)}} for a, c, t in ((a1, c1, HONEST), (a2, c2, moved))]
+            "lines": _rows(t, ATS_EVIDENCE)}} for a, c, t in ((a1, c1, ATS_HONEST), (a2, c2, moved))]
         resp = await client.post("/api/applications/record-events", json={"events": items})
         assert resp.status_code == 200, resp.text
         assert [r["ok"] for r in resp.json()["events"]] == [True, True]

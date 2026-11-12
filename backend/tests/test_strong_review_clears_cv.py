@@ -14,15 +14,16 @@ import pytest
 from httpx import AsyncClient
 
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
+from tests._cv_review import ATS_RAW, ATS_TAIL, ats_rows, blank_ad
 
 RAW = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
-    "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
+    "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n" + ATS_RAW  # rules 6: the tail is true
 )
 CV = (
     "Ada Lovelace\nada@example.com | +44 7700 900123 | linkedin.com/in/ada\nEXPERIENCE\n"
     "- Data engineer at Northwind since 2019.\n"
-    "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
+    "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n" + ATS_TAIL  # ATS-ready (rules 6)
 )
 # One row per review line (rules 5): n = its number in review.lines, the reviewer's verdict, verbatim profile quotes.
 L1 = {"n": 1, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]}
@@ -51,6 +52,7 @@ async def _setup(client: AsyncClient, *, cv_auto: bool = True, cv: str = CV, aut
     })
     assert brought.status_code == 200, brought.text
     app_id = int(brought.json()["application_id"])
+    await blank_ad(app_id)  # rules 6: no ad text = jd_no_ad (the ad's requirements: test_cv_review_benchmark.py)
     return app_id, await _save_cv(client, app_id, cv)
 
 
@@ -61,7 +63,7 @@ async def _save_cv(client: AsyncClient, app_id: int, text: str) -> int:
 
 
 async def _review(client: AsyncClient, app_id: int, cv_id: int, text: str = CV, confidence: str = "strong") -> str:
-    payload = {"artifact_id": cv_id, "sha256": sha(text), "confidence": confidence, "lines": [L1, L2],
+    payload = {"artifact_id": cv_id, "sha256": sha(text), "confidence": confidence, "lines": [L1, L2, *ats_rows(3)],
                "reviewer": "fresh helper"}
     resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "cv_reviewed", "payload": payload})
     assert resp.status_code == 201, resp.text
