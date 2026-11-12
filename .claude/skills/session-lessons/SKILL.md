@@ -436,3 +436,17 @@ Apify web-fetch tool, before you build. Never cite from memory.
   was green, and from 2 Nov main was red (#1452's offline shard). **Rule:** when code starts reading today's date,
   run its tests with the date forced to several days (a fixture patching `hk._dt`), and give tests that are not
   about the date a fixed input (here a saved cursor at 0).
+- 2026-11-12 (#1559): the middleware PR went red on CodeQL "User-controlled bypass of security check": the new
+  branch `if (pathname === "/")` wrapped the session check, and CodeQL reads a request value compared to one
+  literal, guarding an auth call, as a bypass. **Rule:** in `middleware.ts` route by membership of a fixed list
+  (`HOME_PAGES.includes(pathname)`, like `AUTH_PAGES`), never by `pathname === "<literal>"`.
+- 2026-11-12 (#1559): `safeNext` passed `/..//evil.example`; the URL parser folds it to `//evil.example`, and Next
+  makes a same-host `Location` relative, so the browser left the site. The unit tests saw the absolute URL and
+  passed. An independent Opus review caught it before the push. **Rule:** an open-redirect test list includes
+  dot-segment paths (`/..//host`, `/.//host`, `/%2e%2e//host`) and asserts the resolved path does not start `//`.
+- 2026-11-12 (#1563): I left a local backend on :8000 while running the hermetic Playwright suite. Unmocked calls
+  reached it with a fake cookie, got 401, and the new session-ended handler looped 20 old tests to `/login`; I
+  took ten minutes to see it was my own server. Later a stale `next start` kept its port (the process is named
+  `next-server`, so `pkill -f "next start"` missed it) and served old chunks. **Rule:** before a hermetic e2e
+  run, stop the local backend; free a port with `fuser -k <port>/tcp` and check the new server's log shows no
+  `EADDRINUSE` before trusting what it serves.

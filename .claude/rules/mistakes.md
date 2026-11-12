@@ -74,6 +74,11 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Name `model:` on every Agent call (model-delegation); an unnamed worker inherits the lead's model (2026-10-24).
 - A machine never adds `assistant-merge` to a hand-merge PR, nor removes it: that switch is the owner's yes (owner, 2026-10-26).
 - A watcher checks its grep found a commit before it loops; an empty `merge=` never finishes (2026-10-23).
+- In `frontend/src/middleware.ts` route by a fixed list (`X_PAGES.includes(pathname)`), never
+  `pathname === "<literal>"` around the session check: CodeQL flags it high (2026-11-12, #1559).
+- Open-redirect tests include dot-segment paths (`/..//host`, `/%2e%2e//host`) and check the resolved path (#1559).
+- Before a hermetic Playwright run stop the local backend; free ports with `fuser -k <port>/tcp`, never
+  `pkill -f "next start"` (the process is `next-server`) (2026-11-12, #1563).
 
 ## Probing job sites
 - Call a site "blocked" only after testing the exact endpoint the reader uses, and name it
