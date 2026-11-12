@@ -58,7 +58,7 @@ DOWNGRADES = (
     "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "evidence_reused", "cv_checks_found",
     "ats_format", "jd_not_judged", "jd_no_must", "jd_too_few", "jd_term_not_in_ad", "jd_evidence_not_in_profile",
     "jd_term_not_in_cv",
-    "jd_gap_claimed", "jd_coverage_low", "retry_limit",
+    "jd_gap_claimed", "jd_coverage_low", "jd_terms_dropped", "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
@@ -807,6 +807,7 @@ def judged_versions(reviews: list[dict[str, Any]], application_id: int) -> set[A
 
 async def ats_and_jd(
     db: JobDatabase, user_id: str, application_id: int, jd: Any, cv_text: str, lines: list[str], profile: Any,
+    earlier: Any = None,
 ) -> tuple[dict[str, list[Any]], dict[str, Any]]:
     """(e) and (f) of the module docstring (rules 6): ``(where, stored jd block)``. ``ats_format`` holds closed codes,
     details and line numbers only (``code[:detail][@lines]``), never CV text; ``jd`` is ``review_jd.judge`` on the
@@ -826,7 +827,7 @@ async def ats_and_jd(
     except Exception:  # noqa: BLE001
         saved = 0
     jd_where, stored = review_jd.judge(jd, str(app_row.get("job_description_snapshot") or ""), lines, cv_text, profile,
-                                       saved)
+                                       saved, earlier)
     where.update(jd_where)
     logger.info("cv_reviewed ats_jd application=%s ats=%s jd=%s must=%s covered=%s codes=%s",
                 safe_log_value(application_id), len(fmt), stored["state"], stored.get("must"), stored.get("covered"),
@@ -868,12 +869,15 @@ async def verify(
     found = cv_checks.check_text("cv", cv["text"], profile)
     if found:
         where["cv_checks_found"] = [i["code"] for i in found]
+    reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
+    # D (2026-11-12, apps 793, 150): every earlier review's judged terms; a review stored before them has none
+    earlier = [t for e in reviews for t in ((e["payload"].get("jd") if isinstance(e["payload"].get("jd"), dict)
+                                             else None) or {}).get("terms") or []]
     ats_jd, jd = await ats_and_jd(db, user.id, application_id, payload.get("jd"), cv["text"], content[:numbered],
-                                  profile)
+                                  profile, earlier)
     where.update(ats_jd)
     if held:  # how often a list or record line was held by the profile itself (no CV text logged)
         logger.info("cv_reviewed lines_held_by_profile=%s application=%s", held, safe_log_value(application_id))
-    reviews = await kit._events(db, user.id, application_id, (EVENT_TYPE,))
     # A legacy review that named no real version (not_current_cv, empty sha) was never a try: it never counts. Nor
     # does a weak review judged under OLDER rules (no or another ``rules``): its verdict may be one these rules fix
     # (production 2026-11-10: 3 false-weak reviews had spent apps' whole budget), and its rows were never stored,
@@ -910,7 +914,7 @@ def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optiona
     for code in stored.get("downgraded") or []:
         at = [str(x) for x in where.get(code) or []]
         more = f" (+{len(at) - _WHERE_LISTED} more)" if len(at) > _WHERE_LISTED else ""
-        label = ("" if code in ("cv_checks_found", "ats_format", "jd_too_few")
+        label = ("" if code in ("cv_checks_found", "ats_format", "jd_too_few", "jd_terms_dropped")
                  else "jd items " if code.startswith("jd_") else "lines ")
         jd = stored.get("jd") or {}
         if code == "jd_coverage_low":
