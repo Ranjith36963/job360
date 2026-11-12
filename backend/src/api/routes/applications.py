@@ -934,6 +934,28 @@ class ApplicationReviewViewOut(BaseModel):
 APPLICATION_VIEWS = ("review",)
 
 
+class CvWorkItemOut(BaseModel):
+    application_id: int
+    job_title: str
+    job_company: str
+    country: Optional[str] = None
+    browser: Optional[str] = None
+    ad: str
+    ad_truncated: bool
+    jd_requirements: list[str] = []
+    review: Optional[CvReviewViewOut] = None
+    cv_saved_at: Optional[str] = None
+
+
+class CvWorkOut(BaseModel):
+    """`cv_work`: the next queued applications that need CV work, plus one compact profile."""
+
+    items: list[CvWorkItemOut]
+    total_needing_work: int
+    next_after: Optional[int] = None
+    profile: Optional[dict[str, Any]] = None
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -2630,6 +2652,25 @@ async def get_job(
     # P0 2026-10-14 — the text, link and location are THIS user's snapshot,
     # never the shared catalog row (which holds whoever pasted the key first).
     return application_job_response(app_row, dict(row))
+
+
+@router.get("/applications/cv-work", response_model=CvWorkOut, response_model_exclude_unset=True,
+            dependencies=AUTH_FIRST)
+async def cv_work(
+    limit: int = Query(10, ge=1, le=20),
+    after: Optional[int] = Query(None, ge=1, description="cursor: the last application_id of the previous page"),
+    include_profile: bool = Query(True),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The lean read for the scheduled CV write-and-review task: only the queued rows that need CV work."""
+    from src.services.applications import cv_work as cv_work_service  # noqa: PLC0415
+
+    try:
+        return await cv_work_service.cv_work(
+            db, user.id, limit=limit, after=after, include_profile=include_profile)
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 @router.get(

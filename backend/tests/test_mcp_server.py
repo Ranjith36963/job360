@@ -33,6 +33,7 @@ EXPECTED_TOOLS = {
     # §Tool contracts) — seven new tools, 8 -> 15 total.
     "get_application",
     "list_applications",
+    "cv_work",  # the CV task's lean queue read (2026-11-12) - 39 -> 40.
     "mark_inbox_checked",
     "match_email",  # Route an email back to its application from stored facts (feature 8) - 33 -> 34.
     # Owner 2026-10-23 - the scheduled run: what is due, and stamp a duty done (migration 0082).

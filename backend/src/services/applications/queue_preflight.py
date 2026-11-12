@@ -214,10 +214,7 @@ async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
         return []
     queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
     ids = sorted(open_ids, key=lambda i: (str(queued_at.get(i) or ""), i))
-    skip = await _with_kind(db, user_id, ids, "cv")
-    skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
-    blocks = await blocked_service.open_blocks(db, user_id, ids)
-    skip |= {i for i, p in blocks.items() if p.get("reason") in ("posting_closed", blocked_service.ALREADY_APPLIED)}
+    skip = await _with_kind(db, user_id, ids, "cv") | await cv_skip_ids(db, user_id, ids)
     todo = [i for i in ids if i not in skip]
     if not todo:
         return []
@@ -227,6 +224,17 @@ async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     )
     names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
     return [{"id": i, "company": names.get(i, "")} for i in todo]
+
+
+async def cv_skip_ids(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
+    """Rows no CV work happens on, whatever their CV: another session's live hold, a closed posting, a site
+    saying the user already applied. Shared by :func:`cv_rows` and ``cv_work``. Scoped by ``user_id``; read-only."""
+    if not ids:
+        return set()
+    skip = set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
+    blocks = await blocked_service.open_blocks(db, user_id, ids)
+    closed = ("posting_closed", blocked_service.ALREADY_APPLIED)
+    return skip | {i for i, p in blocks.items() if p.get("reason") in closed}
 
 
 def _days_since(iso: Optional[str], now: datetime) -> Optional[int]:
