@@ -258,7 +258,7 @@ async def test_blocked_count_and_hold_and_queued_days(authenticated_async_contex
         _seed_profile(fixture_user_id)
         app_id = await _bring(client, _ad(1))
         await _queue(client, app_id)
-        blocked = {"reason": "captcha", "step": "submit", "page_host": "jobs.example.com", "detail": "CAPTCHA"}
+        blocked = {"reason": "login_needed", "step": "submit", "page_host": "jobs.example.com", "detail": "sign-in page"}
         for _ in range(2):
             assert (await _event(client, app_id, "blocked", payload=blocked)).status_code == 201
         pre = _by_id(await _queued(client))[app_id]["preflight"]

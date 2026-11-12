@@ -46,63 +46,42 @@ def _marks(ids: list[int]) -> str:
     return ",".join("?" for _ in ids)
 
 
+# 2026-11-12 (production 2026-11-09/10: bulk apply unqueued 48 jobs as "failed twice", 13 of them CAPTCHA, 3
+# one-time-code): these blocks are handed to the user (the PC queue, emailed codes), never a failure.
+HANDED_OFF_REASONS = frozenset({"captcha", "bot_check", "otp_needed"})
+# Events that retract the blocks before them: the user cleared it, said the CV is OK / said send, or a form
+# step worked (the page loaded and was read or filled), so the earlier block is no longer standing.
+_RETRACTING = frozenset({"unblocked", "cv_seen", "submit_approved", "form_checked", "form_filled", "form_swept"})
+
+
 async def _blocked_counts(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, int]:
-    """``blocked`` events per application since it was last queued, that no later event retracts
-    (a job put back on the queue after the user cleared its block starts again from 0)."""
+    """Standing failures per application since it was last queued: ``blocked`` events the assistant cannot
+    route (not :data:`HANDED_OFF_REASONS`) with no later retracting event (:data:`_RETRACTING`) and no
+    correction. A re-queue starts counting again. Read at query time from stored payloads: no migration,
+    old rows count. Scoped by ``user_id``."""
     if not ids:
         return {}
     cur = await db._db.execute(
-        f"SELECT e.application_id, COUNT(*) FROM application_events e "  # noqa: S608 - placeholders only
-        f"WHERE e.user_id = ? AND e.event_type = 'blocked' AND e.application_id IN ({_marks(ids)}) "
-        f"AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
-        f"AND e.id > COALESCE((SELECT MAX(q.id) FROM application_events q WHERE q.user_id = e.user_id "
-        f"  AND q.application_id = e.application_id AND q.event_type = 'queued' "
-        f"  AND NOT EXISTS (SELECT 1 FROM application_events c2 WHERE c2.corrects_event_id = q.id)), 0) "
-        f"GROUP BY e.application_id",
-        [user_id, *ids],
-    )
-    counts = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
-    for app_id, n in (await _handed_off(db, user_id, sorted(counts))).items():
-        counts[app_id] = max(0, counts[app_id] - n)
-    return counts
-
-
-async def _handed_off(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, int]:
-    """Per application: CAPTCHA / bot-check blocks from Job360's cloud browser (``blocked.captcha_handoff``,
-    counted by :func:`_blocked_counts`) that the user's own browser then took over: a later event stamped
-    ``browser: own_browser``. That block was handed off, not failed, so it is not counted (owner 2026-11-07).
-    Read at query time from stored payloads: no migration, old rows count. Scoped by ``user_id``."""
-    if not ids:
-        return {}
-    cur = await db._db.execute(
-        f"SELECT e.id, e.application_id, e.event_type, e.payload FROM application_events e "  # noqa: S608
+        f"SELECT e.application_id, e.event_type, e.payload FROM application_events e "  # noqa: S608
         f"WHERE e.user_id = ? AND e.application_id IN ({_marks(ids)}) "
-        f"AND e.event_type IN ('queued', 'blocked', 'form_checked', 'form_filled', 'form_swept', "
-        f"'submit_attempted') "
+        f"AND e.event_type IN ('queued', 'blocked', {', '.join(repr(t) for t in sorted(_RETRACTING))}) "
         f"AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
         [user_id, *ids],
     )
-    open_handoffs: dict[int, int] = {}  # handed-off blocks not yet taken over, per application
-    out: dict[int, int] = {}
-    for r in await cur.fetchall():
-        raw = r[3]
-        try:
-            p = json.loads(raw) if isinstance(raw, str) else raw
-        except ValueError:
-            continue
-        if not isinstance(p, dict):
-            continue
-        app_id = int(r[1])
-        if r[2] == "queued":  # counting starts again from a re-queue, as in _blocked_counts
-            open_handoffs.pop(app_id, None)
-            out.pop(app_id, None)
-        elif r[2] == "blocked":
-            if blocked_service.captcha_handoff(p):
-                open_handoffs[app_id] = open_handoffs.get(app_id, 0) + 1
-        elif p.get("browser") == "own_browser" and open_handoffs.get(app_id):
-            open_handoffs.pop(app_id)
-            out[app_id] = 1  # ONE hand-off per queue span is free; a CAPTCHA that comes back counts
-    return out
+    counts: dict[int, int] = {}
+    for app_id, event_type, raw in await cur.fetchall():
+        app_id = int(app_id)
+        if event_type == "blocked":
+            try:
+                p = json.loads(raw) if isinstance(raw, str) else raw
+            except ValueError:
+                p = None
+            reason = p.get("reason") if isinstance(p, dict) else None
+            if reason not in HANDED_OFF_REASONS:
+                counts[app_id] = counts.get(app_id, 0) + 1
+        else:  # queued starts again; every other kept type retracts what stood before it
+            counts.pop(app_id, None)
+    return counts
 
 
 async def _with_kind(db: JobDatabase, user_id: str, ids: list[int], kind: str) -> set[int]:
