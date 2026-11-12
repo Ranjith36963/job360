@@ -67,8 +67,9 @@ MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # line's row is not judged by its quote, comma / dash headers, "portfolio" headings, no dict keys as profile text (3);
 # a quote comes from the job / project / raw block its line sits under (4, cv_records); free wording: rows
 # {n, verdict, evidence}, hard facts pinned to the row's quotes, no word-overlap rule (5, review_rows); ATS format and
-# the ad's requirements (6, cv_format + review_jd)
-RULES = 6
+# the ad's requirements (6, cv_format + review_jd); headline / summary lines judged on facts against the whole profile,
+# no quote asked, the headline may use the ad's title words; generic skills labels widened (7, owner 2026-11-12)
+RULES = 7
 MAX_LINES = 200
 EVIDENCE_MAX, QUOTE_MIN_CHARS, QUOTE_MAX_CHARS = 3, 3, 600
 WHERE_STORED = 20  # line numbers stored per code
@@ -237,6 +238,8 @@ def list_parts(line: str) -> Optional[tuple[list[str], list[str]]]:
 GENERIC_LABEL_WORDS = frozenset({
     "skills", "skill", "technical", "tools", "technologies", "languages", "frameworks", "core", "key", "backend",
     "frontend", "data", "engineering", "cloud", "ops", "ai", "ml", "agents", "llms", "web", "devops", "databases",
+    "and", "agentic", "machine", "learning", "apis", "programming", "infrastructure", "automation", "generative",
+    "genai", "mlops", "llmops", "platforms", "analytics",
 })
 _NEVER_LABEL_WORDS = frozenset({"education", "experience", "work", "employment"})
 
@@ -244,7 +247,7 @@ _NEVER_LABEL_WORDS = frozenset({"education", "experience", "work", "employment"}
 @dataclass(frozen=True)
 class SkillBook:
     """What the profile says about skills: every whole item, its own labelled groups (label words -> items), and
-    the words of its records (companies, titles, projects, education, certifications) a label may never use."""
+    the words of its records (companies, projects, education, certifications) a label may never use."""
 
     items: frozenset[str]
     groups: tuple[tuple[frozenset[str], frozenset[str]], ...]
@@ -270,11 +273,13 @@ def skill_book(profile: Any) -> SkillBook:
             got = {_norm(i) for i in parts[1]}
             out |= got
             groups.setdefault(_label_words(parts[0]), set()).update(got)
-    texts = [str(r.get(k) or "") for n in ("cv_positions", "linkedin_positions") for r in (getattr(cv, n, None) or [])
-             if isinstance(r, dict) for k in ("company", "title")]
+    # a job TITLE's words are no employer: "Agentic AI:" stays generic for an "AI Solutions Engineer" (rules 7, apps
+    # 435 460 461 462); a title word that is no generic word is never a label anyway
+    texts = [str(r.get("company") or "") for n in ("cv_positions", "linkedin_positions")
+             for r in (getattr(cv, n, None) or []) if isinstance(r, dict)]
     texts += [str(r.get("name") or "") for n in ("cv_projects", "linkedin_projects")
               for r in (getattr(cv, n, None) or []) if isinstance(r, dict)]
-    texts += [s for n in ("education", "certifications", "companies", "job_titles")
+    texts += [s for n in ("education", "certifications", "companies")
               for s in cv_checks._flat(getattr(cv, n, None))]
     entities = frozenset(evidence._words(" ".join(texts).replace("/", " ").replace("-", " ")))
     return SkillBook(frozenset(out - {""}), tuple((k, frozenset(v)) for k, v in groups.items()), entities)
@@ -288,8 +293,8 @@ def profile_items(profile: Any) -> frozenset[str]:
 def list_line_holds(line: str, book: SkillBook) -> bool:
     """A skills line the profile holds item by item (production 2026-11-10, apps 848-882): EVERY item a whole
     profile item, in any order, under a label that is a skills group, never a fact. Each label word is a word of one
-    of the profile's OWN group labels, or a closed :data:`GENERIC_LABEL_WORDS` word; a word of an employer, title,
-    project, degree or certification is never one (unless the profile's own group label uses it), nor
+    of the profile's OWN group labels, a closed :data:`GENERIC_LABEL_WORDS` word or a one-word profile skill; a word
+    of an employer, project, degree or certification is never one (unless the profile's own group label uses it), nor
     :data:`_NEVER_LABEL_WORDS`. A label made only of profile group words claims THOSE groups: its items must come
     from them ("Agents: Python, SQL" is weak when Python is not in "Agents & LLMs"). A label with a generic word no
     group uses ("Backend & Data") may take any profile item. One item the profile lacks keeps it a claim."""
@@ -300,7 +305,8 @@ def list_line_holds(line: str, book: SkillBook) -> bool:
     group_words = frozenset().union(*(k for k, _ in book.groups)) if book.groups else frozenset()
     for w in label:
         named = w in group_words
-        if w in _NEVER_LABEL_WORDS or not (named or w in GENERIC_LABEL_WORDS) or (w in book.entities and not named):
+        generic = w in GENERIC_LABEL_WORDS or w in book.items  # "Python and APIs:" names a skill (rules 7)
+        if w in _NEVER_LABEL_WORDS or not (named or generic) or (w in book.entities and not named):
             return False
     got = {_norm(i) for i in parts[1]}
     if not got <= book.items:
@@ -857,7 +863,8 @@ async def verify(
                        safe_log_value(cv["id"] if cv else None))
         raise SpineError(422, "not_current_cv: this is not the application's newest CV; use get_application's "
                               "review.artifact_id, review.sha256 and review.lines (nothing was stored)")
-    where, content, held = review_rows.judge(cv["text"], rows, profile)
+    app_row = await spine.get_owned_application(db, user.id, application_id) or {}
+    where, content, held = review_rows.judge(cv["text"], rows, profile, str(app_row.get("job_title") or ""))
     numbered = min(len(content), REVIEW_LINES_CAP)
     past = sorted(r["n"] for r in rows if r["n"] > numbered)
     if past:  # a row naming no review line: refused, never stored (it would only look like a review)
