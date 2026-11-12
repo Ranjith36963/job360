@@ -49,14 +49,15 @@ def _marks(ids: list[int]) -> str:
 # 2026-11-12 (production 2026-11-09/10: bulk apply unqueued 48 jobs as "failed twice", 13 of them CAPTCHA, 3
 # one-time-code): these blocks are handed to the user (the PC queue, emailed codes), never a failure.
 HANDED_OFF_REASONS = frozenset({"captcha", "bot_check", "otp_needed"})
-# Events that retract the blocks before them: the user cleared it, said the CV is OK / said send, or a form
-# step worked (the page loaded and was read or filled), so the earlier block is no longer standing.
-_RETRACTING = frozenset({"unblocked", "cv_seen", "submit_approved", "form_checked", "form_filled", "form_swept"})
+# Only an ``unblocked`` the USER did retracts the blocks before it. Form steps (form_checked / form_filled /
+# form_swept), cv_seen, submit_approved and the assistant's own ``unblocked`` {resolution: "retried"} do not:
+# every apply run records them before it submits, so counting them would hide a block that really repeated.
+_USER_CLEARED = frozenset({"user_did_it", blocked_service.OWN_BROWSER})
 
 
 async def _blocked_counts(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, int]:
     """Standing failures per application since it was last queued: ``blocked`` events the assistant cannot
-    route (not :data:`HANDED_OFF_REASONS`) with no later retracting event (:data:`_RETRACTING`) and no
+    route (not :data:`HANDED_OFF_REASONS`) with no later user-cleared ``unblocked`` (:data:`_USER_CLEARED`) and no
     correction. A re-queue starts counting again. Read at query time from stored payloads: no migration,
     old rows count. Scoped by ``user_id``."""
     if not ids:
@@ -64,7 +65,7 @@ async def _blocked_counts(db: JobDatabase, user_id: str, ids: list[int]) -> dict
     cur = await db._db.execute(
         f"SELECT e.application_id, e.event_type, e.payload FROM application_events e "  # noqa: S608
         f"WHERE e.user_id = ? AND e.application_id IN ({_marks(ids)}) "
-        f"AND e.event_type IN ('queued', 'blocked', {', '.join(repr(t) for t in sorted(_RETRACTING))}) "
+        "AND e.event_type IN ('queued', 'blocked', 'unblocked') "
         f"AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
         [user_id, *ids],
     )
@@ -79,8 +80,15 @@ async def _blocked_counts(db: JobDatabase, user_id: str, ids: list[int]) -> dict
             reason = p.get("reason") if isinstance(p, dict) else None
             if reason not in HANDED_OFF_REASONS:
                 counts[app_id] = counts.get(app_id, 0) + 1
-        else:  # queued starts again; every other kept type retracts what stood before it
+        elif event_type == "queued":
             counts.pop(app_id, None)
+        else:  # unblocked: retracts only when the user cleared it
+            try:
+                p = json.loads(raw) if isinstance(raw, str) else raw
+            except ValueError:
+                p = None
+            if isinstance(p, dict) and p.get("resolution") in _USER_CLEARED:
+                counts.pop(app_id, None)
     return counts
 
 

@@ -1,7 +1,7 @@
 """``preflight.blocked_count`` counts only blocks the assistant cannot route and the user has not resolved
 (production 2026-11-09/10: 48 jobs left the queue as "failed twice", 13 of them CAPTCHA, 3 one-time-code).
-CAPTCHA / bot check / one-time code are handed off, never failures; a later ``unblocked``, ``cv_seen`` or
-successful form step retracts earlier blocks. Real doors, real Postgres."""
+CAPTCHA / bot check / one-time code are handed off, never failures; a later ``unblocked`` the USER did
+(user_did_it / own_browser) retracts earlier blocks; form steps and an assistant retry do not. Real doors, real Postgres."""
 from __future__ import annotations
 
 from typing import Any
@@ -80,11 +80,50 @@ async def test_a_block_then_unblocked_does_not_count(authenticated_async_context
 
 
 @pytest.mark.asyncio
-async def test_a_newer_successful_form_step_retracts_earlier_blocks(authenticated_async_context):
+async def test_a_form_step_does_not_retract_earlier_blocks(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _queued_job(client, "formstep")
         await _block(client, app_id, "site_error")
         await _event(client, app_id, "form_checked", {"questions_count": 3, "answered": 3, "missing": 0})
-        assert await _count(client, app_id) == 0
-        await _block(client, app_id, "site_error")
         assert await _count(client, app_id) == 1
+        await _block(client, app_id, "site_error")
+        assert await _count(client, app_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_site_error_at_submit_on_two_runs_counts_two(authenticated_async_context):
+    """Each run checks the form, then the site errors at submit."""
+    async with authenticated_async_context() as client:
+        app_id = await _queued_job(client, "real2")
+        for _ in range(2):
+            await _event(client, app_id, "form_checked", {"questions_count": 3, "answered": 3, "missing": 0})
+            await _block(client, app_id, "site_error")
+        assert await _count(client, app_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_assistant_retry_then_same_block_counts_two(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _queued_job(client, "retry2")
+        await _block(client, app_id, "site_error")
+        await _event(client, app_id, "unblocked", {"resolution": "retried"})
+        await _block(client, app_id, "site_error")
+        assert await _count(client, app_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_own_browser_unblock_retracts(authenticated_async_context, fixture_user_id):
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_routes
+    from src.services.applications import blocked as blocked_service
+
+    async with authenticated_async_context() as client:
+        app_id = await _queued_job(client, "own")
+        user = CurrentUser(id=fixture_user_id, email="u@example.com")
+        async with browser_routes._db() as db:  # noqa: SLF001
+            await blocked_service.record_browser_block(
+                db, user, app_id, {"reason": "site_error", "step": "Job360 browser", "page_host": "boards.greenhouse.io"}
+            )
+        assert await _count(client, app_id) == 1
+        await _event(client, app_id, "unblocked", {"resolution": "own_browser"})
+        assert await _count(client, app_id) == 0
