@@ -179,3 +179,75 @@ async def test_a_malformed_jd_is_refused(authenticated_async_context, fixture_us
                                  json={"event_type": "cv_reviewed", "payload": _payload(cv_id, HONEST, jd)})
     assert resp.status_code == 422, resp.text
     assert "jd" in resp.text
+
+
+# Checker findings 2026-11-12 (D1 dilution, D2 omission, D3 word form).
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dups", [
+    [HONEST_JD[0]] * 20,  # D1: 20 copies of a covered term would make 1 miss of 24 pass the bar
+    [_item("langgraph", evidence=[SUMMARY], n=[2])], [_item("LangGraphs", evidence=[SUMMARY], n=[2])],
+])
+async def test_a_duplicate_jd_term_is_refused(authenticated_async_context, fixture_user_id, dups):
+    jd = [*HONEST_JD[:3], _item("ChromaDB", evidence=[B2]), HONEST_JD[4], *dups]
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id, cv_id = await _app(client, HONEST)
+        resp = await client.post(f"/api/applications/{app_id}/events",
+                                 json={"event_type": "cv_reviewed", "payload": _payload(cv_id, HONEST, jd)})
+    assert resp.status_code == 422, resp.text
+    assert "jd[5]" in resp.text and "duplicate" in resp.text
+
+
+def test_judge_counts_each_distinct_term_once():
+    from src.services.applications import review_jd
+
+    jd = [*HONEST_JD[:3], _item("ChromaDB", evidence=[B2]), HONEST_JD[4], *[HONEST_JD[0]] * 20]
+    lines = cv_review.content_lines(HONEST, _profile())
+    where, stored = review_jd.judge(jd, AD, lines, HONEST, _profile())
+    assert (stored["must"], stored["covered"], "jd_coverage_low" in where) == (4, 3, True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("jd", [[dict(i, must=False) for i in HONEST_JD], [_item("Kubernetes", have=False, must=False)]])
+async def test_a_jd_with_no_must_have_is_weak(authenticated_async_context, fixture_user_id, jd):
+    got = await _review(authenticated_async_context, fixture_user_id, jd)  # D2: the reviewer must name the must-haves
+    assert (got["confidence"], got["downgraded"]) == ("weak", ["jd_no_must"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("saved", "jd", "weak"), [
+    (["LangGraph", "MCP", "RAG", "ChromaDB", "Kubernetes"], [HONEST_JD[0], HONEST_JD[1]], True),  # 2 < 3
+    (["LangGraph", "MCP", "RAG", "ChromaDB", "Kubernetes"], HONEST_JD[:3], False),
+    (["LangGraph", "MCP"], [HONEST_JD[0], HONEST_JD[1]], False),  # min(3, 2 saved)
+    (["LangGraph", "MCP"], [HONEST_JD[0]], True),
+])
+async def test_a_jd_shorter_than_the_saved_requirements_is_weak(authenticated_async_context, fixture_user_id,
+                                                                saved, jd, weak):
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        app_id, cv_id = await _app(client, HONEST)
+        fit = await client.put(f"/api/applications/{app_id}/fit", json={"jd_requirements": saved})
+        assert fit.status_code == 200, fit.text
+        got = await _stored(client, app_id, _payload(cv_id, HONEST, jd))
+    assert (got["confidence"], got["downgraded"]) == (("weak", ["jd_too_few"]) if weak else ("strong", []))
+
+
+@pytest.mark.asyncio
+async def test_the_ads_word_form_is_not_a_false_weak(authenticated_async_context, fixture_user_id):
+    """D3: ad 'RAG pipelines' / 'agentic system design' / 'Lang Graph'; the CV says 'RAG pipeline' / 'agentic
+    systems' / 'LangGraph'."""
+    ad = "AI Engineer. Must have: RAG pipelines, agentic system design and Lang Graph."
+    jd = [_item("RAG pipelines", evidence=[B2], n=[6]), _item("agentic system", evidence=[SUMMARY], n=[2]),
+          _item("Lang Graph", evidence=[SUMMARY], n=[2])]
+    got = await _review(authenticated_async_context, fixture_user_id, jd, ad=ad)
+    assert (got["confidence"], got["downgraded"], got["where"]) == ("strong", [], {})
+    assert (got["jd"]["must"], got["jd"]["covered"]) == (3, 3)
+
+
+def test_java_in_the_ad_is_not_javascript_in_the_cv():
+    from src.services.applications import review_jd
+
+    cv = HONEST.replace("LangGraph, LangChain, MCP, RAG", "LangGraph, LangChain, MCP, RAG, JavaScript")
+    where, stored = review_jd.judge([*HONEST_JD, _item("Java", have=False, must=False)], AD + " Java is a plus.",
+                                    cv_review.content_lines(cv, _profile()), cv, _profile())
+    assert (where, stored["gaps"]) == ({}, ["Kubernetes", "Java"])

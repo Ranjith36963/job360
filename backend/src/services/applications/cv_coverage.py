@@ -5,6 +5,8 @@ what needs no understanding, with :class:`Tokens`:
 
 * :meth:`Tokens.find` (strict): the term, word for word and in order, is in the text (case and whitespace aside);
   it returns the TEXT's own spelling, so a gap is stored in the ad's exact words;
+* :meth:`Tokens.match`: ``find``, or the term in another word form (a trailing s / es folds on a piece longer than
+  3 characters; a two-piece term matches one run-together piece); what the CV review compares with;
 * :meth:`Tokens.claims` (loose): a reader would see the term in the text, also as a spelling variant (``NodeJS`` /
   ``Node.js`` / ``Node JS``). A gap is checked with it, deliberately LOOSER than ``find``, so a tokenisation miss
   can never let a CV claim a requirement the profile lacks.
@@ -102,9 +104,27 @@ class Tokens:
             return " ".join(self.src[a[0] : b[1]].split())
         return " ".join(self.orig[pos : end + 1])
 
+    def match(self, term: Any) -> str:
+        """:meth:`find`, else the term in another word form (checker D3, 2026-11-12): a trailing ``s`` / ``es`` on a
+        piece longer than 3 characters folds (``RAG pipelines`` / ``RAG pipeline``), and a two-piece term matches one
+        piece that is both run together (``Lang Graph`` / ``LangGraph``). Whole pieces only: ``Java`` never matches
+        ``JavaScript``. 1-2 letter terms stay :meth:`find`. This text's own spelling, else ``""``."""
+        exact = self.find(term)
+        t = Tokens(term if isinstance(term, str) else "")
+        if exact or not t.norm or (len(t.norm) == 1 and len(t.norm[0]) <= 2):
+            return exact
+        needles = [t.norm] + ([[t.norm[0] + t.norm[1]]] if len(t.norm) == 2 else [])
+        for needle in needles:
+            for key in _forms(needle[0]):
+                for pos in self.idx.get(key, ()):
+                    hay = self.norm[pos : pos + len(needle)]
+                    if len(hay) == len(needle) and all(_same(a, b) for a, b in zip(hay, needle)):
+                        return " ".join(self.orig[pos : pos + len(needle)])
+        return ""
+
     def claims(self, term: Any) -> bool:
-        """A reader would see the term here: :meth:`find`, or its letters and digits run together (looser)."""
-        if self.find(term):
+        """A reader would see the term here: :meth:`match`, or its letters and digits run together (looser)."""
+        if self.match(term):
             return True
         key = _loose_key(Tokens(term if isinstance(term, str) else "").norm)
         return bool(key) and key in self.loose
@@ -122,6 +142,33 @@ class Tokens:
                     out.add(acc)
             self._loose = out
         return self._loose
+
+
+def _folds(long: str, short: str) -> bool:
+    """``long`` is ``short`` plus a trailing ``s`` / ``es``, on a piece longer than 3 characters (never shorter
+    than 3 after the fold: ``goes`` is not ``go``)."""
+    return len(long) > 3 and len(short) >= 3 and long in (short + "s", short + "es")
+
+
+def _same(a: str, b: str) -> bool:
+    return a == b or _folds(a, b) or _folds(b, a)
+
+
+def _forms(piece: str) -> list[str]:
+    """Every piece that :func:`_same` could equal: the index keys to look up (no scan of the whole text)."""
+    out = [piece, piece + "s", piece + "es"]
+    out += [piece[:-k] for k in (1, 2) if piece.endswith("es"[2 - k :]) and _folds(piece, piece[:-k])]
+    return out
+
+
+def same_term(a: Any, b: Any) -> bool:
+    """Two terms are one requirement for :meth:`Tokens.match` (case, a plural and a split aside): a duplicate."""
+    x, y = Tokens(a).norm, Tokens(b).norm
+    if len(x) < len(y):
+        x, y = y, x
+    if len(x) == 2 and len(y) == 1:
+        x = [x[0] + x[1]]
+    return bool(x) and len(x) == len(y) and all(_same(p, q) for p, q in zip(x, y))
 
 
 def _index(toks: list[str]) -> dict[str, list[int]]:

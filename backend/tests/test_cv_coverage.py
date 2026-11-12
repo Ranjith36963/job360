@@ -73,3 +73,24 @@ def test_huge_and_hostile_inputs_are_bounded_and_fast():
         junk.claims("Python")
     assert time.perf_counter() - t0 < 1.0
     assert Tokens(5).find("x") == "" and Tokens("x").find(5) == ""  # type: ignore[arg-type]
+
+
+def test_match_folds_a_plural_and_joins_a_split_term():
+    """Checker D3 (2026-11-12): the ad's word form must not make an honest CV line weak."""
+    assert Tokens("Engineered a RAG pipeline with Bedrock").match("RAG pipelines") == "RAG pipeline"
+    assert Tokens("AI engineer building agentic systems").match("agentic system") == "agentic systems"
+    assert Tokens("Shipped APIs and LLMs").match("API") == "APIs" and Tokens("an LLM app").match("LLMs") == "LLM"
+    assert Tokens("Built agents with LangGraph and MCP").match("Lang Graph") == "LangGraph"
+    assert Tokens("Built RAG pipeline").claims("RAG pipelines") and Tokens("Used LangGraph").claims("Lang Graph")
+
+
+def test_match_never_folds_a_different_word_in():
+    """Java is not JavaScript; a short word is not a plural (``goes`` is not ``Go``); only a whole s / es folds."""
+    for cv in ("JavaScript developer", "Javascripts", "Java-based", "JAVASCRIPT"):
+        assert Tokens(cv).match("Java") == ("Java" if cv == "Java-based" else ""), cv
+        assert Tokens(cv).claims("Java") is (cv == "Java-based"), cv
+    assert Tokens("Built pipelined jobs").match("pipeline") == ""
+    assert Tokens("Built pipelines").match("pipeline") == "pipelines" and Tokens("process").match("processes") == "process"
+    assert Tokens("It goes live").match("Go") == "" and Tokens("gas bus").match("ga") == ""
+    assert Tokens("Used Lang and then Graph").match("LangGraph") == ""  # only a split TERM is joined
+    assert Tokens("Used LangGraphs").match("Lang Graph") == "LangGraphs"

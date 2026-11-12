@@ -14,6 +14,9 @@ item (number ``i`` from 1, stored in ``where``), with :class:`cv_coverage.Tokens
   never claims a requirement the profile lacks); else it is a gap, stored in the ad's own words for ``stats``.
 
 Coverage = covered must-haves / had must-haves; below ``settings.CV_REVIEW_JD_BAR`` (0.8) = ``jd_coverage_low``.
+Checker 2026-11-12: one item per requirement (a duplicate term, :func:`cv_coverage.same_term`, is a 422, so copies of
+a covered term cannot dilute a miss); no must-have item = ``jd_no_must``; fewer than min(3, save_fit's
+``jd_requirements``) items = ``jd_too_few``; terms compare with :meth:`Tokens.match` (a plural / split term folds).
 Ad text but no ``jd`` (or ``[]``) = ``jd_not_judged`` (weak). No ad text = ``jd_no_ad``: stored, never weak, so the
 caller can ask the user for the ad.
 """
@@ -24,9 +27,11 @@ from typing import Any
 from src.core import settings
 
 JD_KEYS = frozenset({"term", "must", "have", "evidence", "n"})
-CODES = ("jd_not_judged", "jd_term_not_in_ad", "jd_evidence_not_in_profile", "jd_term_not_in_cv", "jd_gap_claimed",
+CODES = ("jd_not_judged", "jd_no_must", "jd_too_few", "jd_term_not_in_ad", "jd_evidence_not_in_profile",
+         "jd_term_not_in_cv", "jd_gap_claimed",
          "jd_coverage_low")
 JD_MAX_ITEMS, TERM_MAX_CHARS, QUOTES_MAX, QUOTE_MAX_CHARS, LINES_MAX = 40, 80, 3, 300, 5
+MIN_ITEMS = 3  # with requirements saved by save_fit: at least min(this, how many were saved)
 _SHAPE = "{term, must, have, evidence, n}"
 
 
@@ -36,7 +41,10 @@ def shape_problems(jd: Any, max_line: int) -> list[str]:
         return []
     if not isinstance(jd, list) or len(jd) > JD_MAX_ITEMS:
         return [f"jd must be a list of at most {JD_MAX_ITEMS} {_SHAPE}"]
+    from src.services.applications.cv_coverage import same_term  # noqa: PLC0415
+
     problems: list[str] = []
+    terms: list[tuple[int, str]] = []
     for i, item in enumerate(jd):
         if not isinstance(item, dict) or set(item) != JD_KEYS:
             problems.append(f"jd[{i}] takes exactly {_SHAPE}")
@@ -44,6 +52,12 @@ def shape_problems(jd: Any, max_line: int) -> list[str]:
         term, quotes, ns = item["term"], item["evidence"], item["n"]
         if not isinstance(term, str) or not 1 <= len(term.strip()) <= TERM_MAX_CHARS:
             problems.append(f"jd[{i}].term must be the ad's words (1-{TERM_MAX_CHARS} characters)")
+        else:  # checker D1: a copy of a covered term would dilute a miss; one item per requirement
+            first = next((j for j, seen in terms if same_term(seen, term)), None)
+            if first is None:
+                terms.append((i, term))
+            else:
+                problems.append(f"jd[{i}] is a duplicate of jd[{first}] (one item per requirement)")
         if not isinstance(item["must"], bool) or not isinstance(item["have"], bool):
             problems.append(f"jd[{i}].must and .have must be true or false")
         if not isinstance(quotes, list) or len(quotes) > QUOTES_MAX or not all(
@@ -55,25 +69,34 @@ def shape_problems(jd: Any, max_line: int) -> list[str]:
     return problems
 
 
-def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any) -> tuple[dict[str, list[Any]],
-                                                                                      dict[str, Any]]:
+def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, saved: int = 0) -> tuple[
+        dict[str, list[Any]], dict[str, Any]]:
     """``(where, stored)``: the codes with their jd item numbers, and the event's ``jd`` block (state, counts, gaps;
-    never CV or profile text, only the ad's own words for a gap)."""
+    never CV or profile text, only the ad's own words for a gap). ``saved`` = how many requirements save_fit holds."""
     from src.services.applications import cv_review  # noqa: PLC0415 - cv_review imports this module lazily
-    from src.services.applications.cv_coverage import Tokens  # noqa: PLC0415
+    from src.services.applications.cv_coverage import Tokens, same_term  # noqa: PLC0415
 
     where: dict[str, list[Any]] = {}
     if not ad_text.strip():
         return where, {"state": "jd_no_ad"}
     if not jd:
         return {"jd_not_judged": []}, {"state": "jd_not_judged"}
+    items: list[tuple[int, dict[str, Any]]] = []
+    for i, item in enumerate(jd, 1):  # each distinct term counts once (shape_problems refuses a duplicate)
+        if not any(same_term(seen["term"], item["term"]) for _, seen in items):
+            items.append((i, item))
+    if not any(item["must"] for _, item in items):  # checker D2: the reviewer names the ad's must-haves
+        where["jd_no_must"] = []
+    need = min(MIN_ITEMS, max(saved, 0))
+    if len(items) < need:
+        where["jd_too_few"] = [f"{len(items)} items, at least {need} (save_fit's jd_requirements)"]
     ad, cv = Tokens(ad_text), Tokens(cv_text)
     source, source_words = cv_review.quote_sources(profile)
     must = covered = 0
     gaps: list[str] = []
-    for i, item in enumerate(jd, 1):
+    for i, item in items:
         term = item["term"]
-        ad_words = ad.find(term)
+        ad_words = ad.match(term)
         if not ad_words:
             where.setdefault("jd_term_not_in_ad", []).append(i)
             continue
@@ -87,7 +110,7 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any) -
         shown = bool(quotes) and all(cv_review.quote_in_profile(q, source, source_words) for q in quotes)
         if not shown:
             where.setdefault("jd_evidence_not_in_profile", []).append(i)
-        named = [n for n in item["n"] if n <= len(lines) and Tokens(lines[n - 1]).find(term)]
+        named = [n for n in item["n"] if n <= len(lines) and Tokens(lines[n - 1]).match(term)]
         if item["n"] and not named:
             where.setdefault("jd_term_not_in_cv", []).append(i)
         if item["must"]:

@@ -56,7 +56,8 @@ VERDICTS = ("supported", "unsupported")
 DOWNGRADES = (
     "not_current_cv", "no_content", "line_uncovered", "line_unsupported", "no_evidence", "quote_not_in_profile",
     "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "evidence_reused", "cv_checks_found",
-    "ats_format", "jd_not_judged", "jd_term_not_in_ad", "jd_evidence_not_in_profile", "jd_term_not_in_cv",
+    "ats_format", "jd_not_judged", "jd_no_must", "jd_too_few", "jd_term_not_in_ad", "jd_evidence_not_in_profile",
+    "jd_term_not_in_cv",
     "jd_gap_claimed", "jd_coverage_low", "retry_limit",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
@@ -789,7 +790,14 @@ async def ats_and_jd(
         where["ats_format"] = [f["code"] + (f":{f['detail']}" if f.get("detail") else "")
                                + ("@" + ",".join(map(str, f["lines"][:5])) if f.get("lines") else "") for f in fmt]
     app_row = await spine.get_owned_application(db, user_id, application_id) or {}
-    jd_where, stored = review_jd.judge(jd, str(app_row.get("job_description_snapshot") or ""), lines, cv_text, profile)
+    try:  # a fit that cannot be read must not block a review
+        from src.services.applications.fit_record import fit_view  # noqa: PLC0415 - fit_record imports spine
+
+        saved = len((fit_view(app_row) or {}).get("jd_requirements") or [])
+    except Exception:  # noqa: BLE001
+        saved = 0
+    jd_where, stored = review_jd.judge(jd, str(app_row.get("job_description_snapshot") or ""), lines, cv_text, profile,
+                                       saved)
     where.update(jd_where)
     logger.info("cv_reviewed ats_jd application=%s ats=%s jd=%s must=%s covered=%s codes=%s",
                 safe_log_value(application_id), len(fmt), stored["state"], stored.get("must"), stored.get("covered"),
@@ -873,7 +881,8 @@ def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optiona
     for code in stored.get("downgraded") or []:
         at = [str(x) for x in where.get(code) or []]
         more = f" (+{len(at) - _WHERE_LISTED} more)" if len(at) > _WHERE_LISTED else ""
-        label = "" if code in ("cv_checks_found", "ats_format") else "jd items " if code.startswith("jd_") else "lines "
+        label = ("" if code in ("cv_checks_found", "ats_format", "jd_too_few")
+                 else "jd items " if code.startswith("jd_") else "lines ")
         jd = stored.get("jd") or {}
         if code == "jd_coverage_low":
             at = [f"{jd.get('covered')} of {jd.get('must')} had must-haves named, bar {jd.get('bar')}"]
