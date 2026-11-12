@@ -80,7 +80,8 @@ async def _review(ctx: Any, user_id: str, jd: Any, cv: str = HONEST, ad: str = A
 async def test_an_honest_owner_shaped_cv_with_an_honest_jd_is_strong(authenticated_async_context, fixture_user_id):
     got = await _review(authenticated_async_context, fixture_user_id, HONEST_JD)
     assert (got["confidence"], got["downgraded"], got["where"], got["rules"]) == ("strong", [], {}, cv_review.RULES)
-    assert got["jd"] == {"state": "judged", "must": 4, "covered": 4, "bar": 0.8, "gaps": ["Kubernetes"]}
+    assert got["jd"] == {"state": "judged", "must": 4, "covered": 4, "bar": 0.8, "gaps": ["Kubernetes"],
+                         "terms": [{"term": t, "must": True} for t in ("LangGraph", "MCP", "RAG", "ChromaDB", "Kubernetes")]}
 
 
 @pytest.mark.asyncio
