@@ -109,13 +109,18 @@ def _marks(placeholders: list[int]) -> str:
 
 async def _events_by_app(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, list[dict[str, Any]]]:
     types = ",".join(f"'{t}'" for t in _FILL_TYPES)  # a fixed constant tuple, never user input
+    # Every fill event, but only the NEWEST form_filled of each application. Its id comes from one grouped
+    # scan joined in, never a correlated ``e.id = (SELECT MAX(..) WHERE .. = e.application_id)``: Postgres
+    # re-runs that per row, so the cost grew with the SQUARE of the history (prod, 2026-11-12).
     cur = await db._db.execute(
         "SELECT e.id, e.application_id, e.event_type, e.payload, e.recorded_at FROM application_events e "  # noqa: S608
+        "LEFT JOIN (SELECT x.application_id, MAX(x.id) AS last_id FROM application_events x WHERE x.user_id = ? "
+        f"AND x.application_id IN ({_marks(ids)}) AND x.event_type = 'form_filled' "
+        "GROUP BY x.application_id) m ON m.application_id = e.application_id "
         f"WHERE e.user_id = ? AND e.application_id IN ({_marks(ids)}) AND e.event_type IN ({types}) "
-        "AND (e.event_type != 'form_filled' OR e.id = (SELECT MAX(x.id) FROM application_events x "
-        "WHERE x.application_id = e.application_id AND x.user_id = e.user_id AND x.event_type = 'form_filled')) "
+        "AND (e.event_type != 'form_filled' OR e.id = m.last_id) "
         "ORDER BY e.id ASC",
-        (user_id, *ids),
+        (user_id, *ids, user_id, *ids),
     )
     out: dict[int, list[dict[str, Any]]] = {}
     for r in await cur.fetchall():
