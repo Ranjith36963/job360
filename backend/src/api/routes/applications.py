@@ -913,6 +913,11 @@ class CvReviewInputsOut(BaseModel):
     state: Literal["none", "weak", "strong"] = "none"
 
 
+class CvReviewJdTermOut(BaseModel):
+    term: str
+    must: bool
+
+
 class CvReviewViewOut(CvReviewInputsOut):
     """`view="review"`: the inputs plus this CV's retry budget under the current rules."""
 
@@ -920,6 +925,8 @@ class CvReviewViewOut(CvReviewInputsOut):
     tries_left: int
     last_downgraded: list[str] = []
     last_where: dict[str, list[Union[int, str]]] = {}  # code -> review line numbers (check codes for cv_checks_found)
+    # the newest judged review's terms (any CV version): a re-review lists each again, same must (dry run 2026-11-12)
+    jd_terms: list[CvReviewJdTermOut] = []
 
 
 class ApplicationReviewViewOut(BaseModel):

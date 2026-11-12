@@ -23,7 +23,7 @@ _BROWSER_RANK = {"job360": 0, "own_browser": 1}
 # The profile facts a CV writer needs, as profile_edits paths: no raw CV / LinkedIn / GitHub text.
 _PROFILE_PATHS = ("cv_data.name", "cv_data.headline", "cv_data.location", "cv_data.summary", "cv_data.skills",
                   "cv_data.education", "cv_data.certifications", "cv_data.cv_positions", "cv_data.cv_projects",
-                  "cv_data.links", "user_info.contact")
+                  "cv_data.links", "cv_data.linkedin_skills", "cv_data.github_languages", "user_info.contact")
 _CONTACT_KEYS = ("email", "phone", "linkedin_url", "address_city", "address_country")
 # (the closed contact schema has no github or website key)
 _ITEM_COLUMNS = ("id, job_title, job_company, job_country, job_description_snapshot, fit_recorded_at, "
@@ -40,6 +40,9 @@ def compact_profile(user_id: str) -> Optional[dict[str, Any]]:
         return None
     values = profile_edits.field_values(profile, _PROFILE_PATHS)
     out = {path.split(".", 1)[1]: v for path, v in values.items() if v not in ("", None, [], {})}
+    if "github_languages" in out:  # {language: bytes}: the names, most code first (dry run 2026-11-12)
+        langs = out["github_languages"]
+        out["github_languages"] = sorted(langs, key=lambda k: -langs[k]) if isinstance(langs, dict) else langs
     contact = out.pop("contact", None)
     contact = {k: contact[k] for k in _CONTACT_KEYS if isinstance(contact, dict) and contact.get(k)}  # no DOB, street
     return {**out, **({"contact": contact} if contact else {})}
@@ -114,11 +117,13 @@ async def cv_work(
     else:
         saved, texts = {}, {}
     items = []
+    with_terms = 0  # items whose review carries the earlier judged terms (a fix round re-lists them)
     for app_id in page:
         row = rows[app_id]
         view = await cv_review.review_view(db, user_id, app_id) or {}
         ad = str(row.get("job_description_snapshot") or "")
         reqs = (fit_view(row) or {}).get("jd_requirements") or []
+        with_terms += bool((view.get("review") or {}).get("jd_terms"))
         items.append({
             "application_id": app_id, "job_title": row.get("job_title") or "",
             "job_company": row.get("job_company") or "", "country": row.get("job_country") or None,
@@ -139,5 +144,6 @@ async def cv_work(
     get_audit_logger().info(
         "cv_work", extra={"event": "cv_work", "user_id": safe_log_value(user_id), "queued": len(queue_order),
                           "needing": len(ids), "returned": len(items), "after": safe_log_value(after), "result": "ok",
-                          "with_cv_text": sum(1 for i in items if i["cv_text"] is not None)})
+                          "with_cv_text": sum(1 for i in items if i["cv_text"] is not None),
+                          "with_jd_terms": with_terms})
     return out

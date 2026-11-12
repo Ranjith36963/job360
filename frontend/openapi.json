@@ -5885,6 +5885,24 @@
         "title": "CvReviewInputsOut",
         "type": "object"
       },
+      "CvReviewJdTermOut": {
+        "properties": {
+          "must": {
+            "title": "Must",
+            "type": "boolean"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "must"
+        ],
+        "title": "CvReviewJdTermOut",
+        "type": "object"
+      },
       "CvReviewViewOut": {
         "description": "`view=\"review\"`: the inputs plus this CV's retry budget under the current rules.",
         "properties": {
@@ -5898,6 +5916,14 @@
               "type": "integer"
             },
             "title": "Held",
+            "type": "array"
+          },
+          "jd_terms": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CvReviewJdTermOut"
+            },
+            "title": "Jd Terms",
             "type": "array"
           },
           "last_downgraded": {

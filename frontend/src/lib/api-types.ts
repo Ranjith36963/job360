@@ -6171,6 +6171,13 @@ export interface components {
              */
             state: "none" | "weak" | "strong";
         };
+        /** CvReviewJdTermOut */
+        CvReviewJdTermOut: {
+            /** Must */
+            must: boolean;
+            /** Term */
+            term: string;
+        };
         /**
          * CvReviewViewOut
          * @description `view="review"`: the inputs plus this CV's retry budget under the current rules.
@@ -6183,6 +6190,11 @@ export interface components {
              * @default []
              */
             held: number[];
+            /**
+             * Jd Terms
+             * @default []
+             */
+            jd_terms: components["schemas"]["CvReviewJdTermOut"][];
             /**
              * Last Downgraded
              * @default []
