@@ -1528,9 +1528,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         """The CV task's lean read (use it, not list_applications + get_application): the next `limit` (1-20)
         queued applications that need CV work, Job360's browser first, after the application_id `after`.
         Each `items[]`: application_id, job_title, job_company, country, browser, `ad` (cut at 6000,
-        `ad_truncated`), jd_requirements, `review` (as get_application view="review"; null = no CV yet),
-        cv_saved_at, cv_text (a weak review's CV: edit it in a fix round). `profile` = the facts to write from
-        (no raw text; `include_profile=false` skips it).
+        `ad_truncated`), jd_requirements, `review` (as get_application view="review"; null = no CV yet;
+        review.jd_terms: list each again, same must), cv_saved_at, cv_text (a weak review's CV: edit it in a fix
+        round). `profile` = the facts to write from (no raw text; `include_profile=false` skips it).
         Page with `after`=`next_after` (rows you finish drop out); `total_needing_work`."""
         try:
             async with _request_db() as db:

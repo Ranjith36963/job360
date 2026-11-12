@@ -31,7 +31,7 @@ from tests.test_cv_review import (
 ITEM_KEYS = {"application_id", "job_title", "job_company", "country", "browser", "ad", "ad_truncated",
              "jd_requirements", "review", "cv_saved_at", "cv_text"}
 REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
-               "last_where"}
+               "last_where", "jd_terms"}
 LINKEDIN = "https://www.linkedin.com/jobs/view/"
 AD = "Build the pipelines. Python, Snowflake. "
 

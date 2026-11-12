@@ -19,7 +19,7 @@ from tests.test_cv_review import CV, N, _event, _mcp_client, _payload, _review, 
 
 KEYS = {"id", "job_title", "job_company", "country", "review"}
 REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
-               "last_where"}
+               "last_where", "jd_terms"}
 
 
 async def _get(client: Any, app_id: int, **params: Any):

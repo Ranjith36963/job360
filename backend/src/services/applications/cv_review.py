@@ -755,6 +755,19 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
             "state": await review_state(db, user_id, application_id, cv["id"], sha)}
 
 
+def jd_terms(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The judged ``terms`` ``[{term, must}]`` of the NEWEST ``cv_reviewed`` (newest first, any CV version) that has
+    them, else ``[]``: exactly what ``review_jd.judge`` compares a re-review with (dry run 2026-11-12, app 454: a new
+    reviewer never saw them and dropped 10)."""
+    for e in reviews:
+        jd = e["payload"].get("jd")
+        terms = jd.get("terms") if isinstance(jd, dict) else None
+        if isinstance(terms, list) and terms:
+            return [{"term": t["term"], "must": t.get("must") is True} for t in terms
+                    if isinstance(t, dict) and isinstance(t.get("term"), str)]
+    return []
+
+
 REVIEW_VIEW_KEYS = ("id", "job_title", "job_company", "country", "review")
 
 
@@ -763,7 +776,8 @@ async def review_view(db: JobDatabase, user_id: str, application_id: int) -> Opt
     asks), ~1 KB instead of 30-130 KB. ``review`` is :func:`inputs` plus ``reviews_used`` / ``tries_left`` (this CV's
     retry budget under the current :data:`RULES`, as ``verify`` counts it: a re-review of an already judged version is
     no new try), ``last_downgraded`` (the codes of the newest ``cv_reviewed`` of this CV, ``[]`` if none) and
-    ``last_where`` (its code -> review line numbers: rewrite exactly those lines). ``None``
+    ``last_where`` (its code -> review line numbers: rewrite exactly those lines) and ``jd_terms`` (:func:`jd_terms`:
+    a re-review lists each again, same ``must``, or it is weak ``jd_terms_dropped``). ``None``
     for a foreign or unknown id (the route turns that into the usual 404). Read-only."""
     from src.services.applications import kit, spine  # noqa: PLC0415
 
@@ -779,7 +793,8 @@ async def review_view(db: JobDatabase, user_id: str, application_id: int) -> Opt
             newest = next((e for e in events if e["payload"].get("artifact_id") == review["artifact_id"]), None)
             down = (newest or {"payload": {}})["payload"].get("downgraded")
             at = (newest or {"payload": {}})["payload"].get("where")
-            review = {**review, "reviews_used": len(used), "tries_left": max(0, MAX_WEAK - len(used)),
+            review = {**review, "jd_terms": jd_terms(events),
+                      "reviews_used": len(used), "tries_left": max(0, MAX_WEAK - len(used)),
                       "last_downgraded": [c for c in down if isinstance(c, str)] if isinstance(down, list) else [],
                       "last_where": {c: v for c, v in at.items() if c in DOWNGRADES and isinstance(v, list)}
                       if isinstance(at, dict) else {}}
