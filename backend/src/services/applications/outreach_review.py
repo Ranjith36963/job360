@@ -15,7 +15,8 @@ name the contact's NEWEST draft, or whose ``sha256`` is not that draft's text ha
 (b) each ``profile_quote`` lies inside ONE profile field value or text line (``cv_review.quote_sources`` /
     ``quote_in_profile``: case, spacing and outer punctuation aside; never two fields glued together)
     (``quote_not_in_profile``) and has 3+ words (``quote_too_thin``);
-(c) every number and capitalised name of a ``msg_line`` (``evidence.claim_tokens``) is in its own quote, the
+(c) every hard fact of a ``msg_line`` (``review_rows.hard_facts``, the CV rules: numbers and number words, role
+    words, capitalised names wherever they stand, a name opening a later sentence too) is in its own quote, the
     person's name, their company, the job's company or title, or the user's name (``claim_not_in_quote``); words
     are scanned one by one, no regex on caller text.
 After weak reviews of :data:`MAX_WEAK` other drafts to this person, a review of a new one is weak (``retry_limit``):
@@ -34,7 +35,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications import cv_review, evidence
+from src.services.applications import cv_review, evidence, review_rows
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.utils.logger import safe_log_value
@@ -203,6 +204,7 @@ async def check(
         down.add("line_not_in_message")
     source, source_words = cv_review.quote_sources(profile)  # a quote lies inside ONE profile field or line
     own = " ".join(sorted(cv_review._name_words(profile)))
+    terms = review_rows.profile_terms(profile)
     actual: dict[str, list[str]] = {}
     for ln in text.splitlines():  # the draft's own text decides case, never the entry's copy
         actual.setdefault(cv_review.line_key(ln), []).append(ln.strip().lstrip(cv_review._BULLETS + " \t"))
@@ -212,9 +214,8 @@ async def check(
             down.add("quote_not_in_profile")
         if len(evidence._words(quote)) < 3:
             down.add("quote_too_thin")
-        bank = " ".join((quote, context, own))
         for body in actual.get(cv_review.line_key(e[LINE_FIELD])) or [e[LINE_FIELD]]:
-            if evidence.unsupported_tokens(body, bank):
+            if review_rows.hard_facts(body, [quote, context, own], *terms):  # the CV rules, every sentence
                 down.add("claim_not_in_quote")
     weak_ids = {
         p.get(ID_KEY) for p in (_parse(r.get("text")) for r in rows if r["entry"] == ENTRY)

@@ -254,6 +254,34 @@ async def test_a_claim_the_quote_does_not_carry_is_weak(authenticated_async_cont
     assert (stored["confidence"], stored["downgraded"]) == ("weak", ["claim_not_in_quote"])
 
 
+_WEAK, _ASK = ("weak", ["claim_not_in_quote"]), ("ask", "outreach_not_reviewed")
+
+
+@pytest.mark.parametrize(("extra", "stored_as", "verdict_is"), [
+    ("Google hired me.", _WEAK, _ASK), ("Kubernetes is my daily tool.", _WEAK, _ASK),
+    ("Amazon promoted me.", _WEAK, _ASK), ("I was a senior staff engineer there.", _WEAK, _ASK),
+    ("I have ten years of it.", _WEAK, ("ask", "unsupported_claims")),  # check_outreach's profile check sees it too
+    ("Python is my daily tool.", ("strong", []), ("send", "auto_mode")),  # what the quote or the job says is free
+    ("Northwind is where I want to build next.", ("strong", []), ("send", "auto_mode")),
+])
+@pytest.mark.asyncio
+async def test_every_sentence_of_a_line_is_judged_by_the_cv_rules(
+    authenticated_async_context, fixture_user_id, extra, stored_as, verdict_is
+):
+    """review_rows.hard_facts judges each message line (checker 2026-11-12: "... at Acme. Google hired me." was sent)."""
+    line = f"{LINE_1} {extra}"
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{line}\n{LINE_2}\nBest regards,\nAda Lovelace")
+        sha = (await _review_block(client, cid))["sha256"]
+        resp = await _record(client, app_id, cid, _payload(mid, sha, _rows((line, QUOTE_1), (LINE_2, QUOTE_2))))
+        assert resp.status_code == 201, resp.text
+        verdict = await _check(client, cid, mid)
+    [stored] = _reviews(cid)
+    assert ((stored["confidence"], stored["downgraded"]), (verdict["decision"], verdict["reason"])) == (
+        stored_as, verdict_is)
+
+
 @pytest.mark.asyncio
 async def test_after_three_weak_drafts_a_fourth_review_stays_weak(authenticated_async_context, fixture_user_id):
     """Owner: up to two rewrites, each re-reviewed (three reviews); then it waits for the user."""
