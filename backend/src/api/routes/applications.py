@@ -2670,8 +2670,7 @@ async def cv_work(
         return await cv_work_service.cv_work(
             db, user.id, limit=limit, after=after, include_profile=include_profile)
     except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 @router.get(
