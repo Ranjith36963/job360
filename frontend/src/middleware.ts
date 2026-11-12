@@ -25,6 +25,11 @@ const PROTECTED_PATHS = [
 // /undo-email-change, /auth/magic) stay reachable on purpose.
 const AUTH_PAGES = ["/login", "/register", "/forgot-password"];
 
+// The home page, as a list like the two above: the gate routes by membership
+// of a fixed list, never by comparing the request path to one literal (CodeQL
+// reads that shape as a user-controlled bypass of the session check).
+const HOME_PAGES = ["/"];
+
 const SESSION_COOKIE = "job360_session";
 
 // Backend origin used to VERIFY the session (same value the /api proxy forwards to).
@@ -84,7 +89,7 @@ export async function middleware(request: NextRequest) {
   // "/" is public (landing for visitors, dashboard for a session). Only a cookie
   // the backend REJECTS changes anything: drop it, so app/page.tsx renders the
   // landing instead of a dashboard full of 401s (C5). No cookie = no backend call.
-  if (pathname === "/") {
+  if (HOME_PAGES.includes(pathname)) {
     if (!session || e2eBypass()) return NextResponse.next();
     if ((await verifySession(session)) !== "rejected") return NextResponse.next();
     // Strip it from the forwarded request too: the page's cookies() reads that.
