@@ -126,8 +126,9 @@ async def cv_work(
             "jd_requirements": [str(r.get("text") or "") if isinstance(r, dict) else str(r) for r in reqs if r],
             "review": view.get("review"),
             "cv_saved_at": str(saved[app_id]) if app_id in saved else None,
-            # The whole newest CV (name, contact line, headings): a fix round edits it, never rebuilds from lines.
-            "cv_text": texts.get(app_id),
+            # The whole newest CV (name, contact line, headings) when its review is weak: a fix round edits it, never
+            # rebuilds it from lines. Unreviewed CVs carry none (the reviewer reads review.lines): tokens per run.
+            "cv_text": texts.get(app_id) if (view.get("review") or {}).get("state") == "weak" else None,
         })
     out: dict[str, Any] = {
         "items": items, "total_needing_work": len(ids),

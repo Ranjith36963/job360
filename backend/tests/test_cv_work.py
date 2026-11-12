@@ -128,6 +128,9 @@ async def test_items_are_exactly_the_queued_rows_needing_cv_work_in_the_cv_tasks
         by_id = {i["application_id"]: i for i in got["items"]}
         assert by_id[no_cv]["review"] is None and by_id[no_cv]["cv_saved_at"] is None
         assert by_id[weak]["review"]["state"] == "weak"
+        # only a weak review's CV comes back whole (a fix round edits it); an unreviewed one costs no tokens
+        assert by_id[weak]["cv_text"] == text(3)
+        assert by_id[first]["cv_text"] is None and by_id[own]["cv_text"] is None
 
 
 @pytest.mark.asyncio
@@ -357,6 +360,10 @@ async def test_cv_text_is_the_newest_cv_exactly_and_matches_the_review_artifact(
         newest = CV + "\nnewest version\n"
         app_id = await _job(client, "text", cv=old)
         await _save_cv(client, app_id, newest)
+        unreviewed = next(i for i in (await _cv_work(client))["items"] if i["application_id"] == app_id)
+        assert unreviewed["cv_text"] is None  # nothing to fix yet: the reviewer reads review.lines
+        art = unreviewed["review"]["artifact_id"]
+        await _stored(client, app_id, _review(art, newest, confidence="weak"))
         item = next(i for i in (await _cv_work(client))["items"] if i["application_id"] == app_id)
         assert item["cv_text"] == newest
         assert item["cv_text"].startswith(CV0.splitlines()[0])  # the name / heading line is there, not only lines
