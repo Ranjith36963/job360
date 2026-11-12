@@ -12,7 +12,8 @@ name the contact's NEWEST draft, or whose ``sha256`` is not that draft's text ha
     no required line is ``no_content``). Not required, and only these: a greeting first line ("Hi Sam," - a
     greeting word, then only the person's name words or "there" / "team" / "all"), a sign-off line (only sign-off
     words and the user's own name words: "Best regards," "Ana Lima") and a contact line (cv_review.is_contact_line);
-(b) each ``profile_quote`` is in ``cv_checks.profile_source_text`` (case and whitespace aside)
+(b) each ``profile_quote`` lies inside ONE profile field value or text line (``cv_review.quote_sources`` /
+    ``quote_in_profile``: case, spacing and outer punctuation aside; never two fields glued together)
     (``quote_not_in_profile``) and has 3+ words (``quote_too_thin``);
 (c) every number and capitalised name of a ``msg_line`` (``evidence.claim_tokens``) is in its own quote, the
     person's name, their company, the job's company or title, or the user's name (``claim_not_in_quote``); words
@@ -33,7 +34,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications import cv_checks, cv_review, evidence
+from src.services.applications import cv_review, evidence
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.utils.logger import safe_log_value
@@ -64,6 +65,38 @@ SIGNOFF_WORDS = frozenset({
 })
 
 logger = logging.getLogger(__name__)
+
+
+ROW_KEYS = (LINE_FIELD, "profile_quote", "field_path")
+_ROW_CAPS = {LINE_FIELD: 1000, "profile_quote": cv_review.QUOTE_MAX_CHARS, "field_path": 200}
+_ROWS = "{msg_line, profile_quote, field_path}"
+
+
+def shape_problems(payload: dict[str, Any]) -> list[str]:
+    """Every shape problem (422). Its own rows: a message line has no ``n`` in a CV's review.lines, so
+    cv_review's {n, verdict, evidence} (rules 5) is not this shape; the payload checks are the same."""
+    problems: list[str] = []
+    if set(payload) != {ID_KEY, "sha256", "confidence", "lines", "reviewer"}:
+        problems.append(f"{EVENT_TYPE} takes exactly {{{ID_KEY}, sha256, confidence, lines, reviewer}}")
+    msg_id = payload.get(ID_KEY)
+    if isinstance(msg_id, bool) or not isinstance(msg_id, int) or not isinstance(payload.get("sha256"), str):
+        problems.append(f"needs {ID_KEY} (a whole number) and sha256 (text)")
+    if payload.get("confidence") not in (STRONG, WEAK):
+        problems.append('confidence must be "strong" or "weak"')
+    reviewer = payload.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > cv_review.REVIEWER_MAX:
+        problems.append(f"reviewer must be a short label (1-{cv_review.REVIEWER_MAX} characters)")
+    lines = payload.get("lines")
+    if not isinstance(lines, list) or not 1 <= len(lines) <= cv_review.MAX_LINES:
+        return [*problems, f"lines must be a list of 1-{cv_review.MAX_LINES} {_ROWS}"]
+    for i, row in enumerate(lines):
+        if not isinstance(row, dict) or set(row) != set(ROW_KEYS):
+            problems.append(f"lines[{i}] takes exactly {_ROWS}")
+            continue
+        for key, cap in _ROW_CAPS.items():
+            if not isinstance(row[key], str) or not row[key].strip() or len(row[key]) > cap:
+                problems.append(f"lines[{i}].{key} must be text of 1-{cap} characters")
+    return problems
 
 
 def _parse(raw: Any) -> dict[str, Any]:
@@ -142,7 +175,7 @@ async def check(
     from src.services.applications import contacts, kit  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
 
-    problems = cv_review.shape_problems(payload, event=EVENT_TYPE, id_key=ID_KEY, line_field=LINE_FIELD)
+    problems = shape_problems(payload)
     if problems:
         raise SpineError(422, "; ".join(problems))
     contact_id = int(contact["id"])
@@ -168,14 +201,14 @@ async def check(
     down |= {"no_content"} if not content else {"line_uncovered"} if covered < len(content) else set()
     if keys - {cv_review.line_key(ln) for ln in text.splitlines()}:
         down.add("line_not_in_message")
-    source = cv_review._norm(cv_checks.profile_source_text(profile))
+    source, source_words = cv_review.quote_sources(profile)  # a quote lies inside ONE profile field or line
     own = " ".join(sorted(cv_review._name_words(profile)))
     actual: dict[str, list[str]] = {}
     for ln in text.splitlines():  # the draft's own text decides case, never the entry's copy
         actual.setdefault(cv_review.line_key(ln), []).append(ln.strip().lstrip(cv_review._BULLETS + " \t"))
     for e in entries:
         quote = e["profile_quote"]
-        if cv_review._norm(quote) not in source:
+        if not cv_review.quote_in_profile(quote, source, source_words):
             down.add("quote_not_in_profile")
         if len(evidence._words(quote)) < 3:
             down.add("quote_too_thin")

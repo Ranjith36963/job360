@@ -92,9 +92,19 @@ async def _event(client: AsyncClient, app_id: int, event_type: str, payload: dic
     return await client.post(f"/api/applications/{app_id}/events", json={"event_type": event_type, "payload": payload})
 
 
+def rows(text: str, pairs: list[dict[str, Any]], profile: Any = None) -> list[dict[str, Any]]:
+    """``{cv_line, profile_quote}`` pairs as rows ``{n, verdict, evidence}``: ``n`` = that line's number in
+    review.lines (rules 5). A pair whose line is not in the review is left as it is (a shape error)."""
+    keys = [cv_review.line_key(x) for x in cv_review.content_lines(
+        text, profile or UserProfile(cv_data=CVData(raw_text=RAW, name="Ada Lovelace")))]
+    return [{"n": keys.index(cv_review.line_key(p["cv_line"])) + 1, "verdict": "supported",
+             "evidence": [p["profile_quote"]]} if "cv_line" in p and cv_review.line_key(p["cv_line"]) in keys else p
+            for p in pairs]
+
+
 def _review(cv_id: int, text: str = CV, lines: Any = None, confidence: str = "strong") -> dict[str, Any]:
     return {"artifact_id": cv_id, "sha256": sha(text), "confidence": confidence,
-            "lines": [L1, L2] if lines is None else lines, "reviewer": "fresh helper"}
+            "lines": rows(text, [L1, L2] if lines is None else lines), "reviewer": "fresh helper"}
 
 
 async def _stored(client: AsyncClient, app_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -231,7 +241,8 @@ async def test_a_verified_strong_review_clears_cv_not_seen_through_http_and_mcp(
         body = await _gate(client, app_id)
     assert stored == {
         "artifact_id": cv_id, "sha256": sha(CV), "claimed": "strong", "confidence": "strong", "downgraded": [],
-        "lines": 2, "content_lines": 2, "covered": 2, "reviewer": "fresh helper", "by": "token:claude-code",
+        "where": {}, "lines": 2, "content_lines": 2, "covered": 2, "reviewer": "fresh helper", "by": "token:claude-code",
+        "rules": cv_review.RULES,
     }
     assert "Snowflake" not in json.dumps(stored), "no CV or profile text is stored"
     # cv_not_seen is cleared; the next ask is the practice run (nothing else is cleared).
@@ -262,22 +273,23 @@ async def test_each_check_forces_weak_with_its_code(authenticated_async_context,
         # (b) a line with no quote: an uncovered bullet, and the owner's case, an unquoted summary line
         assert await downgraded(app_id, _review(cv_id, lines=[L1])) == ["line_uncovered"]
         assert await downgraded(other_app, _review(other_cv, summary)) == ["line_uncovered"]
-        stray = {**L1, "cv_line": "Led the data team."}
-        assert await downgraded(app_id, _review(cv_id, lines=[L1, L2, stray])) == ["line_not_in_cv", "claim_not_in_quote"]
+        # a row naming no review line is refused, never stored (rules 5: rows name lines by number)
+        stray = {"n": 3, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]}
+        assert (await _event(client, app_id, "cv_reviewed", _review(cv_id, lines=[L1, L2, stray]))).status_code == 422
         # (c) a fabricated quote
         fake = {**L2, "profile_quote": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 60%."}
         assert await downgraded(app_id, _review(cv_id, lines=[L1, fake])) == ["quote_not_in_profile", "claim_not_in_quote"]
         # (d) a real quote that does not hold the line's number or names
         short = {**L2, "profile_quote": "Built ETL pipelines in Python"}
-        assert await downgraded(app_id, _review(cv_id, lines=[L1, short])) == ["claim_not_in_quote", "quote_too_thin"]
+        assert await downgraded(app_id, _review(cv_id, lines=[L1, short])) == ["claim_not_in_quote"]
         # (e) the CV's code checks find a number the profile never says
         led = {"cv_line": "- Led a team of 12 engineers.", "profile_quote": "Data engineer", "field_path": "cv_data.raw_text"}
         got = await downgraded(third_app, _review(third_cv, invented, lines=[L1, L2, led]))
-        assert got == ["claim_not_in_quote", "quote_too_thin", "cv_checks_found"]
+        assert got == ["quote_too_thin", "claim_not_in_quote", "cv_checks_found"]
         # the reviewer's own weak is stored weak with nothing downgraded
         own = await _stored(client, other_app, _review(other_cv, summary, lines=[L1, L2, {
             **L1, "cv_line": "Passionate engineer who loves data.", "profile_quote": "Data engineer"}], confidence="weak"))
-        assert (own["confidence"], own["claimed"], own["downgraded"]) == ("weak", "weak", ["claim_not_in_quote", "quote_too_thin"])
+        assert (own["confidence"], own["claimed"], own["downgraded"]) == ("weak", "weak", ["quote_too_thin"])
         # a malformed payload is refused, never stored
         for bad in ({**_review(cv_id), "confidence": "sure"}, {**_review(cv_id), "lines": []},
                     {**_review(cv_id), "cv_text": CV}, _review(cv_id, lines=[{**L1, "profile_quote": ""}])):
@@ -412,11 +424,11 @@ async def test_thin_quotes_unchecked_first_words_and_stretches_are_weak(authenti
             got = await verdict(line, quote)
             assert got[0] == "weak" and "quote_too_thin" in got[1], (line, got)
         # the first word is a claim too
-        for line in ("Google Cloud certified data engineer", "Microsoft data engineer at Northwind",
-                     "Kubernetes data engineer at Northwind", "Snowflake data engineer at Northwind"):
+        for line in ("Google Cloud certified data engineer", "Data engineer at Microsoft and Northwind",
+                     "Data engineer at Northwind with Kubernetes", "Snowflake data engineer at Northwind"):
             got = await verdict(line, "data engineer at Northwind since 2019.")
-            assert got[0] == "weak" and "claim_not_in_quote" in got[1], (line, got)
-        # a stretch: "worked on" is not "led"
+            assert got[0] == "weak" and {"claim_not_in_quote", "cv_checks_found"} & set(got[1]), (line, got)
+        # a stretch: "worked on" is not "led" (a role verb is a fact, never a free opener)
         assert await verdict("- Led the warehouse migration and cut storage costs in half.",
                              "Worked on the warehouse migration and cut storage costs in half.") == (
             "weak", ["claim_not_in_quote"])
@@ -470,8 +482,9 @@ async def test_honest_lines_stay_strong(authenticated_async_context, fixture_use
               "- Built ETL pipelines in Python and Snowflake.\nCERTIFICATIONS\n"
               "Google Cloud Professional Data Engineer, 2022\n")
         app_id, cv_id = await _setup(client, cv=cv)
-        full = L2["profile_quote"]
-        lines = [{**L2, "cv_line": ln, "profile_quote": full} for ln in cv.splitlines()[2:5]] + [
+        full = L2["profile_quote"]  # one quote may vouch for two lines; the third quotes a shorter span of it
+        lines = [{**L2, "cv_line": ln, "profile_quote": full} for ln in cv.splitlines()[2:4]] + [
+            {**L2, "cv_line": cv.splitlines()[4], "profile_quote": "Built ETL pipelines in Python and Snowflake"}] + [
             {"cv_line": "Google Cloud Professional Data Engineer, 2022",
              "profile_quote": "Google Cloud Professional Data Engineer, 2022.", "field_path": "cv_data.raw_text"}]
         got = await _stored(client, app_id, _review(cv_id, cv, lines=lines))

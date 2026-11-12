@@ -204,6 +204,44 @@ async def test_a_fabricated_profile_quote_is_stored_weak(authenticated_async_con
 
 
 @pytest.mark.asyncio
+async def test_a_quote_joining_two_profile_lines_is_not_in_profile(authenticated_async_context, fixture_user_id):
+    """A quote lies inside ONE profile field or line (cv_review.quote_sources): the end of one line glued to the
+    start of the next reads as one claim the profile never makes."""
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        save_profile(UserProfile(cv_data=CVData(raw_text="Data engineer at Acme for 2 years\nLed the Globex migration",
+                                                name="Ada Lovelace")), fixture_user_id, source_action="cv_upload")
+        line = "I spent 2 years and then led the Globex migration."
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{line}\nBest regards,\nAda Lovelace")
+        sha = (await _review_block(client, cid))["sha256"]
+        spans = "for 2 years Led the Globex migration"
+        resp = await _record(client, app_id, cid, _payload(mid, sha, _rows((line, spans))))
+        assert resp.status_code == 201, resp.text
+        verdict = await _check(client, cid, mid)
+    [stored] = _reviews(cid)
+    assert (stored["confidence"], stored["downgraded"]) == ("weak", ["quote_not_in_profile"])
+    assert (verdict["decision"], verdict["reason"]) == ("ask", "outreach_not_reviewed")
+
+
+@pytest.mark.asyncio
+async def test_outreach_rows_keep_their_own_shape_not_the_cv_rows(authenticated_async_context, fixture_user_id):
+    """cv_reviewed rows became {n, verdict, evidence} (PR #1554); outreach_reviewed keeps {msg_line, profile_quote,
+    field_path}: a CV-shaped row is a 422 naming the outreach shape, and nothing is stored."""
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid)
+        sha = (await _review_block(client, cid))["sha256"]
+        cv_row = {"n": 1, "verdict": "supported", "evidence": [QUOTE_1]}
+        resp = await _record(client, app_id, cid, _payload(mid, sha, [cv_row]))
+        long_quote = await _record(client, app_id, cid, _payload(mid, sha, _rows((LINE_1, "x" * 601))))
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"] == "lines[0] takes exactly {msg_line, profile_quote, field_path}"
+    assert long_quote.status_code == 422, long_quote.text
+    assert long_quote.json()["detail"] == "lines[0].profile_quote must be text of 1-600 characters"
+    assert _reviews(cid) == []
+
+
+@pytest.mark.asyncio
 async def test_a_claim_the_quote_does_not_carry_is_weak(authenticated_async_context, fixture_user_id):
     """A real profile quote pinned to a line it does not back (the line's number is not in it) is weak."""
     async with authenticated_async_context() as client:

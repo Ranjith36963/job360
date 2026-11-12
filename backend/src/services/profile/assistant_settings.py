@@ -1282,8 +1282,9 @@ def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
 _CV_NOT_SEEN = "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes."
 _CV_NEEDS_REVIEW = (
     "The user has not seen the latest CV, and no review of it is stored. Have this CV reviewed now: "
-    'get_recipe("doctor"), row CV review. A FRESH reviewer that did not write the CV quotes the profile for '
-    "every CV line; then record_event cv_reviewed {artifact_id, sha256, confidence, lines, reviewer}. A strong "
+    'get_recipe("doctor"), row CV review. A FRESH reviewer (one per batch of up to 5 CVs, each judged on its own) '
+    "that did not write the CV quotes the profile for every CV line; then record_event cv_reviewed "
+    "{artifact_id, sha256, confidence, lines, reviewer}. A strong "
     "review clears this. If it is weak, rewrite only the weak lines, save, and review the new version "
     "(up to two rewrites); weak after the second rewrite waits for the user."
 )

@@ -4665,6 +4665,21 @@ export interface components {
             /** Sent At */
             sent_at: string;
         };
+        /**
+         * ApplicationReviewViewOut
+         * @description `get_application(view="review")`: only what one CV review needs (about 1 KB).
+         */
+        ApplicationReviewViewOut: {
+            /** Country */
+            country?: string | null;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            review?: components["schemas"]["CvReviewViewOut"] | null;
+        };
         /** ApplicationSummaryOut */
         ApplicationSummaryOut: {
             /** Ad Posted At */
@@ -6115,11 +6130,16 @@ export interface components {
         };
         /**
          * CvReviewInputsOut
-         * @description The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed).
+         * @description The newest cv's review inputs: copy `sha256`; one row {n, verdict, evidence} per line, n = its number from 1.
          */
         CvReviewInputsOut: {
             /** Artifact Id */
             artifact_id: number;
+            /**
+             * Held
+             * @default []
+             */
+            held: number[];
             /** Lines */
             lines: string[];
             /** Sha256 */
@@ -6130,6 +6150,45 @@ export interface components {
              * @enum {string}
              */
             state: "none" | "weak" | "strong";
+        };
+        /**
+         * CvReviewViewOut
+         * @description `view="review"`: the inputs plus this CV's retry budget under the current rules.
+         */
+        CvReviewViewOut: {
+            /** Artifact Id */
+            artifact_id: number;
+            /**
+             * Held
+             * @default []
+             */
+            held: number[];
+            /**
+             * Last Downgraded
+             * @default []
+             */
+            last_downgraded: string[];
+            /**
+             * Last Where
+             * @default {}
+             */
+            last_where: {
+                [key: string]: (number | string)[];
+            };
+            /** Lines */
+            lines: string[];
+            /** Reviews Used */
+            reviews_used: number;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * State
+             * @default none
+             * @enum {string}
+             */
+            state: "none" | "weak" | "strong";
+            /** Tries Left */
+            tries_left: number;
         };
         /** CvSeenRequest */
         CvSeenRequest: {
@@ -11973,6 +12032,8 @@ export interface operations {
         parameters: {
             query?: {
                 with_artifact_text?: boolean;
+                /** @description "review": only what a CV review needs */
+                view?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -11992,7 +12053,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApplicationDetailOut"];
+                    "application/json": components["schemas"]["ApplicationDetailOut"] | components["schemas"]["ApplicationReviewViewOut"];
                 };
             };
             /** @description Validation Error */

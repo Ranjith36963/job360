@@ -903,13 +903,36 @@ class KitHoldOut(BaseModel):
 
 
 class CvReviewInputsOut(BaseModel):
-    """The newest cv's review inputs: copy `sha256` and quote EVERY line in `lines` (cv_line exactly as listed)."""
+    """The newest cv's review inputs: copy `sha256`; one row {n, verdict, evidence} per line, n = its number from 1."""
 
     artifact_id: int
     sha256: str
     lines: list[str]
+    held: list[int] = []  # numbers of lines the profile holds itself (a skills list, a header): evidence []
     # This CV's newest VALID stored review (2026-11-09): "none" = no valid review yet, so review it.
     state: Literal["none", "weak", "strong"] = "none"
+
+
+class CvReviewViewOut(CvReviewInputsOut):
+    """`view="review"`: the inputs plus this CV's retry budget under the current rules."""
+
+    reviews_used: int
+    tries_left: int
+    last_downgraded: list[str] = []
+    last_where: dict[str, list[Union[int, str]]] = {}  # code -> review line numbers (check codes for cv_checks_found)
+
+
+class ApplicationReviewViewOut(BaseModel):
+    """`get_application(view="review")`: only what one CV review needs (about 1 KB)."""
+
+    id: int
+    job_title: str
+    job_company: str
+    country: Optional[str] = None
+    review: Optional[CvReviewViewOut] = None
+
+
+APPLICATION_VIEWS = ("review",)
 
 
 class ApplicationDetailOut(BaseModel):
@@ -2622,13 +2645,24 @@ async def get_job(
     return application_job_response(app_row, dict(row))
 
 
-@router.get("/applications/{application_id}", response_model=ApplicationDetailOut, dependencies=AUTH_FIRST)
+@router.get(
+    "/applications/{application_id}", response_model=Union[ApplicationDetailOut, ApplicationReviewViewOut],
+    dependencies=AUTH_FIRST,
+)
 async def get_application(
     application_id: int,
     with_artifact_text: bool = Query(False),
+    view: Optional[str] = Query(None, description='"review": only what a CV review needs'),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    if view is not None and view not in APPLICATION_VIEWS:
+        raise HTTPException(status_code=422, detail=f"unknown view; use one of: {', '.join(APPLICATION_VIEWS)}")
+    if view == "review":
+        lean = await cv_review_service.review_view(db, user.id, application_id)
+        if lean is None:
+            raise HTTPException(status_code=404, detail="application not found")
+        return lean
     detail = await spine.get_application_detail(
         db, user.id, application_id, with_artifact_text=with_artifact_text
     )
@@ -4214,8 +4248,9 @@ async def _record_event(
             # MCP record_event tool calls this route function, so it inherits the check).
             if body.corrects_event_id is not None or source is not None:
                 raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
-            payload = await cv_review_service.check(db, user, application_id, payload)
-            review_warning = cv_review_service.missing_warning(payload)
+            payload, review_where = await cv_review_service.verify(db, user, application_id, payload)
+            review_warning = " ".join(w for w in (cv_review_service.weak_warning(payload, review_where),
+                                                  cv_review_service.missing_warning(payload)) if w) or None
         if body.event_type == email_codes_service.EVENT_TYPE:
             # Owner 2026-11-07: an emailed one-time code may be typed only with use_email_codes on and every rule
             # checked here (M5: the MCP record_event tool calls this route function). Never the code itself.

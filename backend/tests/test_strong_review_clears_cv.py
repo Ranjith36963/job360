@@ -24,11 +24,9 @@ CV = (
     "- Data engineer at Northwind since 2019.\n"
     "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.\n"
 )
-L1 = {"cv_line": "- Data engineer at Northwind since 2019.", "profile_quote": "Data engineer at Northwind since 2019.",
-      "field_path": "cv_data.raw_text"}
-L2 = {"cv_line": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.",
-      "profile_quote": "Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.",
-      "field_path": "cv_data.raw_text"}
+# One row per review line (rules 5): n = its number in review.lines, the reviewer's verdict, verbatim profile quotes.
+L1 = {"n": 1, "verdict": "supported", "evidence": ["Data engineer at Northwind since 2019."]}
+L2 = {"n": 2, "verdict": "supported", "evidence": ["Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%."]}
 
 
 def sha(text: str) -> str:

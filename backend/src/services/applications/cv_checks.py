@@ -129,13 +129,16 @@ def _norm(s: str) -> str:
 
 
 def _flat(value: Any) -> list[str]:
-    """Every string inside a profile value (str / list / dict), for the source haystack."""
+    """Every string VALUE inside a profile value (str / list / dict), for the source haystack. A dict's keys are the
+    schema ("company", "title", "dates"), never what the user said: with them, "Co title X dates Y" read as a quote
+    of the profile (2026-11-10). A field whose keys ARE the content (:data:`_KEYED_FIELDS`) goes through
+    :func:`field_strings`."""
     if value is None:
         return []
     if isinstance(value, str):
         return [value]
     if isinstance(value, dict):
-        return [s for k, v in value.items() for s in (_flat(k) + _flat(v))]
+        return [s for v in value.values() for s in _flat(v)]
     if isinstance(value, (list, tuple, set)):
         return [s for v in value for s in _flat(v)]
     return [str(value)]
@@ -143,6 +146,7 @@ def _flat(value: Any) -> list[str]:
 
 _SOURCE_FIELDS = (
     "raw_text",
+    "location",  # the user's own location (2026-11-10: "London, United Kingdom" quotes read as not in the profile)
     "linkedin_raw_text",
     "cv_positions",
     "cv_projects",
@@ -176,6 +180,17 @@ _SOURCE_FIELDS = (
 )
 
 
+# A dict field whose KEYS are what the profile says: GitHub languages {name: bytes} (the byte count is no fact).
+_KEYED_FIELDS = frozenset({"github_languages"})
+
+
+def field_strings(name: str, value: Any) -> list[str]:
+    """The strings a profile field says: its keys for a :data:`_KEYED_FIELDS` dict, else :func:`_flat`."""
+    if name in _KEYED_FIELDS and isinstance(value, dict):
+        return [k for k in value if isinstance(k, str)]
+    return _flat(value)
+
+
 def profile_source_text(profile: Any, *, include_targets: bool = True) -> str:
     """Everything the user's OWN profile says: CV + LinkedIn raw text, dated positions,
     projects, education, certifications, skills, GitHub languages/topics/frameworks.
@@ -187,13 +202,81 @@ def profile_source_text(profile: Any, *, include_targets: bool = True) -> str:
         return ""
     parts: list[str] = []
     for name in _SOURCE_FIELDS:
-        parts.extend(_flat(getattr(cv, name, None)))
+        parts.extend(field_strings(name, getattr(cv, name, None)))
     prefs = getattr(profile, "preferences", None)
     if prefs is not None:
         names = ("additional_skills", "about_me") + (("target_job_titles",) if include_targets else ())
         for name in names:
             parts.extend(_flat(getattr(prefs, name, None)))
     return "\n".join(parts)
+
+
+# Closed and hard-coded, never caller-supplied, never fuzzy (production 2026-11-10, CV review apps 353-389): a
+# country or region and its standard abbreviation name ONE place. An abbreviation counts only as written here, in
+# capitals ("us" the pronoun is no place); the full name only as these exact words in this order.
+PLACE_ABBREVIATIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("UK", "U.K"), ("united", "kingdom")),
+    (("US", "U.S", "USA", "U.S.A"), ("united", "states")),
+    (("UAE", "U.A.E"), ("united", "arab", "emirates")),
+    (("EU", "E.U"), ("european", "union")),
+)
+
+
+def place_equivalents(text: str) -> str:
+    """The other spelling of every place of :data:`PLACE_ABBREVIATIONS` that ``text`` names ("United Kingdom" ->
+    "UK U.K"; "UK" -> "united kingdom"), as text to append to a fact bank. Word by word, no regex."""
+    raw = [t.strip(_OUTER_PUNCT) for t in str(text or "").split()]
+    words = [t.casefold() for t in raw if t]
+    caps = set(raw)
+    extra: list[str] = []
+    for abbrs, full in PLACE_ABBREVIATIONS:
+        n = len(full)
+        if any(tuple(words[i : i + n]) == full for i in range(len(words) - n + 1)):
+            extra.extend(abbrs)
+        if caps.intersection(abbrs):
+            extra.extend(full)
+    return " ".join(extra)
+
+
+_PLACE_MAX_TOKENS = 400  # a record string longer than this gets no other spelling (bounded work)
+
+
+def place_variant(text: str) -> str:
+    """``text`` with every place of :data:`PLACE_ABBREVIATIONS` written the other way ("Stevenage, United Kingdom"
+    -> "Stevenage, UK"; "(UK)" -> "(United Kingdom)"), its outer punctuation kept so a piece boundary stays where it
+    was; ``""`` when it names none. An abbreviation counts only in capitals, as :func:`place_equivalents` reads it.
+    Token by token, no regex."""
+    toks = str(text or "").split()
+    if len(toks) > _PLACE_MAX_TOKENS:
+        return ""
+    out: list[str] = []
+    changed = False
+    i = 0
+    while i < len(toks):
+        tok = toks[i]
+        core = tok.strip(_OUTER_PUNCT)
+        lead = tok[: len(tok) - len(tok.lstrip(_OUTER_PUNCT))]
+        for abbrs, full in PLACE_ABBREVIATIONS:
+            if core and core in abbrs:
+                words = [w.title() for w in full]
+                trail = tok[len(lead) + len(core):]
+                out.extend([lead + words[0], *words[1:-1], words[-1] + trail] if len(words) > 1
+                           else [lead + words[0] + trail])
+                changed, i = True, i + 1
+                break
+            run = toks[i : i + len(full)]
+            inner_clean = all(t == t.strip(_OUTER_PUNCT) for t in run[1:-1]) and run[0] == run[0].rstrip(_OUTER_PUNCT)
+            if (len(run) == len(full) and inner_clean and len(full) > 1
+                    and tuple(t.strip(_OUTER_PUNCT).casefold() for t in run) == full):
+                last = run[-1]
+                trail = last[len(last.rstrip(_OUTER_PUNCT)):]
+                out.append(lead + abbrs[0] + trail)
+                changed, i = True, i + len(full)
+                break
+        else:
+            out.append(tok)
+            i += 1
+    return " ".join(out) if changed else ""
 
 
 def _issue(code: str, severity: str, detail: str) -> dict[str, str]:
@@ -532,7 +615,7 @@ def prose_names(text: str) -> list[str]:
     # No header block was cut: the first non-empty line is still the name, never a claim.
     name_left = len(body) == len(text.splitlines())
     for line in body:
-        s = line.strip().lstrip(_BULLET_CHARS).strip()
+        s = line.replace("**", "").strip().lstrip(_BULLET_CHARS).strip()  # markdown bold is no part of a name
         if s and name_left:
             name_left = False
             continue
@@ -734,14 +817,41 @@ def _experience_lines(text: str) -> list[str]:
     return out
 
 
-def _entry_parts(line: str) -> Optional[tuple[list[str], str]]:
-    """``(non-date parts, date text)`` for an entry line, else ``None``."""
+# A word that opens a date: a month name or abbreviation, exactly ("Junior" or "Marketing" never), or a year.
+_MONTH_OPENERS = frozenset(
+    set(_MONTH_NUMBERS) | {"sept", "january", "february", "march", "april", "june", "july", "august",
+                                   "september", "october", "november", "december"}
+)
+
+
+def _date_opener(tok: str) -> bool:
+    core = tok.strip(_OUTER_PUNCT).casefold()
+    return core in _MONTH_OPENERS or (len(core) == 4 and core.isdigit()) or ("/" in core and core[:1].isdigit())
+
+
+def _split_lead(part: str) -> tuple[str, str]:
+    """``(text before the date, date text)`` of a part a PDF joined ("AI Solutions Engineer, R&D Jun 2025 – Sep 2025"
+    -> the title, then the range): cut at the FIRST date opener whose rest still reads as the range. Token by
+    token, at most :data:`_ENTRY_LINE_MAX` characters (bounded)."""
+    toks = part.split()
+    for i in range(len(toks)):  # the first opener wins: "Jan 2020 - Present" has no title before it
+        if _date_opener(toks[i]) and _date_range(" ".join(toks[i:])) is not None:
+            if i == 0:
+                break
+            return " ".join(toks[:i]).strip(" ,;-\u2013\u2014"), " ".join(toks[i:])
+    return "", part
+
+
+def _entry_parts(line: str) -> Optional[tuple[list[str], str, str]]:
+    """``(non-date parts, date text, title text written before the date in the date's own part)`` for an entry line,
+    else ``None``."""
     if line.startswith(_BULLET_STARTS) or "|" not in line or len(line) > _ENTRY_LINE_MAX:
         return None
     parts = [p.strip() for p in line.split("|") if p.strip()]
     for i in range(len(parts) - 1, 0, -1):
         if _date_range(parts[i]) is not None:
-            return parts[:i] + parts[i + 1 :], parts[i]
+            lead, dates = _split_lead(parts[i])
+            return parts[:i] + parts[i + 1 :], dates, lead
     return None
 
 
@@ -749,17 +859,35 @@ def _quoted(text: str) -> str:
     return f'"{" ".join(text.split())}"'
 
 
-def _compare_position(entry: list[str], cv_dates: str, pos: dict[str, Any]) -> list[str]:
-    """What differs between one CV entry and one cv_positions record (empty list = same)."""
+def _cut_title(text: str, title: str) -> bool:
+    """A title written beside the dates or the company: the CV may CUT the profile's title, never add a word
+    ("Senior")."""
+    words = set(_words(text))
+    return bool(words) and words <= set(_words(title))
+
+
+def _compare_position(entry: list[str], cv_dates: str, pos: dict[str, Any], lead: str = "") -> list[str]:
+    """What differs between one CV entry and one cv_positions record (empty list = same). The title is looked for
+    in a part of its own (as before), in ``lead`` (written before the dates in their part) and in the company's
+    part minus the company's words ("Founder, Orbitly (orbitly.uk) | dates | place"); a place part is never the
+    only title candidate when the title stands beside the dates or the company (2026-11-10, apps 113 and 389)."""
     diffs: list[str] = []
     cv_range, pos_dates = _date_range(cv_dates), str(pos.get("dates") or "").strip()
     pr = _date_range(pos_dates) if pos_dates else None
     if cv_range and pr and not (_point_matches(cv_range[0], pr[0]) and _point_matches(cv_range[1], pr[1])):
         diffs.append(f"dates: CV says {_quoted(cv_dates)}, profile says {_quoted(pos_dates)}")
     title = str(pos.get("title") or "").strip()
-    others = [p for p in entry if not _same_company(p, str(pos.get("company") or ""))]
-    if title and others and not any(_same_title(p, title) for p in others):
-        diffs.append(f"title: CV says {_quoted(others[0])}, profile says {_quoted(title)}")
+    company = str(pos.get("company") or "")
+    others = [p for p in entry if not _same_company(p, company)]
+    drop = set(_words(company)) | _LEGAL_SUFFIXES
+    beside = [lead] + [" ".join(w for w in _words(p) if w not in drop) for p in entry if _same_company(p, company)]
+    title_words = set(_words(title))
+    beside = [b for b in beside if title_words & set(_words(b))]  # only text that tries to be this title
+    if not title or not (others or beside):
+        return diffs
+    if not (any(_same_title(p, title) for p in others) or any(_cut_title(b, title) for b in beside)):
+        said = beside[0] if beside else others[0]
+        diffs.append(f"title: CV says {_quoted(said)}, profile says {_quoted(title)}")
     return diffs
 
 
@@ -785,7 +913,7 @@ def cv_entry_mismatch(text: str, profile: Any) -> Optional[dict[str, str]]:
         parsed = _entry_parts(line)
         if parsed is None:
             continue
-        entry, cv_dates = parsed
+        entry, cv_dates, lead = parsed
         head = entry[:2]  # the company is the first part (rules.md shape) or, in older CVs, the second
         matched = [p for p in positions if any(_same_company(h, str(p["company"])) for h in head)]
         if not matched:
@@ -793,7 +921,7 @@ def cv_entry_mismatch(text: str, profile: Any) -> Optional[dict[str, str]]:
             if not any(_same_company(h, c) for h in head for c in linkedin_companies):
                 found.append(f"{_quoted(entry[0])}: employer is in none of the profile's positions")
             continue
-        options = [_compare_position(entry, cv_dates, p) for p in matched]
+        options = [_compare_position(entry, cv_dates, p, lead) for p in matched]
         if all(options):
             best = min(options, key=len)
             name = next(h for h in head if any(_same_company(h, str(p["company"])) for p in matched))
@@ -1043,7 +1171,8 @@ def check_text(kind: str, text: str, profile: Any) -> list[dict[str, str]]:
             if kind == "outreach":
                 out.append(unsupported_year_claims(text, source))
             if kind == "cv":
-                out.append(unsupported_terms(text, source))
+                # "UK" = "United Kingdom" (the closed PLACE_ABBREVIATIONS table)
+                out.append(unsupported_terms(text, source + "\n" + place_equivalents(source)))
                 out.append(missing_current_roles(text, profile))
                 out.append(cv_entry_mismatch(text, profile))
     return [i for i in out if i]

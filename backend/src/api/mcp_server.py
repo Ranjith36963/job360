@@ -1491,7 +1491,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     # parity test (test_mcp_gate_parity.py) checks exactly this.
 
     @mcp.tool()
-    async def get_application(application_id: int, with_artifact_text: bool = False) -> dict[str, Any]:
+    async def get_application(
+        application_id: int, with_artifact_text: bool = False, view: Optional[str] = None,
+    ) -> dict[str, Any]:
         """One application in full: status, the job snapshot, the fit verdict,
         every artifact version (text omitted unless with_artifact_text=true),
         `review` (newest cv's sha256 + lines to quote), the whole event timeline,
@@ -1508,10 +1510,12 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         event_type="lesson"); follow_up → a follow-up date has arrived — chase
         them or record what happened (record_event again clears it once the
         news moves the status). wait / interview / await_outcome / decide /
-        closed need nothing from you."""
+        closed need nothing from you. view="review" returns only id, job_title, job_company, country and `review`
+        (artifact_id, sha256, lines, held, state, tries_left, last_downgraded, last_where): the lean read for a CV
+        review."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.get_application(application_id, with_artifact_text, db, _user())
+                resp = await applications_route.get_application(application_id, with_artifact_text, view, db, _user())
         except HTTPException as exc:
             _audit("get_application", "error", application_id=application_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -1945,11 +1949,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
         """`source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email.
-        Unsure: outcome_suggested.
 
-        Status events move status; furthest stage wins (only corrects_event_id moves back).
-        A repeat `applied` + `source` is proof.
-        `scheduled_at` (ISO-8601+tz) only on interview_requested/_scheduled.
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
+        furthest stage wins (only corrects_event_id moves back).
+        `scheduled_at` only on interview_requested/_scheduled.
 
         Outreach: `contact_id` + `channel` with outreach_sent,
         outreach_replied, contact_meeting|_call|_intro, referral_asked|_given,
@@ -1960,7 +1963,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes;
-        chat adds user_words (reply verbatim), asked;
+        chat adds user_words, asked;
         submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         email_drafted {to, subject, attachments, gmail_draft_id};
@@ -1971,7 +1974,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         manual_only|site_limit_reached|already_applied_on_site|other, step, page_host, detail, evidence?}, stop;
         unblocked {resolution: retried|user_did_it|skipped|own_browser, note?}.
         proof_text {text, page_host}; simulation {};
-        process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, lines, reviewer};
+        process_log {}; unqueued {reason?}; cv_reviewed {artifact_id, sha256, confidence, reviewer,
+        lines: [{n, verdict, evidence}]};
         answer_corrected {key|question, was_source}. 403/409: rules recipe.
         Form/submit/blocked: browser job360|own_browser|manual."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.

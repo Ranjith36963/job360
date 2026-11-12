@@ -174,13 +174,18 @@ RULES:
    user's own product. Never undersell (no "1.5 years" when they built more).
 3. Summary: 2 lines, specific (what they build, for whom, with what proof).
    No filler words: results-driven, passionate, hard-working, team player.
-4. Bullets: strong verb + what was built + measurable result or proof (%,
-   time saved, users, tests, "live on ..."). Max 2 lines. 2-4 per role, 1-2
-   per project. No duplicate bullets; the summary must not repeat bullets.
-5. Tailor: mirror the job's real keywords where they are TRUE; put the most
-   relevant role/project bullets first. Do not keyword-stuff.
+4. Bullets: write each in natural human words from ONE profile record's facts
+   (its cv_positions bullets / cv_projects description), under that record's
+   own entry line. Wording is free; facts are exact: every number, date,
+   employer, title, degree and tool as the profile says it, never from memory,
+   never moved to another job, never two records merged. 2-4 per role,
+   1-2 per project. No duplicate bullets; the summary must not repeat bullets.
+5. Tailor: use the ad's own words where the profile supports them; a gap stays
+   out; put the most relevant role/project bullets first. Do not keyword-stuff.
 6. Skills: 3 grouped lines (e.g. "Agents & LLMs:", "ML & Engineering:",
-   "Cloud & Ops:"), only real skills, most relevant first. Never a 40-item dump.
+   "Cloud & Ops:"), only items the profile lists, each spelled as it does, most
+   relevant first. Entry and project lines: company, title, dates, place and tech
+   exactly as that ONE cv_positions / cv_projects entry says. Never a 40-item dump.
 7. Education compact: degree, university, year (dissertation one line).
 8. Length = the user's template (1 page for most juniors). Cut older or weaker
    items before shrinking text. No photo, age, "Curriculum Vitae" title,

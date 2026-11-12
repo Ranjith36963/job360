@@ -1177,6 +1177,9 @@ ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(
 KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
 # S5d - the biggest `form_filled` payload (it may carry the answers the assistant typed).
 KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
+# CV benchmark S2 (owner 2026-11-10): one profile quote may be the ONLY evidence of at most this many CV lines in a
+# cv_reviewed; more is evidence_reused (a generic quote cannot vouch for a whole CV).
+CV_REVIEW_QUOTE_REUSE_MAX = int(os.getenv("CV_REVIEW_QUOTE_REUSE_MAX", "2"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
 # Autonomy bar (owner plan 2026-11-02): "Approve CV" / "Send" leave Needs you for one kind (essay, fixed, cv)
