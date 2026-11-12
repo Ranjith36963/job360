@@ -181,10 +181,11 @@ LIE = "Cut model training time by 40%."  # Tidewater's "model training" + Calnex
     "Work History\n",
     "Selected Projects\n",
 ])
-def test_a_bullet_before_any_known_header_is_no_top_line(before):
-    text = f"Ada Lovelace\n{HEADLINE}\n{SUMMARY}\n{before}- {LIE}\nEXPERIENCE\n{CALNEX_H}\n- {CALNEX_B}\n"
-    n = cv_review.content_lines(text, _profile()).index(f"- {LIE}") + 1
-    got = _judge(text, {f"- {LIE}": []}, "AI Product Engineer")
+@pytest.mark.parametrize("mark", ["- ", "· ", "➤ ", "→ ", "> ", "o ", "+ ", "1. ", "2) "])
+def test_a_bullet_before_any_known_header_is_no_top_line(before, mark):
+    text = f"Ada Lovelace\n{HEADLINE}\n{SUMMARY}\n{before}{mark}{LIE}\nEXPERIENCE\n{CALNEX_H}\n- {CALNEX_B}\n"
+    n = cv_review.content_lines(text, _profile()).index(f"{mark}{LIE}") + 1
+    got = _judge(text, {f"{mark}{LIE}": []}, "AI Product Engineer")
     assert n in got.get("no_evidence", []), got
     assert n not in review_rows.held_numbers(text, _profile())
 
@@ -218,3 +219,11 @@ def test_top_lines_reusing_a_quote_never_sweep_in_a_quoted_bullet():
 ])
 def test_the_headline_never_borrows_a_seniority_or_role_word_from_the_ad(headline, title):
     assert _judge(_cv(headline=headline), job_title=title) == {"claim_not_in_quote": [1]}, headline
+
+
+@pytest.mark.parametrize("headline", ["AI PRODUCT ENGINEER", "AI ENGINEER | AGENTIC SYSTEMS"])
+def test_an_all_caps_headline_is_the_headline(headline):
+    from src.services.applications import cv_records
+
+    assert cv_records.top_lines(_cv(headline=headline), _profile()) == (frozenset({1, 2}), 1)
+    assert _judge(_cv(headline=headline), job_title="AI Product Engineer") == {}

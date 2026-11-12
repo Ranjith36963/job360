@@ -135,15 +135,16 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
         if not line or n >= len(content):
             continue
         is_content = line == content[n]
-        if line[0] in cv_review._BULLETS:  # a bullet is a record's line, never the headline or summary
+        heading = cv_review.is_heading(line)
+        if not heading and _marked(line):  # a bullet is a record's line, never the headline or summary
             break
-        if cv_review.is_heading(line):
-            words = cv_review._and_words(evidence._words(line.strip("#*: \t").replace("/", " ")))
-            if not (words <= _TOP_HEADING_WORDS and words & _TOP_SECTION_WORDS):
-                break
+        words = cv_review._and_words(evidence._words(line.strip("#*: \t").replace("/", " "))) if heading else set()
+        if heading and words <= _TOP_HEADING_WORDS and words & _TOP_SECTION_WORDS:
             seen_heading = True
             if is_content:  # "PROFESSIONAL SUMMARY" kept as a line: a top line, never the headline
                 out.append(n + 1)
+        elif heading and not (is_content and not out and not seen_heading):
+            break  # "EXPERIENCE", "HIGHLIGHTS": the top is over (an all-caps first line is the headline)
         elif cv_review._raw_header(line) and (
                 any(cv_review._runs_in(cv_review.header_pieces(line) or [], r) for r in keyed)
                 or _named(profile, line)):
@@ -154,6 +155,13 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
                 headline = n + 1
         n += is_content
     return frozenset(out), headline
+
+
+def _marked(line: str) -> bool:
+    """A line opening with a list marker: any symbol ("-", "·", "➤", ">"), "o ", or a number like "1." / "2)"."""
+    first = line.split(maxsplit=1)[0]
+    return (not line[0].isalnum() or first == "o"
+            or (len(first) > 1 and first[:-1].isdigit() and first[-1] in ".)"))
 
 
 def _skills_list(line: str, first: bool = False) -> bool:
