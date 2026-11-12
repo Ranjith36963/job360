@@ -1523,6 +1523,24 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
+    async def cv_work(limit: int = 10, offset: int = 0, include_profile: bool = True) -> dict[str, Any]:
+        """The CV task's lean read (use it, not list_applications + get_application): the next `limit` (1-20)
+        queued applications that need CV work, Job360's browser first, from `offset`. Each `items[]`: application_id,
+        job_title, job_company, country, browser, `ad` (cut at 6000, `ad_truncated`), jd_requirements, `review` (as
+        get_application view="review"; null = no CV yet), cv_saved_at. `profile` = the facts to write from (no raw
+        text; `include_profile=false` skips it). Page with `next_offset`; `total_needing_work`."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.cv_work(
+                    limit=limit, offset=offset, include_profile=include_profile, db=db, user=_user())
+        except HTTPException as exc:
+            _audit("cv_work", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("cv_work", "ok", count=len(resp.get("items", [])))
+        _Fence().record(resp, ("items[].ad",))
+        return resp
+
+    @mcp.tool()
     async def list_applications(
         status: Optional[str] = None,
         updated_since: Optional[str] = None,

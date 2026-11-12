@@ -581,6 +581,46 @@ async def newest_review(
     return None
 
 
+async def newest_cv_ids(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, int]:
+    """``{application_id: id of its NEWEST unhidden cv}`` in one query (apps with no cv are absent)."""
+    from src.services.applications.hiding import hidden_artifact_ids  # noqa: PLC0415
+
+    if not ids:
+        return {}
+    hidden = await hidden_artifact_ids(db, user_id)
+    cur = await db._db.execute(
+        "SELECT id, application_id FROM application_artifacts "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND kind = 'cv' AND application_id IN ({','.join('?' for _ in ids)}) "
+        "ORDER BY version_no DESC",
+        (user_id, *ids),
+    )
+    newest: dict[int, int] = {}
+    for art_id, app_id in await cur.fetchall():
+        if int(art_id) not in hidden:
+            newest.setdefault(int(app_id), int(art_id))
+    return newest
+
+
+async def tries_left_for_apps(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, int]:
+    """``{application_id: tries_left}`` as ``view="review"`` counts it (:func:`judged_versions` minus the newest cv),
+    in two queries however many applications; an application with no cv has all :data:`MAX_WEAK`. Read-only."""
+    from src.services.applications import kit  # noqa: PLC0415 - kit imports this module lazily
+
+    ids = sorted(set(application_ids))
+    if not ids:
+        return {}
+    newest = await newest_cv_ids(db, user_id, ids)
+    cur = await db._db.execute(
+        "SELECT application_id, payload FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({','.join('?' for _ in ids)})",
+        (user_id, EVENT_TYPE, *ids),
+    )
+    by_app: dict[int, list[dict[str, Any]]] = {}
+    for app_id, raw in await cur.fetchall():
+        by_app.setdefault(int(app_id), []).append({"payload": kit._json(raw)})
+    return {a: max(0, MAX_WEAK - len(judged_versions(by_app.get(a, []), a) - {newest.get(a)})) for a in ids}
+
+
 async def states_for_apps(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, str]:
     """``{application_id: none | weak | strong}`` for each application's NEWEST (unhidden) CV, read as
     :func:`review_state` reads one: the newest valid stored review of exactly that id + sha. Four queries
@@ -589,23 +629,12 @@ async def states_for_apps(db: JobDatabase, user_id: str, application_ids: list[i
     the CV still needs the user when ``cv_auto_approve`` is off or its save checks list unsupported claims
     (``kit.reviews_clearing`` decides that)."""
     from src.services.applications import kit  # noqa: PLC0415 - kit imports this module lazily
-    from src.services.applications.hiding import hidden_artifact_ids  # noqa: PLC0415
-
     ids = sorted(set(application_ids))
     out = {a: NONE for a in ids}
     if not ids:
         return out
     marks = ",".join("?" for _ in ids)
-    hidden = await hidden_artifact_ids(db, user_id)
-    cur = await db._db.execute(
-        "SELECT id, application_id FROM application_artifacts "  # noqa: S608 - placeholders only
-        f"WHERE user_id = ? AND kind = 'cv' AND application_id IN ({marks}) ORDER BY version_no DESC",
-        (user_id, *ids),
-    )
-    newest: dict[int, int] = {}
-    for art_id, app_id in await cur.fetchall():
-        if int(art_id) not in hidden:
-            newest.setdefault(int(app_id), int(art_id))
+    newest = await newest_cv_ids(db, user_id, ids)
     if not newest:
         return out
     art_ids = sorted(newest.values())

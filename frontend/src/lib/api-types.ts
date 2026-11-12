@@ -72,6 +72,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/cv-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cv Work
+         * @description The lean read for the scheduled CV write-and-review task: only the queued rows that need CV work.
+         */
+        get: operations["cv_work_api_applications_cv_work_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/export": {
         parameters: {
             query?: never;
@@ -6187,6 +6207,47 @@ export interface components {
             /** Job Title */
             job_title: string;
         };
+        /** CvWorkItemOut */
+        CvWorkItemOut: {
+            /** Ad */
+            ad: string;
+            /** Ad Truncated */
+            ad_truncated: boolean;
+            /** Application Id */
+            application_id: number;
+            /** Browser */
+            browser?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Cv Saved At */
+            cv_saved_at?: string | null;
+            /**
+             * Jd Requirements
+             * @default []
+             */
+            jd_requirements: string[];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            review?: components["schemas"]["CvReviewViewOut"] | null;
+        };
+        /**
+         * CvWorkOut
+         * @description `cv_work`: the next queued applications that need CV work, plus one compact profile.
+         */
+        CvWorkOut: {
+            /** Items */
+            items: components["schemas"]["CvWorkItemOut"][];
+            /** Next Offset */
+            next_offset?: number | null;
+            /** Profile */
+            profile?: {
+                [key: string]: unknown;
+            } | null;
+            /** Total Needing Work */
+            total_needing_work: number;
+        };
         /** Disagreement */
         Disagreement: {
             /** Application Id */
@@ -11674,6 +11735,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListApplicationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cv_work_api_applications_cv_work_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                include_profile?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CvWorkOut"];
                 };
             };
             /** @description Validation Error */
