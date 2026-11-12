@@ -239,7 +239,7 @@ describe("middleware — verify fetch timeout (S17)", () => {
     vi.restoreAllMocks();
   });
 
-  it("aborts the /api/auth/me call after 5 s and takes the service-unavailable path", async () => {
+  it("aborts the /api/auth/me call after 20 s and takes the service-unavailable path", async () => {
     const timedOut = new AbortController();
     timedOut.abort(new DOMException("timed out", "TimeoutError"));
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timedOut.signal);
@@ -262,7 +262,7 @@ describe("middleware — verify fetch timeout (S17)", () => {
     const res = await middleware(
       new NextRequest("http://localhost:3000/profile", { headers: COOKIE })
     );
-    expect(timeoutSpy).toHaveBeenCalledWith(5000);
+    expect(timeoutSpy).toHaveBeenCalledWith(20000);
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(timedOut.signal);
     const loc = new URL(res.headers.get("location")!);
     expect(loc.pathname).toBe("/login");
