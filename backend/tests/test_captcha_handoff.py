@@ -149,9 +149,10 @@ async def _own_event(client: AsyncClient, app_id: int) -> None:
     assert resp.status_code == 201, resp.text
 
 
+# 2026-11-12: CAPTCHA and bot check are never a failure, however often the cloud meets them
+# (was: a returning captcha counted; bulk apply then unqueued 13 CAPTCHA jobs as "failed twice").
 @pytest.mark.asyncio
 async def test_a_handed_off_captcha_that_returns_never_counts(authenticated_async_context):
-    """2026-11-12: CAPTCHA and bot check are never a failure, however often the cloud meets them."""
     async with authenticated_async_context() as client:
         app_id = await _queued_job(client, "loop")
         await _cloud_block(client, app_id, "captcha")
