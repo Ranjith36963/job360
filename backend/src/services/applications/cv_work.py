@@ -134,5 +134,5 @@ async def cv_work(
         out["profile"] = compact_profile(user_id)
     get_audit_logger().info(
         "cv_work", extra={"event": "cv_work", "user_id": safe_log_value(user_id), "queued": len(queue_order),
-                          "needing": len(ids), "returned": len(items), "after": after, "result": "ok"})
+                          "needing": len(ids), "returned": len(items), "after": safe_log_value(after), "result": "ok"})
     return out
