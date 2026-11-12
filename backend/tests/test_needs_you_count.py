@@ -381,9 +381,35 @@ async def test_the_badge_reports_how_long_each_step_took(authenticated_async_con
     assert resp.status_code == 200, resp.text
     entries = [e.strip() for e in resp.headers["server-timing"].split(",")]
     names = [e.split(";dur=")[0] for e in entries]
-    assert names == [*PHASES, "total"]
+    # Every step by name, then the total. The blockers step may add its own parts (``b_<part>``).
+    assert [n for n in names if not n.startswith("b_")] == [*PHASES, "total"]
     durations = [float(e.split(";dur=")[1]) for e in entries]
     assert all(d >= 0 for d in durations)
     assert durations[-1] >= max(durations[:-1])  # the total covers every step
     # Durations only: no letter outside the fixed step names can ride in the header.
     assert all(e.split(";dur=")[1].replace(".", "", 1).isdigit() for e in entries)
+
+
+@pytest.mark.asyncio
+async def test_the_badge_names_the_parts_of_the_blockers_step(authenticated_async_context):
+    """2026-11-12: the readout showed the blockers step was 2.2 s of 2.4 s on production, and nothing said
+    which part of it. With an open application the header carries each part (``b_<part>``), durations only."""
+    async with authenticated_async_context() as client:
+        brought = await client.post(
+            "/api/jobs/bring",
+            json={"title": "Engineer", "company": "Northwind", "description": "Build things.",
+                  "apply_url": "https://northwind.example/c/1"},
+        )
+        assert brought.status_code in (200, 201), brought.text
+        resp = await client.get("/api/needs-you-count")
+    assert resp.status_code == 200, resp.text
+    parts = {
+        e.strip().split(";dur=")[0]: float(e.strip().split(";dur=")[1])
+        for e in resp.headers["server-timing"].split(",")
+        if e.strip().startswith("b_")
+    }
+    assert list(parts) == [
+        "b_events", "b_blocks", "b_cvs", "b_asks_queue", "b_score_today", "b_state", "b_profile", "b_flags",
+        "b_reviews", "b_outreach_confirm", "b_derive",
+    ]
+    assert all(ms >= 0 for ms in parts.values())
