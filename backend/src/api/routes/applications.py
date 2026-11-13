@@ -3299,6 +3299,14 @@ async def outreach_check(
             "The email raises visa, salary, health or another private topic: the user's to raise. Save a Gmail "
             "draft and ask_user.",
         )
+    # Owner 2026-11-13: a note that goes alone never goes for a TEST application (test_marker.py).
+    if verdict.decision == "send" and verdict.reason == "auto_note" and contact.get("application_id") is not None:
+        from src.services.applications import test_marker  # noqa: PLC0415
+
+        if int(contact["application_id"]) in await test_marker.test_app_ids(db, user.id):
+            verdict = settings_rules.OutreachDecision(
+                "stop", "test_application", "This person belongs to a test application. Never send."
+            )
     # Owner 2026-11-09: a text that goes with nobody pressing Send needs a strong outreach_reviewed of exactly
     # this draft (id + sha). The user's own Send (owner_clicked, connect_no_note) and a no-note request do not.
     review_needed = verdict.decision == "send" and verdict.reason in outreach_review_service.AUTO_SEND_REASONS

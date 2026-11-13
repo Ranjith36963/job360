@@ -537,7 +537,8 @@ sends against the user's limits (a contact with an application is job outreach, 
 Gmail draft; the saved message shows under People to reach on Needs you;
 the user sends. A LinkedIn message is sent only while you hold the person (own_browser_queue take) AND
 check_outreach(contact_id, message_id, session) says `send`: owner_clicked (the user pressed Send on that exact draft),
-or, on the new-connection path only, connect_no_note, auto_connect, auto_after_accept or auto_follow_up. A person
+or, on the new-connection path only, connect_no_note, auto_connect, auto_note (a note to someone not connected,
+only with `outreach_send` auto), auto_after_accept or auto_follow_up. A person
 already connected, or one who replied, always needs the user's Send; follow get_recipe("own_browser"). An other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's
 Gmail Sent folder for a message to that address since this version was saved,

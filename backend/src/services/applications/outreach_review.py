@@ -56,7 +56,7 @@ MAX_WEAK = cv_review.MAX_WEAK  # owner 2026-11-09: up to two rewrites, each re-r
 REVIEW_LINES_CAP = cv_review.REVIEW_LINES_CAP
 # check_outreach's AUTOMATIC sends: nobody pressed Send for this text. owner_clicked and connect_no_note are the
 # user's own Send; auto_connect is a connection request WITHOUT a note (no text goes, so there is nothing to review).
-AUTO_SEND_REASONS = ("auto_mode", "auto_after_accept", "auto_follow_up")
+AUTO_SEND_REASONS = ("auto_mode", "auto_after_accept", "auto_follow_up", "auto_note")
 NOT_REVIEWED = "outreach_not_reviewed"
 GREETINGS = frozenset({"hi", "hello", "dear", "hey"})
 _GREETING_EXTRA = frozenset({"there", "team", "all"})
