@@ -16,10 +16,14 @@ Owner answers 2026-10-31 applied here:
   browser hit it, and its open ask and its ``blocked`` event are ONE blocker.
 A closed application (rejected, withdrawn, ghosted, hired, declined) has none. A form yes older than its
 time-to-live reads ``Send`` again; the finer fingerprint (changed cover letter, form page) stays with the gate.
+Owner 2026-11-13 (Needs you F5 + F10): a job the user's own rule drops (below the line, ``below_line`` skip: the
+rule ``spine.open_queue`` uses) has no place in the batch and nothing on the user or the user's PC but a proof or
+an open ask; an open job with a CV, no fill and not queued is the ASSISTANT's ("queue or drop this job").
 """
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 from contextvars import ContextVar
@@ -67,6 +71,9 @@ _SITE_WORDS = {
     "upload_failed": "attach your CV", "upload": "attach your CV",
     blocked.ALREADY_APPLIED: "mark it applied",
 }
+_OWNER_SIDE = ("you", "your_pc")
+_DROPPED_GONE = ("review_cv", "fix_cv", "queued")  # a dropped job gets no CV look and no batch place either
+_NOT_ON_YOU_LOG_MAX = 50
 _FILL_TYPES = ("blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen")
 
 
@@ -296,7 +303,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     # connection each, on the menu badge of every page); none when neither has anything to judge.
     loaded: Optional[tuple[Any, list[dict[str, Any]]]] = None
     lap("state")
-    if fills or unseen:
+    below = [i for i in ids if state[i]["below"]]
+    if fills or unseen or below:
         from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
 
         loaded = await asyncio.to_thread(load_profile_with_overlay, user_id)
@@ -305,6 +313,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     lap("flags")
     reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded))
     lap("reviews")
+    # F5: the user's own rule drops it (below the line, below_line skip), read the way open_queue reads it.
+    dropped = _dropped(below, apps, line, _or_empty(loaded))
+    queued_at = {a: t for a, t in queued_at.items() if a not in dropped}
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
@@ -317,6 +328,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
 
     silent = await auto_applied.silent_submits(db, user_id, ids, now)
     lap("outreach_confirm")
+    stale: list[int] = []
     for app_id in ids:
         a, s, out = apps[app_id], state[app_id], result[app_id]
         if (conf := confirmed.get(app_id)) is not None and a["status"] not in _DEAD:
@@ -366,12 +378,14 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and app_id in queued_at:
             browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {}, hosts)
             if browser["kind"] == "own_browser":
-                out.append(_b("queued", "your_pc", "apply on the site", queued_at[app_id]))
+                out.append(_b("queued", "your_pc", "apply from your PC", queued_at[app_id]))
             else:
                 out.append(_b("queued", "assistant", f"in batch #{position[app_id]}", queued_at[app_id]))
-        elif considering and s["cv"] and not s["fill"]:
-            cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
-            out.append(_b("apply_by_hand", "you", "apply on the site", s["cv"]["created_at"], cv_ref))
+        elif considering and s["cv"] and not s["fill"] and app_id not in dropped and a.get("fit_recorded_at"):
+            # F10: never queued (or taken off) with a CV and no fill: the assistant queues or drops it, not the user.
+            stale_ref = {"artifact_id": s["cv"]["artifact_id"], "reason": "not_queued"}
+            out.append(_b("assistant_step", "assistant", "queue or drop this job", s["cv"]["created_at"], stale_ref))
+            stale.append(app_id)
         if considering and not s["below"] and app_id not in queued_at:
             if not a.get("fit_recorded_at"):
                 out.append(_b("assistant_step", "assistant", "judge the fit", a["updated_at"]))
@@ -388,7 +402,29 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and reason == blocked.ALREADY_APPLIED:
             # The site says the user already applied: only their answer waits ("mark it applied"), nothing else.
             out[:] = [b for b in out if b["kind"] in ("confirm_sent", "site_step")]
+        if app_id in dropped:  # F5: only a proof or an open ask (answered or withdrawn, never hidden) stays
+            out[:] = [b for b in out if b["kind"] == "confirm_sent" or (b["ref"] or {}).get("ask_id") or (
+                b["actor"] not in _OWNER_SIDE and b["kind"] not in _DROPPED_GONE)]
+    if dropped or stale:
+        get_audit_logger().info(
+            "blockers_not_on_you",
+            extra={"event": "blockers_not_on_you", "user_id": safe_log_value(user_id),
+                   "below_line_skip": sorted(dropped)[:_NOT_ON_YOU_LOG_MAX],
+                   "not_queued": sorted(stale)[:_NOT_ON_YOU_LOG_MAX],
+                   "result": "ok"},
+        )
     lap("derive")
+
+
+def _dropped(below: list[int], apps: dict[int, dict[str, Any]], line: Optional[int], profile: Any) -> set[int]:
+    """Which ``below`` jobs the user's own rule drops: ``assistant_settings.drops_below_line``, the rule
+    ``spine.below_line_dropped`` (and so ``open_queue``) applies, with the score line this derivation read."""
+    if not below or profile is None:
+        return set()
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415 - profile imports spine
+
+    cfg = dataclasses.replace(rules.effective(profile.assistant_settings), apply_min_score=line)
+    return {i for i in below if rules.drops_below_line(apps[i].get("fit_score"), cfg)}
 
 
 def _or_empty(loaded: Optional[tuple[Any, list[dict[str, Any]]]]) -> Any:
