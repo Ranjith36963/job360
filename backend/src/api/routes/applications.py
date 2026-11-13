@@ -4446,6 +4446,7 @@ def _queue_refused(user: CurrentUser, application_id: int, event_type: str, stat
         "bad_reason": "unqueued takes only an optional reason: " + ", ".join(queue_preflight.UNQUEUE_REASONS),
         "not_open": "not open",
         "already_queued": "already queued",
+        "closed_posting": spine.CLOSED_POSTING_NOTE,
         "not_queued": "not queued",
         "corrects_non_queue_event": f"{event_type} may only correct a queued or unqueued event",
     }[reason]
@@ -4491,6 +4492,10 @@ async def _check_queue_event(
         is_queued = application_id in await spine.queued_at_by_app(db, user.id, [application_id])
         if event_type == "queued" and is_queued:
             raise _queue_refused(user, application_id, event_type, 409, "already_queued")
+        if event_type == "queued" and actor_for(user) != "web" and await spine.unqueued_as_closed(
+            db, user.id, application_id
+        ):
+            raise _queue_refused(user, application_id, event_type, 409, "closed_posting")
         if event_type == "unqueued" and not is_queued:
             raise _queue_refused(user, application_id, event_type, 409, "not_queued")
     get_audit_logger().info(

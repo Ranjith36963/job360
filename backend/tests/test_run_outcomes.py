@@ -266,6 +266,7 @@ async def test_a_closed_posting_never_asks_for_a_cv(authenticated_async_context,
         _seed(fixture_user_id)
         app_id = await _queued_job(client, 8)
         closed = await client.post(f"/api/applications/{app_id}/events", json={
-            "event_type": "blocked", "payload": {"reason": "posting_closed", "page_host": "jobs.northwind.example"}})
+            "event_type": "blocked", "payload": {"reason": "posting_closed", "page_host": "jobs.northwind.example",
+                                                       "evidence": "http_404"}})
         assert closed.status_code == 201, closed.text
         assert (await _stop_batch(client)).status_code == 200
