@@ -221,7 +221,9 @@ async def test_a_fill_older_than_the_newest_cv_is_the_assistants_refill(authenti
         await _cv(client, app_id, "Ada Lovelace, a newer version.")
         got = (await _rows(uid, [app_id]))[app_id]
         assert "check_send" not in _kinds(got) and "answers" not in _kinds(got) and "send_yes" not in _kinds(got), got
-        assert [b["label"] for b in got if b["actor"] == "assistant"] == ["refill the form"]
+        # main (2026-11-13): the newer CV is unreviewed, so the assistant also reviews it first; nothing is the owner's.
+        assert [b["label"] for b in got if b["actor"] == "assistant"] == ["review the CV", "refill the form"]
+        assert not [b for b in got if b["actor"] == "you"], got
 
 
 _REASONS = ["new_site_first_time", "cv_not_seen", "sensitive_unconfirmed", "question_open", "practice_run",

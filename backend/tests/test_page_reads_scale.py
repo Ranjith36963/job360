@@ -19,6 +19,7 @@ from src.services.applications import blockers as blockers_service
 from src.services.applications import needs_you_count as nyc
 from src.services.applications import spine
 from src.services.profile import storage
+from tests._cv_review import owners_turn
 
 _AD = {"company": "Northwind", "description": "Build things."}
 
@@ -131,6 +132,8 @@ async def test_blockers_share_one_profile_read(authenticated_async_context, monk
     user_id = authenticated_async_context.fixture_user_id
     async with authenticated_async_context() as client:
         ids = await _bring(client, 0, 3)
+        for app_id in ids:
+            await owners_turn(user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
     real = storage.load_profile_with_overlay
     reads: list[str] = []
 

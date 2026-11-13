@@ -14,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core import settings
 from src.repositories import pgsync
+from tests._cv_review import owners_turn
 
 _AD = {
     "title": "Data Engineer", "company": "Larkspur", "location": "London", "country": "GB", "remote": False,
@@ -60,6 +61,7 @@ async def test_a_hidden_cv_version_is_never_the_current_one_and_undo_brings_it_b
     async with authenticated_async_context() as client:
         app_id, job_id = await _bring(client)
         v1 = await _save(client, app_id, "the real cv")
+        await owners_turn(authenticated_async_context.fixture_user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         v2 = await _save(client, app_id, "NEGATIVE TEST cv")
         hide = await client.post(f"/api/applications/{app_id}/artifacts/{v2['artifact_id']}/hide")
         assert hide.status_code == 201, hide.text

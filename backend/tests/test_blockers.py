@@ -18,6 +18,7 @@ from src.api import dependencies as api_deps
 from src.core import settings
 from src.repositories import pg, pgsync
 from src.services.applications import blockers, kit, spine
+from tests._cv_review import owners_turn
 
 FORM = "https://careers.example/apply/7"
 
@@ -162,6 +163,7 @@ async def test_order_and_another_users_id_is_ignored(authenticated_async_context
         app_id = await _bring(client)
         _above(app_id)
         await _client_cv(client, app_id)
+        await owners_turn(uid, app_id)  # reviews spent: the CV waits on the user (owner 2026-11-13)
         await _ask(client, app_id, "guess", "referred", "Were you referred by an employee?", "No")
         await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 3, "answers": []})
         await _event(client, app_id, "blocked", {"reason": "otp_needed"})

@@ -8,6 +8,7 @@ and never read from a body (``extra="forbid"``).
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -133,7 +134,7 @@ async def list_asks(
             await memory_closes.close_covered(db, user.id)  # old asks Memory now answers close (Memory first)
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset, exclude_test=True)
         if actor_for(user) == "web" and status == "open":
-            rows = _with_saved_answers(user.id, rows)
+            rows = await asyncio.to_thread(_with_saved_answers, user.id, rows)
         # The hand-off fields, shared with the application page (GET /applications/{id}).
         rows = await blocked_service.with_hand_off(db, user.id, rows)
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id, exclude_test=True)}
