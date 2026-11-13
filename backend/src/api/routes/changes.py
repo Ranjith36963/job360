@@ -177,6 +177,12 @@ async def changes(
     return out
 
 
+class SiteSignInOut(BaseModel):
+    host: str  # the site, lower case, no www. (one sign-in there clears every job listed)
+    word: str  # the step: "sign in", "create an account" or "enter the code"
+    app_ids: list[int]
+
+
 class NeedsYouCountOut(BaseModel):
     n: int  # the Needs-you page's total: jobs + other + 1 while the Answer-once card has rows
     jobs: int  # jobs whose first blocker is the user (= jobs_waiting_on_you)
@@ -188,6 +194,8 @@ class NeedsYouCountOut(BaseModel):
     other_ask_ids: list[int] = []  # open asks tied to a job that is not a row (e.g. proof missing): shown in Other
     job_ids: list[int] = []  # the jobs waiting on the user, oldest first blocker first (the page's rows)
     job_ids_by_kind: dict[str, list[int]] = {}  # the same ids grouped by their first blocker's kind
+    # Diagnosis D: the jobs waiting on one sign-in, one item per site (their ids are not in job_ids).
+    site_signins: list[SiteSignInOut] = []
     pc_idle: Optional[PcIdleOut] = None  # owner #12: jobs wait on the user's PC and no PC session worked them
 
 

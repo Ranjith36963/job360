@@ -11048,6 +11048,14 @@
                 "type": "null"
               }
             ]
+          },
+          "site_signins": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SiteSignInOut"
+            },
+            "title": "Site Signins",
+            "type": "array"
           }
         },
         "required": [
@@ -16449,6 +16457,53 @@
           }
         },
         "title": "SetupProgressOut",
+        "type": "object"
+      },
+      "SignedInOut": {
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "unblocked": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Unblocked",
+            "type": "array"
+          }
+        },
+        "required": [
+          "host",
+          "unblocked"
+        ],
+        "title": "SignedInOut",
+        "type": "object"
+      },
+      "SiteSignInOut": {
+        "properties": {
+          "app_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "App Ids",
+            "type": "array"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "word",
+          "app_ids"
+        ],
+        "title": "SiteSignInOut",
         "type": "object"
       },
       "StatsBandOut": {
@@ -33296,6 +33351,81 @@
         "summary": "Report Wrong Fact Route",
         "tags": [
           "changes"
+        ]
+      }
+    },
+    "/api/sites/{host}/signed-in": {
+      "post": {
+        "description": "\"I've signed in\" on a Needs-you site card (diagnosis D): for each of the user's jobs with an open\nsign-in / create-account / code block on ``host``, records ``unblocked`` {user_did_it} and ``site_account``\n{host}; their asks close. 409 when none waits. Session only; no MCP tool (an agent unblocks per job).",
+        "operationId": "site_signed_in_api_sites__host__signed_in_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "title": "Host",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedInOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Site Signed In",
+        "tags": [
+          "asks"
         ]
       }
     },
