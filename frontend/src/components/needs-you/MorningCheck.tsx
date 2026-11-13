@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAssistantSettings, getMorningCheck } from "@/lib/api";
+import { usePathname } from "next/navigation";
+import { getMorningCheck } from "@/lib/api";
 import type { MorningCheck as MorningCheckData } from "@/lib/api";
-import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
+import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT, fetchSettingsShared } from "@/lib/assistant-state";
 import { formatFeedTime, hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
 import {
   ALWAYS_ASKS,
@@ -38,6 +39,7 @@ const linkBtn = "text-xs font-medium text-muted-foreground underline-offset-2 ho
  */
 export function MorningCheck() {
   const appLink = useAppHref();
+  const pathname = usePathname() ?? "";
   const [data, setData] = useState<MorningCheckData | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Bucket | null>(null);
@@ -51,7 +53,9 @@ export function MorningCheck() {
   });
   const stamped = useRef(false);
 
-  const load = useCallback(() => {
+  // Mount shares the settings read with the top bar's pause hook (same key); a reload after a pause or a
+  // send reads fresh.
+  const load = useCallback((key: string = `morning:${Date.now()}:${Math.random()}`) => {
     getMorningCheck(win.since).then(
       (d) => {
         setData(d);
@@ -59,15 +63,15 @@ export function MorningCheck() {
       },
       () => setFailed(true),
     );
-    getAssistantSettings().then(
+    fetchSettingsShared(key).then(
       (v) => setGrant({ count: v.auto_grant_count?.value, until: v.auto_grant_until?.value }),
       () => setGrant({ count: null, until: null }),
     );
   }, [win]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    load(pathname);
+  }, [load, pathname]);
 
   // A pause or resume from the top bar, or a Send / Don't send below, updates the strip at once.
   useEffect(() => {
