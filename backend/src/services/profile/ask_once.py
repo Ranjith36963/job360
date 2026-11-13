@@ -15,7 +15,7 @@ from ``common_questions`` rows that are guessed (to verify) or not known, most-g
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from src.services.profile import common_questions
 
@@ -311,17 +311,20 @@ def _conflict_row(c: dict[str, Any], cc: str) -> dict[str, Any]:
     }
 
 
-def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def questionnaire(
+    profile: Any, overlay: list[dict[str, Any]], extra_countries: Iterable[str] = (),
+) -> list[dict[str, Any]]:
     """``[{country, questions}]``: per saved country, up to :data:`PER_COUNTRY` rows still guessed or not
     known (``summary()``'s to_verify + missing), guessed first, then by how many forms ask it. A row the
     user already remembered is done: a global one for every country, a country-specific one
     (:func:`is_country_specific`) for its country only (``fits_country``). Read-only."""
     from src.services.profile.answer_match import conflicts, find_answer, topic_key  # noqa: PLC0415
 
-    rows = [r for r in common_questions.common_questions(profile, overlay) if not r["per_job"]]
+    # extra_countries: the queued jobs' countries (2026-11-13), so a US / NL / SE job has a slot here.
+    rows = [r for r in common_questions.common_questions(profile, overlay, extra_countries) if not r["per_job"]]
     saved = getattr(getattr(profile, "user_info", None), "answers", None) or []
     out: list[dict[str, Any]] = []
-    for cc in common_questions._countries(profile):
+    for cc in common_questions._countries(profile, extra_countries):
         todo = [
             {**r, "topic": _key(r), "question": r["question"].replace("{country}", cc)}
             for r in rows
@@ -340,7 +343,7 @@ def questionnaire(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str,
     return out
 
 
-def open_questions(user_id: str) -> int:
+def open_questions(user_id: str, extra_countries: Iterable[str] = ()) -> int:
     """How many questionnaire rows wait on the user, every country together (the Needs-you count's
     ``answer_once``). Read-only; 0 when the profile cannot be read, so a bad profile never breaks the badge."""
     import logging  # noqa: PLC0415
@@ -350,7 +353,7 @@ def open_questions(user_id: str) -> int:
 
     try:
         loaded, overlay = load_profile_with_overlay(user_id)
-        return sum(len(c["questions"]) for c in questionnaire(loaded or UserProfile(), overlay))
+        return sum(len(c["questions"]) for c in questionnaire(loaded or UserProfile(), overlay, extra_countries))
     except Exception:  # noqa: BLE001 - the count must answer; the card's own read shows the error
         logging.getLogger(__name__).exception("ask_once.open_questions failed")
         return 0

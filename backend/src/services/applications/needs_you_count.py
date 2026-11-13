@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import asks as asks_service
-from src.services.applications import inbox_items, outcome_suggestions, site_signin, test_marker
+from src.services.applications import inbox_items, outcome_suggestions, site_signin, spine, test_marker
 from src.services.profile import ask_once, setting_requests
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -224,7 +224,7 @@ async def needs_you_count(
     mark("inbox")
     other = general + len(other_ask_ids) + waiting_settings + len(suggestions) + open_mail + connections
     # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
-    answer_once = await asyncio.to_thread(ask_once.open_questions, user_id)
+    answer_once = await asyncio.to_thread(ask_once.open_questions, user_id, await spine.queued_countries(db, user_id))
     mark("answer_once")
     # Owner #12: one line for the jobs on the user's PC when no session in their own browser worked the queue.
     from src.services.applications import own_browser  # noqa: PLC0415 - own_browser -> contacts -> this package

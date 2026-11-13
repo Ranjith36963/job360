@@ -2386,6 +2386,22 @@ async def open_queue(db: JobDatabase, user_id: str, profile: Any = None) -> tupl
     return sorted(queued_at, key=lambda i: (queued_at[i], i)), queued_at
 
 
+async def queued_countries(db: JobDatabase, user_id: str) -> list[str]:
+    """The countries of the user's open queue (:func:`open_queue`), first queued first, upper case, each once.
+    The Answer once page asks the work questions for each (2026-11-13: runs filed a job-less ask per run for
+    US / NL / SE because the page had slots only for saved countries). Scoped by ``user_id``."""
+    order, _queued_at = await open_queue(db, user_id)
+    if not order:
+        return []
+    cur = await db._db.execute(
+        f"SELECT id, job_country FROM applications WHERE user_id = ? "  # noqa: S608 - placeholders, not values
+        f"AND id IN ({','.join('?' for _ in order)})",
+        [user_id, *order],
+    )
+    by_id = {int(r[0]): str(r[1] or "").strip().upper() for r in await cur.fetchall()}
+    return list(dict.fromkeys(c for c in (by_id.get(i, "") for i in order) if c and c != "ANY"))
+
+
 # ── R11 — get_application / list_applications ────────────────────────────────
 
 

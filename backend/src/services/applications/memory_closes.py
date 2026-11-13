@@ -11,7 +11,8 @@ the user, so the answer history stays true.
 It runs where the asks are read anyway: the kit and check_submit for that job, the user's own Needs-you
 read, and after a Memory save. There is no background worker. Never touched: an answered or partly answered
 ask, one that is not open, a captcha / login / upload / safety ask, a proof ask, one the user wrote on the
-web, and an ask on a job whose country is unknown.
+web, and an ask on a job whose country is unknown. An ask tied to no job closes when every row is a
+``right_to_work.<cc>.*`` fact Memory holds for THAT row's country (:func:`covered_jobless`, 2026-11-13).
 """
 from __future__ import annotations
 
@@ -39,6 +40,35 @@ MEMORY_PATHS = frozenset({
 # only for a non-sensitive fact). ``inferred`` (an assistant's guess) and ``sensitive`` (an equality, visa
 # or salary value the user has not confirmed, which #1506 shows on each form first) leave it open.
 _USERS_WORD = ("confirmed", "relayed")
+
+
+_UK = {"uk": "GB"}  # a key may say uk; Memory's page is GB
+
+
+def row_country(row: Any) -> Optional[str]:
+    """The country a job-less ask's row names: a ``right_to_work.<cc>.*`` key (``uk`` read as GB), else None."""
+    parts = str((row or {}).get("key") or "").split(".") if isinstance(row, dict) else []
+    if len(parts) < 3 or parts[0] != "right_to_work" or len(parts[1]) != 2 or not parts[1].isalpha():
+        return None
+    return _UK.get(parts[1].lower(), parts[1].upper())
+
+
+def covered_jobless(ask: dict[str, Any], memory: dict[str, dict[str, dict[str, Any]]]) -> bool:
+    """Pure (production 2026-11-13, asks 583-588): a job-less ask is covered when EVERY row is a
+    ``right_to_work.<cc>.*`` fact (:func:`row_country`) that :func:`covered` finds in Memory for ITS country.
+    ``memory`` = ``{cc: kit items by key}`` for every country the rows name."""
+    rows = ask.get("questions") or []
+    if ask.get("application_id") is not None or not rows:
+        return False
+    for row in rows:
+        cc = row_country(row)
+        if cc is None or cc not in memory:
+            return False
+        # The key names the fact; with its country in upper case memory_question reads it as that kit key.
+        own = {**row, "key": ".".join(["right_to_work", cc, *str(row["key"]).split(".")[2:]])}
+        if not covered({**ask, "application_id": 0, "questions": [own]}, cc, memory[cc]):
+            return False
+    return True
 
 
 def covered(ask: dict[str, Any], country: Optional[str], by_key: dict[str, dict[str, Any]]) -> bool:
@@ -99,7 +129,7 @@ async def _close_covered(db: JobDatabase, user_id: str, application_id: Optional
 
     # A question ask (asks.QUESTION_FAMILY: "" or "question") an assistant filed; never one the user wrote.
     sql = (
-        "SELECT k.id, a.job_country FROM application_asks k JOIN applications a "
+        "SELECT k.id, a.job_country, k.application_id FROM application_asks k LEFT JOIN applications a "
         "ON a.id = k.application_id AND a.user_id = k.user_id WHERE k.user_id = ? AND k.answered_at IS NULL "
         "AND k.withdrawn_at IS NULL AND k.kind IN ('', 'question') AND k.asked_by <> 'web' "
     )
@@ -108,11 +138,14 @@ async def _close_covered(db: JobDatabase, user_id: str, application_id: Optional
     else:
         cur = await db._db.execute(sql + "AND k.application_id = ? ORDER BY k.id", (user_id, application_id))
     rows: list[tuple[int, str]] = []
+    jobless: list[int] = []  # asks tied to no job: each row names its own country (covered_jobless)
     for r in await cur.fetchall():
         country = str(r[1] or "").strip().upper()
-        if country:
+        if r[2] is None:
+            jobless.append(int(r[0]))
+        elif country:
             rows.append((int(r[0]), country))
-    if not rows:
+    if not rows and not jobless:
         return 0
     # Off the event loop. Safe although writes follow: every await below already separates this read from
     # them, and each withdraw is guarded in the database (``answered_at IS NULL AND withdrawn_at IS NULL``,
@@ -121,16 +154,29 @@ async def _close_covered(db: JobDatabase, user_id: str, application_id: Optional
     profile = loaded or UserProfile()
     memory: dict[str, dict[str, dict[str, Any]]] = {}
     closed = 0
-    for ask_id, country in rows:
+
+    def memory_of(country: str) -> dict[str, dict[str, Any]]:
         if country not in memory:
             blocks, _missing = kit.compute_answers(profile, overlay, country, None)
             memory[country] = {str(i["key"]): i for block in blocks.values() for i in block}
+        return memory[country]
+
+    for ask_id, country in [*rows, *((i, "") for i in jobless)]:
         ask = await asks._get_ask(db, user_id, ask_id)
-        if ask is None or not covered(ask, country, memory[country]):
+        if ask is None:
+            continue
+        if country:
+            hit = covered(ask, country, memory_of(country))
+        else:
+            ccs = {row_country(q) for q in ask.get("questions") or []}
+            hit = None not in ccs and covered_jobless(ask, {cc: memory_of(cc) for cc in ccs if cc})
+        if not hit:
             continue
         try:
             await asks.withdraw_ask(db, user_id, ask_id, MEMORY_ACTOR, MEMORY_ANSWERS, detail=CLOSED_DETAIL)
             closed += 1
+            logger.info("memory_closed_ask", extra={"event": "memory_closed_ask", "user_id": safe_log_value(user_id),
+                                                    "ask_id": ask_id, "jobless": not country})
         except SpineError:  # answered or withdrawn in between: nothing left to close
             continue
     return closed
