@@ -6533,5 +6533,14 @@
 {"name":"ictjob Belgium (newest)","ats":"ictjob","board":"be","source":"hunt-kit"},
 {"name":"ictjob Belgium: machine learning","ats":"ictjob","board":"be/machine-learning","source":"hunt-kit"},
 {"name":"ictjob Belgium: artificial intelligence","ats":"ictjob","board":"be/artificial-intelligence","source":"hunt-kit"},
-{"name":"ictjob Luxembourg (newest)","ats":"ictjob","board":"lu","source":"hunt-kit"}
+{"name":"ictjob Luxembourg (newest)","ats":"ictjob","board":"lu","source":"hunt-kit"},
+{"name":"itjobs.pt","ats":"itjobspt","board":"all","source":"hunt-kit"},
+{"name":"Magnet.me (fresh postings)","ats":"magnetme","board":"all","source":"hunt-kit"},
+{"name":"StepStone Germany: machine learning engineer","ats":"stepstone","board":"machine-learning-engineer","source":"hunt-kit"},
+{"name":"StepStone Germany: AI engineer","ats":"stepstone","board":"ai-engineer","source":"hunt-kit"},
+{"name":"StepStone Germany: data scientist","ats":"stepstone","board":"data-scientist","source":"hunt-kit"},
+{"name":"jobs.ch: machine learning","ats":"swissjobs","board":"jobs.ch/machine-learning","source":"hunt-kit"},
+{"name":"jobs.ch: artificial intelligence","ats":"swissjobs","board":"jobs.ch/artificial-intelligence","source":"hunt-kit"},
+{"name":"jobup.ch: machine learning","ats":"swissjobs","board":"jobup.ch/machine-learning","source":"hunt-kit"},
+{"name":"jobup.ch: artificial intelligence","ats":"swissjobs","board":"jobup.ch/artificial-intelligence","source":"hunt-kit"}
 ]
