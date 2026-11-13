@@ -3198,6 +3198,8 @@ async def whats_new(
     limit: int = 50,
     inbox_offset: int = 0,
     inbox_stale_alerts: bool = False,
+    newest: bool = False,
+    before_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """R9 — what changed across ALL of the caller's applications since a
     cursor. Paged and ordered by ``recorded_at`` (when Job360 learned it),
@@ -3209,7 +3211,11 @@ async def whats_new(
     boundary is never dropped.
 
     Also carries open_asks, proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask)
-    and ``interviews`` ({upcoming, just_passed}, services/applications/agenda.py) whatever `since` says."""  # noqa: E501
+    and ``interviews`` ({upcoming, just_passed}, services/applications/agenda.py) whatever `since` says.
+
+    ``newest=True`` (2026-11-13): the NEWEST ``limit`` matching events instead of the oldest, so a caller that
+    shows the latest few rows reads one page, not a walk from the oldest. Same filters; ``before_id`` continues
+    backwards; the page still comes back oldest first; ``next_before_id`` is its smallest id."""  # noqa: E501
     limit = max(1, min(int(limit), settings.WHATS_NEW_MAX_EVENTS))
     now = datetime.now(timezone.utc).isoformat()
     since_val = since or (
@@ -3238,19 +3244,25 @@ async def whats_new(
     else:
         where.append("recorded_at >= ?")
         params.append(since_val)
+    if newest and before_id is not None:
+        where.append("id < ?")
+        params.append(before_id)
     where_sql = " AND ".join(where)
 
+    order = "id DESC" if newest else "recorded_at ASC, id ASC"
     cur = await db._db.execute(
         f"SELECT id, application_id, event_type, detail, payload, occurred_at, recorded_at, "  # noqa: S608
         f"recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id, "
         f"source_quote, source_sender, source_subject, source_received_at, scheduled_at "
         f"FROM application_events WHERE {where_sql} "
-        f"ORDER BY recorded_at ASC, id ASC LIMIT ?",
+        f"ORDER BY {order} LIMIT ?",
         [*params, limit + 1],
     )
     rows = [dict(r) for r in await cur.fetchall()]
     truncated = len(rows) > limit
     rows = rows[:limit]
+    if newest:  # picked newest first in SQL; handed back oldest first, the order every caller reads
+        rows.sort(key=lambda r: (r["recorded_at"], r["id"]))
 
     events = []
     app_ids: list[int] = []
@@ -3289,6 +3301,7 @@ async def whats_new(
 
     next_since = rows[-1]["recorded_at"] if rows else since_val
     next_after_id = rows[-1]["id"] if rows else after_id
+    next_before_id = min(r["id"] for r in rows) if newest and rows else None
 
     # "Needs you" - open asks are ALWAYS carried, whatever `since` says: an
     # unanswered question does not expire because the cursor moved past it.
@@ -3312,6 +3325,7 @@ async def whats_new(
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
+        "next_before_id": next_before_id,
         "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
         "inbox_items": inbox["items"], "inbox_page": inbox["page"],
     }
