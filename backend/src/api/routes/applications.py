@@ -4488,14 +4488,16 @@ async def _check_queue_event(
         )
         if await cur.fetchone() is None:
             raise _queue_refused(user, application_id, event_type, 422, "corrects_non_queue_event")
+    # App 146 (checker 2026-11-13): only the user undoes a closed_posting unqueue, also through a correction
+    # (a queued, or an unqueued retracting the closed one, would put the job back on the queue).
+    if actor_for(user) != "web" and (event_type == "queued" or corrects_event_id is not None) and (
+        await spine.unqueued_as_closed(db, user.id, application_id)
+    ):
+        raise _queue_refused(user, application_id, event_type, 409, "closed_posting")
     if corrects_event_id is None:
         is_queued = application_id in await spine.queued_at_by_app(db, user.id, [application_id])
         if event_type == "queued" and is_queued:
             raise _queue_refused(user, application_id, event_type, 409, "already_queued")
-        if event_type == "queued" and actor_for(user) != "web" and await spine.unqueued_as_closed(
-            db, user.id, application_id
-        ):
-            raise _queue_refused(user, application_id, event_type, 409, "closed_posting")
         if event_type == "unqueued" and not is_queued:
             raise _queue_refused(user, application_id, event_type, 409, "not_queued")
     get_audit_logger().info(

@@ -179,3 +179,31 @@ async def test_the_users_read_withdraws_an_unproven_closed_ask(authenticated_asy
                 "SELECT withdrawn_reason FROM application_asks WHERE id = ? AND user_id = ?",
                 (ask_id, fixture_user_id))
             assert (await cur.fetchone())[0] == "Job360 is re-checking the posting"
+
+
+async def _correcting(client: AsyncClient, app_id: int, event_type: str, payload: dict[str, Any], eid: int) -> Any:
+    return await client.post(f"/api/applications/{app_id}/events",
+                             json={"event_type": event_type, "payload": payload, "corrects_event_id": eid})
+
+
+@pytest.mark.asyncio
+async def test_an_agent_cannot_correct_its_way_past_a_closed_unqueue(authenticated_async_context, fixture_user_id):
+    """Checker 2026-11-13: a ``queued`` (or a reason-less ``unqueued``) that corrects the ``closed_posting``
+    unqueue retracted it and put the job back on the queue with no user action."""
+    async with authenticated_async_context() as web:
+        app_id = await _job(web, 9)
+        async with await _agent(web) as agent:
+            off = await _event(agent, app_id, "unqueued", {"reason": "closed_posting"})
+            assert off.status_code == 201, off.text
+            eid = int(off.json()["event_id"])
+            back = await _correcting(agent, app_id, "queued", {}, eid)
+            assert back.status_code == 409 and "closed posting" in back.text, back.text
+            hide = await _correcting(agent, app_id, "unqueued", {}, eid)
+            assert hide.status_code == 409 and "closed posting" in hide.text, hide.text
+            again = await _event(agent, app_id, "queued", {})
+            assert again.status_code == 409 and "closed posting" in again.text, again.text
+        async with browser_routes._db() as db:  # noqa: SLF001
+            assert app_id not in await spine.queued_at_by_app(db, fixture_user_id, [app_id])
+        mine = await _correcting(web, app_id, "queued", {}, eid)
+        assert mine.status_code == 201, mine.text
+
