@@ -1511,8 +1511,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         them or record what happened (record_event again clears it once the
         news moves the status). wait / interview / await_outcome / decide /
         closed need nothing from you. view="review" returns only id, job_title, job_company, country and `review`
-        (artifact_id, sha256, lines, held, state, tries_left, last_downgraded, last_where): the lean read for a CV
-        review."""
+        (artifact_id, sha256, lines, held, top, headline, state, tries_left, last_downgraded, last_where): the
+        lean read for a CV review."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application(application_id, with_artifact_text, view, db, _user())

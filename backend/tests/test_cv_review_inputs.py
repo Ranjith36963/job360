@@ -27,7 +27,7 @@ async def test_review_carries_the_checks_own_sha_and_lines(authenticated_async_c
         profile = UserProfile(cv_data=CVData(raw_text=RAW, name="Ada Lovelace"))
         for params in ({}, {"with_artifact_text": True}):
             review = (await _detail(client, app_id, **params))["review"]
-            assert review == {"artifact_id": cv_id, "sha256": kit.sha256_text(CV), "state": "none", "held": [], "lines": [
+            assert review == {"artifact_id": cv_id, "sha256": kit.sha256_text(CV), "state": "none", "held": [], "top": [], "headline": None, "lines": [
                 "- Data engineer at Northwind since 2019.",
                 "- Built ETL pipelines in Python and Snowflake, cutting warehouse costs 30%.", *ATS_LINES]}
             assert review["lines"] == cv_review.content_lines(CV, profile)

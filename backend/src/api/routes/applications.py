@@ -913,6 +913,10 @@ class CvReviewInputsOut(BaseModel):
     sha256: str
     lines: list[str]
     held: list[int] = []  # numbers of lines the profile holds itself (a skills list, a header): evidence []
+    # The CV's top lines (a subset of `held`; the headline and a summary naming no job): evidence []. A summary that
+    # names a job is NOT here and needs 1-3 quotes (2026-11-13: apps 455, 460).
+    top: list[int] = []
+    headline: Optional[int] = None
     # This CV's newest VALID stored review (2026-11-09): "none" = no valid review yet, so review it.
     state: Literal["none", "weak", "strong"] = "none"
 

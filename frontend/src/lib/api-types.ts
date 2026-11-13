@@ -6204,6 +6204,8 @@ export interface components {
         CvReviewInputsOut: {
             /** Artifact Id */
             artifact_id: number;
+            /** Headline */
+            headline?: number | null;
             /**
              * Held
              * @default []
@@ -6219,6 +6221,11 @@ export interface components {
              * @enum {string}
              */
             state: "none" | "weak" | "strong";
+            /**
+             * Top
+             * @default []
+             */
+            top: number[];
         };
         /** CvReviewJdTermOut */
         CvReviewJdTermOut: {
@@ -6234,6 +6241,8 @@ export interface components {
         CvReviewViewOut: {
             /** Artifact Id */
             artifact_id: number;
+            /** Headline */
+            headline?: number | null;
             /**
              * Held
              * @default []
@@ -6268,6 +6277,11 @@ export interface components {
              * @enum {string}
              */
             state: "none" | "weak" | "strong";
+            /**
+             * Top
+             * @default []
+             */
+            top: number[];
             /** Tries Left */
             tries_left: number;
         };
