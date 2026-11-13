@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { getSentOnItsOwn, reportWrongFact } from "@/lib/api";
 import type { SentOnItsOwnItem } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { ApprovalTag } from "@/components/applications/ApprovalTag";
 
 // Sent on its own (owner plan 2026-11-02): a LOG of answers and essays that went to an employer without
 // the user, each with the sources it was checked against and a "Wrong fact" button. Not a to-do: it never
@@ -81,6 +82,7 @@ export function SentOnItsOwn() {
                 </span>
               )}
             </p>
+            {i.approval && <div><ApprovalTag approval={i.approval} /></div>}
             {i.kind !== "cv" && <p className="text-sm font-medium">{i.question}</p>}
             <p className="whitespace-pre-wrap text-sm">{i.answer}</p>
             {i.sources.length > 0 && (

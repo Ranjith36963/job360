@@ -963,6 +963,7 @@ export async function deleteCoveredAnswer(id: string): Promise<_Schemas["Covered
  *  with the sources they were checked against. A log, never a to-do. Also CVs sent on a strong review (kind
  *  "cv", id < 0) and `cv_sample`: today's 5 to check. */
 export type SentOnItsOwnItem = _Schemas["SentItem"];
+export type Approval = _Schemas["ApprovalOut"];
 export async function getSentOnItsOwn(): Promise<_Schemas["SentOnItsOwnOut"]> {
   return request("/api/sent-on-its-own");
 }

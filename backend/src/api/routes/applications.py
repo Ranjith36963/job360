@@ -52,6 +52,7 @@ from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services import idempotency
+from src.services.applications import approval as approval_service
 from src.services.applications import asks as asks_service
 from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
@@ -968,6 +969,18 @@ class CvWorkOut(BaseModel):
     profile: Optional[dict[str, Any]] = None
 
 
+class ApprovalOut(BaseModel):
+    """Who approved one thing ("You approved" / "AI reviewed"), read off stored rows (approval.py). ``ref`` is the
+    event the tag belongs to (``ref_kind`` event), or an outreach row. ``reviewer`` is caller text, cut short."""
+
+    by: str  # "ai" | "you"
+    what: str  # "cv" | "outreach" | "answers" | "submit"
+    at: str
+    ref: int
+    ref_kind: str = "event"
+    reviewer: Optional[str] = None
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -990,6 +1003,8 @@ class ApplicationDetailOut(BaseModel):
     # over the record, never a judgement of the job). `code` is the closed
     # vocabulary an agent branches on; `label` is the sentence the web shows.
     next_step: NextStepOut
+    # F12 (owner 2026-11-13): who approved the CV, outreach, answers and submit (none when no record says so).
+    approvals: list[ApprovalOut] = []
     # Blockers slice 3 - everything that waits, ordered; `next` is the first, `more` how many follow it.
     blockers: list[BlockerOut] = []
     next: Optional[BlockerOut] = None
@@ -2740,6 +2755,7 @@ async def get_application(
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="application not found")
+    detail["approvals"] = (await approval_service.approvals_for(db, user.id, [application_id])).get(application_id, [])
     return detail
 
 

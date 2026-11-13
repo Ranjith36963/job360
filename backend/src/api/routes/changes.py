@@ -39,6 +39,7 @@ from pydantic import BaseModel
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user
 from src.api.dependencies import get_request_db
+from src.api.routes.applications import ApprovalOut
 from src.api.routes.own_browser import PcIdleOut
 from src.repositories.database import JobDatabase
 from src.services.applications import sent_alone
@@ -228,6 +229,7 @@ class SentItem(BaseModel):
     sources: list[SentSource] = []
     sent_at: str
     reported_wrong: bool = False
+    approval: Optional[ApprovalOut] = None  # F12: "AI reviewed" when an agent record says so, else None
 
 
 class SentOnItsOwnOut(BaseModel):
