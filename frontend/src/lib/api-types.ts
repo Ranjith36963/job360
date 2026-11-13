@@ -3352,8 +3352,8 @@ export interface paths {
         };
         /**
          * Get Questionnaire
-         * @description Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed
-         *     or not known, most-guessed first (``ask_once.questionnaire``). Read-only.
+         * @description Ask once (owner 2026-11-02): up to 10 common questions per country the user works in or has a queued
+         *     job in, still guessed or not known, most-guessed first (``ask_once.questionnaire``). Read-only.
          */
         get: operations["get_questionnaire_api_profile_questionnaire_get"];
         put?: never;
@@ -11677,6 +11677,8 @@ export interface components {
             interviews: components["schemas"]["InterviewAgenda"];
             /** Next After Id */
             next_after_id: number | null;
+            /** Next Before Id */
+            next_before_id?: number | null;
             /** Next Since */
             next_since: string;
             /** Now */
@@ -18246,6 +18248,8 @@ export interface operations {
                 limit?: number;
                 inbox_offset?: number;
                 inbox_stale_alerts?: boolean;
+                newest?: boolean;
+                before_id?: number | null;
             };
             header?: {
                 authorization?: string | null;

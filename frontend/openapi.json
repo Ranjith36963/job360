@@ -20389,6 +20389,17 @@
             ],
             "title": "Next After Id"
           },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before Id"
+          },
           "next_since": {
             "title": "Next Since",
             "type": "string"
@@ -31827,7 +31838,7 @@
     },
     "/api/profile/questionnaire": {
       "get": {
-        "description": "Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed\nor not known, most-guessed first (``ask_once.questionnaire``). Read-only.",
+        "description": "Ask once (owner 2026-11-02): up to 10 common questions per country the user works in or has a queued\njob in, still guessed or not known, most-guessed first (``ask_once.questionnaire``). Read-only.",
         "operationId": "get_questionnaire_api_profile_questionnaire_get",
         "parameters": [
           {
@@ -34140,6 +34151,32 @@
               "default": false,
               "title": "Inbox Stale Alerts",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "newest",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Newest",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Id"
             }
           },
           {

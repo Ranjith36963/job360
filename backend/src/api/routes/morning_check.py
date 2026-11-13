@@ -7,6 +7,7 @@ A WEB read, not a gate: no MCP twin (the assistant has ``whats_new`` and
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -180,13 +181,19 @@ async def morning_check(
     """State + the four-bucket tally since ``since``."""
     now = datetime.now(timezone.utc)
     start = resolve_since(since, now).isoformat()
-    view = settings_view(load_profile(user.id) or UserProfile(), user.id)
+
+    def _read_settings() -> tuple[dict[str, Any], Optional[Any]]:
+        # Sync pgsync reads, one hop off the event loop (same calls, same order as before).
+        view = settings_view(load_profile(user.id) or UserProfile(), user.id)
+        if not view["paused"]:
+            return view, None
+        return view, profile_edits.path_history(user.id, rules.PAUSED_UNTIL_PATH, 1)
+
+    view, history = await asyncio.to_thread(_read_settings)
     paused = bool(view["paused"])
     by = at = None
-    if paused:
-        history = profile_edits.path_history(user.id, rules.PAUSED_UNTIL_PATH, 1)
-        if history:
-            by, at = history[0]["set_by"], history[0]["set_at"]
+    if history:
+        by, at = history[0]["set_by"], history[0]["set_at"]
     counts = await rules.load_submit_counts(db, user.id, now)
     blocked, failed = await _stopped(db, user.id, start)
     tally = MorningTally(
