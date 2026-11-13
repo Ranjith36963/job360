@@ -5,9 +5,10 @@ wrote a CV, so a Pro-plan run cleared 2-5. This returns, selected on the server,
 CV work, each with its capped ad and the ``view="review"`` block, plus ONE compact profile. Never ranks by fit
 (rule 4); the order is the task's own: Job360's browser first, then the user's own, then queue position.
 
-Needs CV work = on the open queue and either no CV yet, or the newest CV waits on the user's approval
-(``approve_cv`` blocker), its review is not strong and it still has tries left. Fixed number of queries for the
-queue, per-row reads only for the page. Read-only; every query is scoped by ``user_id`` (rules #12/#25).
+Needs CV work = on the open queue and either no CV yet, or the newest CV waits on a look
+(``review_cv`` / ``fix_cv`` / ``approve_cv`` blocker), its review is not strong and it still has tries left.
+Fixed number of queries for the queue, per-row reads only for the page.
+Read-only; every query is scoped by ``user_id`` (rules #12/#25).
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from src.utils.logger import get_audit_logger, safe_log_value
 
 AD_CAP = 6000  # characters of the frozen job ad per item
 LIMIT_MAX, LIMIT_DEFAULT = 20, 10
+_CV_WAITS = ("approve_cv", "review_cv", "fix_cv")  # blockers' kinds for an unapproved newest CV
 _BROWSER_RANK = {"job360": 0, "own_browser": 1}
 # The profile facts a CV writer needs, as profile_edits paths: no raw CV / LinkedIn / GitHub text.
 _PROFILE_PATHS = ("cv_data.name", "cv_data.headline", "cv_data.location", "cv_data.summary", "cv_data.skills",
@@ -63,7 +65,8 @@ async def _needing_work(db: JobDatabase, user_id: str, queue_order: list[int]) -
     states = await cv_review.states_for_apps(db, user_id, have_cv)
     candidates = [i for i in have_cv if states.get(i) != cv_review.STRONG]
     waiting = await blockers_service.blockers_for(db, user_id, candidates)
-    approve = [i for i in candidates if any(b["kind"] == "approve_cv" for b in waiting.get(i, []))]
+    # The CV still waits on a look: the assistant's review / fix turn (owner 2026-11-13) or the user's approve_cv.
+    approve = [i for i in candidates if any(b["kind"] in _CV_WAITS for b in waiting.get(i, []))]
     tries = await cv_review.tries_left_for_apps(db, user_id, approve)
     return sorted(no_cv) + [i for i in approve if tries.get(i, 0) > 0]
 

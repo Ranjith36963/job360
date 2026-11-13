@@ -63,6 +63,22 @@ beforeEach(() => {
 });
 
 describe("JobCard", () => {
+  it("lists ALL the owner's needs in order and marks the next one", () => {
+    const needs = [{ kind: "site_step", label: "solve the CAPTCHA" }, { kind: "approve_cv", label: "approve the CV" },
+      { kind: "send_yes", label: "Send" }];
+    render(<JobCard card={card([ask("Notice period?")], { needs })} onChanged={onChanged} />);
+    const list = screen.getByTestId("needs-7");
+    expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "1. solve the CAPTCHA (next)", "2. approve the CV", "3. Send"]);
+    expect(screen.getByTestId("need-7-0")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByTestId("need-7-1")).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows no list for a single need", () => {
+    render(<JobCard card={card([ask("Notice period?")], { needs: [{ kind: "answers", label: "answer 1 question" }] })} onChanged={onChanged} />);
+    expect(screen.queryByTestId("needs-7")).toBeNull();
+  });
+
   it("gives a blocker buttons, never a text box, and links the form", async () => {
     const captcha = ask("Solve the CAPTCHA and press Submit");
     render(<JobCard card={card([captcha])} onChanged={onChanged} />);

@@ -48,7 +48,7 @@ function Gauges({ tiers, oldest }: { tiers: number[]; oldest: string }) {
   );
 }
 
-/** The summary line with its gauges, the filter chips (single select, hidden at 0 except All) and one
+/** The summary line with its gauges, the filter chips (single select, ALL always shown, at 0 too) and one
  *  row holding the sort menu, Expand all / Fold all and the grey line saying what the order means
  *  (owner plan §2.1, §2.4-§2.6; one row since 2026-10-27). */
 export function NeedsYouControls({ count, settled, show, onShow, sort, onSort, gauges, onFoldAll }: {
@@ -73,25 +73,23 @@ export function NeedsYouControls({ count, settled, show, onShow, sort, onSort, g
         </p>
         {gauges && <Gauges tiers={gauges.tiers} oldest={gauges.oldest} />}
       </div>
-      {count.n > 0 && (
-        <div role="group" aria-label="Show" className="-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 pb-1" data-testid="needs-you-chips">
-          {count.chips.map((c) => (
-            <button
-              key={c}
-              type="button"
-              aria-pressed={show === c}
-              data-testid={`chip-${c}`}
-              onClick={() => onShow(c)}
-              className={cn(
-                "shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                show === c ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted",
-              )}
-            >
-              {chipLabel(c)} <span className="font-mono">{count.byChip[c]}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      <div role="group" aria-label="Show" className="-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 pb-1" data-testid="needs-you-chips">
+        {count.chips.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-pressed={show === c}
+            data-testid={`chip-${c}`}
+            onClick={() => onShow(c)}
+            className={cn(
+              "shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              show === c ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted",
+            )}
+          >
+            {chipLabel(c)} <span className="font-mono">{count.byChip[c]}</span>
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <label className="flex items-center gap-1.5 text-sm">
           <span className="text-muted-foreground">Sort:</span>

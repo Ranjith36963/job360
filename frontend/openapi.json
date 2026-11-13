@@ -10942,6 +10942,14 @@
             "title": "By Kind",
             "type": "object"
           },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NeedsYouFilterOut"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
           "job_ids": {
             "default": [],
             "items": {
@@ -11003,6 +11011,42 @@
           "other"
         ],
         "title": "NeedsYouCountOut",
+        "type": "object"
+      },
+      "NeedsYouFilterOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "job_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "count",
+          "kind"
+        ],
+        "title": "NeedsYouFilterOut",
         "type": "object"
       },
       "NextStepOut": {

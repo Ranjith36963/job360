@@ -176,6 +176,14 @@ async def changes(
     return out
 
 
+class NeedsYouFilterOut(BaseModel):
+    key: str  # fixed keys, always all present, in this order (needs_you_count.FILTERS)
+    label: str
+    count: int  # this filter's own items (jobs + the items that are no job)
+    job_ids: list[int] = []  # the jobs in it, the page's order
+    kind: str  # "todo" (the owner does it), "view" (settled by the assistant) or "stat" (a count only)
+
+
 class NeedsYouCountOut(BaseModel):
     n: int  # the Needs-you page's total: jobs + other + 1 while the Answer-once card has rows
     jobs: int  # jobs whose first blocker is the user (= jobs_waiting_on_you)
@@ -188,6 +196,7 @@ class NeedsYouCountOut(BaseModel):
     job_ids: list[int] = []  # the jobs waiting on the user, oldest first blocker first (the page's rows)
     job_ids_by_kind: dict[str, list[int]] = {}  # the same ids grouped by their first blocker's kind
     pc_idle: Optional[PcIdleOut] = None  # owner #12: jobs wait on the user's PC and no PC session worked them
+    filters: list[NeedsYouFilterOut] = []  # the fixed filter set; a job is in each one it has an owner need in
 
 
 @router.get("/needs-you-count", response_model=NeedsYouCountOut, dependencies=AUTH_FIRST)

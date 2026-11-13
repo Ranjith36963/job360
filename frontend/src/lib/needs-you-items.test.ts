@@ -83,47 +83,60 @@ describe("fromServerCount", () => {
     ...over,
   });
 
-  it("one chip per kind that waits on you, in plan words; the chips add up to the jobs, All is N", () => {
-    const c = fromServerCount(server());
-    expect(c.chips).toEqual(["all", "site_step", "approve_cv", "answers", "send_yes", "outreach_send", "other"]);
-    expect(c.chips.map(chipLabel)).toEqual(["All", "On the site", "Approve CV", "Answer once", "Send", "Notes", "Other"]);
-    expect(c.byChip).toEqual({ all: 9, other: 2, site_step: 1, approve_cv: 1, answers: 2, send_yes: 2, outreach_send: 1 });
-    expect(c.chips.filter((k) => k !== "all" && k !== "other").reduce((t, k) => t + c.byChip[k], 0)).toBe(c.jobs);
-    expect(c.jobIds).toHaveLength(c.jobs);
+  const KEYS = ["all", "signin_captcha", "check_send", "answer_once", "cv_weak", "finish_by_hand", "went_out",
+    "strong_cvs", "posting_closed", "other"];
+  const filter = (key: string, count: number, job_ids: number[] = [], kind = "todo") => ({ key, label: key, count, job_ids, kind });
+  const filters = (counts: Record<string, [number, number[]]> = {}) =>
+    KEYS.map((k) => filter(k, counts[k]?.[0] ?? 0, counts[k]?.[1] ?? [], k === "strong_cvs" ? "view" : k === "posting_closed" ? "stat" : "todo"));
+
+  it("the chips are the server's fixed filters, in its order, a job in each one it has a need in; All is N", () => {
+    const c = fromServerCount(server({ filters: filters({
+      all: [9, [5, 6]], signin_captcha: [1, [5]], cv_weak: [1, [5]], check_send: [2, [5, 6]], other: [2, []],
+    }) }));
+    expect(c.chips).toEqual(KEYS);
+    expect(c.chips.map(chipLabel)).toEqual([
+      "All", "Sign in / CAPTCHA", "Check & send", "Answer once", "CV still weak", "Finish by hand", "Did it go out?",
+      "Strong CVs (AI reviewed)", "Posting closed", "Other"]);
+    expect(c.byChip).toMatchObject({ all: 9, signin_captcha: 1, cv_weak: 1, check_send: 2, other: 2 });
+    expect(c.idsByKind.check_send).toEqual([5, 6]); // job 5 is in three filters at once
+    expect(c.idsByKind.signin_captcha).toEqual([5]);
+    expect(c.kinds).toMatchObject({ strong_cvs: "view", posting_closed: "stat", all: "todo" });
+  });
+
+  it("every chip is rendered at zero too: a server with nothing waiting still has all ten", () => {
+    const c = fromServerCount(server({ n: 0, jobs: 0, other: 0, job_ids: [], job_ids_by_kind: {}, filters: filters() }));
+    expect(c.chips).toEqual(KEYS);
+    expect(Object.values(c.byChip).every((n) => n === 0)).toBe(true);
+    // an older answer with no filters still gives the ten chips, All = N
+    const old = fromServerCount(server({ filters: [] }));
+    expect(old.chips).toEqual(KEYS);
+    expect(old.byChip).toMatchObject({ all: 9, other: 2, signin_captcha: 0 });
   });
 
   it("the Answer-once card is one item under Answer once while the server has rows for it", () => {
-    const c = fromServerCount(server({ n: 10, answer_once: 6 }));
+    const c = fromServerCount(server({ n: 10, answer_once: 6, filters: filters({ all: [10, []], answer_once: [3, [7, 8]] }) }));
     expect(c.answerOnce).toBe(true);
-    expect(c.byChip.answers).toBe(3); // jobs 7 and 8, plus the one card (6 rows count once)
-    const only = fromServerCount(server({ n: 1, jobs: 0, other: 0, job_ids: [], job_ids_by_kind: {}, answer_once: 2 }));
-    expect(only.chips.map(chipLabel)).toEqual(["All", "Answer once"]);
-    expect(only.byChip).toEqual({ all: 1, other: 0, answers: 1 });
+    expect(c.byChip.answer_once).toBe(3); // jobs 7 and 8, plus the one card (6 rows count once)
     expect(fromServerCount(server({ answer_once: 0 })).answerOnce).toBe(false);
-  });
-
-  it("a server with nothing waiting on the user has only All", () => {
-    const c = fromServerCount(server({ n: 0, jobs: 0, other: 0, job_ids: [], job_ids_by_kind: {} }));
-    expect(c.chips).toEqual(["all"]);
-    expect(c.byChip.all).toBe(0);
   });
 
   it("leaves out dropped jobs and counts asks of a failed job in Other", () => {
     // Job 8 is not a row (its ask is in other_ask_ids, so it counts in Other); job 7 is a row and counts once in All.
     const c = fromServerCount(server({
       n: 2, jobs: 1, other: 1, job_ids: [7], job_ids_by_kind: { answers: [7] }, other_ask_ids: [31],
+      filters: filters({ all: [2, [7]], answer_once: [1, [7]], other: [1, []] }),
     }));
     expect(c.otherAskIds).toEqual([31]);
-    expect(c.byChip).toMatchObject({ all: 2, other: 1, answers: 1 });
+    expect(c.byChip).toMatchObject({ all: 2, other: 1, answer_once: 1 });
     expect(c.jobIds).toEqual([7]);
   });
 
   it("ready cards past the page still count, as Ready", () => {
     // 30 Send jobs: the page loads only a few cards, but the chip is the server's count of ids.
     const ids = Array.from({ length: 30 }, (_, i) => 100 + i);
-    const c = fromServerCount(server({ n: 30, jobs: 30, other: 0, job_ids: ids, job_ids_by_kind: { send_yes: ids } }));
-    expect(c.byChip.send_yes).toBe(30);
-    expect(chipLabel("send_yes")).toBe("Send");
+    const c = fromServerCount(server({ n: 30, jobs: 30, other: 0, job_ids: ids, filters: filters({ check_send: [30, ids] }) }));
+    expect(c.byChip.check_send).toBe(30);
+    expect(chipLabel("check_send")).toBe("Check & send");
   });
 
   it("the badge's cheap read: the number is the server's n, not a count of loaded cards", () => {

@@ -321,6 +321,13 @@ function announce(openCount: number) {
 
 /** `aside` sits right of the summary on wide screens, below it on narrow ones (the page passes RunNowPanel). */
 /** `focusJob`: the job the user just came back from (?job=, set by "Back to Needs you"); its row unfolds and scrolls into view. */
+/** The page's rows: the jobs waiting on the user, plus the jobs of the chosen VIEW (a strong review settled them, so
+ *  they are not rows of the to-do list, but the view lists them). */
+function rowIds(count: NeedsYouCount, active: Chip): number[] {
+  if (count.kinds[active] !== "view") return count.jobIds;
+  return [...new Set([...count.jobIds, ...(count.idsByKind[active] ?? [])])];
+}
+
 export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJob?: number | null } = {}) {
   const [open, setOpen] = useState<Ask[] | null>(null);
   // What the job list reports: its loaded cards, the asks it could not place, how many jobs it lists.
@@ -426,7 +433,8 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
   }, [open, jobs.total, jobs.readyTotal, waiting.length, otherLoaded, countTick]);
   const shownCount = count ?? EMPTY_COUNT;
   // A chip that empties (its last item answered) falls back to All.
-  const active: Chip = show !== "all" && jobs.settled && count !== null && !(shownCount.byChip[show] > 0) ? "all" : show;
+  // The filters are fixed, so a chip at 0 stays selected; only a key that is no filter (an old link) falls back.
+  const active: Chip = show !== "all" && !shownCount.chips.includes(show) ? "all" : show;
 
   // A chip that emptied falls back to All: the link says so too, so a reload or a copy of it matches the page.
   useEffect(() => {
@@ -505,12 +513,12 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}
         {/* Answer once (owner 2026-11-02): the questions asked on every form, answered once per country. */}
-        {(active === "all" || active === "answers") && (count === null || count.answerOnce) && (
+        {(active === "all" || active === "answer_once") && (count === null || count.answerOnce) && (
           <Questionnaire onChanged={() => setCountTick((t) => t + 1)} />
         )}
         {/* Memory first (plan S3): old saved answers Memory now covers; the owner deletes each one. Silent when none. */}
-        {(active === "all" || active === "answers") && <MemoryCoveredAnswers />}
-        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} linkedinPerDay={linkedinPerDay} focusJob={focusJob} />
+        {(active === "all" || active === "answer_once") && <MemoryCoveredAnswers />}
+        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? rowIds(count, active) : countFailed ? undefined : []} idsByKind={count?.idsByKind} linkedinPerDay={linkedinPerDay} focusJob={focusJob} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>
       <OtherList

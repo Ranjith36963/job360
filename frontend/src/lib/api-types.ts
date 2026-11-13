@@ -8262,6 +8262,11 @@ export interface components {
                 [key: string]: number;
             };
             /**
+             * Filters
+             * @default []
+             */
+            filters: components["schemas"]["NeedsYouFilterOut"][];
+            /**
              * Job Ids
              * @default []
              */
@@ -8290,6 +8295,22 @@ export interface components {
              */
             other_ask_ids: number[];
             pc_idle?: components["schemas"]["PcIdleOut"] | null;
+        };
+        /** NeedsYouFilterOut */
+        NeedsYouFilterOut: {
+            /** Count */
+            count: number;
+            /**
+             * Job Ids
+             * @default []
+             */
+            job_ids: number[];
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
         };
         /**
          * NextStepOut

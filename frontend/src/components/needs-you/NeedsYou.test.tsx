@@ -119,6 +119,17 @@ beforeEach(() => {
   readyMock.items = [];
 });
 
+const FILTER_ROWS: [string, string, string][] = [
+  ["all", "All", "todo"], ["signin_captcha", "Sign in / CAPTCHA", "todo"], ["check_send", "Check & send", "todo"],
+  ["answer_once", "Answer once", "todo"], ["cv_weak", "CV still weak", "todo"], ["finish_by_hand", "Finish by hand", "todo"],
+  ["went_out", "Did it go out?", "todo"], ["strong_cvs", "Strong CVs (AI reviewed)", "view"],
+  ["posting_closed", "Posting closed", "stat"], ["other", "Other", "todo"],
+];
+/** The server's fixed filters: every one present, at zero unless given. */
+const fixed = (given: Record<string, [number, number[]]>) =>
+  FILTER_ROWS.map(([key, label, kind]) => ({ key, label, kind, count: given[key]?.[0] ?? 0, job_ids: given[key]?.[1] ?? [] }));
+
+
 describe("NeedsYou", () => {
   it("no longer renders the morning check or the Batch apply panel (they moved to Home, owner 2026-10-26)", async () => {
     setup([]);
@@ -344,7 +355,7 @@ describe("NeedsYou", () => {
     window.addEventListener("job360:asks-changed", on);
     try {
       setup([openAsk]);
-      getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] } });
+      getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] }, filters: fixed({ all: [3, [5, 6]], check_send: [2, [5, 6]], other: [1, []] }) });
       render(<NeedsYou />);
       await waitFor(() => expect(seen).toEqual([3]));
     } finally {
@@ -403,33 +414,34 @@ describe("NeedsYou", () => {
     questionnaireMock.read = async () => ({ countries: [{ country: "GB", questions: [row] }] });
     try {
       listAsks.mockImplementation(async (status: string) => ({ asks: status === "open" ? [{ ...openAsk, application_id: null }] : [] }));
-      getNeedsYouCount.mockResolvedValue({ n: 2, jobs: 0, other: 1, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, answer_once: 4 });
+      getNeedsYouCount.mockResolvedValue({ n: 2, jobs: 0, other: 1, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, answer_once: 4,
+        filters: fixed({ all: [2, []], answer_once: [1, []], other: [0, []] }) });
       render(<NeedsYou />);
       expect(await screen.findByTestId("questionnaire")).toBeInTheDocument();
-      expect(screen.getByTestId("chip-answers")).toHaveTextContent("Answer once 1");
+      expect(screen.getByTestId("chip-answer_once")).toHaveTextContent("Answer once 1");
       fireEvent.click(screen.getByTestId("chip-other"));
       await waitFor(() => expect(screen.queryByTestId("questionnaire")).toBeNull());
-      fireEvent.click(screen.getByTestId("chip-answers"));
+      fireEvent.click(screen.getByTestId("chip-answer_once"));
       expect(await screen.findByTestId("questionnaire")).toBeInTheDocument();
     } finally {
       questionnaireMock.read = async () => ({ countries: [] });
     }
   });
 
-  it("a chip shows only its part of the page and lives in the link; chips at 0 are hidden", async () => {
+  it("a chip shows only its part of the page and lives in the link; chips at 0 stay shown", async () => {
     readyMock.total = 2;
-    getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] } });
+    getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] }, filters: fixed({ all: [3, [5, 6]], check_send: [2, [5, 6]], other: [1, []] }) });
     try {
       setup([{ ...openAsk, application_id: null }], [{ ...base, id: 2, question: "Q2", status: "answered", answer: "A2" }]);
-      getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] } });
+      getNeedsYouCount.mockResolvedValue({ n: 3, jobs: 2, other: 1, jobs_waiting_on_you: 2, by_actor: { you: 2 }, by_kind: { send_yes: 2 }, job_ids: [5, 6], job_ids_by_kind: { send_yes: [5, 6] }, filters: fixed({ all: [3, [5, 6]], check_send: [2, [5, 6]], other: [1, []] }) });
       render(<NeedsYou />);
       await waitFor(() => expect(screen.getByTestId("needs-you-summary")).toHaveTextContent("3 things need you"));
-      expect(screen.getByTestId("chip-send_yes")).toHaveTextContent("Send 2");
-      expect(screen.queryByTestId("chip-answers")).toBeNull();
-      expect(screen.queryByTestId("chip-approve_cv")).toBeNull();
-      fireEvent.click(screen.getByTestId("chip-send_yes"));
-      expect(window.location.search).toBe("?show=send_yes");
-      expect(screen.getByTestId("chip-send_yes")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("chip-check_send")).toHaveTextContent("Check & send 2");
+      expect(screen.getByTestId("chip-answer_once")).toHaveTextContent("Answer once 0"); // fixed set: shown at 0
+      expect(screen.getByTestId("chip-cv_weak")).toHaveTextContent("CV still weak 0");
+      fireEvent.click(screen.getByTestId("chip-check_send"));
+      expect(window.location.search).toBe("?show=check_send");
+      expect(screen.getByTestId("chip-check_send")).toHaveAttribute("aria-pressed", "true");
       expect(screen.queryByTestId("other-list")).toBeNull();
       expect(screen.queryByTestId("answered-toggle")).toBeNull();
       fireEvent.click(screen.getByTestId("chip-other"));

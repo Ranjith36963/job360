@@ -114,6 +114,8 @@ export type JobCardData = {
   confirmSent?: { subject: string; receivedAt: string } | null;
   /** Things only the user can still do on this job (Mark Applied warns with them). */
   openItems?: string[];
+  /** Every need of the owner on this job, in the order they come (blockers_for's order): the first is next. */
+  needs?: { kind: string; label: string }[];
 };
 
 /** Open asks grouped by job (one card each), the rest (no job) left over. A test job's asks never
@@ -162,6 +164,7 @@ export function buildCard(
     confirmSent: confirmSentOf(detail),
     // The "mark it applied" step is the very thing the row's button does: not listed as still open.
     openItems: openYouItems(detail.blockers?.filter((b) => b.label !== "mark it applied")),
+    needs: (detail.blockers ?? []).filter((b) => b.actor === "you").map((b) => ({ kind: b.kind, label: b.label })),
   };
 }
 
