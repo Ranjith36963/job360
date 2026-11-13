@@ -1116,6 +1116,41 @@ async def reviews_clearing(
     return out
 
 
+REVIEW_CV, FIX_CV = "review_cv", "fix_cv"
+
+
+async def assistant_cv_turns(db: JobDatabase, user_id: str, cvs: dict[int, dict[str, Any]]) -> dict[int, str]:
+    """THE rule for "this unapproved CV is the assistant's turn, not the user's" (owner 2026-11-13), shared by the
+    blockers, the Approve CV card and so the batch's waiting-on-you tally. ``cvs`` is ``{application_id:
+    {artifact_id, sha}}``; returns ``{application_id: review_cv | fix_cv}``: :data:`REVIEW_CV` when exactly that
+    CV has no valid stored review, :data:`FIX_CV` when its newest is weak and tries are left (counted as
+    ``cv_review.tries_left_for_apps`` counts them). A strong review, or a weak one with no tries left, is absent:
+    it stays the user's. Never the submit gate: check_submit still needs the user's approval. One query."""
+    if not cvs:
+        return {}
+    app_ids = sorted(cvs)
+    cur = await db._db.execute(
+        "SELECT application_id, payload FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({','.join('?' for _ in app_ids)}) "
+        "ORDER BY id DESC",
+        (user_id, cv_review.EVENT_TYPE, *app_ids),
+    )
+    by_app: dict[int, list[dict[str, Any]]] = {}
+    for app_id, raw in await cur.fetchall():
+        by_app.setdefault(int(app_id), []).append({"payload": _json(raw)})
+    out: dict[int, str] = {}
+    for a in app_ids:
+        evs, want = by_app.get(a, []), cvs[a]
+        newest = next((e for e in evs if cv_review.review_valid(e["payload"], want["artifact_id"], want["sha"])), None)
+        if newest is None:
+            out[a] = REVIEW_CV
+        elif newest["payload"].get("confidence") != cv_review.STRONG:
+            used = cv_review.judged_versions(evs, a) - {want["artifact_id"]}
+            if cv_review.MAX_WEAK - len(used) > 0:
+                out[a] = FIX_CV
+    return out
+
+
 async def open_rule_items(
     db: JobDatabase, user_id: str, application_id: int, *, cv_artifact_id: Optional[int] = None,
     app_row: Optional[dict[str, Any]] = None, channel: str = "",
