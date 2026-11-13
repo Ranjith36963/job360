@@ -43,6 +43,7 @@ def next_step(
     form_filled: bool = False,
     submit_approved: bool = False,
     approval_holds: bool = True,
+    assistant_finishes_form: bool = False,
     now: datetime | None = None,
 ) -> dict[str, str]:
     """``{"code": …, "label": …}`` — ``code`` is a closed vocabulary an agent
@@ -79,6 +80,9 @@ def next_step(
             return {"code": "confirm_submit", "label": "Your yes ran out — say yes again"}
         if form_filled and submit_approved:
             return {"code": "submit_now", "label": "You said yes — submit, then it is recorded"}
+        if form_filled and assistant_finishes_form:
+            # The submit gate would not ask the user (or the fill is old): the assistant finishes it.
+            return {"code": "apply", "label": "Form filled — your assistant checks it and submits when sure"}
         if form_filled:
             return {"code": "confirm_submit", "label": "Form filled — waiting for your yes to submit"}
         return {"code": "apply", "label": "CV ready — apply, then mark it applied"}
@@ -121,7 +125,9 @@ def kit_flags(events: Iterable[tuple[int, str]]) -> tuple[bool, bool]:
     return True, approved > fill
 
 
-def next_step_for_detail(detail: Mapping[str, Any], *, approval_holds: bool = True) -> dict[str, str]:
+def next_step_for_detail(
+    detail: Mapping[str, Any], *, approval_holds: bool = True, assistant_finishes_form: bool = False,
+) -> dict[str, str]:
     """Derive the inputs from the ``get_application`` shape."""
     events = detail.get("events") or []
     artifacts = detail.get("artifacts") or []
@@ -139,4 +145,5 @@ def next_step_for_detail(detail: Mapping[str, Any], *, approval_holds: bool = Tr
         form_filled=filled,
         submit_approved=approved,
         approval_holds=approval_holds,
+        assistant_finishes_form=assistant_finishes_form,
     )

@@ -41,9 +41,11 @@ from src.services.applications import (
     own_browser,
     queue_preflight,
     ready,
+    send_need,
     site_signin,
     spine,
     test_marker,
+    which_browser,
 )
 from src.services.browser_agent import learned
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -66,8 +68,8 @@ _DEAD = ("rejected", "withdrawn")
 # kind order (lower = sooner); notes on the user's PC come after the ones on the user, then the others.
 _RANK = {
     "confirm_sent": -1, "posting_closed": 0, "site_step": 1, "approve_cv": 2, "answers": 3, "send_yes": 4,
-    "apply_by_hand": 5, "outreach_send": 6, kit.REVIEW_CV: 7, kit.FIX_CV: 7, "assistant_step": 8, "queued": 9,
-    "follow_up": 10, "waiting_employer": 11,
+    "check_send": 4, "apply_by_hand": 5, "outreach_send": 6, kit.REVIEW_CV: 7, kit.FIX_CV: 7, "assistant_step": 8,
+    "queued": 9, "follow_up": 10, "waiting_employer": 11,
 }
 _CV_TURNS = (kit.REVIEW_CV, kit.FIX_CV)
 _LOG_IDS_MAX = 50
@@ -80,7 +82,21 @@ _SITE_WORDS = {
 _OWNER_SIDE = ("you", "your_pc")
 _DROPPED_GONE = ("review_cv", "fix_cv", "queued")  # a dropped job gets no CV look and no batch place either
 _NOT_ON_YOU_LOG_MAX = 50
-_FILL_TYPES = ("blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen")
+_FILL_TYPES = (
+    "blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen",
+    "artifact_saved", "submit_mode_set", "duplicate_cleared",
+)
+CHECK_SEND_LABEL = "check the answers and send"
+# The assistant's own steps on a filled form (no owner Send): ``list_applications`` next_step reads them.
+ASSISTANT_FORM_STEPS = frozenset({"submit", "check form", "refill the form"})
+
+
+def assistant_owns_form(blockers: list[Any]) -> bool:
+    """True when the form is the assistant's to finish: an assistant form step and no owner Send item."""
+    kinds = {b["kind"] for b in blockers if b["actor"] == "you"}
+    return not kinds & {"check_send", "send_yes"} and any(
+        b["kind"] == "assistant_step" and b["label"] in ASSISTANT_FORM_STEPS for b in blockers
+    )
 
 
 def _iso(value: Any) -> str:
@@ -145,8 +161,11 @@ async def _events_by_app(db: JobDatabase, user_id: str, ids: list[int]) -> dict[
     return out
 
 
-def _question_class(row: dict[str, Any]) -> Optional[str]:
-    """``answer`` (only the user can say it), ``ok`` (the user confirms it) or None (verified already)."""
+def _question_class(row: dict[str, Any], saved: Optional[Any] = None) -> Optional[str]:
+    """``answer`` (only the user can say it), ``ok`` (the user confirms it) or None (verified already).
+    ``saved(row)``: the row is the user's own approved word for THIS job's country (F7), never an owner item."""
+    if saved is not None and saved(row):
+        return None
     source, text = row.get("source"), str(row.get("answer") or "").strip()
     if source in (asks.NOT_KNOWN, "none") or not text:
         return "answer"
@@ -155,23 +174,30 @@ def _question_class(row: dict[str, Any]) -> Optional[str]:
     return "ok" if source in ("guess", "draft", "memory") else None
 
 
-def _answer_blockers(
-    app_id: int, ask_rows: list[dict[str, Any]], flags: list[dict[str, Any]], since: Any, unknown_block: bool,
-    fill_id: Optional[int] = None,
-) -> list[Blocker]:
+def _needs(
+    ask_rows: list[dict[str, Any]], flags: list[dict[str, Any]], saved: Optional[Any] = None,
+) -> dict[str, str]:
+    """``{question key: "answer" | "ok"}`` of these asks' rows and a fill's flags."""
     need: dict[str, str] = {}
-    ask_id: Optional[int] = None
     for ask in ask_rows:
-        ask_id = ask_id or int(ask["id"])
         rows = ask["questions"] or [{"key": f"ask_{ask['id']}", "question": ask["question"], "source": "none"}]
         for q in rows:
-            if (cls := _question_class(q)) is not None:
+            if (cls := _question_class(q, saved)) is not None:
                 need[str(q.get("key") or q.get("question"))] = cls
     for f in flags:
         cls = {"blank": "answer", "sensitive": "answer", "guessed": "ok", "unapproved": "ok"}.get(f["code"])
         key = str(f.get("key") or f["text"])
         if cls and need.get(key) != "answer":
             need[key] = cls
+    return need
+
+
+def _answer_blockers(
+    app_id: int, ask_rows: list[dict[str, Any]], flags: list[dict[str, Any]], since: Any, unknown_block: bool,
+    fill_id: Optional[int] = None, saved: Optional[Any] = None,
+) -> list[Blocker]:
+    need = _needs(ask_rows, flags, saved)
+    ask_id: Optional[int] = int(ask_rows[0]["id"]) if ask_rows else None
     to_answer = sum(1 for c in need.values() if c == "answer") or (1 if unknown_block else 0)
     to_ok = sum(1 for c in need.values() if c == "ok")
     ref: Optional[dict[str, Any]] = {"ask_id": ask_id} if ask_id else None
@@ -199,8 +225,8 @@ async def blockers_for(
     if not wanted:
         return {}
     cur = await db._db.execute(
-        "SELECT id, status, fit_score, fit_recorded_at, job_url, job_country, job_company, follow_up_on, "  # noqa: S608
-        f"updated_at FROM applications WHERE user_id = ? AND id IN ({_marks(wanted)})",  # noqa: S608
+        "SELECT id, job_id, job_title, status, fit_score, fit_recorded_at, job_url, job_country, job_company, "  # noqa: S608
+        f"follow_up_on, updated_at FROM applications WHERE user_id = ? AND id IN ({_marks(wanted)})",  # noqa: S608
         (user_id, *wanted),
     )
     apps = {int(r["id"]): dict(r) for r in await cur.fetchall()}
@@ -303,14 +329,21 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         marks = [*last["cv_seen"], *last["submit_approved"]]
         seen = cv is not None and any(kit.cv_mark_matches(e, cv["artifact_id"], cv["sha"]) for e in marks)
         reason = str(blocks.get(app_id, {}).get("reason") or "")
+        # The gate's own rule (kit._filled_with_latest_cv): a fill older than the newest saved CV is no fill.
+        cv_saves = [int(e["id"]) for e in last["artifact_saved"] if e["payload"].get("kind") == "cv"]
+        fill_stale = bool(fill) and bool(cv_saves) and max(cv_saves) > fill_id
+        modes = [e["payload"].get("submit_mode") for e in last["submit_mode_set"]]
+        browsers = frozenset(which_browser.read(e["payload"]) for e in [*last["form_filled"][-1:], *last["form_swept"]])
         state[app_id] = {
+            "stale": fill_stale, "browsers": browsers, "dup_cleared": bool(last["duplicate_cleared"]),
+            "override": modes[-1] if modes and modes[-1] in ("confirm", "auto_when_sure") else None,
             "fill": fill, "fill_open": fill_open, "approved": approved[-1] if approved else None, "cv": cv,
             "seen": seen, "block": blocks.get(app_id), "reason": reason,
             "block_ev": last["blocked"][-1] if last["blocked"] and blocks.get(app_id) is not None else None,
             "swept": bool(fill) and any(int(e["id"]) > fill_id for e in last["form_swept"]),
             "below": settings_line_side(a.get("fit_score"), line) == "below",
         }
-        if fill_open and fill and isinstance(fill["payload"].get("answers"), list):
+        if fill_open and not fill_stale and fill and isinstance(fill["payload"].get("answers"), list):
             fills[app_id] = {
                 "job_country": a.get("job_country"), "job_company": a.get("job_company"),
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
@@ -322,7 +355,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     loaded: Optional[tuple[Any, list[dict[str, Any]]]] = None
     lap("state")
     below = [i for i in ids if state[i]["below"]]
-    if fills or unseen or below:
+    open_form = any(state[i]["fill_open"] and not state[i]["stale"] and state[i]["approved"] is None for i in ids)
+    if fills or unseen or below or open_form or any(
+        k["kind"] in asks.QUESTION_FAMILY for ks in open_asks.values() for k in ks
+    ):
         from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
 
         loaded = await asyncio.to_thread(load_profile_with_overlay, user_id)
@@ -344,6 +380,34 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     # A batch place counts only the jobs open_queue keeps: drop every queued job the rule drops, not only `ids`
     # (#1598 review: numbered before the drop, a kept job read "in batch #2" while first in the real batch).
     position = await _batch_places(db, user_id, loaded) if queued_at else {}
+    # F6: for each filled form with no yes, would the gate ask the owner (send_need)? Display only.
+    cfg = rules_effective(_or_empty(loaded))
+    cands: dict[int, send_need.Facts] = {}
+    for app_id in ids:
+        s = state[app_id]
+        if not s["fill_open"] or s["stale"] or s["approved"] is not None:
+            continue
+        a = apps[app_id]
+        site_open = bool(open_asks.get(app_id)) or (s["block"] is not None)
+        cands[app_id] = send_need.Facts(
+            override=s["override"],
+            flag_codes=frozenset(str(f["code"]) for f in flags.get(app_id, [])) & send_need.OWNER_FLAGS,
+            open_ask=bool(open_asks.get(app_id)), blocked=site_open and bool(s["block"]),
+            cv_artifact_id=s["cv"]["artifact_id"] if s["cv"] else None,
+            cv_cleared=bool(s["seen"]) or app_id in reviewed,
+            fit_score=a.get("fit_score"), host=s["fill"]["payload"].get("host") or None, browsers=s["browsers"],
+            dup_cleared=s["dup_cleared"], job_id=a.get("job_id"), job_url=str(a.get("job_url") or ""),
+            job_title=str(a.get("job_title") or ""),
+        )
+    owner_why = await send_need.reasons_for(db, user_id, cfg, cands) if cands else {}
+    if cands:
+        get_audit_logger().info("check_send_derived", extra={
+            "event": "check_send_derived", "user_id": safe_log_value(user_id), "result": "ok",
+            "owner": {str(i): w for i, w in owner_why.items() if w},
+            "assistant": [i for i, w in owner_why.items() if not w],
+            "stale": [i for i in ids if state[i]["stale"] and state[i]["fill_open"]],
+        })
+    memory: dict[Optional[str], dict[str, dict[str, Any]]] = {}
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
@@ -392,12 +456,24 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 ref["signin_host"] = host  # one sign-in on this site clears it: Needs you groups by host
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
-        if s["fill_open"] or question_asks or reason == "unknown_question":
+        why = owner_why.get(app_id)
+        fold: list[dict[str, Any]] = []  # the asks of THIS fill, folded into its one check_send item
+        if why:
+            fill_when = _when(s["fill"]["recorded_at"])
+            fold = [k for k in question_asks if _when(k["asked_at"]) >= fill_when]
+            question_asks = [k for k in question_asks if k not in fold]
+        stale_fill = s["fill_open"] and s["stale"]
+        if stale_fill:  # an old fill's asks belong to a form that is being redone
+            fill_when = _when(s["fill"]["recorded_at"])
+            question_asks = [k for k in question_asks if _when(k["asked_at"]) < fill_when]
+        mine_flags = [] if (why or stale_fill) else flags.get(app_id, [])
+        if (s["fill_open"] and not why and not stale_fill) or question_asks or reason == "unknown_question":
             fill_at = s["fill"]["recorded_at"] if s["fill"] else block_since
             since = min((k["asked_at"] for k in question_asks), key=_when, default=fill_at)
+            saved = _saved_fn(loaded, a, memory) if question_asks else None
             open_fill = int(s["fill"]["id"]) if s["fill_open"] and s["fill"] else None
             out += _answer_blockers(
-                app_id, question_asks, flags.get(app_id, []), since, reason == "unknown_question", open_fill)
+                app_id, question_asks, mine_flags, since, reason == "unknown_question", open_fill, saved)
         if considering and s["cv"] and not s["seen"] and app_id not in receipts and app_id not in reviewed:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
             if (turn := turns.get(app_id)) is not None:
@@ -405,10 +481,21 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 out.append(_b(turn, "assistant", label, s["cv"]["created_at"], {**cv_ref, "reason": turn}))
             else:
                 out.append(_b("approve_cv", "you", "approve the CV", s["cv"]["created_at"], cv_ref))
-        if s["fill_open"]:
+        if s["fill_open"] and s["stale"]:
+            out.append(_b("assistant_step", "assistant", "refill the form", s["fill"]["recorded_at"],
+                          {"event_id": s["fill"]["id"], "reason": "newer_cv"}))
+        elif s["fill_open"]:
             yes = s["approved"]
-            if yes is None:
-                out.append(_b("send_yes", "you", "Send", s["fill"]["recorded_at"], {"event_id": s["fill"]["id"]}))
+            if yes is None and why:
+                saved = _saved_fn(loaded, a, memory)
+                keys = sorted(_needs(fold, flags.get(app_id, []), saved))
+                check_ref = {"event_id": s["fill"]["id"], "questions": keys, "reasons": why,
+                             "ask_id": fold[0]["id"] if fold else None}
+                out.append(_b("check_send", "you", CHECK_SEND_LABEL, s["fill"]["recorded_at"], check_ref))
+            elif yes is None:
+                step = "submit" if s["swept"] else "check form"
+                out.append(_b("assistant_step", "assistant", step, s["fill"]["recorded_at"],
+                              {"event_id": s["fill"]["id"]}))
             elif kit._approval_age_over(yes["recorded_at"], now, yes.get("payload")):
                 label = "Send again (your yes expired)"
                 out.append(_b("send_yes", "you", label, yes["recorded_at"], {"event_id": yes["id"]}))
@@ -496,6 +583,39 @@ def _or_empty(loaded: Optional[tuple[Any, list[dict[str, Any]]]]) -> Any:
     from src.services.profile.models import UserProfile  # noqa: PLC0415 - profile imports spine
 
     return loaded[0] or UserProfile()
+
+
+def rules_effective(profile: Any) -> Any:
+    from src.services.profile.assistant_settings import effective  # noqa: PLC0415 - profile imports spine
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+
+    return effective((profile or UserProfile()).assistant_settings)
+
+
+def _saved_fn(loaded: Optional[tuple[Any, list[dict[str, Any]]]], app: dict[str, Any],
+              memory: dict[Optional[str], dict[str, dict[str, Any]]]) -> Optional[Any]:
+    """F7: ``saved(row)`` is True when a question row is the user's OWN approved word for THIS job's country: an
+    approved saved answer (``ready._approved_record``, country-bound) or a Memory fact they confirmed
+    (``memory_closes.row_covered``). Assistant guesses, ``inferred`` / ``sensitive`` Memory and another
+    country's page never count. None when no profile was read."""
+    if loaded is None or loaded[0] is None:
+        return None
+    from src.services.applications import memory_closes  # noqa: PLC0415 - it imports asks
+
+    profile, overlay = loaded
+    country = (str(app.get("job_country") or "").strip().upper()) or None
+    company = ready._company_key(str(app.get("job_company") or ""))
+
+    def saved(row: dict[str, Any]) -> bool:
+        if ready._approved_record(profile, str(row.get("question") or ""), company,
+                                  str(row.get("key") or "") or None, country) is not None:
+            return True
+        if country not in memory:
+            blocks, _missing = kit.compute_answers(profile, overlay, country, None)
+            memory[country] = {str(i["key"]): i for block in blocks.values() for i in block}
+        return memory_closes.row_covered(row, country, memory[country])
+
+    return saved
 
 
 def settings_line_side(score: Optional[int], line: Optional[int]) -> str:

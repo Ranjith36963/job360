@@ -129,10 +129,10 @@ async def test_a_yes_older_than_its_time_to_live_reads_send_again(authenticated_
         _above(app_id)
         cv = await _client_cv(client, app_id)
         await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 3, "answers": []})
-        assert [b["label"] for b in (await _blockers(uid, [app_id]))[app_id] if b["kind"] == "send_yes"] == ["Send"]
+        assert [b["label"] for b in (await _blockers(uid, [app_id]))[app_id] if b["kind"] == "check_send"] == ["check the answers and send"]
         await _event(client, app_id, "submit_approved", {"artifact_id": cv, "sha256": kit.sha256_text("Ada Lovelace"), "where": "web"})
         rows = (await _blockers(uid, [app_id]))[app_id]
-        assert "send_yes" not in _kinds(rows) and "check form" in [b["label"] for b in rows]
+        assert "check_send" not in _kinds(rows) and "check form" in [b["label"] for b in rows]
         old = (datetime.now(timezone.utc) - timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES + 5)).isoformat()
         _sql("UPDATE application_events SET recorded_at = ? WHERE application_id = ? AND event_type = 'submit_approved'", (old, app_id))
         assert [b["label"] for b in (await _blockers(uid, [app_id]))[app_id] if b["kind"] == "send_yes"] == ["Send again (your yes expired)"]
@@ -168,8 +168,8 @@ async def test_order_and_another_users_id_is_ignored(authenticated_async_context
         await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 3, "answers": []})
         await _event(client, app_id, "blocked", {"reason": "otp_needed"})
         got = (await _blockers(uid, [app_id]))[app_id]
-        assert _kinds(got) == ["site_step", "approve_cv", "answers", "send_yes"]
-        assert [b["label"] for b in got] == ["enter the code", "approve the CV", "OK 1 answer", "Send"]
+        assert _kinds(got) == ["site_step", "approve_cv", "answers", "check_send"]
+        assert [b["label"] for b in got] == ["enter the code", "approve the CV", "OK 1 answer", "check the answers and send"]
         assert await _blockers("someone-else", [app_id]) == {}
 
 
