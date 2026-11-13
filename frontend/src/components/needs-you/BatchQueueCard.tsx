@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { toast } from "sonner";
-import { getNeedsYouCount, listApplications, recordApplicationEvent } from "@/lib/api";
+import { listApplications, recordApplicationEvent } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import {
   filterByBrowser,
@@ -19,6 +19,8 @@ import {
 import type { OwnTask, QueueBrowserFilter, QueueSummary } from "@/lib/batch-queue";
 import { decideOwnBrowserSend, getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
 import { onChanges } from "@/lib/live-changes";
+import { fetchNeedsYouCountShared, freshCountKey } from "@/lib/needs-you-count";
+import { usePathname } from "next/navigation";
 import { QueueBrowserChip, QueueBrowserFilterRow } from "./QueueBrowser";
 import { useAppHref } from "@/lib/app-href";
 
@@ -64,6 +66,7 @@ function personHref(o: OutreachRow, appLink: (id: number, hash?: string) => stri
  *  sits on Needs you (RunNowPanel): a trigger, not a permission. */
 export function BatchQueueCard() {
   const appLink = useAppHref();
+  const pathname = usePathname() ?? "";
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [outreach, setOutreach] = useState<OutreachRow[]>([]);
   const [order, setOrder] = useState<string[] | null>(null);
@@ -76,10 +79,12 @@ export function BatchQueueCard() {
   const [own, setOwn] = useState<OwnBrowserQueue | null>(null);
   const [needYou, setNeedYou] = useState<number | null>(null); // the one server count, not this queue's own
 
-  const load = useCallback(async () => {
+  // `key` decides who shares the count read: the page load shares with the badge and Home, a live change
+  // shares with them by its seq, and a reload after the user's own action reads fresh.
+  const load = useCallback(async (key: string = freshCountKey()) => {
     void getOwnBrowserQueue().then((q) => q && setOwn(q)); // a failed read keeps the last good tasks
     try {
-      void getNeedsYouCount().then((c) => setNeedYou(c.jobs_waiting_on_you), () => {});
+      void fetchNeedsYouCountShared(key).then((c) => setNeedYou(c.jobs_waiting_on_you), () => {});
     } catch {
       // no count: the line falls back to the queue's own
     }
@@ -97,11 +102,11 @@ export function BatchQueueCard() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
-    void load();
-  }, [load]);
+    void load(pathname);
+  }, [load, pathname]);
 
   // Live: re-read when the assistant moves anything (the queue spans jobs and people); a failed read keeps the rows.
-  useEffect(() => onChanges(() => void load()), [load]);
+  useEffect(() => onChanges((d) => void load(`live:${d.seq}`)), [load]);
 
   async function remove(id: number) {
     setBusy(`application:${id}`);

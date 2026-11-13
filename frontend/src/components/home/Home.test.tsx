@@ -214,6 +214,67 @@ describe("Home", () => {
     expect(api.listApplications.mock.calls[0][0]).not.toHaveProperty("due");
   });
 
+  it("the feed asks for the NEWEST events in one call (newest=true, limit 200)", async () => {
+    happy();
+    render(<Home />);
+    await screen.findByTestId("home-feed");
+    expect(api.whatsNew).toHaveBeenCalledTimes(1);
+    expect(api.whatsNew.mock.calls[0][0]).toMatchObject({ newest: true, limit: 200 });
+    expect(api.whatsNew.mock.calls[0][0].after_id).toBeUndefined();
+  });
+
+  // The stop rule: ONE page only when it holds 12 assistant rows AND reaches back to the last visit (7 days
+  // ago here) AND holds an `applied` event; otherwise older pages, at most 3.
+  const OLD = new Date(Date.now() - 20 * 864e5).toISOString();
+  const fresh = (n: number, from = 1) => Array.from({ length: n }, (_, i) => event(from + i, "agent:Claude"));
+  const applied = (id: number, recordedAt = NOW) => ({ ...event(id, "agent:Claude"), event_type: "applied", recorded_at: recordedAt });
+  const old = (id: number) => ({ ...event(id, "agent:Claude"), recorded_at: OLD });
+  const page = (events: unknown[], truncated: boolean) => ({ ...whatsNewOk(events), truncated, next_before_id: 1 });
+
+  it("makes ONE call when the first page has the rows, reaches the last visit and holds an applied event", async () => {
+    happy();
+    api.whatsNew.mockReset();
+    api.whatsNew.mockResolvedValue(page([applied(1, OLD), ...fresh(11, 2)], true));
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 11 records/ });
+    expect(api.whatsNew).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveTextContent("+");
+  });
+
+  it("reads a second page when the first is all newer than the last visit, and then counts exactly", async () => {
+    happy();
+    api.whatsNew.mockReset();
+    api.whatsNew
+      .mockResolvedValueOnce(page([applied(20), ...fresh(11, 21)], true))
+      .mockResolvedValueOnce(page([old(5)], false));
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 12 records/ });
+    expect(api.whatsNew).toHaveBeenCalledTimes(2);
+    expect(api.whatsNew.mock.calls[1][0]).toMatchObject({ newest: true, before_id: 1 });
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveTextContent("+");
+  });
+
+  it("reads a second page when the first holds no applied event, and the applied line shows from it", async () => {
+    happy();
+    api.whatsNew.mockReset();
+    api.whatsNew
+      .mockResolvedValueOnce(page([old(30), ...fresh(12, 31)], true))
+      .mockResolvedValueOnce(page([applied(5, OLD)], false));
+    render(<Home />);
+    await screen.findByText(/The last application you confirmed was Mistral AI/);
+    expect(api.whatsNew).toHaveBeenCalledTimes(2);
+  });
+
+  it("never reads more than 3 pages, and the sentence then says N+", async () => {
+    happy();
+    api.whatsNew.mockReset();
+    let n = 0;
+    api.whatsNew.mockImplementation(async () => page(fresh(12, 100 * ++n), true));
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 36\+ records/ });
+    expect(api.whatsNew).toHaveBeenCalledTimes(3);
+  });
+
   it("events from before the last visit are in the feed but not in the sentence", async () => {
     const old = { ...event(3, "agent:Claude"), recorded_at: new Date(Date.now() - 20 * 864e5).toISOString() };
     happy({ events: [old, event(1, "agent:Claude")] });

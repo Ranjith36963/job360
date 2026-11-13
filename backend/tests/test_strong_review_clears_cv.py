@@ -14,7 +14,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.services.profile.models import AssistantSettings, CVData, UserProfile
-from tests._cv_review import ATS_RAW, ATS_TAIL, ats_rows, blank_ad
+from tests._cv_review import ATS_RAW, ATS_TAIL, ats_rows, blank_ad, owners_turn
 
 RAW = (
     "Ada Lovelace\nEXPERIENCE\nData engineer at Northwind since 2019.\n"
@@ -94,13 +94,17 @@ async def test_a_strong_review_of_the_current_cv_clears_every_place_it_is_shown(
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client)
-        assert _needs_you(await _state(client, app_id)) and not (await _state(client, app_id))["batch_due"]
+        # Owner 2026-11-13: before any review the CV is the assistant's turn (review_cv), never on Needs you; a
+        # weak review with no tries left cannot be followed by a strong one (retry_limit), so no owner turn first.
+        before = await _state(client, app_id)
+        assert "review_cv" in before["blockers"] and "approve_cv" not in before["blockers"]
+        assert (before["card"], before["waiting"]) == (False, 0)
         count_before = (await client.get("/api/needs-you-count")).json()["n"]
         assert await _review(client, app_id, cv_id) == "strong"
         s = await _state(client, app_id)
-        assert "approve_cv" not in s["blockers"] and s["card"] is False
+        assert "approve_cv" not in s["blockers"] and "review_cv" not in s["blockers"] and s["card"] is False
         assert (s["waiting"], s["hold"], s["batch_due"]) == (0, None, True)
-        assert (await client.get("/api/needs-you-count")).json()["n"] == count_before - 1
+        assert (await client.get("/api/needs-you-count")).json()["n"] == count_before
 
 
 @pytest.mark.asyncio
@@ -109,6 +113,7 @@ async def test_a_weak_review_still_needs_the_user(authenticated_async_context, f
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client)
         assert await _review(client, app_id, cv_id, confidence="weak") == "weak"
+        await owners_turn(fixture_user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         assert _needs_you(await _state(client, app_id))
 
 
@@ -123,6 +128,7 @@ async def test_a_review_of_an_older_version_or_sha_does_not_clear_the_newer_cv(
         assert "approve_cv" not in (await _state(client, app_id))["blockers"]
         v2 = CV.replace("- Data engineer", "* Data engineer")
         await _save_cv(client, app_id, v2)
+        await owners_turn(fixture_user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         assert _needs_you(await _state(client, app_id)), "the review names v1, not the newest CV"
 
 
@@ -133,6 +139,7 @@ async def test_a_cv_the_save_checks_flag_stays_with_the_user(authenticated_async
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client, cv=flagged)
         assert await _review(client, app_id, cv_id, flagged) == "weak"  # cv_checks_found downgrades it
+        await owners_turn(fixture_user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         assert _needs_you(await _state(client, app_id))
 
 

@@ -24,9 +24,10 @@ export const FEED_LOOKBACK_DAYS = 30;
 export const FEED_LIMIT = 12;
 /** Most pages of `whats-new` Home will follow (200 events each). */
 export const MAX_WHATS_NEW_PAGES = 3;
-/** The feed needs the NEWEST events but the route pages oldest first, so it
- * reads further (up to 5,000 events in the window) before giving up. */
-export const FEED_MAX_PAGES = 25;
+/** The feed needs the NEWEST events, so it asks the route for them (`newest=true`):
+ * one page of 200 is normally enough; it follows `next_before_id` for at most this
+ * many pages when those 200 hold fewer than FEED_LIMIT assistant rows. */
+export const FEED_NEWEST_MAX_PAGES = 3;
 /** Open asks shown as cards on Home before "See all". */
 export const HOME_ASKS_LIMIT = 3;
 
