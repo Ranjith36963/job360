@@ -2857,12 +2857,16 @@ async def list_applications(
     not sent, each with its fit verdict as the reason).
     """
     from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
+    from src.utils.server_timing import Lap  # noqa: PLC0415
+
+    lap = Lap()
     from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
 
     if priority is not None and priority not in job_priority.FILTER_VALUES:
         raise SpineError(422, f"priority must be one of: {', '.join(job_priority.FILTER_VALUES)}")
     _profile = load_profile(user_id)
     rtw = getattr(_profile.user_info, "right_to_work", None) if _profile is not None else None
+    lap("l_profile")
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     # Bug fix (coordinator review, 2026-09-25) — Query(ge=1, le=...) on the
@@ -2901,6 +2905,7 @@ async def list_applications(
 
     today = await user_today(db, user_id)
     today_iso = today.isoformat()
+    lap("l_today")
 
     if due or quiet_days is not None:
         placeholders = ",".join("?" for _ in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES)
@@ -2922,6 +2927,7 @@ async def list_applications(
             (user_id, cutoff),
         )
         held = await kit_service.holds_for_apps(db, user_id, [int(c[0]) for c in await cand.fetchall()], now)
+        lap("l_in_flight")
         if held:
             where.append(f"id IN ({','.join('?' for _ in held)})")
             params.extend(held)
@@ -2932,6 +2938,7 @@ async def list_applications(
 
         zone = await user_zone(db, user_id)
         in_range = await agenda_application_ids(db, user_id, agenda, today, zone)
+        lap("l_agenda")
         if in_range:
             where.append(f"id IN ({','.join('?' for _ in in_range)})")
             params.extend(in_range)
@@ -2943,6 +2950,7 @@ async def list_applications(
         params.extend(p_params)
     if origin is not None:
         from_origin = [a for a, o in (await origin_by_app(db, user_id, None)).items() if o == origin]
+        lap("l_origin_filter")
         if from_origin:
             where.append(f"id IN ({','.join('?' for _ in from_origin)})")
             params.extend(from_origin)
@@ -2955,6 +2963,7 @@ async def list_applications(
     # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
     # Two queries for the page (events, then the status of the queued ids), never N+1.
     queue_order, queued_at = await open_queue(db, user_id, _profile)
+    lap("l_queue")
     queue_position = {app_id: pos for pos, app_id in enumerate(queue_order, start=1)}
     if queued:
         if queue_order:
@@ -2968,6 +2977,7 @@ async def list_applications(
         f"SELECT COUNT(*) FROM applications WHERE {where_sql}", params  # noqa: S608 — where_sql built from constants
     )
     total = int((await cur.fetchone())[0])
+    lap("l_count")
 
     order_sql = "follow_up_on ASC, id ASC" if due else "last_event_at DESC NULLS LAST, id DESC"
     if queued:
@@ -2984,6 +2994,7 @@ async def list_applications(
         [*params, *page_params],
     )
     rows = [dict(r) for r in await cur.fetchall()]
+    lap("l_rows")
     if queued:
         # Work order (2026-10-30): not waiting on the owner first, unfilled before filled, FIFO inside each.
         from src.services.applications import queue_preflight as _qp  # noqa: PLC0415 - imports spine
@@ -2992,6 +3003,7 @@ async def list_applications(
         work_rank = {app_id: n for n, app_id in enumerate(work_ids)}
         rows.sort(key=lambda r: work_rank[r["id"]])
         rows = rows[offset:offset + limit]
+        lap("q_work_order")
 
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
@@ -2999,10 +3011,13 @@ async def list_applications(
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 — profile ↔ spine cycle
 
     countries = await visa_service.user_work_countries(db, user_id)
+    lap("l_countries")
     score_line = await user_score_line(user_id)
+    lap("l_score_line")
     from src.services.applications import blockers as blockers_service  # noqa: PLC0415 - blockers imports this module
 
     blockers_by_app = await blockers_service.blockers_for(db, user_id, [int(r["id"]) for r in rows])
+    lap("l_blockers")
 
     # 2026-09-24 — the list's "Next:" line needs interview_at and has_lesson,
     # both read off application_events. One query for the whole page (never
@@ -3034,6 +3049,7 @@ async def list_applications(
             if r["event_type"] == "lesson":
                 has_lesson_by_app[app_id] = True
             kit_events_by_app.setdefault(app_id, []).append((int(r["id"]), r["event_type"]))
+    lap("l_events")
 
     # Owner decision, 2026-09-25 — the list row now shows a "Sent <date>" tag,
     # which needs the LATEST receipt per application. One batched query for
@@ -3052,13 +3068,17 @@ async def list_applications(
         for row in await r_cur.fetchall():
             receipt_count_by_app[row[0]] = int(row[1])
             last_receipt_at_by_app[row[0]] = row[2]
+    lap("l_receipts")
 
     from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user_id, app_ids)
+    lap("l_proofs")
     origins = await origin_by_app(db, user_id, app_ids)
+    lap("l_origins")
     holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
+    lap("l_holds")
     preflights: dict[int, dict[str, Any]] = {}
     browsers: dict[int, dict[str, str]] = {}
     summary: Optional[dict[str, Any]] = None
@@ -3074,20 +3094,27 @@ async def list_applications(
 
         # One profile read, off the event loop (CodeRabbit 2026-10-18), shared with the preflight.
         loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
+        lap("q_profile_load")
         profile = loaded or UserProfile()
         cfg = settings_rules.effective(profile.assistant_settings)
         preflights = await queue_preflight.preflight_rows(
             db, user_id, rows, queued_at, holds, cfg, profile, overlay
         )
+        lap.skip()  # preflight_rows timed its own parts (q_*)
         browsers = await queue_preflight.queue_browsers(db, user_id, queue_order)
+        lap("q_browsers")
         # One queue (owner 2026-10-26): the approved, unsent LinkedIn sends too, merged by when the user said yes.
         from src.services.applications import own_browser  # noqa: PLC0415 - imports spine
 
         outreach = await own_browser.queued_outreach(db, user_id, datetime.now(timezone.utc))
+        lap("q_outreach")
         merged = own_browser.merged_order({i: queued_at[i] for i in queue_order}, outreach)
         summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg, browsers, outreach)
+        lap("q_summary")
     event_counts = await _event_counts_by_app(db, app_ids)
+    lap("l_event_counts")
     artifact_counts_by_app = await _artifact_counts_by_app(db, app_ids)
+    lap("l_artifact_counts")
     out = []
     for r in rows:
         app_id = r["id"]
@@ -3097,6 +3124,9 @@ async def list_applications(
         receipts_count = receipt_count_by_app.get(app_id, 0)
         follow_up_on = r.get("follow_up_on")
         follow_up_due = _follow_up_due(follow_up_on, r["status"], today_iso)
+        lap("l_build")
+        approval_holds = await _approval_holds(db, user_id, r, kit_events_by_app.get(app_id, []))
+        lap("l_approval")
         out.append(
             {
                 "id": app_id, "job_id": r["job_id"], "job_title": r["job_title"] or "",
@@ -3144,10 +3174,11 @@ async def list_applications(
                     follow_up_due=follow_up_due,
                     form_filled=kit_flags(kit_events_by_app.get(app_id, []))[0],
                     submit_approved=kit_flags(kit_events_by_app.get(app_id, []))[1],
-                    approval_holds=await _approval_holds(db, user_id, r, kit_events_by_app.get(app_id, [])),
+                    approval_holds=approval_holds,
                 ),
             }
         )
+    lap("l_build")
     return {
         "applications": out, "total": total, "queue_summary": summary, "outreach": outreach, "queue_order": merged,
     }
