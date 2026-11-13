@@ -2856,6 +2856,8 @@ async def list_applications(
     applications with an ``applied`` event; false: only ones never applied to (the record of jobs
     not sent, each with its fit verdict as the reason).
     """
+    import asyncio  # noqa: PLC0415 - stdlib, only this reader needs it
+
     from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
     from src.utils.server_timing import Lap  # noqa: PLC0415
 
@@ -2864,7 +2866,7 @@ async def list_applications(
 
     if priority is not None and priority not in job_priority.FILTER_VALUES:
         raise SpineError(422, f"priority must be one of: {', '.join(job_priority.FILTER_VALUES)}")
-    _profile = load_profile(user_id)
+    _profile = await asyncio.to_thread(load_profile, user_id)
     rtw = getattr(_profile.user_info, "right_to_work", None) if _profile is not None else None
     lap("l_profile")
     limit = max(1, min(int(limit), 200))
