@@ -268,17 +268,26 @@ async def preflight_rows(
     lap("q_cv_reviews")
     receipts = await kit.recent_receipts(db, user_id)  # the same rows for every row: read once, not once per row
     lap("q_receipts")
+    # One answer set per country for the whole page: compute_answers and _missing_flags read only (profile, overlay,
+    # country), so rows in one country share the result; each row still gets its own copy of the key list.
+    missing_keys: dict[Optional[str], list[str]] = {}
+    countries: dict[int, Optional[str]] = {}
+    for r in rows:
+        country = (str(r.get("job_country") or "").strip().upper()) or None
+        countries[int(r["id"])] = country
+        if country not in missing_keys:
+            _blocks, missing = kit.compute_answers(profile, overlay, country)
+            flags = ready._missing_flags(profile, missing, country)
+            missing_keys[country] = [str(f["key"]) for f in flags if f.get("key")]
+    lap("q_answers")
+    dups = await kit.duplicate_facts_batch(db, user_id, rows, now, receipts=receipts)
+    lap("q_duplicates")
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         app_id = int(r["id"])
-        country = (str(r.get("job_country") or "").strip().upper()) or None
-        _blocks, missing = kit.compute_answers(profile, overlay, country)
-        flags = ready._missing_flags(profile, missing, country)
-        lap("q_answers")
         app_row = {"id": app_id, "job_id": r.get("job_id"), "job_url": r.get("job_url"),
                    "job_company": r.get("job_company")}
-        dup = await kit.duplicate_facts(db, user_id, app_row, now, receipts=receipts)
-        lap("q_duplicates")
+        dup = dups[app_id]
         flag = str(dup["flag"] or "")
         if flag == "same_job" and app_id in cleared:
             flag = ""
@@ -288,7 +297,7 @@ async def preflight_rows(
             left = settings_rules.company_left(cfg, applied)
             lap("q_company_cap")
         out[app_id] = {
-            "kit_missing": [str(f["key"]) for f in flags if f.get("key")],
+            "kit_missing": list(missing_keys[countries[app_id]]),
             "has_cv": app_id in cv_apps,
             # 2026-11-09 (application 339): the newest CV's review, from valid reviews only; "none" = review it.
             "cv_review": reviews.get(app_id, cv_review.NONE),
