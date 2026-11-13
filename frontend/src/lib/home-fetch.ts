@@ -4,7 +4,7 @@
 
 import { listApplications, whatsNew } from "@/lib/api";
 import type { ApplicationSummary, WhatsNewEvent, WhatsNewResponse } from "@/lib/api";
-import { MAX_WHATS_NEW_PAGES } from "@/lib/home";
+import { FEED_NEWEST_MAX_PAGES, MAX_WHATS_NEW_PAGES } from "@/lib/home";
 
 type WhatsNewApplication = WhatsNewResponse["applications"][number];
 
@@ -36,6 +36,32 @@ export async function fetchWhatsNewPages(
     truncated = res.truncated;
     if (!res.truncated) break;
     cursor = { since: res.next_since, afterId: res.next_after_id ?? undefined };
+  }
+  return { events, applications: [...apps.values()], now, truncated };
+}
+
+/** The NEWEST events since `since` (`newest=true`): ONE page of 200, then older pages through `next_before_id`
+ * only while older events remain (`truncated`) and `enough(events, applications)` is still false, for at most
+ * `maxPages` pages in total. Events stay oldest first across pages; `truncated` = older ones still remain
+ * beyond what was read. */
+export async function fetchNewestWhatsNew(
+  since: string,
+  enough: (events: readonly WhatsNewEvent[], applications: readonly WhatsNewApplication[]) => boolean,
+  maxPages: number = FEED_NEWEST_MAX_PAGES
+): Promise<WhatsNewPages> {
+  let events: WhatsNewEvent[] = [];
+  const apps = new Map<number, WhatsNewApplication>();
+  let beforeId: number | undefined;
+  let now = "";
+  let truncated = false;
+  for (let page = 0; page < maxPages; page++) {
+    const res = await whatsNew({ since, limit: 200, newest: true, before_id: beforeId });
+    if (page === 0) now = res.now;
+    events = [...res.events, ...events]; // an older page goes in front
+    for (const a of res.applications) apps.set(a.id, a);
+    truncated = res.truncated;
+    if (!res.truncated || res.next_before_id == null || enough(events, [...apps.values()])) break;
+    beforeId = res.next_before_id;
   }
   return { events, applications: [...apps.values()], now, truncated };
 }

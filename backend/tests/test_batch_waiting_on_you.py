@@ -16,6 +16,7 @@ from httpx import AsyncClient
 
 from src.services.profile import schedule
 from src.services.profile.models import CVData, UserPreferences, UserProfile
+from tests._cv_review import owners_turn
 
 NOW = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
 
@@ -81,6 +82,7 @@ async def test_asks_blocks_and_unseen_cvs_hold_the_batch_until_the_user_answers(
         assert stuck.status_code == 201, stuck.text
         saved = await client.post(f"/api/applications/{cv}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
         assert saved.status_code in (200, 201), saved.text
+        await owners_turn(fixture_user_id, cv)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         # 2026-11-01: the asked and the blocked job have no CV yet, so a run still has work: write them.
         no_cv = await _due(client)
         assert [d["duty"] for d in no_cv["due"]] == ["batch"] and no_cv["batch_hold"] is None
@@ -88,6 +90,7 @@ async def test_asks_blocks_and_unseen_cvs_hold_the_batch_until_the_user_answers(
         for app_id in (asked, blocked):
             done = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
             assert done.status_code in (200, 201), done.text
+            await owners_turn(fixture_user_id, app_id)
         held = await _due(client)
         assert (held["batch_hold"], held["waiting_on_you"], held["nothing_due"]) == ("waiting_on_you", 3, True)
         stuck_free = await client.post(f"/api/applications/{blocked}/events", json={

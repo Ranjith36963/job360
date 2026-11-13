@@ -2,18 +2,22 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { getNeedsYouCount, listAsks } from "@/lib/api";
-import type { ApplicationSummary, Ask } from "@/lib/api";
+import { usePathname } from "next/navigation";
+import { listAsks, listApplications } from "@/lib/api";
+import { onChanges } from "@/lib/live-changes";
+import { fetchNeedsYouCountShared, freshCountKey } from "@/lib/needs-you-count";
+import type { Ask, NeedsYouCount } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { MorningCheck } from "@/components/needs-you/MorningCheck";
 import { BatchApplyPanel } from "@/components/needs-you/BatchApplyPanel";
 import { FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
-import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
+import { fetchNewestWhatsNew } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
   FEED_LOOKBACK_DAYS,
-  FEED_MAX_PAGES,
+  FEED_NEWEST_MAX_PAGES,
+  assistantEvents,
   buildSentence,
   dayAt,
   daysAgoIso,
@@ -51,9 +55,16 @@ const linkBtn =
 
 const GROUP = "font-heading text-xl font-normal";
 
+const waitsOf = (c: NeedsYouCount): Waits => ({
+  you: c.by_actor.you ?? 0,
+  your_pc: c.by_actor.your_pc ?? 0,
+  assistant: c.by_actor.assistant ?? 0,
+});
+
 const subscribeNever = () => () => {};
 
 export function Home() {
+  const pathname = usePathname() ?? "";
   // Client-only: the date and the last-visit stamp belong to this browser, so
   // the server render leaves the date empty instead of guessing a timezone.
   const today = useSyncExternalStore(subscribeNever, () => formatToday(), () => "");
@@ -61,15 +72,20 @@ export function Home() {
   const [since, setSince] = useState<Load<SinceVisit>>(LOADING);
   const [asks, setAsks] = useState<Load<Asks>>(LOADING);
   const [waits, setWaits] = useState<Load<Waits>>(LOADING);
-  const [apps, setApps] = useState<Load<{ list: ApplicationSummary[]; total: number }>>(LOADING);
+  const [apps, setApps] = useState<Load<{ total: number }>>(LOADING);
   const [feed, setFeed] = useState<Load<Feed>>(LOADING);
 
   // Which "since" this page view uses — read once, so a retry or a reload after
   // answering a question keeps the same window instead of jumping to "now".
   const sinceRef = useRef<string | null>(null);
   const epoch = useRef(0);
+  // The newest count read wins: an older answer that arrives late (a slow page-load read finishing after
+  // a live re-read) must never overwrite a newer one.
+  const waitsAsk = useRef(0);
 
-  const run = useCallback(() => {
+  // `countKey` decides who the count read is shared with: the page load shares with the nav badge and
+  // the batch card (the pathname), the user's own Try again reads fresh.
+  const run = useCallback((countKey: string = pathname) => {
     const mine = ++epoch.current;
     const live = () => mine === epoch.current;
     if (sinceRef.current === null) sinceRef.current = readLastVisit();
@@ -79,19 +95,33 @@ export function Home() {
       .then((r) => live() && setAsks({ status: "ok", value: { asks: r.asks, openCount: r.open_count } }))
       .catch(() => live() && setAsks({ status: "error" }));
 
-    getNeedsYouCount()
-      .then((c) => live() && setWaits({ status: "ok", value: { you: c.by_actor.you ?? 0, your_pc: c.by_actor.your_pc ?? 0, assistant: c.by_actor.assistant ?? 0 } }))
-      .catch(() => live() && setWaits({ status: "error" }));
+    // Same key as the nav badge (the pathname): one count read per page load.
+    const asked = ++waitsAsk.current;
+    fetchNeedsYouCountShared(countKey)
+      .then((c) => live() && asked === waitsAsk.current && setWaits({ status: "ok", value: waitsOf(c) }))
+      .catch(() => live() && asked === waitsAsk.current && setWaits({ status: "error" }));
 
-    fetchAllApplications()
-      .then((r) => live() && setApps({ status: "ok", value: { list: r.applications, total: r.total } }))
+    // Home reads only the total (brand-new or not): one row is enough, never the whole list.
+    listApplications({ limit: 1 })
+      .then((r) => live() && setApps({ status: "ok", value: { total: r.total } }))
       .catch(() => live() && setApps({ status: "error" }));
 
     // ONE whats-new read feeds both the sentence and the feed: the last-visit
     // window is cut out of the 30-day read here instead of asking twice. (A
     // last visit older than the window is counted from the window's start.)
     const sinceMs = Date.parse(sinceVisit);
-    fetchWhatsNewPages(daysAgoIso(FEED_LOOKBACK_DAYS), FEED_MAX_PAGES)
+    fetchNewestWhatsNew(
+      daysAgoIso(FEED_LOOKBACK_DAYS),
+      // Stop at ONE page when it already settles all three: the feed's rows, an exact "since you were last
+      // here" count (the oldest event read is at or before the last visit; with an unparseable stamp the
+      // filter below counts every event, so there is no boundary to reach and this holds), and the last
+      // applied line. Otherwise read older pages, up to FEED_NEWEST_MAX_PAGES.
+      (events, applications) =>
+        assistantEvents(events).length >= FEED_LIMIT &&
+        (Number.isNaN(sinceMs) || (events.length > 0 && Date.parse(events[0].recorded_at) <= sinceMs)) &&
+        lastApplied(events, applications) !== null,
+      FEED_NEWEST_MAX_PAGES,
+    )
       .then((r) => {
         if (!live()) return;
         setFeed({
@@ -106,7 +136,9 @@ export function Home() {
           status: "ok",
           value: {
             events: r.events.filter((e) => !(Date.parse(e.recorded_at) <= sinceMs)),
-            truncated: r.truncated,
+            // We hold the NEWEST events: the count is a floor ("N+") only while the oldest one read is still
+            // inside the window since the last visit. Once it is older, everything since then is in hand.
+            truncated: r.truncated && r.events.length > 0 && !(Date.parse(r.events[0].recorded_at) <= sinceMs),
             now: r.now,
           },
         });
@@ -116,7 +148,20 @@ export function Home() {
         setFeed({ status: "error" });
         setSince({ status: "error" });
       });
-  }, []);
+  }, [pathname]);
+
+  // Live: the assistant changed something; the headline's "waits on you" counts re-read (shared with the badge).
+  useEffect(
+    () =>
+      onChanges((d) => {
+        const asked = ++waitsAsk.current;
+        fetchNeedsYouCountShared(`live:${d.seq}`).then(
+          (c) => asked === waitsAsk.current && setWaits({ status: "ok", value: waitsOf(c) }),
+          () => {},
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     const token = epoch;
@@ -142,7 +187,7 @@ export function Home() {
     setWaits(LOADING);
     setApps(LOADING);
     setFeed(LOADING);
-    run();
+    run(freshCountKey());
   }
 
 

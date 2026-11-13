@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import time
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Literal, Optional, Union
+from typing import Annotated, Any, Awaitable, Callable, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer
@@ -87,6 +89,7 @@ from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.edits import WEB_ACTOR
 from src.services.profile.models import UserProfile
 from src.services.profile.storage import load_profile
+from src.utils import server_timing
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["applications"])
@@ -1370,6 +1373,8 @@ class WhatsNewResponse(BaseModel):
     next_since: str
     next_after_id: Optional[int]
     truncated: bool
+    # Only with ``newest=true``: the smallest event id on this page - pass it as ``before_id`` for the next older page.
+    next_before_id: Optional[int] = None
     # Always the user's open asks, whatever `since` says.
     open_asks: list[AskOut]
     # S7 - applied jobs with no proof after PROOF_NO_PROOF_AFTER_DAYS and no ask yet.
@@ -2482,6 +2487,9 @@ async def list_outcome_suggestions(
     return {"suggestions": items, "truncated": truncated}
 
 
+SLOW_LIST_MS = 1000  # log the step timings when the list took this long
+logger = logging.getLogger("job360.applications")
+_NO_RESPONSE = Response()  # default for direct callers (MCP); the HTTP route always gets FastAPI's own
 QUEUE_LIST_LIMIT = 200  # the route's own max; a queued list with no limit is the whole queue
 
 
@@ -2510,7 +2518,12 @@ async def list_applications(
     applied: Optional[bool] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+    # FastAPI injects the real response; the default is for the MCP tool, which calls this function directly.
+    response: Response = _NO_RESPONSE,
 ) -> dict[str, Any]:
+    timings: dict[str, float] = {}
+    token = server_timing.TIMINGS.set(timings)
+    started = time.perf_counter()
     try:
         if limit is None:
             limit = QUEUE_LIST_LIMIT if queued else 20
@@ -2522,6 +2535,16 @@ async def list_applications(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    finally:
+        server_timing.TIMINGS.reset(token)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        # How long each step took, in the standard header browsers show. Durations only.
+        response.headers["Server-Timing"] = server_timing.header_value(timings, total_ms)
+        if total_ms >= SLOW_LIST_MS:
+            logger.warning(
+                "applications_list_slow user=%s queued=%s total_ms=%s phases=%s",
+                safe_log_value(user.id), bool(queued), total_ms, safe_log_value(timings),
+            )
 
 
 @router.post("/applications/inbox-checked", response_model=InboxCheckedOut, dependencies=AUTH_FIRST)
@@ -4617,8 +4640,13 @@ async def whats_new(
     inbox_stale_alerts: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+    # Annotated, not `= Query(..)`: the MCP tool calls this function directly and passes neither.
+    newest: Annotated[bool, Query()] = False,
+    before_id: Annotated[Optional[int], Query()] = None,
 ) -> dict[str, Any]:
+    if before_id is not None and not newest:
+        raise HTTPException(status_code=422, detail="before_id only works with newest=true")
     return await spine.whats_new(
         db, user.id, since=since, after_id=after_id, limit=limit,
-        inbox_offset=inbox_offset, inbox_stale_alerts=inbox_stale_alerts,
+        inbox_offset=inbox_offset, inbox_stale_alerts=inbox_stale_alerts, newest=newest, before_id=before_id,
     )
