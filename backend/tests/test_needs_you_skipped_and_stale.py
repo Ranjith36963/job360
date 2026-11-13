@@ -184,3 +184,21 @@ async def test_a_job_queued_on_the_users_pc_reads_apply_from_your_pc(authenticat
     rows = (await _blockers(fixture_user_id, [app_id]))[app_id]
     queued = [b for b in rows if b["kind"] == "queued"]
     assert [(b["actor"], b["label"]) for b in queued] == [("your_pc", "apply from your PC")], rows
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_job_takes_no_batch_place_from_the_jobs_after_it(
+    authenticated_async_context, fixture_user_id
+):
+    """A job the user's rule drops holds no batch place, so the next queued job reads the batch place open_queue
+    gives it (#1598 review: positions were numbered before the dropped jobs left the queue)."""
+    async with authenticated_async_context() as client:
+        dropped = await _dropped_job(client, fixture_user_id, queue=True, n=5)
+        kept = await _bring(client, 6, queue=True)
+        await _fit(client, kept, 90)
+        await _cv(client, kept, seen=True)
+    db = await api_deps.get_db()
+    order = (await _open_queue(db, fixture_user_id))[0]
+    assert dropped not in order and order.index(kept) == 0, order
+    rows = (await _blockers(fixture_user_id, [kept]))[kept]
+    assert [b["label"] for b in rows if b["kind"] == "queued"] == ["in batch #1"], rows

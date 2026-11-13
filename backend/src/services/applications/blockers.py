@@ -273,7 +273,6 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         open_asks.setdefault(int(d["application_id"]), []).append(d)
     queued_at = await spine.queued_at_by_app(db, user_id, None)
     hosts = await learned.blocked_hosts(db, user_id) if queued_at else frozenset()
-    position = {a: n for n, (a, _t) in enumerate(sorted(queued_at.items(), key=lambda kv: (_when(kv[1]), kv[0])), 1)}
     lap("asks_queue")
     line = await spine.user_score_line(user_id)
     today_iso = (await spine.user_today(db, user_id)).isoformat()
@@ -330,6 +329,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     # F5: the user's own rule drops it (below the line, below_line skip), read the way open_queue reads it.
     dropped = _dropped(below, apps, line, _or_empty(loaded))
     queued_at = {a: t for a, t in queued_at.items() if a not in dropped}
+    # A batch place counts only the jobs open_queue keeps: drop every queued job the rule drops, not only `ids`
+    # (#1598 review: numbered before the drop, a kept job read "in batch #2" while first in the real batch).
+    position = await _batch_places(db, user_id, loaded) if queued_at else {}
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
                 and apps[i]["status"] not in _DEAD and state[i]["reason"] != "posting_closed"]
@@ -398,7 +400,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             if browser["kind"] == "own_browser":
                 out.append(_b("queued", "your_pc", "apply from your PC", queued_at[app_id]))
             else:
-                out.append(_b("queued", "assistant", f"in batch #{position[app_id]}", queued_at[app_id]))
+                place = position.get(app_id)  # None: open_queue left it out, so no number is claimed
+                out.append(_b("queued", "assistant", f"in batch #{place}" if place else "in the batch",
+                              queued_at[app_id]))
         elif considering and s["cv"] and not s["fill"] and app_id not in dropped:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
             if a.get("fit_recorded_at"):
@@ -436,6 +440,21 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                    "result": "ok"},
         )
     lap("derive")
+
+
+async def _batch_places(
+    db: Any, user_id: str, loaded: Optional[tuple[Any, list[dict[str, Any]]]],
+) -> dict[int, int]:
+    """Each queued job's place in the batch, 1-based: read off ``spine.open_queue`` itself, the batch the
+    assistant works, so a job the user's own rule drops (or one no longer considered) holds no place."""
+    if loaded is None:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - profile imports spine
+
+        profile = await asyncio.to_thread(load_profile, user_id)
+    else:
+        profile = _or_empty(loaded)
+    order, _ = await spine.open_queue(db, user_id, profile)
+    return {a: n for n, a in enumerate(order, 1)}
 
 
 def _dropped(below: list[int], apps: dict[int, dict[str, Any]], line: Optional[int], profile: Any) -> set[int]:
