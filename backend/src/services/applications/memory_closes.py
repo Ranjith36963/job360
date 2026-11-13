@@ -91,6 +91,8 @@ async def close_covered(db: JobDatabase, user_id: str, application_id: Optional[
 
 
 async def _close_covered(db: JobDatabase, user_id: str, application_id: Optional[int]) -> int:
+    import asyncio  # noqa: PLC0415 - stdlib, only this reader needs it
+
     from src.services.applications import kit  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
@@ -112,7 +114,10 @@ async def _close_covered(db: JobDatabase, user_id: str, application_id: Optional
             rows.append((int(r[0]), country))
     if not rows:
         return 0
-    loaded, overlay = load_profile_with_overlay(user_id)
+    # Off the event loop. Safe although writes follow: every await below already separates this read from
+    # them, and each withdraw is guarded in the database (``answered_at IS NULL AND withdrawn_at IS NULL``,
+    # 409 on no rowcount), so an ask answered in the gap is never closed behind the user's back.
+    loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
     profile = loaded or UserProfile()
     memory: dict[str, dict[str, dict[str, Any]]] = {}
     closed = 0

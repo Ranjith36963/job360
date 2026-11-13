@@ -12,6 +12,8 @@ Owner answers 2026-10-31 applied here:
   user clicks Mark Applied or It was not sent) comes first of all;
 * order: posting_closed, site_step, approve_cv, answers, send_yes, apply_by_hand, notes on you, notes on your PC,
   then assistant, then employer; ties oldest first;
+* owner 2026-11-13: an unapproved CV with no review (``review_cv``) or a weak one with tries left (``fix_cv``) is
+  the ASSISTANT's turn (``kit.assistant_cv_turns``), after every blocker on the user; never ``approve_cv``;
 * a CAPTCHA / sign-in / code / account / upload / safety stop is ALWAYS the user's (actor ``you``), whichever
   browser hit it, and its open ask and its ``blocked`` event are ONE blocker.
 A closed application (rejected, withdrawn, ghosted, hired, declined) has none. A form yes older than its
@@ -60,8 +62,11 @@ _DEAD = ("rejected", "withdrawn")
 # kind order (lower = sooner); notes on the user's PC come after the ones on the user, then the others.
 _RANK = {
     "confirm_sent": -1, "posting_closed": 0, "site_step": 1, "approve_cv": 2, "answers": 3, "send_yes": 4,
-    "apply_by_hand": 5, "outreach_send": 6, "assistant_step": 8, "queued": 9, "follow_up": 10, "waiting_employer": 11,
+    "apply_by_hand": 5, "outreach_send": 6, kit.REVIEW_CV: 7, kit.FIX_CV: 7, "assistant_step": 8, "queued": 9,
+    "follow_up": 10, "waiting_employer": 11,
 }
+_CV_TURNS = (kit.REVIEW_CV, kit.FIX_CV)
+_LOG_IDS_MAX = 50
 _SITE_WORDS = {
     "captcha": "solve the CAPTCHA", "bot_check": "solve the CAPTCHA", "login_needed": "sign in",
     "login": "sign in", "otp_needed": "enter the code", "account_creation": "create an account",
@@ -203,7 +208,11 @@ async def blockers_for(
     get_audit_logger().info(
         "blockers_derived",
         extra={"event": "blockers_derived", "user_id": safe_log_value(user_id), "ids": len(wanted),
-               "blockers": sum(len(v) for v in result.values()), "ms": int((time.monotonic() - started) * 1000),
+               "blockers": sum(len(v) for v in result.values()),
+               # ids + reason codes of the CVs left with the assistant (capped): why a job left Needs you.
+               "cv_turns": {k: sorted(a for a, v in result.items() if any(b["kind"] == k for b in v))[:_LOG_IDS_MAX]
+                            for k in _CV_TURNS},
+               "ms": int((time.monotonic() - started) * 1000),
                "result": "ok"},
     )
     return result
@@ -305,6 +314,11 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
     lap("flags")
     reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded))
+    # Owner 2026-11-13: an unreviewed CV, or a weak one with tries left, is the assistant's to review / fix first.
+    turns = await kit.assistant_cv_turns(db, user_id, {
+        i: cv for i, cv in unseen.items()
+        if i not in reviewed and i not in receipts and apps[i]["status"] == "considering"
+    })
     lap("reviews")
 
     sent_ids = [i for i in ids if apps[i]["status"] != "considering" and not state[i]["below"]
@@ -355,7 +369,11 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             out += _answer_blockers(app_id, question_asks, flags.get(app_id, []), since, reason == "unknown_question")
         if considering and s["cv"] and not s["seen"] and app_id not in receipts and app_id not in reviewed:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
-            out.append(_b("approve_cv", "you", "approve the CV", s["cv"]["created_at"], cv_ref))
+            if (turn := turns.get(app_id)) is not None:
+                label = "review the CV" if turn == kit.REVIEW_CV else "fix the CV (weak review)"
+                out.append(_b(turn, "assistant", label, s["cv"]["created_at"], {**cv_ref, "reason": turn}))
+            else:
+                out.append(_b("approve_cv", "you", "approve the CV", s["cv"]["created_at"], cv_ref))
         if s["fill_open"]:
             yes = s["approved"]
             if yes is None:

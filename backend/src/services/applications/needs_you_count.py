@@ -23,6 +23,7 @@ and people are left out. Nothing is judged by its words: a real "Simulation Engi
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -217,13 +218,13 @@ async def needs_you_count(
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other
     suggestions, _ = await outcome_suggestions.open_suggestions(db, user_id, settings.OUTCOME_SUGGESTIONS_LIST_MAX)
     mark("suggestions")
-    waiting_settings = len(setting_requests.list_waiting(user_id))
+    waiting_settings = len(await asyncio.to_thread(setting_requests.list_waiting, user_id))
     mark("settings")
     open_mail = min(await inbox_items.count_open(db, user_id), MAIL_LIST_MAX)
     mark("inbox")
     other = general + len(other_ask_ids) + waiting_settings + len(suggestions) + open_mail + connections
     # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
-    answer_once = ask_once.open_questions(user_id)
+    answer_once = await asyncio.to_thread(ask_once.open_questions, user_id)
     mark("answer_once")
     # Owner #12: one line for the jobs on the user's PC when no session in their own browser worked the queue.
     from src.services.applications import own_browser  # noqa: PLC0415 - own_browser -> contacts -> this package

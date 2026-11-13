@@ -19,6 +19,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core import settings
 from src.repositories import pgsync
+from tests._cv_review import owners_turn
 
 FORM = "https://careers.example/apply/7"
 
@@ -164,6 +165,7 @@ async def test_one_job_with_an_ask_a_ready_card_and_a_cv_counts_once(authenticat
         app_id = await _bring(client)
         await _ask(client, app_id)
         await _cv(client, app_id)
+        await owners_turn(authenticated_async_context.fixture_user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         await _ready(client, app_id)
         assert (await client.get("/api/ready-to-send")).json()["total"] == 1
         assert len((await client.get("/api/cv-to-approve")).json()["items"]) == 1
@@ -266,6 +268,7 @@ async def test_the_total_equals_the_pages_rules_over_the_pages_own_reads(authent
         await _ask(client, jobs[1], "Second")
         await _ready(client, jobs[1])
         await _cv(client, jobs[2])
+        await owners_turn(user_id, jobs[2])  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         await _ready(client, jobs[3])
         await _applied(client, jobs[4])
         await _person(client, "Rita", jobs[4])

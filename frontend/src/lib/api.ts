@@ -1315,9 +1315,11 @@ export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
 export type StatsResponse = _Schemas["StatsResponse"];
 
 /** What changed since `since` (events oldest first, `limit` max 200). Page on
- * with `next_since` + `next_after_id` while `truncated` is true. */
+ * with `next_since` + `next_after_id` while `truncated` is true. With `newest: true`
+ * the page is the NEWEST `limit` events (still oldest first inside the page); page
+ * back to older ones with `before_id` = `next_before_id` while `truncated`. */
 export async function whatsNew(
-  params: { since?: string; after_id?: number; limit?: number } = {}
+  params: { since?: string; after_id?: number; limit?: number; newest?: boolean; before_id?: number } = {}
 ): Promise<WhatsNewResponse> {
   return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
 }
