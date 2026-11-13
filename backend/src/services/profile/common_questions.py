@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from src.services.profile import answer_guesses
 
@@ -50,12 +50,13 @@ def catalog() -> tuple[dict[str, Any], ...]:
     return tuple(raw)
 
 
-def _countries(profile: Any) -> list[str]:
-    """The countries the user saved a right-to-work or salary record for (not ``ANY``), in saved order."""
+def _countries(profile: Any, extra: Iterable[str] = ()) -> list[str]:
+    """The countries the user saved a right-to-work or salary record for (not ``ANY``), in saved order, then
+    ``extra`` (the countries of the user's queued jobs, :func:`spine.queued_countries`)."""
     out: list[str] = []
     rtw = getattr(getattr(profile, "user_info", None), "right_to_work", None) or {}
     salary = getattr(getattr(profile, "preferences", None), "salary_by_country", None) or []
-    for rec in [*(rtw.get("countries") or []), *salary]:
+    for rec in [*(rtw.get("countries") or []), *salary, *({"country": c} for c in extra)]:
         cc = str((rec or {}).get("country") or "").upper() if isinstance(rec, dict) else ""
         if cc and cc != "ANY" and cc not in out:
             out.append(cc)
@@ -154,12 +155,14 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
     }
 
 
-def common_questions(profile: Any, overlay: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def common_questions(
+    profile: Any, overlay: list[dict[str, Any]], extra_countries: Iterable[str] = (),
+) -> list[dict[str, Any]]:
     """Every common question with the user's saved answer and whether they verified it. One row per
     saved country for a per-country question (none when no country is saved: the kit has nothing)."""
     from src.services.applications import kit  # noqa: PLC0415 - lazy: kit is large
 
-    countries = _countries(profile)
+    countries = _countries(profile, extra_countries)
     by_country = {cc: kit.compute_answers(profile, overlay, cc)[0] for cc in countries}
     plain, _ = kit.compute_answers(profile, overlay, None)
 

@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
+from src.api.dependencies import get_request_db
+from src.repositories.database import JobDatabase
 from src.services.profile import common_questions
 
 router = APIRouter(tags=["profile"])
@@ -83,15 +85,20 @@ class QuestionnaireOut(BaseModel):
 
 
 @router.get("/profile/questionnaire", response_model=QuestionnaireOut, dependencies=AUTH_FIRST)
-async def get_questionnaire(user: CurrentUser = Depends(require_user)) -> dict[str, Any]:  # noqa: B008
-    """Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed
-    or not known, most-guessed first (``ask_once.questionnaire``). Read-only."""
+async def get_questionnaire(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Ask once (owner 2026-11-02): up to 10 common questions per country the user works in or has a queued
+    job in, still guessed or not known, most-guessed first (``ask_once.questionnaire``). Read-only."""
+    from src.services.applications import spine  # noqa: PLC0415
     from src.services.profile import ask_once  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
     loaded, overlay = load_profile_with_overlay(user.id)
-    return {"countries": ask_once.questionnaire(loaded or UserProfile(), overlay)}
+    queued = await spine.queued_countries(db, user.id)
+    return {"countries": ask_once.questionnaire(loaded or UserProfile(), overlay, queued)}
 
 
 class RememberItem(BaseModel):
