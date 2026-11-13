@@ -2237,6 +2237,12 @@ async def queue_if_open(
         return False, "below your score line, and below the line you drop jobs"
     if application_id in await queued_at_by_app(db, user_id, [application_id]):
         return True, "already queued"
+    if recorded_by != "web" and await unqueued_as_closed(db, user_id, application_id):
+        get_audit_logger().info("queue_refused_closed_posting", extra={
+            "event": "queue_refused_closed_posting", "user_id": safe_log_value(user_id),
+            "application_id": int(application_id), "actor": safe_log_value(recorded_by), "result": "refused",
+        })
+        return False, CLOSED_POSTING_NOTE
     row = await get_owned_application(db, user_id, application_id)
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM application_receipts WHERE application_id = ? AND user_id = ?",
@@ -2249,6 +2255,29 @@ async def queue_if_open(
         occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=recorded_by,
     )
     return True, None
+
+
+CLOSED_POSTING_NOTE = "taken off the queue as a closed posting; only the user puts it back"
+
+
+async def unqueued_as_closed(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """2026-11-13 (app 146: unqueued as ``closed_posting``, queued again by an agent, five more CVs): the newest
+    surviving queue event is ``unqueued`` {reason: closed_posting}. Only the user's own ``queued`` undoes it."""
+    cur = await db._db.execute(
+        "SELECT e.event_type, e.payload FROM application_events e WHERE e.user_id = ? AND e.application_id = ? "
+        "AND e.event_type IN ('queued', 'unqueued') "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "ORDER BY e.id DESC LIMIT 1",
+        (user_id, application_id),
+    )
+    row = await cur.fetchone()
+    if row is None or row["event_type"] != "unqueued":
+        return False
+    try:
+        p = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
+    except ValueError:
+        return False
+    return isinstance(p, dict) and p.get("reason") == "closed_posting"
 
 
 async def below_line_dropped(db: JobDatabase, user_id: str, ids: list[int], cfg: Any = None) -> set[int]:

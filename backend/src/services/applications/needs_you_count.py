@@ -30,11 +30,12 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import asks as asks_service
-from src.services.applications import inbox_items, outcome_suggestions, spine, test_marker
+from src.services.applications import inbox_items, outcome_suggestions, site_signin, spine, test_marker
 from src.services.profile import ask_once, setting_requests
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
+    from src.services.applications.blockers import Blocker
 
 # The page's list of unmatched mail asks for 50 (GET /api/inbox-items default); its New connections
 # read at most 25 full records (``MAX_NEW_CONNECTIONS`` in NewConnections.tsx).
@@ -148,6 +149,7 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
     by_actor = dict.fromkeys(ACTORS, 0)
     by_kind: dict[str, int] = {}
     mine: list[tuple[str, int, str]] = []
+    firsts: dict[int, Blocker] = {}
     for app_id, lst in (await blockers.blockers_for(db, user_id, ids, tests=tests)).items():
         if not lst:
             continue
@@ -156,11 +158,18 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
         by_kind[first["kind"]] = by_kind.get(first["kind"], 0) + 1
         if first["actor"] == "you":
             mine.append((first["since"], app_id, first["kind"]))
+            firsts[app_id] = first
     mine.sort()
+    # Diagnosis D (2026-11-13): one sign-in on a site clears every job on it, so those jobs are ONE item.
+    signins, grouped = site_signin.group([(i, firsts[i]) for _, i, _ in mine])
     by_ids: dict[str, list[int]] = {}
     for _, app_id, kind in mine:
-        by_ids.setdefault(kind, []).append(app_id)
-    return {"by_actor": by_actor, "by_kind": by_kind, "job_ids": [i for _, i, _ in mine], "job_ids_by_kind": by_ids}
+        if app_id not in grouped:
+            by_ids.setdefault(kind, []).append(app_id)
+    return {
+        "by_actor": by_actor, "by_kind": by_kind, "job_ids": [i for _, i, _ in mine if i not in grouped],
+        "job_ids_by_kind": by_ids, "site_signins": signins, "signin_job_ids": sorted(grouped),
+    }
 
 
 PHASES = ("tests", "asks", "contacts", "blockers", "suggestions", "settings", "inbox", "answer_once", "pc_idle")
@@ -169,7 +178,8 @@ PHASES = ("tests", "asks", "contacts", "blockers", "suggestions", "settings", "i
 async def needs_you_count(
     db: JobDatabase, user_id: str, timings: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
-    """``n`` = jobs + other. ``jobs`` = the jobs whose first blocker is the user (= ``jobs_waiting_on_you``);
+    """``n`` = the page's job rows + one per sign-in site (``site_signins``) + other. ``jobs`` = the jobs whose
+    first blocker is the user (= ``jobs_waiting_on_you``);
     ``by_actor`` / ``by_kind`` count every open job once by its first blocker, so the badge, the dashboard
     headline and the Needs-you chips all read this one answer.
 
@@ -204,7 +214,7 @@ async def needs_you_count(
     if timings is not None:
         timings.update({f"b_{part}": ms for part, ms in parts.items()})
     jobs = first["by_actor"]["you"]
-    rows = set(first["job_ids"])
+    rows = {*first["job_ids"], *first.pop("signin_job_ids")}  # a grouped job's asks wait on its host card
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other
     suggestions, _ = await outcome_suggestions.open_suggestions(db, user_id, settings.OUTCOME_SUGGESTIONS_LIST_MAX)
     mark("suggestions")
@@ -222,6 +232,7 @@ async def needs_you_count(
     pc_idle = await own_browser.pc_idle(db, user_id, datetime.now(timezone.utc), first["by_actor"]["your_pc"])
     mark("pc_idle")
     return {
-        "n": jobs + other + (1 if answer_once else 0), "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
+        "n": len(first["job_ids"]) + len(first["site_signins"]) + other + (1 if answer_once else 0),
+        "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
         "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first, "pc_idle": pc_idle,
     }

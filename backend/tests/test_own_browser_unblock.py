@@ -118,8 +118,10 @@ async def _job360_block(user_id: str, app_id: int, reason: str) -> None:
 
     user = CurrentUser(id=user_id, email="u@example.com")
     async with browser_routes._db() as db:  # noqa: SLF001
+        proof = {"evidence": "page_says_closed"} if reason == "posting_closed" else {}  # required with it
         await blocked_service.record_browser_block(
-            db, user, app_id, {"reason": reason, "step": "Job360 browser", "page_host": "careers.northwind.example"}
+            db, user, app_id,
+            {"reason": reason, "step": "Job360 browser", "page_host": "careers.northwind.example", **proof},
         )
 
 

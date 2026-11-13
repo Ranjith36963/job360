@@ -358,6 +358,18 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     rows = [dict(r) for r in await cur.fetchall()]
     if not rows:
         return 0
+    rechecked = await _unproven_closed_asks(db, user_id, [int(r["id"]) for r in rows])
+    rows = [r for r in rows if int(r["id"]) not in rechecked]
+    closed = 0
+    for ask_id in sorted(rechecked):
+        try:
+            await withdraw_ask(db, user_id, ask_id, TIDY_ACTOR, RECHECK_CLOSED)
+            closed += 1
+        except SpineError:  # answered or withdrawn in between
+            continue
+    if rechecked:
+        get_audit_logger().info("closed_posting_asks_withdrawn", extra={
+            "event": "closed_posting_asks_withdrawn", "user_id": user_id, "ask_ids": sorted(rechecked)})
     groups: dict[tuple[Optional[int], str, str], list[dict[str, Any]]] = {}
     closed_job: list[dict[str, Any]] = []
     applied_job: list[dict[str, Any]] = []
@@ -382,9 +394,8 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     pasted = [a for (_app, fam, _side), v in groups.items() if fam == "question"
               for a in v[-1:] if any(_PASTE_RE.search(str(q["question"])) for q in _rows_of_all(v))]
     if not dupes and not closed_job and not pasted and not applied_job:
-        return 0
+        return closed
     now = datetime.now(timezone.utc).isoformat()
-    closed = 0
     async with db._db.transaction():
         for (_app, family, _side), asks_ in dupes.items():
             keep, olds = asks_[-1], asks_[:-1]
@@ -418,6 +429,37 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed,
                                                   "jobless_merged": jobless})
     return closed
+
+
+RECHECK_CLOSED = "Job360 is re-checking the posting"
+
+
+async def _unproven_closed_asks(db: JobDatabase, user_id: str, ask_ids: list[int]) -> set[int]:
+    """2026-11-13 (asks 578, 580): of these open asks, those a ``blocked`` {reason: posting_closed} with no
+    ``evidence`` opened (its payload names the ask) and no other block reason shares. The job goes back to the
+    queue once for a re-check with proof (``queue_preflight.closed_recheck_ids``); the ask no longer waits."""
+    if not ask_ids:
+        return set()
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE user_id = ? AND event_type = 'blocked' "  # noqa: S608
+        "AND application_id IN (SELECT application_id FROM application_asks WHERE user_id = ? "
+        f"AND id IN ({','.join('?' for _ in ask_ids)}))",  # placeholders only
+        (user_id, user_id, *ask_ids),
+    )
+    hit: set[int] = set()
+    other: set[int] = set()
+    for r in await cur.fetchall():
+        raw = r[0]
+        try:
+            p = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        ask_id = p.get("ask_id") if isinstance(p, dict) else None
+        if not isinstance(ask_id, int):
+            continue
+        unproven = p.get("reason") == "posting_closed" and not p.get("evidence")
+        (hit if unproven else other).add(ask_id)
+    return (hit - other) & set(ask_ids)
 
 
 async def _log_read_form_notes(db: JobDatabase, user_id: str) -> None:

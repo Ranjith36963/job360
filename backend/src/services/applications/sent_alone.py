@@ -147,7 +147,8 @@ def _linkedin_items(rows: list[dict[str, Any]], person: dict[str, Any]) -> list[
             if yes and yes[-1]["entry"] == ob.APPROVED and not (invites and invites[-1]["id"] > yes[-1]["id"]):
                 continue  # the user pressed Send on this message itself
             kind, words = "linkedin_message", str(messages[-1].get("text") or "")
-            question = f"LinkedIn message to {person['name']}"
+            noted = not invites and not any(r["entry"] == "sent" and r["channel"] == "linkedin" for r in earlier)
+            question = f"LinkedIn {'connection note' if noted else 'message'} to {person['name']}"
         else:
             continue
         out.append({
@@ -155,6 +156,17 @@ def _linkedin_items(rows: list[dict[str, Any]], person: dict[str, Any]) -> list[
             "sent_at": str(row["recorded_at"]), "reported_wrong": False,
         })
     return out
+
+
+async def _tag(db: JobDatabase, user_id: str, items: list[dict[str, Any]]) -> None:
+    """F12: each item gets ``approval`` (the approval.py item for that very row, else ``None``). Never a guess."""
+    from src.services.applications import approval  # noqa: PLC0415
+
+    app_ids = [int(i["application_id"]) for i in items if i["application_id"] is not None]
+    found = await approval.approvals_for(db, user_id, app_ids)
+    by_ref = {(a["ref_kind"], a["ref"]): a for v in found.values() for a in v}
+    for i in items:
+        i["approval"] = by_ref.get(("event", -i["id"]) if i["kind"] == "cv" else ("outreach", i["id"]))
 
 
 async def list_items(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
@@ -183,6 +195,7 @@ async def list_items(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
         }
         out.extend(_linkedin_items(await contacts._outreach_rows(db, contact_id), person))
     out.extend(await _cv_items(db, user_id))
+    await _tag(db, user_id, out)
     return sorted(out, key=lambda i: (i["sent_at"], i["id"]), reverse=True)
 
 

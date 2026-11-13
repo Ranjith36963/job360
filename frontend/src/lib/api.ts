@@ -963,6 +963,7 @@ export async function deleteCoveredAnswer(id: string): Promise<_Schemas["Covered
  *  with the sources they were checked against. A log, never a to-do. Also CVs sent on a strong review (kind
  *  "cv", id < 0) and `cv_sample`: today's 5 to check. */
 export type SentOnItsOwnItem = _Schemas["SentItem"];
+export type Approval = _Schemas["ApprovalOut"];
 export async function getSentOnItsOwn(): Promise<_Schemas["SentOnItsOwnOut"]> {
   return request("/api/sent-on-its-own");
 }
@@ -1292,6 +1293,12 @@ export async function resolveBlocked(applicationId: number): Promise<Application
   return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
 }
 
+/** "I've signed in" on a Needs-you site card: every job waiting on a sign-in on `host` is unblocked
+ * (`unblocked` {user_did_it} + `site_account` {host}); their asks close. 409 when none waits. */
+export async function signedInOnSite(host: string): Promise<_Schemas["SignedInOut"]> {
+  return request(`/api/sites/${encodeURIComponent(host)}/signed-in`, { method: "POST" });
+}
+
 /** "I submitted it" - the user pressed Submit themselves after the block: records `unblocked`
  * {resolution: user_did_it} and a receipt (recorded_by web, the pasted confirmation). 409 once a receipt exists. */
 export async function submittedBlocked(
@@ -1451,6 +1458,7 @@ export async function getMorningCheck(since: string): Promise<MorningCheck> {
 
 // ---- Needs-you total for the menu badge (owner 2026-10-27) ----
 export type NeedsYouCount = _Schemas["NeedsYouCountOut"];
+export type SiteSignIn = _Schemas["SiteSignInOut"];
 
 /** The number "N things need you" shows, computed by the server with the page's own rules. */
 export async function getNeedsYouCount(): Promise<NeedsYouCount> {

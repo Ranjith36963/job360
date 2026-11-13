@@ -86,15 +86,32 @@ async def test_a_closed_page_with_proof_closes_and_leaves_needs_you(authenticate
 
 
 @pytest.mark.asyncio
-async def test_no_proof_means_no_close_and_the_user_still_decides(authenticated_async_context):
+async def test_no_proof_means_no_close_and_the_user_still_decides(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as web:
         app_id = await _bring(web, 2)
         async with await _agent(web) as agent:
             resp = await _closed(agent, app_id)
-        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        # 2026-11-13: no door takes a closed posting without proof now (422); a block written before that
+        # (production apps 998, 146) still never closes the job by itself.
+        assert resp.status_code == 422 and "posting_closed needs evidence" in resp.text, resp.text
+        await _legacy_unproven_block(fixture_user_id, app_id)
         detail = await _detail(web, app_id)
         assert detail["status"] == "considering" and _events(detail, "withdrawn") == []
         assert (await _count(web))["job_ids_by_kind"]["posting_closed"] == [app_id]
+
+
+async def _legacy_unproven_block(user_id: str, app_id: int) -> int:
+    from src.api.routes import browser as browser_routes
+    from src.services.applications import spine
+
+    async with browser_routes._db() as db:  # noqa: SLF001
+        ev = await spine.append_event(
+            db, user_id=user_id, application_id=app_id, event_type="blocked",
+            payload={"reason": "posting_closed", "step": "open the ad", "page_host": HOST, "detail": "",
+                     "assistant": "token:claude-code"},
+            occurred_at=spine.parse_occurred_at(None), recorded_by="token:claude-code",
+        )
+    return int(ev["event_id"])
 
 
 @pytest.mark.asyncio
@@ -233,14 +250,15 @@ async def test_a_job_with_an_open_ask_to_the_owner_is_never_auto_closed(authenti
 
 
 @pytest.mark.asyncio
-async def test_an_assistants_look_alike_withdrawn_is_not_undoable(authenticated_async_context):
+async def test_an_assistants_look_alike_withdrawn_is_not_undoable(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as web:
         app_id = await _bring(web, 11)
         async with await _agent(web) as agent:
-            block = await _closed(agent, app_id)  # no evidence: a real block, never a proven close
+            # no evidence: a real block (written before proof was required), never a proven close
+            block_id = await _legacy_unproven_block(fixture_user_id, app_id)
             fake = await agent.post(f"/api/applications/{app_id}/events", json={
                 "event_type": "withdrawn", "detail": "posting closed",
-                "payload": {"closed_by": "posting_closed", "blocked_event_id": block.json()["event_id"]}})
+                "payload": {"closed_by": "posting_closed", "blocked_event_id": block_id}})
             assert fake.status_code == 201 and fake.json()["status"] == "withdrawn", fake.text
         assert (await web.post(f"/api/applications/{app_id}/auto/undo")).status_code == 409
         assert (await _detail(web, app_id))["status"] == "withdrawn"
