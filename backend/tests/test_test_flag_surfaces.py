@@ -15,6 +15,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.core import settings
+from tests._cv_review import owners_turn
 from tests._routes import route_table
 
 FORM = "https://careers.{co}.example/apply/1"
@@ -183,6 +184,8 @@ async def test_a_test_application_is_on_no_surface(authenticated_async_context, 
         await _ok(await client.patch("/api/profile", json=edit), 200)
         real = set(await _seed(client, "Realco", test=False))
         tests = set(await _seed(client, "Testco", test=True))
+        for open_id in (min(real), min(tests)):  # each seed's open job holds the CV
+            await owners_turn(fixture_user_id, open_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         for path, read in SURFACES.items():
             seen = await read(client)
             assert seen & real, f"{path} listed none of the real applications: the check would be vacuous"

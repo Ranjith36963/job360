@@ -281,25 +281,45 @@ async def preflight_rows(
     ask). ``profile`` / ``overlay`` are the caller's one ``load_profile_with_overlay`` read
     (never re-read here, never on the loop)."""
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine cycle
+    from src.utils.server_timing import Lap  # noqa: PLC0415
+
+    lap = Lap()
     ids = [int(r["id"]) for r in rows]
     if not ids:
         return {}
     now = datetime.now(timezone.utc)
     blocked_n = await _blocked_counts(db, user_id, ids)
+    lap("q_blocked")
     cv_apps = await _with_kind(db, user_id, ids, "cv")
+    lap("q_cv_kinds")
     cleared = await _cleared(db, user_id, ids)
+    lap("q_cleared")
     waiting = await _open_ask_apps(db, user_id, ids)
+    lap("q_open_asks")
     reviews = await cv_review.states_for_apps(db, user_id, ids)
+    lap("q_cv_reviews")
     receipts = await kit.recent_receipts(db, user_id)  # the same rows for every row: read once, not once per row
+    lap("q_receipts")
+    # One answer set per country for the whole page: compute_answers and _missing_flags read only (profile, overlay,
+    # country), so rows in one country share the result; each row still gets its own copy of the key list.
+    missing_keys: dict[Optional[str], list[str]] = {}
+    countries: dict[int, Optional[str]] = {}
+    for r in rows:
+        country = (str(r.get("job_country") or "").strip().upper()) or None
+        countries[int(r["id"])] = country
+        if country not in missing_keys:
+            _blocks, missing = kit.compute_answers(profile, overlay, country)
+            flags = ready._missing_flags(profile, missing, country)
+            missing_keys[country] = [str(f["key"]) for f in flags if f.get("key")]
+    lap("q_answers")
+    dups = await kit.duplicate_facts_batch(db, user_id, rows, now, receipts=receipts)
+    lap("q_duplicates")
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         app_id = int(r["id"])
-        country = (str(r.get("job_country") or "").strip().upper()) or None
-        _blocks, missing = kit.compute_answers(profile, overlay, country)
-        flags = ready._missing_flags(profile, missing, country)
         app_row = {"id": app_id, "job_id": r.get("job_id"), "job_url": r.get("job_url"),
                    "job_company": r.get("job_company")}
-        dup = await kit.duplicate_facts(db, user_id, app_row, now, receipts=receipts)
+        dup = dups[app_id]
         flag = str(dup["flag"] or "")
         if flag == "same_job" and app_id in cleared:
             flag = ""
@@ -307,8 +327,9 @@ async def preflight_rows(
         if cfg.company_cap is not None:
             applied = await settings_rules.company_applied_count(db, user_id, app_id, now, cfg.company_cap_days)
             left = settings_rules.company_left(cfg, applied)
+            lap("q_company_cap")
         out[app_id] = {
-            "kit_missing": [str(f["key"]) for f in flags if f.get("key")],
+            "kit_missing": list(missing_keys[countries[app_id]]),
             "has_cv": app_id in cv_apps,
             # 2026-11-09 (application 339): the newest CV's review, from valid reviews only; "none" = review it.
             "cv_review": reviews.get(app_id, cv_review.NONE),
@@ -321,6 +342,7 @@ async def preflight_rows(
             # An open ask to the owner (no answer, not withdrawn): skip the row until they answer.
             "waiting_on_owner": app_id in waiting,
         }
+        lap("q_build")
     return out
 
 
