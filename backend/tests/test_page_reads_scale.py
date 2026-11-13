@@ -33,16 +33,18 @@ async def _bring(client: Any, start: int, n: int) -> list[int]:
         assert resp.status_code in (200, 201), resp.text
         app_id = int(resp.json()["application_id"])
         ids.append(app_id)
+        # The CV and the ask come BEFORE the fill: a fill older than the newest CV is the assistant's refill
+        # (F6), and an ask filed after a fill folds into that fill's one "check and send" item.
+        cv = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": f"CV {i}"})
+        assert cv.status_code == 201, cv.text
+        ask = await client.post("/api/asks", json={"question": f"Notice period {i}?", "application_id": app_id})
+        assert ask.status_code in (200, 201), ask.text
         for event_type, payload in (("note", {}), ("form_filled", {"form_url": "https://northwind.example/f",
                                                                   "fields_count": 1, "answers": []})):
             sent = await client.post(
                 f"/api/applications/{app_id}/events", json={"event_type": event_type, "detail": "n", "payload": payload}
             )
             assert sent.status_code == 201, sent.text
-        cv = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": f"CV {i}"})
-        assert cv.status_code == 201, cv.text
-        ask = await client.post("/api/asks", json={"question": f"Notice period {i}?", "application_id": app_id})
-        assert ask.status_code in (200, 201), ask.text
     return ids
 
 
@@ -140,7 +142,7 @@ async def test_blockers_share_one_profile_read(authenticated_async_context, monk
     async with browser_routes._db() as db:  # noqa: SLF001
         found = await blockers_service.blockers_for(db, user_id, ids)
     kinds = {b["kind"] for lst in found.values() for b in lst}
-    assert kinds == {"approve_cv", "answers", "send_yes", "assistant_step"}  # every profile reader ran
+    assert kinds == {"approve_cv", "answers", "check_send", "assistant_step"}  # every profile reader ran
     assert reads == [user_id, user_id]
 
 

@@ -2713,16 +2713,8 @@ async def get_application_detail(
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
     # reaches the web header and every agent calling get_application.
-    from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
-
-    detail["next_step"] = next_step_for_detail(
-        detail,
-        approval_holds=await _approval_holds(
-            db, user_id, app_row,
-            [(int(e.get("id") or 0), str(e.get("event_type"))) for e in events if not e.get("superseded")],
-        ),
-    )
     from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+    from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
 
     held = (await kit_service.holds_for_apps(db, user_id, [application_id], datetime.now(timezone.utc))).get(
         application_id
@@ -2732,6 +2724,14 @@ async def get_application_detail(
 
     mine = await blockers_service.blockers_for(db, user_id, [application_id])
     detail.update(blockers_fields(mine.get(application_id, [])))
+    detail["next_step"] = next_step_for_detail(
+        detail,
+        approval_holds=await _approval_holds(
+            db, user_id, app_row,
+            [(int(e.get("id") or 0), str(e.get("event_type"))) for e in events if not e.get("superseded")],
+        ),
+        assistant_finishes_form=blockers_service.assistant_owns_form(mine.get(application_id, [])),
+    )
     return detail
 
 
@@ -3145,6 +3145,7 @@ async def list_applications(
                     form_filled=kit_flags(kit_events_by_app.get(app_id, []))[0],
                     submit_approved=kit_flags(kit_events_by_app.get(app_id, []))[1],
                     approval_holds=await _approval_holds(db, user_id, r, kit_events_by_app.get(app_id, [])),
+                    assistant_finishes_form=blockers_service.assistant_owns_form(blockers_by_app.get(app_id, [])),
                 ),
             }
         )

@@ -47,9 +47,6 @@ def covered(ask: dict[str, Any], country: Optional[str], by_key: dict[str, dict[
     form would (:func:`kit._memory_answer`). ``by_key`` is :func:`kit.compute_answers`' items by key for that
     country. Unset is absent (rule #29); a mixed ask, an unknown country or a row with no single fact is
     never covered."""
-    from src.services.applications import kit  # noqa: PLC0415 - kit imports this package
-    from src.services.profile.ask_once import memory_question  # noqa: PLC0415
-
     if not country or ask.get("status") != "open" or ask.get("application_id") is None:
         return False
     if ask.get("kind") not in asks.QUESTION_FAMILY or ask.get("asked_by") == "web":
@@ -61,16 +58,22 @@ def covered(ask: dict[str, Any], country: Optional[str], by_key: dict[str, dict[
     rows = ask.get("questions") or []
     if not rows:
         return False
-    for row in rows:
-        if not isinstance(row, dict):
-            return False
-        family, template = memory_question(str(row.get("key") or "") or None, str(row.get("question") or ""))
-        if not family or template is None:
-            return False
-        item, _why = kit._memory_answer(by_key, template, country)
-        if item is None or item.get("source") not in ("memory", "profile") or item.get("state") not in _USERS_WORD:
-            return False
-    return True
+    return all(row_covered(row, country, by_key) for row in rows)
+
+
+def row_covered(row: Any, country: Optional[str], by_key: dict[str, dict[str, Any]]) -> bool:
+    """Pure: ONE question row is a Memory fact the user has set, in their own word, for ``country`` (the rule
+    :func:`covered` applies to every row of an ask; the Needs-you blockers use it per row, so the two never drift)."""
+    from src.services.applications import kit  # noqa: PLC0415 - kit imports this package
+    from src.services.profile.ask_once import memory_question  # noqa: PLC0415
+
+    if not country or not isinstance(row, dict):
+        return False
+    family, template = memory_question(str(row.get("key") or "") or None, str(row.get("question") or ""))
+    if not family or template is None:
+        return False
+    item, _why = kit._memory_answer(by_key, template, country)
+    return item is not None and item.get("source") in ("memory", "profile") and item.get("state") in _USERS_WORD
 
 
 async def close_covered(db: JobDatabase, user_id: str, application_id: Optional[int] = None) -> int:
