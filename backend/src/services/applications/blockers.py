@@ -37,6 +37,7 @@ from src.services.applications import (
     own_browser,
     queue_preflight,
     ready,
+    site_signin,
     spine,
     test_marker,
 )
@@ -358,6 +359,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 ask_id = (s["block"] or {}).get("ask_id")
             ref = {k: v for k, v in (("ask_id", ask_id),
                                      ("event_id", block_ev["id"] if block_ev else None)) if v is not None}
+            if reason in site_signin.SIGN_IN_REASONS and (host := site_signin.host_of(s["block"] or {}, a["job_url"])):
+                ref["signin_host"] = host  # one sign-in on this site clears it: Needs you groups by host
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
         if s["fill_open"] or question_asks or reason == "unknown_question":

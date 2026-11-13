@@ -358,3 +358,26 @@ async def resolve_inbox_item(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
+
+
+class SignedInOut(BaseModel):
+    host: str
+    unblocked: list[int]
+
+
+@router.post("/sites/{host}/signed-in", status_code=201, response_model=SignedInOut, dependencies=AUTH_FIRST)
+async def site_signed_in(
+    host: str,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"I've signed in" on a Needs-you site card (diagnosis D): for each of the user's jobs with an open
+    sign-in / create-account / code block on ``host``, records ``unblocked`` {user_did_it} and ``site_account``
+    {host}; their asks close. 409 when none waits. Session only; no MCP tool (an agent unblocks per job)."""
+    from src.services.applications import site_signin  # noqa: PLC0415
+
+    try:
+        return await site_signin.signed_in(db, user, host)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
