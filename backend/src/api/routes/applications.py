@@ -2540,7 +2540,8 @@ async def list_applications(
         response.headers["Server-Timing"] = server_timing.header_value(timings, total_ms)
         if total_ms >= SLOW_LIST_MS:
             logger.warning(
-                "applications_list_slow user=%s queued=%s total_ms=%s phases=%s", user.id, queued, total_ms, timings
+                "applications_list_slow user=%s queued=%s total_ms=%s phases=%s",
+                safe_log_value(user.id), bool(queued), total_ms, safe_log_value(timings),
             )
 
 
