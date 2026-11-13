@@ -2026,7 +2026,10 @@ LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
 # The other LinkedIn yes (owner 2026-11-03), in place of owner_clicked: connect_no_note (the user's Send on an
 # after_connect draft: the request goes without a note), auto_connect (the same request with outreach_send auto),
 # auto_after_accept (they accepted a request the user, or outreach_send auto, approved: the message goes).
-LINKEDIN_AUTO_SEND_REASONS: tuple[str, ...] = ("connect_no_note", "auto_connect", "auto_after_accept", "auto_follow_up")
+# auto_note (owner 2026-11-13): under outreach_send auto, a note to someone NOT connected goes alone.
+LINKEDIN_AUTO_SEND_REASONS: tuple[str, ...] = (
+    "connect_no_note", "auto_connect", "auto_after_accept", "auto_follow_up", "auto_note",
+)
 # Said on every LinkedIn answer: its counts are every channel's, not LinkedIn's own day limit.
 _LINKEDIN_COUNTS_NOTE = " (sent_today and daily_max count every channel; LinkedIn's is linkedin_sends_per_day.)"
 
@@ -2152,19 +2155,24 @@ def _linkedin_verdict(
     auto = cfg.outreach_send == OUTREACH_SEND_AUTO
     after_accept = state == "connected" and facts.invited and (facts.invite_owner_approved or auto)
     auto_invite = state == "not_connected" and facts.after_connect and auto and not facts.owner_approved
-    if after_accept and facts.unsupported_claims:
+    # Owner 2026-11-13: a connection NOTE too, to someone known not to be connected, never one already sent or invited.
+    auto_note = (
+        state == "not_connected" and auto and not facts.after_connect and not facts.owner_approved
+        and not facts.invited and not facts.already_sent
+    )
+    if (after_accept or auto_note) and facts.unsupported_claims:
         return OutreachDecision(
             "ask", "unsupported_claims",
             "The draft names a number, years or a name the profile does not contain. It is not sent on its own: "
             "fix it with true facts only, or it waits for the user's Send.",
         )
-    if after_accept and facts.sensitive:
+    if (after_accept or auto_note) and facts.sensitive:
         return OutreachDecision(
             "ask", "sensitive_topic",
             "The draft mentions visa, sponsorship, salary, age or health. It is not sent on its own: it waits "
             "for the user's Send.",
         )
-    if not (facts.owner_approved or after_accept or auto_invite):
+    if not (facts.owner_approved or after_accept or auto_invite or auto_note):
         return OutreachDecision(
             "ask", "needs_owner_click",
             "The user has not pressed Send on this person's card for this draft. Do not send; it waits on Needs you.",
@@ -2188,6 +2196,11 @@ def _linkedin_verdict(
         )
     if auto_invite:
         return OutreachDecision("send", "auto_connect", "outreach_send is auto: " + no_note)
+    if auto_note:
+        return OutreachDecision(
+            "send", "auto_note",
+            "outreach_send is auto: Connect, Add a note, paste the draft exactly, send, then record outreach_sent.",
+        )
     if state == "not_connected" and facts.after_connect:
         return OutreachDecision("send", "connect_no_note", "The user pressed Send: " + no_note)
     return OutreachDecision(
@@ -2224,7 +2237,7 @@ def may_send_outreach(
     invite_limit_reached, company_cap_reached, network_hourly_cap_reached, linkedin_daily_cap_reached,
     too_soon, claimed_by_other_session, needs_claim (the click is there but the caller holds no live claim),
     already_invited, weekly_invite_cap_reached, follow_up_used, follow_up_not_due; ask unsupported_claims,
-    sensitive_topic, needs_owner_click; SEND
+    sensitive_topic, needs_owner_click (an ``auto_note`` also asks on the first two); SEND
     owner_clicked or one of ``LINKEDIN_AUTO_SEND_REASONS``.
     """
     if is_paused(cfg.paused_until, now):
