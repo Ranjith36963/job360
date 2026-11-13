@@ -12,11 +12,12 @@ import { MorningCheck } from "@/components/needs-you/MorningCheck";
 import { BatchApplyPanel } from "@/components/needs-you/BatchApplyPanel";
 import { FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
-import { fetchWhatsNewPages } from "@/lib/home-fetch";
+import { fetchNewestWhatsNew } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
   FEED_LOOKBACK_DAYS,
-  FEED_MAX_PAGES,
+  FEED_NEWEST_MAX_PAGES,
+  assistantEvents,
   buildSentence,
   dayAt,
   daysAgoIso,
@@ -109,7 +110,18 @@ export function Home() {
     // window is cut out of the 30-day read here instead of asking twice. (A
     // last visit older than the window is counted from the window's start.)
     const sinceMs = Date.parse(sinceVisit);
-    fetchWhatsNewPages(daysAgoIso(FEED_LOOKBACK_DAYS), FEED_MAX_PAGES)
+    fetchNewestWhatsNew(
+      daysAgoIso(FEED_LOOKBACK_DAYS),
+      // Stop at ONE page when it already settles all three: the feed's rows, an exact "since you were last
+      // here" count (the oldest event read is at or before the last visit; with an unparseable stamp the
+      // filter below counts every event, so there is no boundary to reach and this holds), and the last
+      // applied line. Otherwise read older pages, up to FEED_NEWEST_MAX_PAGES.
+      (events, applications) =>
+        assistantEvents(events).length >= FEED_LIMIT &&
+        (Number.isNaN(sinceMs) || (events.length > 0 && Date.parse(events[0].recorded_at) <= sinceMs)) &&
+        lastApplied(events, applications) !== null,
+      FEED_NEWEST_MAX_PAGES,
+    )
       .then((r) => {
         if (!live()) return;
         setFeed({
@@ -124,7 +136,9 @@ export function Home() {
           status: "ok",
           value: {
             events: r.events.filter((e) => !(Date.parse(e.recorded_at) <= sinceMs)),
-            truncated: r.truncated,
+            // We hold the NEWEST events: the count is a floor ("N+") only while the oldest one read is still
+            // inside the window since the last visit. Once it is older, everything since then is in hand.
+            truncated: r.truncated && r.events.length > 0 && !(Date.parse(r.events[0].recorded_at) <= sinceMs),
             now: r.now,
           },
         });
