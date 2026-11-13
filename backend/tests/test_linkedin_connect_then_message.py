@@ -226,10 +226,11 @@ async def test_with_outreach_send_auto_the_request_goes_without_a_click(authenti
         assert (await _take(client, cid))["status"] == "task"
         assert await _check(client, cid, mid) == ("send", "auto_connect")
         assert (await _release(client, f"contact:{cid}", "other")).status_code == 200
-        # A note draft to someone else still needs the click under auto.
+        # Owner 2026-11-13 (F14): a note draft to someone not connected goes under auto too, but only with a strong
+        # outreach_reviewed of that draft (test_linkedin_notes_auto.py); without one it asks.
         app2, other = await _person(client, 1)
         note = int((await _save(client, app2, other, "Hi Priya, a short note")).json()["artifact_id"])
-        assert await _check(client, other, note, "laptop") == ("ask", "needs_owner_click")
+        assert await _check(client, other, note, "laptop") == ("stop", "needs_claim")  # nobody holds them yet
 
 
 @pytest.mark.asyncio

@@ -147,7 +147,8 @@ def _linkedin_items(rows: list[dict[str, Any]], person: dict[str, Any]) -> list[
             if yes and yes[-1]["entry"] == ob.APPROVED and not (invites and invites[-1]["id"] > yes[-1]["id"]):
                 continue  # the user pressed Send on this message itself
             kind, words = "linkedin_message", str(messages[-1].get("text") or "")
-            question = f"LinkedIn message to {person['name']}"
+            noted = not invites and not any(r["entry"] == "sent" and r["channel"] == "linkedin" for r in earlier)
+            question = f"LinkedIn {'connection note' if noted else 'message'} to {person['name']}"
         else:
             continue
         out.append({
