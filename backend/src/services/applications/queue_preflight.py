@@ -249,25 +249,36 @@ async def preflight_rows(
     ask). ``profile`` / ``overlay`` are the caller's one ``load_profile_with_overlay`` read
     (never re-read here, never on the loop)."""
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine cycle
+    from src.utils.server_timing import Lap  # noqa: PLC0415
+
+    lap = Lap()
     ids = [int(r["id"]) for r in rows]
     if not ids:
         return {}
     now = datetime.now(timezone.utc)
     blocked_n = await _blocked_counts(db, user_id, ids)
+    lap("q_blocked")
     cv_apps = await _with_kind(db, user_id, ids, "cv")
+    lap("q_cv_kinds")
     cleared = await _cleared(db, user_id, ids)
+    lap("q_cleared")
     waiting = await _open_ask_apps(db, user_id, ids)
+    lap("q_open_asks")
     reviews = await cv_review.states_for_apps(db, user_id, ids)
+    lap("q_cv_reviews")
     receipts = await kit.recent_receipts(db, user_id)  # the same rows for every row: read once, not once per row
+    lap("q_receipts")
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         app_id = int(r["id"])
         country = (str(r.get("job_country") or "").strip().upper()) or None
         _blocks, missing = kit.compute_answers(profile, overlay, country)
         flags = ready._missing_flags(profile, missing, country)
+        lap("q_answers")
         app_row = {"id": app_id, "job_id": r.get("job_id"), "job_url": r.get("job_url"),
                    "job_company": r.get("job_company")}
         dup = await kit.duplicate_facts(db, user_id, app_row, now, receipts=receipts)
+        lap("q_duplicates")
         flag = str(dup["flag"] or "")
         if flag == "same_job" and app_id in cleared:
             flag = ""
@@ -275,6 +286,7 @@ async def preflight_rows(
         if cfg.company_cap is not None:
             applied = await settings_rules.company_applied_count(db, user_id, app_id, now, cfg.company_cap_days)
             left = settings_rules.company_left(cfg, applied)
+            lap("q_company_cap")
         out[app_id] = {
             "kit_missing": [str(f["key"]) for f in flags if f.get("key")],
             "has_cv": app_id in cv_apps,
@@ -289,6 +301,7 @@ async def preflight_rows(
             # An open ask to the owner (no answer, not withdrawn): skip the row until they answer.
             "waiting_on_owner": app_id in waiting,
         }
+        lap("q_build")
     return out
 
 

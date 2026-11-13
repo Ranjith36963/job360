@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Literal, Optional, Union
 
@@ -87,6 +89,7 @@ from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.edits import WEB_ACTOR
 from src.services.profile.models import UserProfile
 from src.services.profile.storage import load_profile
+from src.utils import server_timing
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["applications"])
@@ -2482,6 +2485,9 @@ async def list_outcome_suggestions(
     return {"suggestions": items, "truncated": truncated}
 
 
+SLOW_LIST_MS = 1000  # log the step timings when the list took this long
+logger = logging.getLogger("job360.applications")
+_NO_RESPONSE = Response()  # default for direct callers (MCP); the HTTP route always gets FastAPI's own
 QUEUE_LIST_LIMIT = 200  # the route's own max; a queued list with no limit is the whole queue
 
 
@@ -2510,7 +2516,12 @@ async def list_applications(
     applied: Optional[bool] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+    # FastAPI injects the real response; the default is for the MCP tool, which calls this function directly.
+    response: Response = _NO_RESPONSE,
 ) -> dict[str, Any]:
+    timings: dict[str, float] = {}
+    token = server_timing.TIMINGS.set(timings)
+    started = time.perf_counter()
     try:
         if limit is None:
             limit = QUEUE_LIST_LIMIT if queued else 20
@@ -2522,6 +2533,15 @@ async def list_applications(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    finally:
+        server_timing.TIMINGS.reset(token)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        # How long each step took, in the standard header browsers show. Durations only.
+        response.headers["Server-Timing"] = server_timing.header_value(timings, total_ms)
+        if total_ms >= SLOW_LIST_MS:
+            logger.warning(
+                "applications_list_slow user=%s queued=%s total_ms=%s phases=%s", user.id, queued, total_ms, timings
+            )
 
 
 @router.post("/applications/inbox-checked", response_model=InboxCheckedOut, dependencies=AUTH_FIRST)
