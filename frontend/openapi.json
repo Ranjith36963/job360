@@ -5900,6 +5900,17 @@
             "title": "Artifact Id",
             "type": "integer"
           },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
           "held": {
             "default": [],
             "items": {
@@ -5928,6 +5939,14 @@
             ],
             "title": "State",
             "type": "string"
+          },
+          "top": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Top",
+            "type": "array"
           }
         },
         "required": [
@@ -5962,6 +5981,17 @@
           "artifact_id": {
             "title": "Artifact Id",
             "type": "integer"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
           },
           "held": {
             "default": [],
@@ -6029,6 +6059,14 @@
             ],
             "title": "State",
             "type": "string"
+          },
+          "top": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Top",
+            "type": "array"
           },
           "tries_left": {
             "title": "Tries Left",

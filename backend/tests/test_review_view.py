@@ -18,7 +18,7 @@ from tests.test_application_spine import _second_user_session_cookie, _session_c
 from tests.test_cv_review import CV, N, _event, _mcp_client, _payload, _review, _save_cv, _seed, _setup, _stored, sha
 
 KEYS = {"id", "job_title", "job_company", "country", "review"}
-REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "state", "reviews_used", "tries_left", "last_downgraded",
+REVIEW_KEYS = {"artifact_id", "sha256", "lines", "held", "top", "headline", "state", "reviews_used", "tries_left", "last_downgraded",
                "last_where", "jd_terms"}
 
 

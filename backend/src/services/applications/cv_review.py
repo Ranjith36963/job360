@@ -763,7 +763,12 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
     row for (row ``n`` = ``lines[n-1]``), ``held`` (the numbers of lines the profile holds itself: evidence ``[]``),
     plus ``state`` (:func:`review_state` of that CV) (``None`` when no cv is saved). Same functions as ``check``, so
     the agent never guesses."""
-    from src.services.applications import kit, review_rows, spine  # noqa: PLC0415 - review_rows imports this module
+    from src.services.applications import (  # noqa: PLC0415 - review_rows imports this module
+        cv_records,
+        kit,
+        review_rows,
+        spine,
+    )
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -773,9 +778,10 @@ async def inputs(db: JobDatabase, user_id: str, application_id: int) -> Optional
     profile = load_profile(user_id) or UserProfile()
     lines = content_lines(cv["text"], profile)[:REVIEW_LINES_CAP]
     held = review_rows.held_numbers(cv["text"], profile)  # the same rule judge() applies (PR #1554)
+    top, headline = cv_records.top_lines(cv["text"], profile)  # the held lines that are the CV's top: evidence []
     sha = kit.sha256_text(cv["text"])
-    return {"artifact_id": cv["id"], "sha256": sha, "lines": lines, "held": held,
-            "state": await review_state(db, user_id, application_id, cv["id"], sha)}
+    return {"artifact_id": cv["id"], "sha256": sha, "lines": lines, "held": held, "top": sorted(top),
+            "headline": headline, "state": await review_state(db, user_id, application_id, cv["id"], sha)}
 
 
 def jd_terms(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -888,6 +894,17 @@ async def ats_and_jd(
     return where, stored
 
 
+def shifted_rows(rows: list[dict[str, Any]], held: list[int]) -> int:
+    """How many held lines carry quotes while the line after them (not held) carries ``[]``, when that is at least 2
+    and at least half of the held lines that have such a next line (the +1 slip of production 2026-11-13); else 0.
+    One quoted header is a reviewer's habit, not a shift."""
+    ev = {int(r["n"]): bool(r["evidence"]) for r in rows}
+    held_set = set(held)
+    eligible = [h for h in held if h + 1 not in held_set and h in ev and h + 1 in ev]
+    hits = sum(1 for h in eligible if ev[h] and not ev[h + 1])
+    return hits if hits >= 2 and hits * 2 >= len(eligible) else 0
+
+
 async def verify(
     db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, list[Any]]]:
@@ -918,6 +935,13 @@ async def verify(
     if past:  # a row naming no review line: refused, never stored (it would only look like a review)
         raise SpineError(422, f"lines n {', '.join(map(str, past[:5]))}: review.lines has {numbered} lines "
                               "(nothing was stored)")
+    shifted = shifted_rows(rows, review_rows.held_numbers(cv["text"], profile))
+    if shifted:  # 2026-11-13 (apps 455, 460): never stored, never a try; says what the agent got wrong
+        logger.warning("cv_reviewed_refused reason=rows_shifted application=%s held_rows_quoted=%s",
+                       safe_log_value(application_id), shifted)
+        raise SpineError(422, "rows look shifted by one: n is 1-based, row n reviews review.lines[n-1], so row n "
+                              "belongs to the line numbered n (copy review.held as it is, never add 1); held lines "
+                              "take evidence []; nothing was stored, no try used")
     if not content:
         where["no_content"] = []
     found = cv_checks.check_text("cv", cv["text"], profile)
