@@ -5,7 +5,7 @@
 
 import { listAsks } from "@/lib/api";
 import type { NeedsYouCount as NeedsYouCountOut } from "@/lib/api";
-import type { Ask, CvToApproveRow, ReadyCardData } from "@/lib/api";
+import type { Ask, CvToApproveRow, ReadyCardData, SiteSignIn } from "@/lib/api";
 import { groupAsks } from "@/lib/job-cards";
 import { newestAt, sortByUrgency } from "@/lib/needs-you-rank";
 import type { JobRankInput } from "@/lib/needs-you-rank";
@@ -128,6 +128,8 @@ export type NeedsYouCount = {
   otherAskIds: number[];
   /** The Answer-once card has rows waiting: it shows under All and Answer once. */
   answerOnce: boolean;
+  /** Jobs waiting on one sign-in, one card per site (their ids are not in `jobIds`); under On the site. */
+  siteSignins: SiteSignIn[];
 };
 
 /** The page's count IS the server's (GET /api/needs-you-count): N = jobs waiting on you + Other, All = N = the
@@ -137,7 +139,8 @@ export function fromServerCount(c: NeedsYouCountOut): NeedsYouCount {
   const idsByKind = c.job_ids_by_kind ?? {};
   // The Answer-once card is one item on the server's n while any of its rows wait (`answer_once`).
   const answerOnce = (c.answer_once ?? 0) > 0 ? 1 : 0;
-  const extra: Record<string, number> = { answers: answerOnce };
+  const siteSignins = c.site_signins ?? [];
+  const extra: Record<string, number> = { answers: answerOnce, site_step: siteSignins.length };
   const size = (k: string) => (idsByKind[k]?.length ?? 0) + (extra[k] ?? 0);
   const kinds = KIND_CHIPS.map((k) => k.key).filter((k) => size(k) > 0);
   const byChip: Record<Chip, number> = { all: c.n, other: c.other };
@@ -145,11 +148,12 @@ export function fromServerCount(c: NeedsYouCountOut): NeedsYouCount {
   return {
     n: c.n, jobs: c.jobs, other: c.other, byChip, chips: ["all", ...kinds, ...(c.other > 0 ? ["other"] : [])],
     jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [], answerOnce: answerOnce > 0,
+    siteSignins,
   };
 }
 export const EMPTY_COUNT: NeedsYouCount = fromServerCount({
   n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, other_ask_ids: [],
-  answer_once: 0,
+  answer_once: 0, site_signins: [],
 });
 
 /** "57 things need you" (owner plan §2.6). */

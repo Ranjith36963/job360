@@ -200,6 +200,7 @@ SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/profile/questionnaire/remember"): "the owner's own remember press on the questionnaire",
     ("POST", "/api/applications/{application_id}/browser/refill"): "the user's own Refill the form: replays and holds",
     ("GET", "/api/changes"): "the web page's own live poll; agents have whats_new, and a token never polls it",
+    ("POST", "/api/sites/{host}/signed-in"): "the user's own I've signed in on a Needs-you site card",
     ("GET", "/api/needs-you-count"): "the web menu badge's own count; an agent reads whats_due, not this",
     ("GET", "/api/sent-on-its-own"): "the Needs-you page's own log of what went without the user",
     ("POST", "/api/sent-on-its-own/{item_id}/wrong-fact"): "the user's own Wrong fact press; never an agent's",
