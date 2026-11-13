@@ -17,6 +17,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.services.profile.models import AssistantSettings, CVData, UserPreferences, UserProfile
+from tests._cv_review import owners_turn
 
 CV_TEXT = "Ada Lovelace\nSenior data engineer\nPython, dbt, Snowflake."
 FORM = "https://careers.northwind.example/apply/7"
@@ -135,6 +136,8 @@ async def test_approve_cv_lists_unseen_cvs_and_a_chat_or_web_cv_seen_clears_it(
             client, {**_AD, "title": "ML Engineer", "apply_url": "https://northwind.example/careers/8"},
         )
         cv_one, cv_two = await _save_cv(client, one), await _save_cv(client, two)
+        for app_id in (one, two):
+            await owners_turn(fixture_user_id, app_id)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
         listed = (await client.get("/api/cv-to-approve")).json()["items"]
         assert [r["application_id"] for r in listed] == [two, one]   # newest CV first; no CV, no row
         assert listed[0]["job_title"] == "Platform Engineer" and listed[0]["cv"]["artifact_id"] == cv_two
@@ -155,6 +158,7 @@ async def test_approve_cv_lists_unseen_cvs_and_a_chat_or_web_cv_seen_clears_it(
 
         # A new CV version is unseen again.
         await _save_cv(client, one, CV_TEXT + "\nChanged.")
+        await owners_turn(fixture_user_id, one)
         assert [r["application_id"] for r in (await client.get("/api/cv-to-approve")).json()["items"]] == [one]
 
 

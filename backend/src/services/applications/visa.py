@@ -103,9 +103,12 @@ async def user_work_countries(db: JobDatabase, user_id: str) -> list[str]:
     Lazy import: the profile stack is heavy (rule #16). ``db`` is accepted
     for signature parity with the other readers on the request path."""
     del db  # the profile read is sync (pgsync) and opens its own connection
+    import asyncio  # noqa: PLC0415 - stdlib, only this reader needs it
+
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
-    profile = load_profile(user_id)
+    # Off the event loop: a new Postgres connection per call, and nothing is written after it.
+    profile = await asyncio.to_thread(load_profile, user_id)
     out = WorkCountries()
     if profile is None:
         return out

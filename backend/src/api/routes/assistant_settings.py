@@ -18,6 +18,7 @@ pause reason or notes text.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -92,7 +93,7 @@ async def get_assistant_settings(
 ) -> AssistantSettingsView:
     """The caller's settings (each raw + effective), the practice-run state and
     the requests waiting for the user's OK. Read-only; any signed-in caller."""
-    view = _view_for(user.id)
+    view = await asyncio.to_thread(_view_for, user.id)  # sync pgsync reads: off the event loop
     _log("assistant_settings_read", user, surface="web", waiting=len(view["waiting"]))
     return AssistantSettingsView(**view)
 
@@ -106,6 +107,9 @@ async def confirm_request(
     row (so history says the human did it). 404 when the id is not the caller's;
     409 when it was already decided or has expired; 422 when the stored value no
     longer passes validation (for example a pause time that has since passed)."""
+    # On the loop on purpose: the read and the write that follows must stay ONE step. An await here lets an
+    # assistant write (sync on the loop, under user_edit_lock) land in the gap. See the PR that moved the GET
+    # reads off the loop.
     row = _open_request_or_error(user, request_id)
     path, value = row["path"], row["value"]
     try:
@@ -118,7 +122,7 @@ async def confirm_request(
         raise HTTPException(status_code=409, detail="This request was already decided")
     profile_edits.record_edits(user.id, profile_edits.WEB_ACTOR, [(path, value)], enforce_rate_limit=False)
     _log("assistant_setting_confirmed", user, path=safe_log_value(path), request_id=request_id)
-    return AssistantSettingsView(**_view_for(user.id))
+    return AssistantSettingsView(**await asyncio.to_thread(_view_for, user.id))
 
 
 @router.post("/assistant-settings/requests/{request_id}/decline", response_model=AssistantSettingsView)
@@ -128,11 +132,14 @@ async def decline_request(
 ) -> AssistantSettingsView:
     """The user declines a waiting request ("Don't change"): nothing is applied
     and the request is closed. Same 404 / 409 rules as confirm."""
+    # On the loop on purpose: the read and the write that follows must stay ONE step. An await here lets an
+    # assistant write (sync on the loop, under user_edit_lock) land in the gap. See the PR that moved the GET
+    # reads off the loop.
     row = _open_request_or_error(user, request_id)
     if not setting_requests.decide(user.id, request_id, "declined", actor_for(user)):
         raise HTTPException(status_code=409, detail="This request was already decided")
     _log("assistant_setting_declined", user, path=safe_log_value(row["path"]), request_id=request_id)
-    return AssistantSettingsView(**_view_for(user.id))
+    return AssistantSettingsView(**await asyncio.to_thread(_view_for, user.id))
 
 
 @router.post("/assistant-settings/take-back", response_model=AssistantSettingsView)
@@ -146,13 +153,16 @@ async def take_back_setting(
     newest one (``null`` — the safe default — when there was none). Not
     rate-limited (the human's own action). 404 when the setting never changed."""
     path = _setting_path_or_422(body.path)
+    # On the loop on purpose: this read decides the value the write below stores, so no await may separate
+    # them (an assistant write landing in the gap would be silently overwritten). See the PR that moved the
+    # GET reads off the loop.
     history = profile_edits.path_history(user.id, path, 2)
     if not history:
         raise HTTPException(status_code=404, detail=f"No change to take back on {path}")
     previous = history[1]["value"] if len(history) > 1 else None
     profile_edits.record_edits(user.id, profile_edits.WEB_ACTOR, [(path, previous)], enforce_rate_limit=False)
     _log("assistant_setting_taken_back", user, path=safe_log_value(path))
-    return AssistantSettingsView(**_view_for(user.id))
+    return AssistantSettingsView(**await asyncio.to_thread(_view_for, user.id))
 
 
 @router.get("/assistant-settings/history", response_model=ProfileEditHistoryResponse)
@@ -163,5 +173,7 @@ async def setting_history(
     """Every change to ONE setting, newest first, both sides (the user's web
     rows and the assistant's). At most ``PROFILE_EDIT_HISTORY_MAX`` rows."""
     _setting_path_or_422(path)
-    rows = profile_edits.path_history(user.id, path, max(1, settings.PROFILE_EDIT_HISTORY_MAX))
+    rows = await asyncio.to_thread(
+        profile_edits.path_history, user.id, path, max(1, settings.PROFILE_EDIT_HISTORY_MAX)
+    )
     return ProfileEditHistoryResponse(path=path, rows=[ProfileEditHistoryRow(**r) for r in rows])

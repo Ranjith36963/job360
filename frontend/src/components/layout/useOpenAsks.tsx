@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, getNeedsYouCount } from "@/lib/api";
+import { ASKS_CHANGED_EVENT } from "@/lib/api";
+import { fetchNeedsYouCountShared } from "@/lib/needs-you-count";
 import { onChanges } from "@/lib/live-changes";
 
 /**
@@ -17,19 +18,8 @@ import { onChanges } from "@/lib/live-changes";
  * mounted at once for a signed-in user (the Navbar only hides with CSS), so
  * the request is shared: one call per navigation, not one per caller.
  */
-let inFlight: { key: string; count: Promise<number> } | null = null;
-
-function fetchOpenCount(key: string): Promise<number> {
-  if (inFlight?.key === key) return inFlight.count;
-  const count = getNeedsYouCount().then((c) => c.n);
-  const entry = { key, count };
-  inFlight = entry;
-  const clear = () => {
-    if (inFlight === entry) inFlight = null;
-  };
-  count.then(clear, clear);
-  return count;
-}
+// The read itself is shared with Home and the batch queue card (lib/needs-you-count.ts).
+const fetchOpenCount = (key: string): Promise<number> => fetchNeedsYouCountShared(key).then((c) => c.n);
 
 let announceSeq = 0;
 
