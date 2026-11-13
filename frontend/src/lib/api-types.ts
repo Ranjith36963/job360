@@ -11698,6 +11698,8 @@ export interface components {
             interviews: components["schemas"]["InterviewAgenda"];
             /** Next After Id */
             next_after_id: number | null;
+            /** Next Before Id */
+            next_before_id?: number | null;
             /** Next Since */
             next_since: string;
             /** Now */
@@ -18267,6 +18269,8 @@ export interface operations {
                 limit?: number;
                 inbox_offset?: number;
                 inbox_stale_alerts?: boolean;
+                newest?: boolean;
+                before_id?: number | null;
             };
             header?: {
                 authorization?: string | null;

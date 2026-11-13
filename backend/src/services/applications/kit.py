@@ -300,6 +300,23 @@ async def recent_receipts(db: JobDatabase, user_id: str) -> list[dict[str, Any]]
     return [dict(x) for x in await cur.fetchall()]
 
 
+def _same_job(
+    receipts: list[dict[str, Any]], app_row: dict[str, Any], include_self: bool = False
+) -> Optional[dict[str, Any]]:
+    """The first of the user's ``receipts`` (newest first) on ANOTHER application with this row's job id or URL."""
+    application_id = int(app_row["id"])
+    mine = norm_url(str(app_row.get("job_url") or ""))
+    for r in receipts:
+        if r["application_id"] == application_id and not include_self:
+            continue  # an application is never a duplicate of itself
+        hit = r["job_id"] == app_row.get("job_id") or (
+            mine and norm_url(str(r["job_apply_url"] or "")) == mine
+        )
+        if hit:
+            return {"application_id": r["application_id"], "status": r["status"] or "", "applied_at": r["sent_at"]}
+    return None
+
+
 async def duplicate_facts(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], now: datetime, *, include_self: bool = False,
     receipts: Optional[list[dict[str, Any]]] = None,
@@ -320,19 +337,7 @@ async def duplicate_facts(
     application_id = int(app_row["id"])
     if receipts is None:
         receipts = await recent_receipts(db, user_id)
-    mine = norm_url(str(app_row.get("job_url") or ""))
-    same_job: Optional[dict[str, Any]] = None
-    for r in receipts:
-        if r["application_id"] == application_id and not include_self:
-            continue  # an application is never a duplicate of itself
-        hit = r["job_id"] == app_row.get("job_id") or (
-            mine and norm_url(str(r["job_apply_url"] or "")) == mine
-        )
-        if hit:
-            same_job = {
-                "application_id": r["application_id"], "status": r["status"] or "", "applied_at": r["sent_at"],
-            }
-            break
+    same_job = _same_job(receipts, app_row, include_self)
     company = ""
     cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
     row = await cur.fetchone()
@@ -353,6 +358,85 @@ async def duplicate_facts(
         same_company = int(got[0]) if got else 0
     flag = "same_job" if same_job else ("same_role" if same_role else ("same_company" if same_company else ""))
     return {"same_job": same_job, "same_role": same_role, "same_company_30d": same_company, "flag": flag}
+
+
+def _marks(n: int) -> str:
+    return ",".join("?" for _ in range(n))
+
+
+async def duplicate_facts_batch(
+    db: JobDatabase, user_id: str, rows: list[dict[str, Any]], now: datetime, *, receipts: list[dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    """:func:`duplicate_facts` for every application of one page (``rows`` carry ``id``, ``job_id``, ``job_url``,
+    ``job_title``) in a fixed number of reads, answer for answer the same as calling it row by row. The company
+    lookup, the same-role events and the same-company count are each ONE query for the page. The per-row
+    ``<> own id`` becomes a skip in Python, and the per-row ``LIMIT 200`` still counts only the events kept
+    after that skip. Timestamps stay compared as TEXT in SQL against the same cutoff strings."""
+    job_ids = sorted({int(r["job_id"]) for r in rows if r.get("job_id") is not None})
+    company_of_job: dict[int, str] = {}
+    if job_ids:
+        cur = await db._db.execute(
+            f"SELECT id, normalized_company FROM jobs WHERE id IN ({_marks(len(job_ids))})", job_ids  # noqa: S608
+        )
+        for x in await cur.fetchall():
+            company_of_job[int(dict(x)["id"])] = str(dict(x)["normalized_company"] or "")
+    company_of = {
+        int(r["id"]): company_of_job.get(int(r["job_id"]), "") if r.get("job_id") is not None else "" for r in rows
+    }
+    companies = sorted({c for c in company_of.values() if c and c != "unknown"})
+    role_events: dict[str, list[dict[str, Any]]] = {c: [] for c in companies}
+    applied_at: dict[str, set[int]] = {c: set() for c in companies}
+    if companies and any(normalized_title(str(r.get("job_title") or "")) for r in rows):
+        cutoff = (now - timedelta(days=settings.DUPLICATE_ROLE_WINDOW_DAYS)).isoformat()
+        cur = await db._db.execute(
+            "SELECT j.normalized_company, e.application_id, a.job_title, a.status, e.occurred_at "  # noqa: S608
+            "FROM application_events e JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
+            "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' "
+            f"AND (e.occurred_at >= ? OR e.recorded_at >= ?) AND j.normalized_company IN ({_marks(len(companies))}) "
+            "ORDER BY e.id DESC",
+            (user_id, user_id, cutoff, cutoff, *companies),
+        )
+        for d in (dict(x) for x in await cur.fetchall()):
+            role_events[str(d["normalized_company"])].append(d)
+    if companies:
+        cutoff = (now - timedelta(days=settings.DUPLICATE_COMPANY_WINDOW_DAYS)).isoformat()
+        cur = await db._db.execute(
+            "SELECT DISTINCT j.normalized_company, e.application_id FROM application_events e "  # noqa: S608
+            "JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
+            "WHERE e.user_id = ? AND e.event_type = 'applied' AND e.occurred_at >= ? "
+            f"AND j.normalized_company IN ({_marks(len(companies))})",
+            (user_id, cutoff, *companies),
+        )
+        for d in (dict(x) for x in await cur.fetchall()):
+            applied_at[str(d["normalized_company"])].add(int(d["application_id"]))
+    out: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        application_id = int(r["id"])
+        company = company_of[application_id]
+        same_job = _same_job(receipts, {"id": application_id, "job_id": r.get("job_id"), "job_url": r.get("job_url")})
+        same_role: Optional[dict[str, Any]] = None
+        same_company = 0
+        if company and company != "unknown":
+            mine = normalized_title(str(r.get("job_title") or ""))
+            kept = 0
+            for d in role_events[company] if mine else ():
+                if int(d["application_id"]) == application_id:
+                    continue
+                kept += 1
+                if kept > 200:
+                    break
+                if normalized_title(str(d.get("job_title") or "")) == mine:
+                    same_role = {
+                        "application_id": d["application_id"], "status": d["status"] or "",
+                        "applied_at": str(d["occurred_at"]),
+                    }
+                    break
+            same_company = len(applied_at[company] - {application_id})
+        flag = "same_job" if same_job else ("same_role" if same_role else ("same_company" if same_company else ""))
+        out[application_id] = {
+            "same_job": same_job, "same_role": same_role, "same_company_30d": same_company, "flag": flag,
+        }
+    return out
 
 
 _TITLE_PUNCT_RE = re.compile(r"[^\w]+", re.UNICODE)

@@ -11,6 +11,7 @@ import { useAuth } from "@/components/layout/AuthProvider";
 import { getAssistantSettings, updateProfileFields } from "@/lib/api";
 import type { AssistantSettingsView } from "@/lib/api";
 import { onChanges } from "@/lib/live-changes";
+import { createSharedRead } from "@/lib/shared-read";
 
 export const PAUSE_PATH = "assistant_settings.paused_until";
 export const PAUSE_REASON_PATH = "assistant_settings.pause_reason";
@@ -21,19 +22,9 @@ export const READY_CHANGED_EVENT = "job360:ready-changed";
 /** Fired when the user taps the amber button: open the Resume confirm. */
 export const RESUME_ASK_EVENT = "job360:resume-ask";
 
-let inFlight: { key: string; view: Promise<AssistantSettingsView> } | null = null;
-
-/** One in-flight settings read per navigation key, shared by every caller. */
-export function fetchSettingsShared(key: string): Promise<AssistantSettingsView> {
-  if (inFlight?.key === key) return inFlight.view;
-  const entry = { key, view: getAssistantSettings() };
-  inFlight = entry;
-  const clear = () => {
-    if (inFlight === entry) inFlight = null;
-  };
-  entry.view.then(clear, clear);
-  return entry.view;
-}
+/** One settings read per navigation key, shared by every caller, including one that asks a moment after
+ *  the answer arrived (the pause hook waits for the signed-in user): see shared-read.ts. */
+export const fetchSettingsShared = createSharedRead<AssistantSettingsView>(() => getAssistantSettings());
 
 /** The pause just written ("" | "until_resumed" | an ISO time), set right before
  *  PAUSE_CHANGED_EVENT fires: the event's detail stays a boolean, so every hook reads the time here. */
