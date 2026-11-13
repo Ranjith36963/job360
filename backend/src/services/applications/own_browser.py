@@ -566,14 +566,16 @@ async def _application_tasks(
     apps = {int(dict(r)["id"]): dict(r) for r in await cur.fetchall()}
     blocks = await blocked.open_blocks(db, user.id, list(apps))
     routes: list[tuple[int, routing.Route]] = []
+    codes = await blocked.codes_mine(user.id, blocks)
     for app_id, p in sorted(blocks.items()):
         handoff = blocked.captcha_handoff(p)
-        if p.get(blocked.BY_KEY) != blocked.BY_BROWSER and not handoff:
+        code = blocked.assistant_reads_code(p, codes)  # F8: a code box the user's setting makes the assistant's
+        if p.get(blocked.BY_KEY) != blocked.BY_BROWSER and not handoff and not code:
             continue
         reason = str(p.get("reason") or "")
         route = routing.ask_route(
             blocked.ASK_KIND_FOR_REASON.get(reason, ""), block_reason=reason, block_by_browser=not handoff,
-            handoff=handoff,
+            handoff=handoff, email_codes=code,
             # While Job360's browser still holds that page the user finishes it on Needs you; once it let go, no.
             finish_here=reason == "captcha" and blocked.browser_hold_live(user.id, app_id),
         )

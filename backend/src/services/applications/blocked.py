@@ -22,7 +22,7 @@ import re
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import asks as asks_service
-from src.services.applications import event_examples, spine, which_browser
+from src.services.applications import email_codes, event_examples, spine, which_browser
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.services.browser_agent import routing
@@ -255,6 +255,25 @@ def captcha_handoff(block_payload: dict[str, Any]) -> bool:
     )
 
 
+# F8 (2026-11-13): stored only on an ``otp_needed`` block that was handed BACK to the owner (the code never worked).
+ESCALATED_KEY = "code_escalated"
+CODE_WORDS = "read the code from Gmail and enter it"
+CODES_WITHDRAWN = "Job360: the assistant reads the code from your email"
+
+
+def assistant_reads_code(block_payload: dict[str, Any], codes_on: bool) -> bool:
+    """A code box the user's setting (``use_email_codes``, read live by the caller) makes the assistant's: an
+    ``otp_needed`` block that was not escalated back to the owner. Decided at read time from the stored block."""
+    return bool(codes_on) and block_payload.get("reason") == "otp_needed" and not block_payload.get(ESCALATED_KEY)
+
+
+async def codes_mine(user_id: str, blocks: dict[int, dict[str, Any]]) -> bool:
+    """The setting, read (one profile read) only when some open block is an assistant-readable code box."""
+    if not any(p.get("reason") == "otp_needed" and not p.get(ESCALATED_KEY) for p in blocks.values()):
+        return False
+    return await email_codes.codes_are_assistants(user_id)
+
+
 async def browser_captcha_open(db: JobDatabase, user_id: str, application_id: int) -> bool:
     """The open block is a CAPTCHA that Job360's own browser recorded (``by: browser``). A caller's
     look-alike (``step: "Job360 browser"`` typed by an assistant) never counts, nor does a block from
@@ -401,6 +420,7 @@ async def browser_for_asks(
         )
         urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     out: dict[int, dict[str, str]] = {}
+    codes = await codes_mine(user_id, blocks)
     for a in asks:
         if a.get("status") != "open":
             continue
@@ -409,7 +429,7 @@ async def browser_for_asks(
         route = routing.ask_route(
             a.get("kind") or "", block_reason=str(mine.get("reason") or ""),
             block_by_browser=mine.get(BY_KEY) == BY_BROWSER, finish_here=a["id"] in finish,
-            handoff=captcha_handoff(mine),
+            handoff=captcha_handoff(mine), email_codes=assistant_reads_code(mine, codes),
             url=urls.get(int(a.get("application_id") or 0), ""),
         )
         out[int(a["id"])] = routing.label(route)
@@ -501,6 +521,16 @@ async def before_append(
                 "(user_did_it) or it is skipped",
             )
         return stored
+    if stored["reason"] == "otp_needed" and await email_codes.codes_are_assistants(user.id):
+        tries = await email_codes.refused_tries(db, user.id, application_id) + 1
+        audit = {"user_id": safe_log_value(user.id), "application_id": int(application_id), "reason": "otp_needed",
+                 "tries": tries}
+        if tries < email_codes.OTP_ESCALATE_AT:
+            # F8: the assistant reads the code from Gmail; no owner ask. The job waits in the PC queue.
+            get_audit_logger().info("otp_block_assistant", extra={"event": "otp_block_assistant", **audit})
+            return {**stored, "ask_id": None}
+        get_audit_logger().info("otp_block_escalated", extra={"event": "otp_block_escalated", **audit})
+        stored = {**stored, ESCALATED_KEY: True}
     open_ids = await _open_ask_ids(db, user.id, _ask_ids(events, stored["reason"]))
     if open_ids:
         return {**stored, "ask_id": max(open_ids)}

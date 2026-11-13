@@ -236,6 +236,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     lap("events")
     blocks = await blocked.open_blocks(db, user_id, ids)
     lap("blocks")
+    codes = await blocked.codes_mine(user_id, blocks)  # F8: read the setting live, only when a code box is open
     cvs = await ready.newest_cv_by_app(db, user_id, ids)
     lap("cvs")
     cur = await db._db.execute(
@@ -336,6 +337,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and reason == "posting_closed":
             ref = {"event_id": block_ev["id"]} if block_ev else None
             out.append(_b("posting_closed", "you", "skip or keep", block_since, ref))
+        elif considering and blocked.assistant_reads_code(s["block"] or {}, codes):
+            # F8: use_email_codes is on, so the code box is the assistant's (Gmail), never the owner's.
+            ref = {"event_id": block_ev["id"]} if block_ev else None
+            out.append(_b("assistant_step", "assistant", blocked.CODE_WORDS, block_since, ref))
         elif considering and (site_asks or (s["block"] is not None and reason != "unknown_question")):
             ask_kind = site_asks[0]["kind"] if site_asks else ""
             word = _SITE_WORDS.get(reason) or _SITE_WORDS.get(ask_kind) or "finish on the site"

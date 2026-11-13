@@ -317,6 +317,47 @@ MOVED_TO_LOG_DETAIL = "Moved to the assistant's work log."
 
 
 async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
+    """The user's own read's clean-up: asks for a code box the assistant now reads (F8), then the
+    duplicate / closed-job clean-up (:func:`_tidy_duplicates`). Returns how many asks it closed."""
+    return await _withdraw_code_asks(db, user_id) + await _tidy_duplicates(db, user_id)
+
+
+async def _withdraw_code_asks(db: JobDatabase, user_id: str) -> int:
+    """F8 (2026-11-13): with ``use_email_codes`` on, an open ask that Job360 itself opened from an
+    ``otp_needed`` block (matched by the block's own ``ask_id`` and the same asker, never by words) is the
+    assistant's work: withdrawn with a fixed reason. A block handed back to the owner (``code_escalated``), an
+    ask_user the agent wrote by hand and every other reason stay. Scoped by ``user_id``; logs counts only."""
+    from src.services.applications import blocked  # noqa: PLC0415 - blocked imports this module
+
+    cur = await db._db.execute(
+        "SELECT DISTINCT application_id FROM application_asks WHERE user_id = ? AND answered_at IS NULL "
+        "AND withdrawn_at IS NULL AND application_id IS NOT NULL",
+        (user_id,),
+    )
+    app_ids = [int(r[0]) for r in await cur.fetchall()]
+    found = await blocked.open_blocks(db, user_id, app_ids)
+    blocks = {i: p for i, p in found.items() if p.get("reason") == "otp_needed"}
+    if not blocks or not await blocked.codes_mine(user_id, blocks):
+        return 0
+    linked = {int(p["ask_id"]): i for i, p in blocks.items() if isinstance(p.get("ask_id"), int)
+              and blocked.assistant_reads_code(p, True)}
+    withdrawn = 0
+    for ask_id, ask in (await _get_asks(db, user_id, sorted(linked))).items():
+        if ask.get("status") != "open" or ask["asked_by"] != blocks[linked[ask_id]].get("assistant"):
+            continue
+        try:
+            await withdraw_ask(db, user_id, ask_id, TIDY_ACTOR, blocked.CODES_WITHDRAWN)
+            withdrawn += 1
+        except SpineError:  # answered or withdrawn in between
+            continue
+    if withdrawn:
+        get_audit_logger().info("otp_asks_withdrawn", extra={
+            "event": "otp_asks_withdrawn", "user_id": user_id, "withdrawn": withdrawn, "reason": "otp_needed",
+        })
+    return withdrawn
+
+
+async def _tidy_duplicates(db: JobDatabase, user_id: str) -> int:
     """Owner 2026-10-25: the one-time clean-up of asks filed before one-ask-per-job, run on the user's own
     read (a no-op once tidy). Per job, family and side, the NEWEST open ask keeps every row (merged under
     fixed names) and the older ones close as superseded; an open ask on a closed job closes too. Nothing is
