@@ -2125,7 +2125,9 @@ async def _linkedin_gate_facts(
     from src.services.applications import kit  # noqa: PLC0415
 
     label = kit.clean_session(session)
-    task = own_browser.derive(rows, now, auto=True)  # a claim on a draft with no click counts; the gate weighs it
+    # A claim on a draft with no click counts; the gate weighs it. A note (owner 2026-11-13) counts only for a person
+    # saved as not_connected: derive cannot see the state.
+    task = own_browser.derive(rows, now, auto=True, note_ok=(current.get("linkedin_state") or "") == "not_connected")
     mine = task is not None and int(task["message_id"]) == int(target["id"])
     holder = (
         (task["claimed_by"], task["claimed_actor"])

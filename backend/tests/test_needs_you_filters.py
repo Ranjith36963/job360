@@ -239,6 +239,19 @@ async def test_a_strong_review_is_a_view_and_never_moves_n(authenticated_async_c
         assert by["all"]["count"] == after["n"]
 
 
+async def _legacy_unproven_block(user_id: str, app_id: int) -> None:
+    from src.api.routes import browser as browser_routes
+    from src.services.applications import spine
+
+    async with browser_routes._db() as db:  # noqa: SLF001
+        await spine.append_event(
+            db, user_id=user_id, application_id=app_id, event_type="blocked",
+            payload={"reason": "posting_closed", "step": "open the ad", "page_host": HOST, "detail": "",
+                     "assistant": "token:claude-code"},
+            occurred_at=spine.parse_occurred_at(None), recorded_by="token:claude-code",
+        )
+
+
 async def _agent(web: AsyncClient) -> AsyncClient:
     from src.api.main import app
 
@@ -250,7 +263,7 @@ async def _agent(web: AsyncClient) -> AsyncClient:
 
 @pytest.mark.asyncio
 async def test_posting_closed_is_a_stat_proven_closes_and_open_blocks_count_but_forged_text_does_not(
-    authenticated_async_context,
+    authenticated_async_context, fixture_user_id,
 ):
     async with authenticated_async_context() as web:
         proven, unproven, forged, quiet = [await _bring(web, n) for n in range(1, 5)]
@@ -258,8 +271,10 @@ async def test_posting_closed_is_a_stat_proven_closes_and_open_blocks_count_but_
             base = {"reason": "posting_closed", "step": "open the ad", "page_host": HOST}
             r = await agent.post(f"/api/applications/{proven}/events", json={"event_type": "blocked", "payload": {**base, "evidence": "http_404"}})
             assert r.status_code == 201 and r.json()["status"] == "withdrawn", r.text
+            # No door takes a closed posting without proof now (#1600, 422); a block written before that still counts.
             r = await agent.post(f"/api/applications/{unproven}/events", json={"event_type": "blocked", "payload": base})
-            assert r.status_code == 201 and r.json()["status"] != "withdrawn", r.text
+            assert r.status_code == 422, r.text
+        await _legacy_unproven_block(fixture_user_id, unproven)
         # Caller-written text: a withdrawn that only SAYS it was closed by the posting check.
         await _event(web, forged, "withdrawn", {"closed_by": "posting_closed", "blocked_event_id": 999999})
         got = await _count(web)

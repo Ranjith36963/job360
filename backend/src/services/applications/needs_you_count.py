@@ -31,12 +31,13 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications import asks as asks_service
-from src.services.applications import inbox_items, outcome_suggestions, test_marker
+from src.services.applications import inbox_items, outcome_suggestions, site_signin, test_marker
 from src.services.profile import ask_once, setting_requests
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
+    from src.services.applications.blockers import Blocker
 
 # The page's list of unmatched mail asks for 50 (GET /api/inbox-items default); its New connections
 # read at most 25 full records (``MAX_NEW_CONNECTIONS`` in NewConnections.tsx).
@@ -197,6 +198,7 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
     by_actor = dict.fromkeys(ACTORS, 0)
     by_kind: dict[str, int] = {}
     mine: list[tuple[str, int, str]] = []
+    firsts: dict[int, Blocker] = {}
     members: dict[str, list[int]] = {key: [] for key, _, _ in FILTERS}
     unknown: dict[int, list[str]] = {}
     cleared: set[int] = set()
@@ -221,10 +223,17 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
         by_kind[first["kind"]] = by_kind.get(first["kind"], 0) + 1
         if first["actor"] == "you":
             mine.append((first["since"], app_id, first["kind"]))
+            firsts[app_id] = first
     mine.sort()
+    # Diagnosis D (2026-11-13): one sign-in on a site clears every job on it, so those jobs are ONE item.
+    signins, grouped = site_signin.group([(i, firsts[i]) for _, i, _ in mine])
     by_ids: dict[str, list[int]] = {}
     for _, app_id, kind in mine:
-        by_ids.setdefault(kind, []).append(app_id)
+        if app_id not in grouped:
+            by_ids.setdefault(kind, []).append(app_id)
+    for key, _, kind in FILTERS:  # a grouped job is no row: its host card is the item (counted in signin_captcha)
+        if kind == "todo":
+            members[key] = [i for i in members[key] if i not in grouped]
     members["strong_cvs"] = sorted(cleared)
     members["posting_closed"] = sorted(
         set(members["posting_closed"]) | set(await auto_close.proven_closed_ids(db, user_id)))
@@ -235,8 +244,10 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
         get_audit_logger().info("needs_you_filter_unknown_kind", extra={
             "event": "needs_you_filter_unknown_kind", "user_id": safe_log_value(user_id), "reason": "kind_not_in_table",
             "jobs": {str(a): [safe_log_value(k, max_len=40) for k in ks] for a, ks in sorted(unknown.items())[:50]}})
-    return {"by_actor": by_actor, "by_kind": by_kind, "job_ids": [i for _, i, _ in mine], "job_ids_by_kind": by_ids,
-            "members": members}
+    return {
+        "by_actor": by_actor, "by_kind": by_kind, "job_ids": [i for _, i, _ in mine if i not in grouped],
+        "job_ids_by_kind": by_ids, "site_signins": signins, "signin_job_ids": sorted(grouped), "members": members,
+    }
 
 
 PHASES = ("tests", "asks", "contacts", "blockers", "suggestions", "settings", "inbox", "answer_once", "pc_idle")
@@ -245,7 +256,8 @@ PHASES = ("tests", "asks", "contacts", "blockers", "suggestions", "settings", "i
 async def needs_you_count(
     db: JobDatabase, user_id: str, timings: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
-    """``n`` = jobs + other. ``jobs`` = the jobs whose first blocker is the user (= ``jobs_waiting_on_you``);
+    """``n`` = the page's job rows + one per sign-in site (``site_signins``) + other. ``jobs`` = the jobs whose
+    first blocker is the user (= ``jobs_waiting_on_you``);
     ``by_actor`` / ``by_kind`` count every open job once by its first blocker, so the badge, the dashboard
     headline and the Needs-you chips all read this one answer.
 
@@ -281,7 +293,7 @@ async def needs_you_count(
         timings.update({f"b_{part}": ms for part, ms in parts.items()})
     members = first.pop("members")
     jobs = first["by_actor"]["you"]
-    rows = set(first["job_ids"])
+    rows = {*first["job_ids"], *first.pop("signin_job_ids")}  # a grouped job's asks wait on its host card
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other
     suggestions, _ = await outcome_suggestions.open_suggestions(db, user_id, settings.OUTCOME_SUGGESTIONS_LIST_MAX)
     mark("suggestions")
@@ -298,8 +310,8 @@ async def needs_you_count(
 
     pc_idle = await own_browser.pc_idle(db, user_id, datetime.now(timezone.utc), first["by_actor"]["your_pc"])
     mark("pc_idle")
-    n = jobs + other + (1 if answer_once else 0)
-    filters = _filters(members, n, general, other, answer_once)
+    n = len(first["job_ids"]) + len(first["site_signins"]) + other + (1 if answer_once else 0)
+    filters = _filters(members, n, general, other, answer_once, len(first["site_signins"]))
     get_audit_logger().info("needs_you_filters", extra={
         "event": "needs_you_filters", "user_id": safe_log_value(user_id), "n": n, "result": "ok",
         "counts": {f["key"]: f["count"] for f in filters}})
@@ -309,13 +321,16 @@ async def needs_you_count(
     }
 
 
-def _filters(members: dict[str, list[int]], n: int, general: int, other: int, answer_once: int) -> list[dict[str, Any]]:
+def _filters(
+    members: dict[str, list[int]], n: int, general: int, other: int, answer_once: int, site_cards: int = 0,
+) -> list[dict[str, Any]]:
     """The fixed filters, each with its own count. A job counts in every filter it has an owner need in; All
     counts each job once and equals ``n``. The items that are no job are PARTITIONED, never added twice: the
     job-less asks and the Answer-once card show under "Answer once", the rest of Other under "Other", so
     the non-job items across the filters add up to ``other + card`` (``n`` minus the jobs). The view and the
-    stat never enter ``n``."""
-    extra = {"answer_once": general + (1 if answer_once else 0), "other": other - general}
+    stat never enter ``n``. A site sign-in card (one per host, its jobs are no rows) counts once in
+    "Sign in / CAPTCHA"."""
+    extra = {"answer_once": general + (1 if answer_once else 0), "other": other - general, "signin_captcha": site_cards}
     out: list[dict[str, Any]] = []
     for key, label, kind in FILTERS:
         ids = members[key]

@@ -95,10 +95,13 @@ def test_rules_recipe_and_mcp_docstring_name_every_reason():
 async def test_new_reasons_record_open_one_ask_and_unblock(authenticated_async_context, reason):
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 1)
-        resp = await _event(client, app_id, "blocked", {"reason": reason, "step": "form", "page_host": "x.example.com"})
+        # 2026-11-13: posting_closed carries its proof and opens no ask (its blocker alone shows on Needs you).
+        proof = {"evidence": "http_404"} if reason == "posting_closed" else {}
+        resp = await _event(client, app_id, "blocked", {"reason": reason, "step": "form", "page_host": "x.example.com",
+                                                         **proof})
         assert resp.status_code == 201, resp.text
         asks = (await client.get("/api/asks", params={"status": "open"})).json()["asks"]
-        assert len([a for a in asks if a["application_id"] == app_id]) == 1
+        assert len([a for a in asks if a["application_id"] == app_id]) == (0 if reason == "posting_closed" else 1)
         resp = await _event(client, app_id, "unblocked", {"resolution": "skipped"})
         assert resp.status_code == 201, resp.text
 

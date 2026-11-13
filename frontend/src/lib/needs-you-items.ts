@@ -5,7 +5,7 @@
 
 import { listAsks } from "@/lib/api";
 import type { NeedsYouCount as NeedsYouCountOut } from "@/lib/api";
-import type { Ask, CvToApproveRow, ReadyCardData } from "@/lib/api";
+import type { Ask, CvToApproveRow, ReadyCardData, SiteSignIn } from "@/lib/api";
 import { groupAsks } from "@/lib/job-cards";
 import { newestAt, sortByUrgency } from "@/lib/needs-you-rank";
 import type { JobRankInput } from "@/lib/needs-you-rank";
@@ -133,6 +133,8 @@ export type NeedsYouCount = {
   otherAskIds: number[];
   /** The Answer-once card has rows waiting: it shows under All and Answer once. */
   answerOnce: boolean;
+  /** Jobs waiting on one sign-in, one card per site (their ids are not in `jobIds`); under Sign in / CAPTCHA. */
+  siteSignins: SiteSignIn[];
 };
 
 /** The page's count IS the server's (GET /api/needs-you-count): N = jobs waiting on you + Other, All = N, and the
@@ -153,11 +155,12 @@ export function fromServerCount(c: NeedsYouCountOut): NeedsYouCount {
   return {
     n: c.n, jobs: c.jobs, other: c.other, byChip, chips: FILTER_CHIPS.map((f) => f.key), kinds,
     jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [], answerOnce,
+    siteSignins: c.site_signins ?? [],
   };
 }
 export const EMPTY_COUNT: NeedsYouCount = fromServerCount({
   n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, other_ask_ids: [],
-  answer_once: 0, filters: [],
+  answer_once: 0, filters: [], site_signins: [],
 });
 
 /** "57 things need you" (owner plan §2.6). */
