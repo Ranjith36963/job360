@@ -75,6 +75,8 @@ BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail", "evidence"})
 # Owner 2026-11-03: what proves a posting closed, read off the job's OWN page (never an email). Only with
 # ``posting_closed``; such a block on the ad's own site closes the application by itself (auto_close.py).
 CLOSED_EVIDENCE = frozenset({"page_says_closed", "http_404", "http_410"})
+NO_PROOF = ("posting_closed needs evidence, what the ad's own page showed: one of "
+            + ", ".join(sorted(CLOSED_EVIDENCE)) + "; page_host must be the ad's own site")
 # Written only by Job360's own browser (``record_browser_block``), never accepted from a caller: the
 # CAPTCHA hold and "Finish it here" trust a block only when it carries this (review of #1176).
 BY_KEY, BY_BROWSER = "by", "browser"
@@ -144,6 +146,10 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
     evidence = payload.get("evidence")
     if evidence is not None and (reason != "posting_closed" or evidence not in CLOSED_EVIDENCE):
         problems.append("evidence goes only with posting_closed and is one of: " + ", ".join(sorted(CLOSED_EVIDENCE)))
+    elif reason == "posting_closed" and evidence is None:
+        # 2026-11-13 (apps 998, 146): a closed posting with no proof sat on Needs you, never closed.
+        problems.append(NO_PROOF)
+        _log_no_proof(user)
     if problems:
         raise event_examples.refusal(event_type, problems)
     stored = {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
@@ -521,6 +527,9 @@ async def before_append(
                 "(user_did_it) or it is skipped",
             )
         return stored
+    if stored["reason"] == "posting_closed":
+        # No ask: the "posting closed" blocker alone shows; auto_close closes it when the proof holds.
+        return {**stored, "ask_id": None}
     if stored["reason"] == "otp_needed" and await email_codes.codes_are_assistants(user.id):
         tries = await email_codes.refused_tries(db, user.id, application_id) + 1
         audit = {"user_id": safe_log_value(user.id), "application_id": int(application_id), "reason": "otp_needed",
@@ -659,6 +668,13 @@ async def record_browser_block(
         raise SpineError(404, "application not found")
     stored = {**check_payload(user, "blocked", payload, ""), BY_KEY: BY_BROWSER, "browser": "job360"}
     return await record(db, user, application_id, "blocked", stored, occurred_at=spine.parse_occurred_at(None))
+
+
+def _log_no_proof(user: CurrentUser) -> None:
+    get_audit_logger().info("blocked_refused", extra={
+        "event": "blocked_refused", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
+        "reason": "posting_closed", "result": "no_proof",
+    })
 
 
 def _log(user: CurrentUser, application_id: int, event_type: str, stored: dict[str, Any], result: str) -> None:

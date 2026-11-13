@@ -46,4 +46,13 @@ describe("Sent on its own", () => {
     expect(await screen.findByTestId("sent-reported-4")).toHaveTextContent("You reported a wrong fact");
     expect(reportWrongFact).toHaveBeenCalledWith(4);
   });
+
+  it("shows the approval tag the server sent, and no tag when it sent none", async () => {
+    const tagged = { ...item, id: 5, approval: { by: "ai", what: "outreach", at: item.sent_at, ref: 5, ref_kind: "outreach", reviewer: null } };
+    getSentOnItsOwn.mockResolvedValue({ items: [tagged, { ...item, id: 6 }] });
+    render(<SentOnItsOwn />);
+    const li = await screen.findByTestId("sent-5");
+    expect(li.querySelector("[data-testid=approval-tag]")?.textContent).toBe("AI reviewed · Message");
+    expect(screen.getByTestId("sent-6").querySelector("[data-testid=approval-tag]")).toBeNull();
+  });
 });

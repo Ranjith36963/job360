@@ -52,6 +52,7 @@ from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services import idempotency
+from src.services.applications import approval as approval_service
 from src.services.applications import asks as asks_service
 from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
@@ -968,6 +969,18 @@ class CvWorkOut(BaseModel):
     profile: Optional[dict[str, Any]] = None
 
 
+class ApprovalOut(BaseModel):
+    """Who approved one thing ("You approved" / "AI reviewed"), read off stored rows (approval.py). ``ref`` is the
+    event the tag belongs to (``ref_kind`` event), or an outreach row. ``reviewer`` is caller text, cut short."""
+
+    by: str  # "ai" | "you"
+    what: str  # "cv" | "outreach" | "answers" | "submit"
+    at: str
+    ref: int
+    ref_kind: str = "event"
+    reviewer: Optional[str] = None
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -990,6 +1003,8 @@ class ApplicationDetailOut(BaseModel):
     # over the record, never a judgement of the job). `code` is the closed
     # vocabulary an agent branches on; `label` is the sentence the web shows.
     next_step: NextStepOut
+    # F12 (owner 2026-11-13): who approved the CV, outreach, answers and submit (none when no record says so).
+    approvals: list[ApprovalOut] = []
     # Blockers slice 3 - everything that waits, ordered; `next` is the first, `more` how many follow it.
     blockers: list[BlockerOut] = []
     next: Optional[BlockerOut] = None
@@ -2740,6 +2755,7 @@ async def get_application(
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="application not found")
+    detail["approvals"] = (await approval_service.approvals_for(db, user.id, [application_id])).get(application_id, [])
     return detail
 
 
@@ -3283,6 +3299,14 @@ async def outreach_check(
             "The email raises visa, salary, health or another private topic: the user's to raise. Save a Gmail "
             "draft and ask_user.",
         )
+    # Owner 2026-11-13: a note that goes alone never goes for a TEST application (test_marker.py).
+    if verdict.decision == "send" and verdict.reason == "auto_note" and contact.get("application_id") is not None:
+        from src.services.applications import test_marker  # noqa: PLC0415
+
+        if int(contact["application_id"]) in await test_marker.test_app_ids(db, user.id):
+            verdict = settings_rules.OutreachDecision(
+                "stop", "test_application", "This person belongs to a test application. Never send."
+            )
     # Owner 2026-11-09: a text that goes with nobody pressing Send needs a strong outreach_reviewed of exactly
     # this draft (id + sha). The user's own Send (owner_clicked, connect_no_note) and a no-note request do not.
     review_needed = verdict.decision == "send" and verdict.reason in outreach_review_service.AUTO_SEND_REASONS
@@ -4300,7 +4324,9 @@ async def _record_event(
         if body.event_type == "answer_corrected":
             _check_answer_corrected(user, application_id, payload)
         # S11a: a version's artifact_saved event and a hide are corrected only by the user's buttons.
-        await hiding.refuse_correction(db, user.id, application_id, body.corrects_event_id)
+        await hiding.refuse_correction(
+            db, user.id, application_id, body.corrects_event_id, body.event_type, by_user=actor_for(user) == "web"
+        )
         if body.event_type == process_log.PROCESS_LOG:
             await process_log.check(
                 db, user, application_id, payload=payload, source=source,
@@ -4469,6 +4495,7 @@ def _queue_refused(user: CurrentUser, application_id: int, event_type: str, stat
         "bad_reason": "unqueued takes only an optional reason: " + ", ".join(queue_preflight.UNQUEUE_REASONS),
         "not_open": "not open",
         "already_queued": "already queued",
+        "closed_posting": spine.CLOSED_POSTING_NOTE,
         "not_queued": "not queued",
         "corrects_non_queue_event": f"{event_type} may only correct a queued or unqueued event",
     }[reason]
@@ -4510,6 +4537,12 @@ async def _check_queue_event(
         )
         if await cur.fetchone() is None:
             raise _queue_refused(user, application_id, event_type, 422, "corrects_non_queue_event")
+    # App 146 (checker 2026-11-13): only the user undoes a closed_posting unqueue, also through a correction
+    # (a queued, or an unqueued retracting the closed one, would put the job back on the queue).
+    if actor_for(user) != "web" and (event_type == "queued" or corrects_event_id is not None) and (
+        await spine.unqueued_as_closed(db, user.id, application_id)
+    ):
+        raise _queue_refused(user, application_id, event_type, 409, "closed_posting")
     if corrects_event_id is None:
         is_queued = application_id in await spine.queued_at_by_app(db, user.id, [application_id])
         if event_type == "queued" and is_queued:

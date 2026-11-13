@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { setHidden } from "@/lib/api";
-import type { ApplicationEvent } from "@/lib/api";
+import type { ApplicationEvent, Approval } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { eventTitle, interviewDetails, offerFigures } from "@/lib/event-detail";
 import { actorLabel } from "@/lib/event-labels";
 import { WhoChip } from "@/components/applications/WhoChip";
+import { ApprovalTag } from "@/components/applications/ApprovalTag";
 import { formatDateTime } from "@/lib/format-date";
 
 function suggestedQuote(payload: unknown): string {
@@ -27,10 +28,13 @@ function hideAction(event: ApplicationEvent): "hide" | "show" | null {
 
 export function Timeline({
   events,
+  approvals,
   applicationId,
   onChanged,
 }: {
   events: ApplicationEvent[];
+  /** F12: who approved what; each is tagged on the event it belongs to (its `ref`). */
+  approvals?: Approval[];
   /** S11a: with both, each plain note gets "Hide from timeline" / "Show in timeline". */
   applicationId?: number;
   onChanged?: () => void | Promise<void>;
@@ -80,6 +84,11 @@ export function Timeline({
           </span>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <WhoChip recordedBy={event.recorded_by} />
+            {(approvals ?? [])
+              .filter((a) => a.ref_kind === "event" && a.ref === event.id)
+              .map((a) => (
+                <ApprovalTag key={`${a.what}-${a.by}`} approval={a} />
+              ))}
             <span className={`font-medium ${event.superseded ? "line-through" : ""}`}>
               {eventTitle(event)}
             </span>

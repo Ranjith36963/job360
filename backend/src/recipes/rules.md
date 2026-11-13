@@ -539,7 +539,8 @@ sends against the user's limits (a contact with an application is job outreach, 
 Gmail draft; the saved message shows under People to reach on Needs you;
 the user sends. A LinkedIn message is sent only while you hold the person (own_browser_queue take) AND
 check_outreach(contact_id, message_id, session) says `send`: owner_clicked (the user pressed Send on that exact draft),
-or, on the new-connection path only, connect_no_note, auto_connect, auto_after_accept or auto_follow_up. A person
+or, on the new-connection path only, connect_no_note, auto_connect, auto_note (a note to someone not connected,
+only with `outreach_send` auto), auto_after_accept or auto_follow_up. A person
 already connected, or one who replied, always needs the user's Send; follow get_recipe("own_browser"). An other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's
 Gmail Sent folder for a message to that address since this version was saved,
@@ -737,12 +738,12 @@ one-time code (yours while Email codes is on, else the user's); `id_or_payment_a
 = timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
 limit message: stop this site for the run); `step` is plain text up to 120 characters;
 `page_host` is the host only (jobs.example.com), never a full URL; `detail`
-is up to 300 plain characters. `posting_closed` read on the ad's own page adds `evidence`:
-page_says_closed | http_404 | http_410 (what the page itself showed; never an email). Then Job360
-closes the job itself (`withdrawn` "posting closed"; the user can Undo it on the website); without
-it, or on another site, the user decides. Any other key is 422; never put a password, a
+is up to 300 plain characters. `posting_closed` needs `evidence` read on the ad's own page (page_host = the ad's site):
+page_says_closed | http_404 | http_410 (what the page itself showed; never an email; none = 422). Then Job360
+closes the job itself (`withdrawn` "posting closed"; the user can Undo it on the website); on another
+site the user decides. Any other key is 422; never put a password, a
 token or page text in it. Job360 fills in who you are and opens one Needs-you
-ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
+ask for the user (none for posting_closed). Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped | own_browser} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with

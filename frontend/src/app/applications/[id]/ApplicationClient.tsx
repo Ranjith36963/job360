@@ -391,7 +391,7 @@ export function ApplicationClient({ applicationId, from, show }: { applicationId
             </button>
             {historyOpen && (
               <>
-                <Timeline events={detail.events} applicationId={detail.id} onChanged={load} />
+                <Timeline events={detail.events} approvals={detail.approvals} applicationId={detail.id} onChanged={load} />
                 <NoteForm applicationId={detail.id} onRecorded={load} />
               </>
             )}
