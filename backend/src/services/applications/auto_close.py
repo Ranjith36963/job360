@@ -144,6 +144,56 @@ def _payload(raw: Any) -> dict[str, Any]:
     return p if isinstance(p, dict) else {}
 
 
+def _proves_closed(block: dict[str, Any]) -> bool:
+    """A ``blocked`` payload that proves the posting is closed: the reason AND evidence from the closed set."""
+    return block.get("reason") == "posting_closed" and block.get("evidence") in blocked.CLOSED_EVIDENCE
+
+
+async def proven_closed_ids(db: JobDatabase, user_id: str) -> list[int]:
+    """Withdrawn applications whose NEWEST status event is this module's own close (the Needs-you "Posting
+    closed" stat). The same rule as ``_our_close`` run over every withdrawn application in a fixed number of
+    queries: ``closed_by`` text alone proves nothing, its ``blocked_event_id`` must name a real posting_closed
+    block with evidence, and nothing may sit between the block and the withdrawn. Read-only; scoped by ``user_id``."""
+    types = tuple(settings.APPLICATION_STATUS_EVENT_TYPES)
+    cur = await db._db.execute(
+        "SELECT e.id, e.application_id, e.event_type, e.payload FROM application_events e "  # noqa: S608
+        "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
+        f"WHERE e.user_id = ? AND a.status = 'withdrawn' AND e.event_type IN ({','.join('?' for _ in types)}) "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id "
+        "AND c.user_id = e.user_id) ORDER BY e.id ASC",
+        (user_id, *types),
+    )
+    newest: dict[int, dict[str, Any]] = {}
+    for r in await cur.fetchall():
+        newest[int(r["application_id"])] = dict(r)  # ascending: the last one wins
+    claims: dict[int, tuple[int, int]] = {}  # application -> (block event id, withdrawn event id)
+    for app_id, ev in newest.items():
+        p = _payload(ev["payload"])
+        block_id = p.get("blocked_event_id")
+        if ev["event_type"] == "withdrawn" and p.get("closed_by") == CLOSED_BY and isinstance(block_id, int):
+            claims[app_id] = (block_id, int(ev["id"]))
+    if not claims:
+        return []
+    apps = sorted(claims)
+    marks = ",".join("?" for _ in apps)
+    cur = await db._db.execute(
+        f"SELECT id, application_id, event_type, payload FROM application_events WHERE user_id = ? "  # noqa: S608
+        f"AND application_id IN ({marks})",
+        (user_id, *apps),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    out: list[int] = []
+    for app_id, (block_id, ev_id) in claims.items():
+        block = next((r for r in rows if int(r["id"]) == block_id and int(r["application_id"]) == app_id
+                      and r["event_type"] == "blocked"), None)
+        if block is None or not _proves_closed(_payload(block["payload"])):
+            continue
+        if any(block_id < int(r["id"]) < ev_id for r in rows if int(r["application_id"]) == app_id):
+            continue
+        out.append(app_id)
+    return sorted(out)
+
+
 async def _our_close(db: JobDatabase, user_id: str, application_id: int, ev: dict[str, Any]) -> bool:
     """``ev`` is a ``withdrawn`` this module wrote: ``closed_by`` alone is caller-writable text, so its
     ``blocked_event_id`` must name a real ``blocked`` posting_closed WITH evidence on this application, and
@@ -158,8 +208,7 @@ async def _our_close(db: JobDatabase, user_id: str, application_id: int, ev: dic
         (block_id, user_id, application_id),
     )
     row = await cur.fetchone()
-    block = _payload(row["payload"]) if row else {}
-    if block.get("reason") != "posting_closed" or block.get("evidence") not in blocked.CLOSED_EVIDENCE:
+    if not _proves_closed(_payload(row["payload"]) if row else {}):
         return False
     cur = await db._db.execute(
         "SELECT 1 FROM application_events WHERE user_id = ? AND application_id = ? AND id > ? AND id < ? LIMIT 1",

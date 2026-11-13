@@ -4,13 +4,13 @@ import { BackBar } from "./BackBar";
 
 describe("BackBar", () => {
   it("from Needs you: back link, chip label and breadcrumb", () => {
-    render(<BackBar applicationId={90} from="needs-you" show="site_step" company="Trackmind" title="Junior AI Engineer" />);
+    render(<BackBar applicationId={90} from="needs-you" show="signin_captcha" company="Trackmind" title="Junior AI Engineer" />);
     const back = screen.getByTestId("back-link");
-    expect(back).toHaveTextContent("Back to Needs you · On the site");
-    expect(back).toHaveAttribute("href", "/needs-you?show=site_step&job=90");
+    expect(back).toHaveTextContent("Back to Needs you · Sign in / CAPTCHA");
+    expect(back).toHaveAttribute("href", "/needs-you?show=signin_captcha&job=90");
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(crumbs).toHaveTextContent("Needs you");
-    expect(within(crumbs).getByRole("link", { name: "On the site" })).toHaveAttribute("href", "/needs-you?show=site_step&job=90");
+    expect(within(crumbs).getByRole("link", { name: "Sign in / CAPTCHA" })).toHaveAttribute("href", "/needs-you?show=signin_captcha&job=90");
     expect(within(crumbs).getByText("Trackmind — Junior AI Engineer")).toHaveAttribute("aria-current", "page");
   });
   it("opened directly or with a bad from: All applications", () => {

@@ -266,9 +266,9 @@ export function JobCards({
   const current = useMemo(() => headers.filter(live), [headers, live]);
   // Live (PR 6): the card the user is in never moves or closes on a refresh (counts use `current`).
   const alive = useLiveJobs(current);
-  // The chosen chip's jobs; "Other" holds no job (only New connections show from here).
+  // The chosen filter's jobs (a job shows under every filter it has a need in).
   const shown = useMemo(
-    () => (show === "all" ? alive : show === "other" ? [] : alive.filter((h) => (idsByKind ? idsByKind[show]?.includes(h.id) : false))),
+    () => (show === "all" ? alive : alive.filter((h) => (idsByKind ? idsByKind[show]?.includes(h.id) : false))),
     [alive, show, idsByKind],
   );
   // The shown jobs: a card that loads with nothing open drops out and the next job takes its place.

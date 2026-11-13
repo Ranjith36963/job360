@@ -3,10 +3,10 @@ import { appHref, backTarget, parseJobParam } from "./back-link";
 
 describe("backTarget", () => {
   it("Needs you with a chip: names the chip and returns to it with the job", () => {
-    const t = backTarget(90, { from: "needs-you", show: "site_step" });
-    expect(t.label).toBe("Back to Needs you · On the site");
-    expect(t.href).toBe("/needs-you?show=site_step&job=90");
-    expect(t.trail.map((x) => x.name)).toEqual(["Needs you", "On the site"]);
+    const t = backTarget(90, { from: "needs-you", show: "signin_captcha" });
+    expect(t.label).toBe("Back to Needs you · Sign in / CAPTCHA");
+    expect(t.href).toBe("/needs-you?show=signin_captcha&job=90");
+    expect(t.trail.map((x) => x.name)).toEqual(["Needs you", "Sign in / CAPTCHA"]);
   });
   it("Needs you, All or no chip: just 'Back to Needs you'", () => {
     for (const show of ["all", undefined]) {
@@ -35,8 +35,8 @@ describe("backTarget", () => {
     }
   });
   it("show is only read for Needs you; an array takes its first value", () => {
-    expect(backTarget(7, { from: "outreach", show: "site_step" }).href).toBe("/outreach/people");
-    expect(backTarget(7, { from: ["needs-you", "x"], show: ["send_yes"] }).label).toBe("Back to Needs you · Send");
+    expect(backTarget(7, { from: "outreach", show: "signin_captcha" }).href).toBe("/outreach/people");
+    expect(backTarget(7, { from: ["needs-you", "x"], show: ["check_send"] }).label).toBe("Back to Needs you · Check & send");
   });
 });
 
@@ -48,7 +48,7 @@ describe("parseJobParam / appHref", () => {
   it("builds the link with where it came from", () => {
     expect(appHref(5)).toBe("/applications/5");
     expect(appHref(5, "home")).toBe("/applications/5?from=home");
-    expect(appHref(5, "needs-you", "site_step")).toBe("/applications/5?from=needs-you&show=site_step");
+    expect(appHref(5, "needs-you", "signin_captcha")).toBe("/applications/5?from=needs-you&show=signin_captcha");
     expect(appHref(5, "needs-you", "all")).toBe("/applications/5?from=needs-you");
   });
 });

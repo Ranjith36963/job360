@@ -177,6 +177,14 @@ async def changes(
     return out
 
 
+class NeedsYouFilterOut(BaseModel):
+    key: str  # fixed keys, always all present, in this order (needs_you_count.FILTERS)
+    label: str
+    count: int  # this filter's own items (jobs + the items that are no job)
+    job_ids: list[int] = []  # the jobs in it, the page's order
+    kind: str  # "todo" (the owner does it), "view" (settled by the assistant) or "stat" (a count only)
+
+
 class SiteSignInOut(BaseModel):
     host: str  # the site, lower case, no www. (one sign-in there clears every job listed)
     word: str  # the step: "sign in", "create an account" or "enter the code"
@@ -197,6 +205,7 @@ class NeedsYouCountOut(BaseModel):
     # Diagnosis D: the jobs waiting on one sign-in, one item per site (their ids are not in job_ids).
     site_signins: list[SiteSignInOut] = []
     pc_idle: Optional[PcIdleOut] = None  # owner #12: jobs wait on the user's PC and no PC session worked them
+    filters: list[NeedsYouFilterOut] = []  # the fixed filter set; a job is in each one it has an owner need in
 
 
 @router.get("/needs-you-count", response_model=NeedsYouCountOut, dependencies=AUTH_FIRST)

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -32,6 +33,7 @@ from src.core import settings
 from src.services.applications import asks as asks_service
 from src.services.applications import inbox_items, outcome_suggestions, site_signin, spine, test_marker
 from src.services.profile import ask_once, setting_requests
+from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -131,13 +133,60 @@ async def _unsent_contacts(db: JobDatabase, user_id: str) -> tuple[set[int], int
 
 ACTORS = ("you", "your_pc", "assistant", "job360", "employer")
 
+# The FIXED filters (owner 2026-11-13): always all present, in this order, at zero too. ``todo`` = something the
+# owner does; ``view`` = jobs the assistant settled (never counted in All or the badge); ``stat`` = a count only.
+FILTERS: tuple[tuple[str, str, str], ...] = (
+    ("all", "All", "todo"), ("signin_captcha", "Sign in / CAPTCHA", "todo"), ("check_send", "Check & send", "todo"),
+    ("answer_once", "Answer once", "todo"), ("cv_weak", "CV still weak", "todo"),
+    ("finish_by_hand", "Finish by hand", "todo"), ("went_out", "Did it go out?", "todo"),
+    ("strong_cvs", "Strong CVs (AI reviewed)", "view"), ("posting_closed", "Posting closed", "stat"),
+    ("other", "Other", "todo"),
+)
+# ONE table: a blocker's kind (and, for a site step, the word of its label) -> the filter it belongs to.
+_SITE_FILTER = {
+    "sign in": "signin_captcha", "create an account": "signin_captcha", "solve the CAPTCHA": "signin_captcha",
+    "attach your CV": "signin_captcha", "enter the code": "signin_captcha",
+    "finish on the site": "finish_by_hand", "mark it applied": "went_out",
+}
+_KIND_FILTER = {
+    "confirm_sent": "went_out", "send_yes": "check_send", "check_send": "check_send", "approve_cv": "cv_weak",
+    "apply_by_hand": "finish_by_hand", "outreach_send": "other", "posting_closed": "other",
+}
+_UNKNOWN_LOGGED = "other"  # reason code written when an owner kind is in no row of the table
+
+
+def filter_for(blocker: Mapping[str, object]) -> Optional[str]:
+    """The filter ONE blocker belongs to, or None. Only the owner's blockers (actor ``you``) map: the assistant's
+    (``review_cv``, ``fix_cv``, ``assistant_step`` ...), the PC's and the employer's land nowhere. An owner kind
+    the table does not know lands in Other, never nowhere. Pure: nothing is read, nothing hidden here (hiding a
+    blocker belongs to ``blockers.py``, so the badge, All and the chips agree)."""
+    if blocker["actor"] != "you":
+        return None
+    kind = blocker["kind"]
+    if kind == "site_step":
+        return _SITE_FILTER.get(str(blocker["label"]), _UNKNOWN_LOGGED)
+    if kind == "answers":
+        ref = blocker.get("ref")
+        return "check_send" if isinstance(ref, dict) and ref.get("fill_event_id") is not None else "answer_once"
+    return _KIND_FILTER.get(str(kind), _UNKNOWN_LOGGED)
+
+
+def filters_of(blockers: Sequence[Mapping[str, object]]) -> set[str]:
+    """Every filter a job's blockers put it in (a job is in each filter it has an owner need in)."""
+    return {key for b in blockers if (key := filter_for(b)) is not None}
+
+
+def _is_known(blocker: Mapping[str, object]) -> bool:
+    kind = blocker["kind"]
+    return kind in _KIND_FILTER or kind in ("site_step", "answers")
+
 
 async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[set[int]] = None) -> dict[str, Any]:
     """Every open application counted ONCE, under the actor and kind of its first blocker (``blockers_for``
     orders them, so the first is what waits next): ``by_actor``, ``by_kind``, and for the jobs that wait on the
     user ``job_ids`` (oldest first blocker first) and ``job_ids_by_kind``. One batch call, no per-job loop.
     ``tests``: the caller's own ``test_marker.test_app_ids`` answer (None = read it once, in ``blockers_for``)."""
-    from src.services.applications import blockers  # lazy: blockers imports this module
+    from src.services.applications import auto_close, blockers  # lazy: blockers imports this module
 
     closed = tuple(settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES)
     marks = ",".join("?" for _ in closed)
@@ -150,9 +199,25 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
     by_kind: dict[str, int] = {}
     mine: list[tuple[str, int, str]] = []
     firsts: dict[int, Blocker] = {}
-    for app_id, lst in (await blockers.blockers_for(db, user_id, ids, tests=tests)).items():
+    members: dict[str, list[int]] = {key: [] for key, _, _ in FILTERS}
+    unknown: dict[int, list[str]] = {}
+    cleared: set[int] = set()
+    token = blockers.CLEARED.set(cleared)
+    try:
+        found = await blockers.blockers_for(db, user_id, ids, tests=tests)
+    finally:
+        blockers.CLEARED.reset(token)
+    for app_id, lst in found.items():
         if not lst:
             continue
+        for key in sorted(filters_of(lst)):
+            members[key].append(app_id)
+        if mine_all := [b for b in lst if b["actor"] == "you"]:
+            members["all"].append(app_id)
+            if odd := [b["kind"] for b in mine_all if not _is_known(b)]:
+                unknown[app_id] = odd
+        if any(b["kind"] == "posting_closed" and b["actor"] == "you" for b in lst):
+            members["posting_closed"].append(app_id)
         first = lst[0]
         by_actor[first["actor"]] = by_actor.get(first["actor"], 0) + 1
         by_kind[first["kind"]] = by_kind.get(first["kind"], 0) + 1
@@ -166,9 +231,22 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
     for _, app_id, kind in mine:
         if app_id not in grouped:
             by_ids.setdefault(kind, []).append(app_id)
+    for key, _, kind in FILTERS:  # a grouped job is no row: its host card is the item (counted in signin_captcha)
+        if kind == "todo":
+            members[key] = [i for i in members[key] if i not in grouped]
+    members["strong_cvs"] = sorted(cleared)
+    members["posting_closed"] = sorted(
+        set(members["posting_closed"]) | set(await auto_close.proven_closed_ids(db, user_id)))
+    order = {app_id: n for n, (_, app_id, _) in enumerate(mine)}  # the page's order: oldest first blocker first
+    for key in members:
+        members[key].sort(key=lambda i: (order.get(i, len(order)), i))
+    if unknown:  # an owner kind the table does not know: filed under Other, and said here so it can be added
+        get_audit_logger().info("needs_you_filter_unknown_kind", extra={
+            "event": "needs_you_filter_unknown_kind", "user_id": safe_log_value(user_id), "reason": "kind_not_in_table",
+            "jobs": {str(a): [safe_log_value(k, max_len=40) for k in ks] for a, ks in sorted(unknown.items())[:50]}})
     return {
         "by_actor": by_actor, "by_kind": by_kind, "job_ids": [i for _, i, _ in mine if i not in grouped],
-        "job_ids_by_kind": by_ids, "site_signins": signins, "signin_job_ids": sorted(grouped),
+        "job_ids_by_kind": by_ids, "site_signins": signins, "signin_job_ids": sorted(grouped), "members": members,
     }
 
 
@@ -213,6 +291,7 @@ async def needs_you_count(
     mark("blockers")
     if timings is not None:
         timings.update({f"b_{part}": ms for part, ms in parts.items()})
+    members = first.pop("members")
     jobs = first["by_actor"]["you"]
     rows = {*first["job_ids"], *first.pop("signin_job_ids")}  # a grouped job's asks wait on its host card
     other_ask_ids = [ask_id for ask_id, job in tied if job not in rows]  # no row to answer them in: Other
@@ -231,8 +310,30 @@ async def needs_you_count(
 
     pc_idle = await own_browser.pc_idle(db, user_id, datetime.now(timezone.utc), first["by_actor"]["your_pc"])
     mark("pc_idle")
+    n = len(first["job_ids"]) + len(first["site_signins"]) + other + (1 if answer_once else 0)
+    filters = _filters(members, n, general, other, answer_once, len(first["site_signins"]))
+    get_audit_logger().info("needs_you_filters", extra={
+        "event": "needs_you_filters", "user_id": safe_log_value(user_id), "n": n, "result": "ok",
+        "counts": {f["key"]: f["count"] for f in filters}})
     return {
-        "n": len(first["job_ids"]) + len(first["site_signins"]) + other + (1 if answer_once else 0),
-        "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
-        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first, "pc_idle": pc_idle,
+        "n": n, "jobs": jobs, "other": other, "jobs_waiting_on_you": jobs,
+        "answer_once": answer_once, "other_ask_ids": other_ask_ids, **first, "pc_idle": pc_idle, "filters": filters,
     }
+
+
+def _filters(
+    members: dict[str, list[int]], n: int, general: int, other: int, answer_once: int, site_cards: int = 0,
+) -> list[dict[str, Any]]:
+    """The fixed filters, each with its own count. A job counts in every filter it has an owner need in; All
+    counts each job once and equals ``n``. The items that are no job are PARTITIONED, never added twice: the
+    job-less asks and the Answer-once card show under "Answer once", the rest of Other under "Other", so
+    the non-job items across the filters add up to ``other + card`` (``n`` minus the jobs). The view and the
+    stat never enter ``n``. A site sign-in card (one per host, its jobs are no rows) counts once in
+    "Sign in / CAPTCHA"."""
+    extra = {"answer_once": general + (1 if answer_once else 0), "other": other - general, "signin_captcha": site_cards}
+    out: list[dict[str, Any]] = []
+    for key, label, kind in FILTERS:
+        ids = members[key]
+        count = n if key == "all" else len(ids) + extra.get(key, 0)
+        out.append({"key": key, "label": label, "count": count, "job_ids": ids, "kind": kind})
+    return out

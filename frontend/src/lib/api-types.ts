@@ -8311,6 +8311,11 @@ export interface components {
                 [key: string]: number;
             };
             /**
+             * Filters
+             * @default []
+             */
+            filters: components["schemas"]["NeedsYouFilterOut"][];
+            /**
              * Job Ids
              * @default []
              */
@@ -8344,6 +8349,22 @@ export interface components {
              * @default []
              */
             site_signins: components["schemas"]["SiteSignInOut"][];
+        };
+        /** NeedsYouFilterOut */
+        NeedsYouFilterOut: {
+            /** Count */
+            count: number;
+            /**
+             * Job Ids
+             * @default []
+             */
+            job_ids: number[];
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
         };
         /**
          * NextStepOut

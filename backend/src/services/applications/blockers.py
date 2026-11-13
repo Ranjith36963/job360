@@ -157,6 +157,7 @@ def _question_class(row: dict[str, Any]) -> Optional[str]:
 
 def _answer_blockers(
     app_id: int, ask_rows: list[dict[str, Any]], flags: list[dict[str, Any]], since: Any, unknown_block: bool,
+    fill_id: Optional[int] = None,
 ) -> list[Blocker]:
     need: dict[str, str] = {}
     ask_id: Optional[int] = None
@@ -173,7 +174,9 @@ def _answer_blockers(
             need[key] = cls
     to_answer = sum(1 for c in need.values() if c == "answer") or (1 if unknown_block else 0)
     to_ok = sum(1 for c in need.values() if c == "ok")
-    ref = {"ask_id": ask_id} if ask_id else None
+    ref: Optional[dict[str, Any]] = {"ask_id": ask_id} if ask_id else None
+    if fill_id is not None:  # the answers are tied to an open form: the filters read this fact, not the label
+        ref = {**(ref or {}), "fill_event_id": int(fill_id)}
     out: list[Blocker] = []
     if to_answer:
         out.append(_b("answers", "you", f"answer {_plural(to_answer, 'question', 'questions')}", since, ref))
@@ -228,6 +231,11 @@ async def blockers_for(
 # Where a caller that wants them (the needs-you badge's Server-Timing header) collects the milliseconds of
 # each part of ``_fill``. None = nobody asked: nothing is recorded. Durations only, never a value.
 SUBSTEPS: ContextVar[Optional[dict[str, float]]] = ContextVar("blockers_substeps", default=None)
+
+
+# Where a caller that wants it (the Needs-you filters) collects the jobs whose newest CV a strong review cleared
+# on its own (``kit.reviews_clearing``), so that rule runs once. None = nobody asked. Ids only.
+CLEARED: ContextVar[Optional[set[int]]] = ContextVar("blockers_cleared", default=None)
 
 
 class _Lap:
@@ -322,6 +330,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
     lap("flags")
     reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded))
+    if (cleared := CLEARED.get()) is not None:
+        cleared.update(i for i in reviewed if i not in receipts and apps[i]["status"] == "considering")
     # Owner 2026-11-13: an unreviewed CV, or a weak one with tries left, is the assistant's to review / fix first.
     turns = await kit.assistant_cv_turns(db, user_id, {
         i: cv for i, cv in unseen.items()
@@ -385,7 +395,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if s["fill_open"] or question_asks or reason == "unknown_question":
             fill_at = s["fill"]["recorded_at"] if s["fill"] else block_since
             since = min((k["asked_at"] for k in question_asks), key=_when, default=fill_at)
-            out += _answer_blockers(app_id, question_asks, flags.get(app_id, []), since, reason == "unknown_question")
+            open_fill = int(s["fill"]["id"]) if s["fill_open"] and s["fill"] else None
+            out += _answer_blockers(
+                app_id, question_asks, flags.get(app_id, []), since, reason == "unknown_question", open_fill)
         if considering and s["cv"] and not s["seen"] and app_id not in receipts and app_id not in reviewed:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
             if (turn := turns.get(app_id)) is not None:

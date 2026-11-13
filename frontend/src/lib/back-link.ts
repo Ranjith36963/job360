@@ -2,7 +2,7 @@
 // the same place. Both values come from the address bar, so they are allow-listed here: anything unknown
 // falls back to the Applications list. Pure, no React.
 
-import { KIND_CHIPS, chipLabel } from "@/lib/needs-you-items";
+import { FILTER_CHIPS, chipLabel } from "@/lib/needs-you-items";
 
 export type Origin = "needs-you" | "outreach" | "home";
 
@@ -13,7 +13,7 @@ const ORIGINS: Record<Origin, { path: string; name: string }> = {
 };
 
 const isOrigin = (v: unknown): v is Origin => typeof v === "string" && Object.hasOwn(ORIGINS, v);
-const KNOWN_CHIPS = new Set<string>(["all", "other", ...KIND_CHIPS.map((c) => c.key)]);
+const KNOWN_CHIPS = new Set<string>(FILTER_CHIPS.map((c) => c.key));
 
 export type BackTarget = {
   /** Where the link goes. */

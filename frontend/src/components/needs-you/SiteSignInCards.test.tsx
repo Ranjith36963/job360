@@ -40,13 +40,17 @@ describe("Sign in once per site", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("counts a site once: under All and On the site, and its jobs are not rows", () => {
+  it("counts a site once: under All and Sign in / CAPTCHA, and its jobs are not rows", () => {
     const c = fromServerCount({
       n: 2, jobs: 5, other: 0, jobs_waiting_on_you: 5, by_actor: { you: 5 }, by_kind: { site_step: 5 },
       job_ids: [7], job_ids_by_kind: { site_step: [7] }, other_ask_ids: [], answer_once: 0, site_signins: [hirist],
+      filters: [
+        { key: "all", label: "All", count: 2, job_ids: [], kind: "todo" },
+        { key: "signin_captcha", label: "Sign in / CAPTCHA", count: 2, job_ids: [7], kind: "todo" },
+      ],
     });
     expect(c.jobIds).toEqual([7]);
-    expect(c.byChip.site_step).toBe(2);
+    expect(c.byChip.signin_captcha).toBe(2);
     expect(c.byChip.all).toBe(2);
     expect(c.siteSignins).toEqual([hirist]);
   });
