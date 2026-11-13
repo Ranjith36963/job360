@@ -486,7 +486,9 @@ async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
 
     waiting = await queue_preflight._open_ask_apps(db, user_id, ids)
     waiting |= {a["application_id"] for a in await ready.cv_to_approve(db, user_id)} & set(ids)
-    waiting |= set(await blocked.open_blocks(db, user_id, sorted(set(ids) - waiting)))  # one query
+    blocks = await blocked.open_blocks(db, user_id, sorted(set(ids) - waiting))  # one query
+    codes = await blocked.codes_mine(user_id, blocks)  # F8: a code box the assistant reads waits on no one
+    waiting |= {a for a, p in blocks.items() if not blocked.assistant_reads_code(p, codes)}
     return len(waiting)
 
 

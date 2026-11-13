@@ -33,6 +33,9 @@ PURPOSES = frozenset({"apply", "verify_email"})
 WINDOW = timedelta(minutes=15)
 CLOCK_SLACK = timedelta(minutes=1)
 MAX_PER_HOUR = 3
+# Owner decision 2 (suggested, F8): the second ``otp_needed`` block on one job with no accepted code between them
+# hands the job back to the owner (the only exit from an assistant-owned loop).
+OTP_ESCALATE_AT = 2
 # Account security, mail and payment providers: never a job site's application code, whatever the form says.
 FORBIDDEN_DOMAINS = (
     "google.com", "gmail.com", "googlemail.com", "youtube.com", "microsoft.com", "microsoftonline.com",
@@ -168,6 +171,51 @@ async def _known_hosts(db: JobDatabase, user_id: str, application_id: int, app_r
     return hosts - {""}
 
 
+def codes_on(profile: Any) -> bool:
+    """The ONE reader of the setting (stored value, effective): every place that decides who owns a code box
+    and :func:`check` call this, so they cannot drift apart. No profile = off."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+
+    return profile is not None and settings_rules.effective(profile.assistant_settings).use_email_codes is True
+
+
+async def codes_are_assistants(user_id: str) -> bool:
+    """True when this user's setting makes a code box the assistant's. Read live every time (turning it off
+    hands the code back at once), never baked into a stored block."""
+    import asyncio  # noqa: PLC0415
+
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - profile <-> spine cycle
+
+    return codes_on(await asyncio.to_thread(load_profile, user_id))
+
+
+async def refused_tries(db: JobDatabase, user_id: str, application_id: int) -> int:
+    """``otp_needed`` blocks on this job since the last accepted ``email_code_used`` or the last time the user
+    cleared or skipped it (the assistant's own ``unblocked retried`` does not reset the count). Read-only."""
+    import json  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT event_type, payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type IN ('blocked', 'unblocked', 'email_code_used') ORDER BY id DESC",
+        (application_id, user_id),
+    )
+    n = 0
+    for row in await cur.fetchall():
+        kind, raw = row[0], row[1]
+        if kind == EVENT_TYPE:
+            break
+        try:
+            p = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            p = {}
+        p = p if isinstance(p, dict) else {}
+        if kind == "unblocked" and p.get("resolution") in ("user_did_it", "skipped"):
+            break
+        if kind == "blocked" and p.get("reason") == "otp_needed":
+            n += 1
+    return n
+
+
 async def check(
     db: JobDatabase, user: CurrentUser, application_id: int, payload: Any, *, now: Optional[datetime] = None,
 ) -> dict[str, Any]:
@@ -178,7 +226,7 @@ async def check(
     when = now or datetime.now(timezone.utc)
     profile = load_profile(user.id)
     audit = {"event": "email_code_check", "user_id": safe_log_value(user.id), "application_id": int(application_id)}
-    if profile is None or profile.assistant_settings.use_email_codes is not True:
+    if profile is None or not codes_on(profile):
         get_audit_logger().info("email_code_check", extra={**audit, "result": "setting_off"})
         raise SpineError(403, "assistant_settings.use_email_codes is off: the user enters the code (otp_needed)")
     app_row = await spine.get_owned_application(db, user.id, application_id) or {}
