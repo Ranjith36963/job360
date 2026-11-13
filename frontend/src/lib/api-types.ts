@@ -4345,6 +4345,11 @@ export interface components {
         };
         /** ApplicationDetailOut */
         ApplicationDetailOut: {
+            /**
+             * Approvals
+             * @default []
+             */
+            approvals: components["schemas"]["ApprovalOut"][];
             /** Artifacts */
             artifacts: components["schemas"]["ApplicationArtifactOut"][];
             /** Asks */
@@ -4840,6 +4845,28 @@ export interface components {
             recorded_by: string;
             /** Signal */
             signal: string;
+        };
+        /**
+         * ApprovalOut
+         * @description Who approved one thing ("You approved" / "AI reviewed"), read off stored rows (approval.py). ``ref`` is the
+         *     event the tag belongs to (``ref_kind`` event), or an outreach row. ``reviewer`` is caller text, cut short.
+         */
+        ApprovalOut: {
+            /** At */
+            at: string;
+            /** By */
+            by: string;
+            /** Ref */
+            ref: number;
+            /**
+             * Ref Kind
+             * @default event
+             */
+            ref_kind: string;
+            /** Reviewer */
+            reviewer?: string | null;
+            /** What */
+            what: string;
         };
         /**
          * ArtifactDiffBaseOut
@@ -10194,6 +10221,7 @@ export interface components {
             answer: string;
             /** Application Id */
             application_id?: number | null;
+            approval?: components["schemas"]["ApprovalOut"] | null;
             /** Id */
             id: number;
             /** Job Company */

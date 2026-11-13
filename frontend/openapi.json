@@ -889,6 +889,14 @@
       },
       "ApplicationDetailOut": {
         "properties": {
+          "approvals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ApprovalOut"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ApplicationArtifactOut"
@@ -2344,6 +2352,51 @@
           "needs_sponsorship"
         ],
         "title": "ApplicationVisaOut",
+        "type": "object"
+      },
+      "ApprovalOut": {
+        "description": "Who approved one thing (\"You approved\" / \"AI reviewed\"), read off stored rows (approval.py). ``ref`` is the\nevent the tag belongs to (``ref_kind`` event), or an outreach row. ``reviewer`` is caller text, cut short.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "integer"
+          },
+          "ref_kind": {
+            "default": "event",
+            "title": "Ref Kind",
+            "type": "string"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "what",
+          "at",
+          "ref"
+        ],
+        "title": "ApprovalOut",
         "type": "object"
       },
       "ArtifactDiffBaseOut": {
@@ -16075,6 +16128,16 @@
               }
             ],
             "title": "Application Id"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "title": "Id",
