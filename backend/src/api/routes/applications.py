@@ -4277,7 +4277,7 @@ async def _record_event(
         if body.event_type == "answer_corrected":
             _check_answer_corrected(user, application_id, payload)
         # S11a: a version's artifact_saved event and a hide are corrected only by the user's buttons.
-        await hiding.refuse_correction(db, user.id, application_id, body.corrects_event_id)
+        await hiding.refuse_correction(db, user.id, application_id, body.corrects_event_id, body.event_type)
         if body.event_type == process_log.PROCESS_LOG:
             await process_log.check(
                 db, user, application_id, payload=payload, source=source,

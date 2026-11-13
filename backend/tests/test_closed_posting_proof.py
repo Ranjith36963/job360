@@ -207,3 +207,23 @@ async def test_an_agent_cannot_correct_its_way_past_a_closed_unqueue(authenticat
         mine = await _correcting(web, app_id, "queued", {}, eid)
         assert mine.status_code == 201, mine.text
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type,payload", [("note", {}), ("interview_scheduled", {})])
+async def test_only_a_queue_event_corrects_a_queue_event(authenticated_async_context, fixture_user_id, event_type, payload):
+    """Re-checker 2026-11-13: a ``note`` (or ``interview_scheduled``) correcting the closed_posting ``unqueued``
+    retracted it, because ``queued_at_by_app`` skips ANY corrected queue event: app 146 again, with no user
+    action. Only a queue event may correct a queue event, whoever sends it."""
+    async with authenticated_async_context() as web:
+        app_id = await _job(web, 11)
+        async with await _agent(web) as agent:
+            off = await _event(agent, app_id, "unqueued", {"reason": "closed_posting"})
+            assert off.status_code == 201, off.text
+            eid = int(off.json()["event_id"])
+            sneak = await _correcting(agent, app_id, event_type, payload, eid)
+            assert sneak.status_code == 422 and "queue event" in sneak.text, sneak.text
+        mine = await _correcting(web, app_id, event_type, payload, eid)
+        assert mine.status_code == 422 and "queue event" in mine.text, mine.text
+        async with browser_routes._db() as db:  # noqa: SLF001
+            assert app_id not in await spine.queued_at_by_app(db, fixture_user_id, [app_id])

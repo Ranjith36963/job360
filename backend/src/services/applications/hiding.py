@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import process_log, spine
 from src.services.applications.spine import SpineError
+from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.api.auth_deps import CurrentUser
@@ -61,14 +62,26 @@ async def _target(db: JobDatabase, user_id: str, application_id: int, event_id: 
     return dict(row) if row else None
 
 
-async def refuse_correction(db: JobDatabase, user_id: str, application_id: int, event_id: Optional[int]) -> None:
+_QUEUE_TYPES = ("queued", "unqueued")
+
+
+async def refuse_correction(
+    db: JobDatabase, user_id: str, application_id: int, event_id: Optional[int], event_type: str = "",
+) -> None:
     """``record_event`` may not correct a version's ``artifact_saved`` event or a hide: both are the
-    user's own Hide / Show again buttons (403)."""
+    user's own Hide / Show again buttons (403). Only a queue event corrects a queue event (422): the queue
+    skips ANY corrected ``queued`` / ``unqueued``, so a ``note`` correcting a closed_posting unqueue put
+    the job back on the queue with no user action (app 146, re-checker 2026-11-13)."""
     if event_id is None:
         return
     row = await _target(db, user_id, application_id, event_id)
     if row is None:
         return  # append_event answers 422 for an id that is not on this application
+    if row["event_type"] in _QUEUE_TYPES and event_type and event_type not in _QUEUE_TYPES:
+        get_audit_logger().info("correction_refused", extra={
+            "event": "correction_refused", "user_id": safe_log_value(user_id),
+            "application_id": application_id, "target": event_id, "reason": "non_queue_corrects_queue"})
+        raise SpineError(422, "only a queued or unqueued event corrects a queue event")
     if row["event_type"] == "artifact_saved":
         raise SpineError(403, "only the user hides a document version, with its Hide button on the web")
     is_hide = row["recorded_by"] == "web" and (
