@@ -120,11 +120,12 @@ async def cv_to_approve(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
             continue
         unseen.append((row, app_id, sha))
     # Owner 2026-11-09: a strong review of this exact CV clears it too (cv_auto_approve on; one batched read).
-    reviewed = await kit.reviews_clearing(
-        db, user_id, {a: {"artifact_id": r["artifact_id"], "sha": sha} for r, a, sha in unseen}
-    )
+    want = {a: {"artifact_id": r["artifact_id"], "sha": sha} for r, a, sha in unseen}
+    reviewed = await kit.reviews_clearing(db, user_id, want)
+    # Owner 2026-11-13: no review yet, or weak with tries left = the assistant's turn, not a card (one shared rule).
+    turns = await kit.assistant_cv_turns(db, user_id, {a: w for a, w in want.items() if a not in reviewed})
     for row, app_id, _sha in unseen:
-        if app_id in reviewed:
+        if app_id in reviewed or app_id in turns:
             continue
         out.append({
             "application_id": app_id, "job_title": row["job_title"] or "", "job_company": row["job_company"] or "",

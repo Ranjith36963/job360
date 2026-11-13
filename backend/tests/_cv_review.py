@@ -58,3 +58,29 @@ async def blank_ad(application_id: int) -> None:
     db = await api_deps.get_db()
     await db._db.execute("UPDATE applications SET job_description_snapshot = '' WHERE id = ?", (application_id,))
     await db._db.commit()
+
+
+async def owners_turn(user_id: str, application_id: int) -> None:
+    """Put the newest CV in the OWNER's turn (owner 2026-11-13: an unreviewed CV, or a weak one with tries left, is the
+    assistant's): a weak review of it on record after :data:`cv_review.MAX_WEAK` other judged versions, so no try is
+    left and ``approve_cv`` waits on the user. For tests about the user's approval, not about the review."""
+    import json
+    from datetime import datetime, timezone
+
+    from src.api import dependencies as api_deps
+    from src.services.applications import cv_review, kit
+
+    db = await api_deps.get_db()
+    cur = await db._db.execute(
+        "SELECT id, text FROM application_artifacts WHERE user_id = ? AND application_id = ? AND kind = 'cv' "
+        "ORDER BY version_no DESC LIMIT 1", (user_id, application_id))
+    art_id, text = await cur.fetchone()
+    now = datetime.now(timezone.utc).isoformat()
+    spent = [-(n + 1) for n in range(cv_review.MAX_WEAK)]  # stand-in versions whose tries were spent
+    for version, sha in [*((v, "0" * 64) for v in spent), (art_id, kit.sha256_text(text or ""))]:
+        payload = {"artifact_id": version, "sha256": sha, "confidence": "weak", "rules": cv_review.RULES}
+        await db._db.execute(
+            "INSERT INTO application_events (user_id, application_id, event_type, detail, payload, occurred_at, "
+            "recorded_at, recorded_by) VALUES (?, ?, ?, '', ?, ?, ?, 'test')",
+            (user_id, application_id, cv_review.EVENT_TYPE, json.dumps(payload), now, now))
+    await db._db.commit()
