@@ -324,3 +324,32 @@ async def test_next_step_follows_check_send_and_the_assistants_submit(authentica
         assert steps[clean] != "confirm_submit", steps
         detail = await spine.get_application_detail(db, uid, clean)
         assert detail["next_step"]["code"] == steps[clean] and detail["next_step"]["code"] != "confirm_submit"
+
+
+# ── the Needs-you filters (#1597): check_send is the owner's Send step ───────
+
+
+def test_check_send_maps_to_the_send_filter_never_other():
+    from src.services.applications import needs_you_count
+
+    blocker = {"kind": "check_send", "actor": "you", "label": "check the answers and send", "ref": {"event_id": 1}}
+    assert needs_you_count.filter_for(blocker) == "check_send"
+    assert needs_you_count.filters_of([blocker]) == {"check_send"}
+    assert needs_you_count._is_known(blocker)  # in the table: no "unknown kind" log line, no Other fallback
+
+
+@pytest.mark.asyncio
+async def test_a_check_send_job_is_listed_and_counted_in_the_send_filter_and_not_in_other(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        uid = authenticated_async_context.fixture_user_id
+        _seed(uid)
+        await _mode(client, False)
+        app_id = await _ready_app(client)
+        assert _kinds((await _rows(uid, [app_id]))[app_id]) == ["check_send"]
+        resp = await client.get("/api/needs-you-count")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        by = {f["key"]: f for f in body["filters"]}
+        assert by["check_send"]["job_ids"] == [app_id] and by["check_send"]["count"] == 1, by["check_send"]
+        assert app_id not in by["other"]["job_ids"] and by["other"]["count"] == 0, by["other"]
+        assert by["all"]["job_ids"] == [app_id] and body["n"] == 1, body

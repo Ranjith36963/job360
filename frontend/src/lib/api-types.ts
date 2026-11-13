@@ -3352,8 +3352,8 @@ export interface paths {
         };
         /**
          * Get Questionnaire
-         * @description Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed
-         *     or not known, most-guessed first (``ask_once.questionnaire``). Read-only.
+         * @description Ask once (owner 2026-11-02): up to 10 common questions per country the user works in or has a queued
+         *     job in, still guessed or not known, most-guessed first (``ask_once.questionnaire``). Read-only.
          */
         get: operations["get_questionnaire_api_profile_questionnaire_get"];
         put?: never;
@@ -3760,6 +3760,28 @@ export interface paths {
          *     arrive with autonomy step 4 (409). Another user's item, or none, is 404.
          */
         post: operations["report_wrong_fact_route_api_sent_on_its_own__item_id__wrong_fact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sites/{host}/signed-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Site Signed In
+         * @description "I've signed in" on a Needs-you site card (diagnosis D): for each of the user's jobs with an open
+         *     sign-in / create-account / code block on ``host``, records ``unblocked`` {user_did_it} and ``site_account``
+         *     {host}; their asks close. 409 when none waits. Session only; no MCP tool (an agent unblocks per job).
+         */
+        post: operations["site_signed_in_api_sites__host__signed_in_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4345,6 +4367,11 @@ export interface components {
         };
         /** ApplicationDetailOut */
         ApplicationDetailOut: {
+            /**
+             * Approvals
+             * @default []
+             */
+            approvals: components["schemas"]["ApprovalOut"][];
             /** Artifacts */
             artifacts: components["schemas"]["ApplicationArtifactOut"][];
             /** Asks */
@@ -4840,6 +4867,28 @@ export interface components {
             recorded_by: string;
             /** Signal */
             signal: string;
+        };
+        /**
+         * ApprovalOut
+         * @description Who approved one thing ("You approved" / "AI reviewed"), read off stored rows (approval.py). ``ref`` is the
+         *     event the tag belongs to (``ref_kind`` event), or an outreach row. ``reviewer`` is caller text, cut short.
+         */
+        ApprovalOut: {
+            /** At */
+            at: string;
+            /** By */
+            by: string;
+            /** Ref */
+            ref: number;
+            /**
+             * Ref Kind
+             * @default event
+             */
+            ref_kind: string;
+            /** Reviewer */
+            reviewer?: string | null;
+            /** What */
+            what: string;
         };
         /**
          * ArtifactDiffBaseOut
@@ -8262,6 +8311,11 @@ export interface components {
                 [key: string]: number;
             };
             /**
+             * Filters
+             * @default []
+             */
+            filters: components["schemas"]["NeedsYouFilterOut"][];
+            /**
              * Job Ids
              * @default []
              */
@@ -8290,6 +8344,27 @@ export interface components {
              */
             other_ask_ids: number[];
             pc_idle?: components["schemas"]["PcIdleOut"] | null;
+            /**
+             * Site Signins
+             * @default []
+             */
+            site_signins: components["schemas"]["SiteSignInOut"][];
+        };
+        /** NeedsYouFilterOut */
+        NeedsYouFilterOut: {
+            /** Count */
+            count: number;
+            /**
+             * Job Ids
+             * @default []
+             */
+            job_ids: number[];
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
         };
         /**
          * NextStepOut
@@ -10194,6 +10269,7 @@ export interface components {
             answer: string;
             /** Application Id */
             application_id?: number | null;
+            approval?: components["schemas"]["ApprovalOut"] | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -10346,6 +10422,22 @@ export interface components {
              * @default 6
              */
             total: number;
+        };
+        /** SignedInOut */
+        SignedInOut: {
+            /** Host */
+            host: string;
+            /** Unblocked */
+            unblocked: number[];
+        };
+        /** SiteSignInOut */
+        SiteSignInOut: {
+            /** App Ids */
+            app_ids: number[];
+            /** Host */
+            host: string;
+            /** Word */
+            word: string;
         };
         /** StatsBandOut */
         StatsBandOut: {
@@ -17827,6 +17919,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    site_signed_in_api_sites__host__signed_in_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                host: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedInOut"];
+                };
             };
             /** @description Validation Error */
             422: {

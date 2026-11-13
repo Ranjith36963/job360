@@ -324,6 +324,17 @@ export function JobCard({
         </div>
       </div>
 
+      {(card.needs?.length ?? 0) > 1 && (
+        <ol className="flex flex-col gap-0.5 text-xs text-muted-foreground" data-testid={`needs-${card.applicationId}`}>
+          {card.needs?.map((n, i) => (
+            <li key={`${n.kind}-${i}`} data-testid={`need-${card.applicationId}-${i}`} aria-current={i === 0 ? "step" : undefined}
+              className={i === 0 ? "font-medium text-foreground" : undefined}>
+              {i + 1}. {n.label}{i === 0 ? " (next)" : ""}
+            </li>
+          ))}
+        </ol>
+      )}
+
       {card.confirmSent && (
         <section className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid={`confirm-sent-${card.applicationId}`}>
           <h3 className={label}>Employer confirmed — did it go out?</h3>

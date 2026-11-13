@@ -71,6 +71,7 @@ WHY_WORDS = {
     "job360_bot_check": "Job360's browser hit a CAPTCHA or bot check.",
     "job360_safety_stop": "Job360's browser stopped for safety.",
     "default": "You pressed Send for this message.",
+    "auto": "Sent under your outreach auto setting.",
     "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
     "link_unclear": "This link looks broken or disguised: your own browser checks it.",
     "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
@@ -169,12 +170,13 @@ def follow_up_held(rows: list[dict[str, Any]], mid: int, now: datetime) -> bool:
             or any(r["entry"] == "reply" for r in rows))
 
 
-def _carried(rows: list[dict[str, Any]], mid: int, auto: bool) -> bool:
+def _carried(rows: list[dict[str, Any]], mid: int, auto: bool, note_ok: bool = False) -> bool:
     """A yes without a click on this draft: ``outreach_send`` auto (after a request, or an ``after_connect`` draft
-    before one), or the user's Send on the request for THIS exact message."""
+    before one, or, owner 2026-11-13, a connection NOTE: ``note_ok``, the caller knows the person is NOT connected),
+    or the user's Send on the request for THIS exact message."""
     if invite_facts(rows) is not None:
         return auto or owner_yes_carries(rows, mid)
-    return auto and is_after_connect(rows, mid)
+    return auto and (is_after_connect(rows, mid) or note_ok)
 
 
 def owner_yes_carries(rows: list[dict[str, Any]], mid: int) -> bool:
@@ -194,7 +196,9 @@ def owner_yes_carries(rows: list[dict[str, Any]], mid: int) -> bool:
     return False
 
 
-def derive(rows: list[dict[str, Any]], now: datetime, auto: bool = False) -> Optional[dict[str, Any]]:
+def derive(
+    rows: list[dict[str, Any]], now: datetime, auto: bool = False, note_ok: bool = False
+) -> Optional[dict[str, Any]]:
     """The contact's own-browser send state, or ``None`` when there is nothing to send: the newest message is
     not a LinkedIn one, or a ``sent`` / ``reply`` mark is newer than it. Else ``{state, message_id,
     approved_at, claim_until, claimed_by}`` with state waiting_on_you (no click yet) | queued | in_progress
@@ -209,7 +213,7 @@ def derive(rows: list[dict[str, Any]], now: datetime, auto: bool = False) -> Opt
     base: dict[str, Any] = {
         "message_id": mid, "approved_at": None, "claim_until": None, "claimed_by": "", "claimed_actor": "",
     }
-    if not decisions and not _carried(rows, mid, auto):
+    if not decisions and not _carried(rows, mid, auto, note_ok):
         return {**base, "state": "waiting_on_you"}
     if decisions and decisions[-1]["entry"] == DECLINED:
         return {**base, "state": "declined"}
@@ -493,7 +497,7 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         if base is None:
             continue
         rows = await _rows(db, contact_id)
-        task = derive(rows, now, auto)
+        task = derive(rows, now, auto, note_ok=True)  # the state filter below drops anyone not not_connected
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
         if follow_up_held(rows, task["message_id"], now):
@@ -513,7 +517,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
             "what": f"Send your LinkedIn message to {view['name']}", "url": view.get("linkedin_url") or "",
             "contact_id": contact_id, "application_id": view.get("application_id"), "name": view["name"],
             "message_id": task["message_id"], "draft_text": text, "draft_chars": len(text),
-            "linkedin_state": state, "why_own_browser": WHY_WORDS["default"],
+            "linkedin_state": state,
+            "why_own_browser": WHY_WORDS["default" if not task.get("auto") else "auto"],
             "owner_yes": not task.get("auto"),
             "no_note": state != "connected" and is_after_connect(rows, task["message_id"]),
             "claim": ({"session": task["claimed_by"], "until": task["claim_until"], "actor": task["claimed_actor"]}
@@ -566,14 +571,16 @@ async def _application_tasks(
     apps = {int(dict(r)["id"]): dict(r) for r in await cur.fetchall()}
     blocks = await blocked.open_blocks(db, user.id, list(apps))
     routes: list[tuple[int, routing.Route]] = []
+    codes = await blocked.codes_mine(user.id, blocks)
     for app_id, p in sorted(blocks.items()):
         handoff = blocked.captcha_handoff(p)
-        if p.get(blocked.BY_KEY) != blocked.BY_BROWSER and not handoff:
+        code = blocked.assistant_reads_code(p, codes)  # F8: a code box the user's setting makes the assistant's
+        if p.get(blocked.BY_KEY) != blocked.BY_BROWSER and not handoff and not code:
             continue
         reason = str(p.get("reason") or "")
         route = routing.ask_route(
             blocked.ASK_KIND_FOR_REASON.get(reason, ""), block_reason=reason, block_by_browser=not handoff,
-            handoff=handoff,
+            handoff=handoff, email_codes=code,
             # While Job360's browser still holds that page the user finishes it on Needs you; once it let go, no.
             finish_here=reason == "captcha" and blocked.browser_hold_live(user.id, app_id),
         )
@@ -685,13 +692,26 @@ async def weekly_limit_until(db: JobDatabase, user_id: str, now: datetime) -> Op
 
 
 async def invites_since(db: JobDatabase, user_id: str, since: datetime) -> int:
-    """Requests without a note the user's sessions reported (release reason ``invited``) since ``since``."""
+    """Connection requests since ``since``: those released ``invited`` (no note), plus (owner 2026-11-13) a LinkedIn
+    ``sent`` mark for a person with no earlier invite whose saved state was not ``connected`` when it was recorded:
+    a connection NOTE is a request too, and LinkedIn's weekly limit counts it."""
+    stamp = since.astimezone(timezone.utc).isoformat()
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM contact_outreach WHERE user_id = ? AND entry = ? AND text = ? AND recorded_at >= ?",
-        (user_id, RELEASED, INVITED, since.astimezone(timezone.utc).isoformat()),
+        (user_id, RELEASED, INVITED, stamp),
     )
     got = await cur.fetchone()
-    return int(got[0]) if got is not None else 0
+    cur = await db._db.execute(
+        "SELECT COUNT(*) FROM contact_outreach s WHERE s.user_id = ? AND s.entry = 'sent' AND s.channel = 'linkedin' "
+        "AND s.recorded_at >= ? AND NOT EXISTS (SELECT 1 FROM contact_outreach i WHERE i.contact_id = s.contact_id "
+        "AND i.entry = ? AND i.text = ? AND i.id < s.id) "
+        "AND COALESCE((SELECT e.value FROM contact_edits e WHERE e.contact_id = s.contact_id AND e.user_id = s.user_id "
+        "AND e.field = 'linkedin_state' AND e.recorded_at <= s.recorded_at ORDER BY e.id DESC LIMIT 1), '') "
+        "<> 'connected'",
+        (user_id, stamp, RELEASED, INVITED),
+    )
+    notes = await cur.fetchone()
+    return (int(got[0]) if got is not None else 0) + (int(notes[0]) if notes is not None else 0)
 
 
 _SUBMIT_MARKS = "e.event_type IN ('applied', 'submit_attempted')"
@@ -754,6 +774,8 @@ def _next_step(task: dict[str, Any]) -> str:
     if task["kind"] == "application":
         return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
     done = ("Connect, Send without a note, then own_browser_queue release reason invited" if task.get("no_note")
+            else "Connect, Add a note, paste the draft exactly, send, then record_event outreach_sent"
+            if task.get("linkedin_state") == "not_connected" and not task.get("owner_yes", True)
             else "send the draft, then record_event outreach_sent")
     return (
         f'call check_outreach(contact_id={task["contact_id"]}, message_id={task["message_id"]}, '
@@ -833,7 +855,8 @@ async def take(
                         (candidate["contact_id"], user.id),
                     )
                     rows = await _rows(db, candidate["contact_id"])
-                    state = derive(rows, now, not candidate["owner_yes"])
+                    noted = candidate.get("linkedin_state") == "not_connected"
+                    state = derive(rows, now, not candidate["owner_yes"], noted)
                     if state is None or state["state"] != "queued":
                         continue
                     later = backoff_until(rows, now)
@@ -920,7 +943,7 @@ async def release(
         )
         if await cur.fetchone() is None:
             raise SpineError(404, "contact not found")
-        state = derive(await _rows(db, contact_id), now, auto=True)  # a claim on a draft with no click too
+        state = derive(await _rows(db, contact_id), now, auto=True, note_ok=True)  # a claim with no click too
         if state is None or state["state"] != "in_progress" or not label or (
             state["claimed_by"], state["claimed_actor"]
         ) != (label, actor_for(user)):

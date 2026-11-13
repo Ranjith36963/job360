@@ -259,20 +259,23 @@ def _sentence_row(key: str, text: str) -> dict[str, Any]:
 
 
 async def _open_family(
-    db: JobDatabase, user_id: str, application_id: int, kind: str, asked_by: str
+    db: JobDatabase, user_id: str, application_id: Optional[int], kind: str, asked_by: str
 ) -> list[dict[str, Any]]:
     """This job's OPEN asks of the same family as ``kind`` (a question ask, or a blocker of any kind), oldest first.
-    An assistant's ask never merges with (or closes) one the user wrote on the web, nor the other way round."""
+    An assistant's ask never merges with (or closes) one the user wrote on the web, nor the other way round.
+    ``application_id`` None = the user's open asks tied to no job (2026-11-13: four job-less work-rights asks)."""
     kinds = QUESTION_FAMILY if kind in QUESTION_FAMILY else BLOCKER_FAMILY
     marks = ",".join("?" for _ in kinds)
     side = "k.asked_by = 'web'" if asked_by == "web" else "k.asked_by <> 'web'"
+    job = "k.application_id IS NULL" if application_id is None else "k.application_id = ?"
     cur = await db._db.execute(
-        _SELECT + f"WHERE k.user_id = ? AND k.application_id = ? AND k.kind IN ({marks}) "  # noqa: S608
+        _SELECT + f"WHERE k.user_id = ? AND {job} AND k.kind IN ({marks}) "  # noqa: S608
         f"AND {side} AND k.answered_at IS NULL AND k.withdrawn_at IS NULL AND k.context NOT LIKE ? "
         "ORDER BY k.id",
-        (user_id, application_id, *kinds, "proof_missing:%"),
+        (user_id, *([] if application_id is None else [application_id]), *kinds, "proof_missing:%"),
     )
-    return [_serialize(dict(r)) for r in await cur.fetchall()]
+    found = [_serialize(dict(r)) for r in await cur.fetchall()]
+    return found if application_id is not None else [a for a in found if a.get("questions")]
 
 
 async def supersede(
@@ -296,6 +299,28 @@ async def supersede(
 
 
 TIDY_ACTOR = "system"
+# Production 2026-11-13 (asks 583, 584, 587, 588): a job-less ask asking only Memory facts is refused; the user
+# answers those once, per country, on the Answer once page.
+MEMORY_ONLY_JOBLESS_MSG = (
+    "this ask is tied to no job and every question is a Memory fact (right to work, sponsorship, salary, "
+    "contact...): do not file it. The user answers these once per country on the Answer once page in Job360 "
+    "(Needs you); tell them in chat to fill it there. Ask about one job with its application_id"
+)
+
+
+def _jobless_merges(kind: str, asked_by: str, rows: Any) -> bool:
+    """A job-less ask merges with the user's other open job-less asks only as an assistant's question ask with
+    question rows; a sentence-only job-less ask ("Which CV?") stays its own card."""
+    return kind in QUESTION_FAMILY and asked_by != "web" and bool(rows)
+
+
+def _memory_only(rows: list[dict[str, Any]]) -> bool:
+    """Every row is in Memory's families (:func:`ask_once.memory_question`); no rows = False."""
+    from src.services.profile.ask_once import memory_question  # noqa: PLC0415 - profile imports this package
+
+    return bool(rows) and all(memory_question(str(q["key"]), str(q["question"]))[0] for q in rows)
+
+
 # blocked.py's one question for a site saying the user already applied (reason already_applied_on_site). Once the
 # job is no longer `considering` (the user's "I applied"), the page closes it on load (tidy_open_asks).
 ALREADY_APPLIED_QUESTION = "The site says you already applied. Mark it applied?"
@@ -317,6 +342,47 @@ MOVED_TO_LOG_DETAIL = "Moved to the assistant's work log."
 
 
 async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
+    """The user's own read's clean-up: asks for a code box the assistant now reads (F8), then the
+    duplicate / closed-job clean-up (:func:`_tidy_duplicates`). Returns how many asks it closed."""
+    return await _withdraw_code_asks(db, user_id) + await _tidy_duplicates(db, user_id)
+
+
+async def _withdraw_code_asks(db: JobDatabase, user_id: str) -> int:
+    """F8 (2026-11-13): with ``use_email_codes`` on, an open ask that Job360 itself opened from an
+    ``otp_needed`` block (matched by the block's own ``ask_id`` and the same asker, never by words) is the
+    assistant's work: withdrawn with a fixed reason. A block handed back to the owner (``code_escalated``), an
+    ask_user the agent wrote by hand and every other reason stay. Scoped by ``user_id``; logs counts only."""
+    from src.services.applications import blocked  # noqa: PLC0415 - blocked imports this module
+
+    cur = await db._db.execute(
+        "SELECT DISTINCT application_id FROM application_asks WHERE user_id = ? AND answered_at IS NULL "
+        "AND withdrawn_at IS NULL AND application_id IS NOT NULL",
+        (user_id,),
+    )
+    app_ids = [int(r[0]) for r in await cur.fetchall()]
+    found = await blocked.open_blocks(db, user_id, app_ids)
+    blocks = {i: p for i, p in found.items() if p.get("reason") == "otp_needed"}
+    if not blocks or not await blocked.codes_mine(user_id, blocks):
+        return 0
+    linked = {int(p["ask_id"]): i for i, p in blocks.items() if isinstance(p.get("ask_id"), int)
+              and blocked.assistant_reads_code(p, True)}
+    withdrawn = 0
+    for ask_id, ask in (await _get_asks(db, user_id, sorted(linked))).items():
+        if ask.get("status") != "open" or ask["asked_by"] != blocks[linked[ask_id]].get("assistant"):
+            continue
+        try:
+            await withdraw_ask(db, user_id, ask_id, TIDY_ACTOR, blocked.CODES_WITHDRAWN)
+            withdrawn += 1
+        except SpineError:  # answered or withdrawn in between
+            continue
+    if withdrawn:
+        get_audit_logger().info("otp_asks_withdrawn", extra={
+            "event": "otp_asks_withdrawn", "user_id": user_id, "withdrawn": withdrawn, "reason": "otp_needed",
+        })
+    return withdrawn
+
+
+async def _tidy_duplicates(db: JobDatabase, user_id: str) -> int:
     """Owner 2026-10-25: the one-time clean-up of asks filed before one-ask-per-job, run on the user's own
     read (a no-op once tidy). Per job, family and side, the NEWEST open ask keeps every row (merged under
     fixed names) and the older ones close as superseded; an open ask on a closed job closes too. Nothing is
@@ -325,7 +391,7 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
 
     await _log_read_form_notes(db, user_id)
     cur = await db._db.execute(
-        "SELECT k.id, a.status AS app_status FROM application_asks k JOIN applications a "
+        "SELECT k.id, a.status AS app_status FROM application_asks k LEFT JOIN applications a "
         "ON a.id = k.application_id AND a.user_id = k.user_id WHERE k.user_id = ? AND k.answered_at IS NULL "
         "AND k.withdrawn_at IS NULL AND k.context NOT LIKE ? ORDER BY k.id",
         (user_id, "proof_missing:%"),
@@ -333,7 +399,19 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
     rows = [dict(r) for r in await cur.fetchall()]
     if not rows:
         return 0
-    groups: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
+    rechecked = await _unproven_closed_asks(db, user_id, [int(r["id"]) for r in rows])
+    rows = [r for r in rows if int(r["id"]) not in rechecked]
+    closed = 0
+    for ask_id in sorted(rechecked):
+        try:
+            await withdraw_ask(db, user_id, ask_id, TIDY_ACTOR, RECHECK_CLOSED)
+            closed += 1
+        except SpineError:  # answered or withdrawn in between
+            continue
+    if rechecked:
+        get_audit_logger().info("closed_posting_asks_withdrawn", extra={
+            "event": "closed_posting_asks_withdrawn", "user_id": user_id, "ask_ids": sorted(rechecked)})
+    groups: dict[tuple[Optional[int], str, str], list[dict[str, Any]]] = {}
     closed_job: list[dict[str, Any]] = []
     applied_job: list[dict[str, Any]] = []
     by_id = await _get_asks(db, user_id, [int(r["id"]) for r in rows])  # one read, never one per ask
@@ -349,14 +427,16 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
             continue
         family = "question" if ask["kind"] in QUESTION_FAMILY else "blocker"
         side = "web" if ask["asked_by"] == "web" else "assistant"
-        groups.setdefault((int(ask["application_id"]), family, side), []).append(ask)
+        job = ask["application_id"]
+        if job is None and not _jobless_merges(ask["kind"], ask["asked_by"], ask["questions"]):
+            continue  # a job-less blocker or web ask is never merged (create_ask merges the same set)
+        groups.setdefault((None if job is None else int(job), family, side), []).append(ask)
     dupes = {k: v for k, v in groups.items() if len(v) > 1}
     pasted = [a for (_app, fam, _side), v in groups.items() if fam == "question"
               for a in v[-1:] if any(_PASTE_RE.search(str(q["question"])) for q in _rows_of_all(v))]
     if not dupes and not closed_job and not pasted and not applied_job:
-        return 0
+        return closed
     now = datetime.now(timezone.utc).isoformat()
-    closed = 0
     async with db._db.transaction():
         for (_app, family, _side), asks_ in dupes.items():
             keep, olds = asks_[-1], asks_[:-1]
@@ -386,8 +466,41 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
             closed += 1
         except SpineError:  # answered or withdrawn in between
             continue
-    get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed})
+    jobless = sum(len(v) - 1 for (app, _f, _s), v in dupes.items() if app is None)
+    get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed,
+                                                  "jobless_merged": jobless})
     return closed
+
+
+RECHECK_CLOSED = "Job360 is re-checking the posting"
+
+
+async def _unproven_closed_asks(db: JobDatabase, user_id: str, ask_ids: list[int]) -> set[int]:
+    """2026-11-13 (asks 578, 580): of these open asks, those a ``blocked`` {reason: posting_closed} with no
+    ``evidence`` opened (its payload names the ask) and no other block reason shares. The job goes back to the
+    queue once for a re-check with proof (``queue_preflight.closed_recheck_ids``); the ask no longer waits."""
+    if not ask_ids:
+        return set()
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE user_id = ? AND event_type = 'blocked' "  # noqa: S608
+        "AND application_id IN (SELECT application_id FROM application_asks WHERE user_id = ? "
+        f"AND id IN ({','.join('?' for _ in ask_ids)}))",  # placeholders only
+        (user_id, user_id, *ask_ids),
+    )
+    hit: set[int] = set()
+    other: set[int] = set()
+    for r in await cur.fetchall():
+        raw = r[0]
+        try:
+            p = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        ask_id = p.get("ask_id") if isinstance(p, dict) else None
+        if not isinstance(ask_id, int):
+            continue
+        unproven = p.get("reason") == "posting_closed" and not p.get("evidence")
+        (hit if unproven else other).add(ask_id)
+    return (hit - other) & set(ask_ids)
 
 
 async def _log_read_form_notes(db: JobDatabase, user_id: str) -> None:
@@ -780,8 +893,13 @@ async def create_ask(
     if is_proof and (first := await _first_proof_ask(db, user_id, application_id, proof_ctx)):
         return first
     clean_qs = merge_questions([], clean_qs)  # fixed names, one row per name
+    if application_id is None and _memory_only(clean_qs):
+        get_audit_logger().info("ask_refused", extra={"event": "ask_refused", "user_id": user_id,
+                                                      "reason": "memory_only_jobless", "rows": len(clean_qs)})
+        raise SpineError(422, MEMORY_ONLY_JOBLESS_MSG)
+    jobless_merge = application_id is None and _jobless_merges(kind, asked_by, clean_qs)
     family = (
-        [] if is_proof or application_id is None
+        [] if is_proof or (application_id is None and not jobless_merge)
         else await _open_family(db, user_id, application_id, kind, asked_by)
     )
     # A merge replaces asks, it never adds one: the cap only stops a NEW card. A job that already has an open ask
@@ -803,8 +921,9 @@ async def create_ask(
             await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:{clean_ctx}",))
             if first := await _first_proof_ask(db, user_id, application_id, proof_ctx):
                 return first
-        elif application_id is not None:  # two runs at once: the second merges into the first's ask
-            await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:ask:{application_id}",))
+        elif application_id is not None or jobless_merge:  # two runs at once: the second merges into the first's
+            lock = f"{user_id}:ask:{application_id}" if application_id is not None else f"{user_id}:ask:jobless"
+            await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (lock,))
             family = await _open_family(db, user_id, application_id, kind, asked_by)
             if family and kind in QUESTION_FAMILY:
                 # A sentence-only ask joins as a row too, or the merged card would hide what it asked.

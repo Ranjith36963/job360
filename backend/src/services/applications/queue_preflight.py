@@ -16,6 +16,7 @@ from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import cv_review, kit, ready, spine
 from src.services.browser_agent import learned, routing
+from src.utils.logger import get_audit_logger
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -174,7 +175,8 @@ async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     ids = sorted(open_ids, key=lambda i: (str(queued_at.get(i) or ""), i))
     skip = await _open_ask_apps(db, user_id, ids) | await _filled_apps(db, user_id, ids)
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
-    skip |= set(await blocked_service.open_blocks(db, user_id, ids))
+    blocks = await blocked_service.open_blocks(db, user_id, ids)
+    skip |= set(blocks) - await closed_recheck_ids(db, user_id, blocks)
     todo = [i for i in ids if i not in skip]
     browsers = await queue_browsers(db, user_id, todo)
     todo = [i for i in todo if browsers.get(i, {}).get("kind") == "job360"]
@@ -186,6 +188,36 @@ async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     )
     names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
     return [{"id": i, "company": names.get(i, "")} for i in todo]
+
+
+# A run's look at the page: after one of these, an unproven closed block has had its one re-check.
+_PAGE_STEPS = ("form_checked", "form_filled", "form_swept", "submit_attempted")
+
+
+async def closed_recheck_ids(db: JobDatabase, user_id: str, blocks: dict[int, dict[str, Any]]) -> set[int]:
+    """2026-11-13 (apps 998, 146): an open ``posting_closed`` block with no ``evidence`` (recorded before proof
+    was required) lets its job back into the queue ONCE, so the next run re-checks the page and records it with
+    proof (``auto_close`` closes it). Once a page step follows the block it stays out; a proven block always
+    does. ``blocks`` = :func:`blocked.open_blocks`. Scoped by ``user_id``; read-only, one query."""
+    unproven = sorted(i for i, p in blocks.items() if p.get("reason") == "posting_closed" and not p.get("evidence"))
+    if not unproven:
+        return set()
+    # The open block is each job's newest ``blocked``: a page step after it = a run already looked.
+    cur = await db._db.execute(
+        f"SELECT m.application_id FROM (SELECT application_id, MAX(id) AS block_id FROM application_events "  # noqa: S608
+        f"WHERE user_id = ? AND event_type = 'blocked' AND application_id IN ({_marks(unproven)}) "
+        f"GROUP BY application_id) m WHERE EXISTS (SELECT 1 FROM application_events s WHERE s.user_id = ? "
+        f"AND s.application_id = m.application_id AND s.id > m.block_id "
+        f"AND s.event_type IN ({','.join('?' for _ in _PAGE_STEPS)}))",
+        [user_id, *unproven, user_id, *_PAGE_STEPS],
+    )
+    looked = {int(r[0]) for r in await cur.fetchall()}
+    out = set(unproven) - looked
+    if out:
+        get_audit_logger().info("closed_posting_recheck", extra={
+            "event": "closed_posting_recheck", "user_id": user_id, "application_ids": sorted(out),
+        })
+    return out
 
 
 async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
@@ -369,14 +401,19 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
     urls = {int(dict(r)["id"]): str(dict(r)["job_url"] or "") for r in await cur.fetchall()}
     blocks = await blocked_service.open_blocks(db, user_id, ids)
     hosts = await learned.blocked_hosts(db, user_id)
-    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {}), hosts) for app_id in ids}
+    codes = await blocked_service.codes_mine(user_id, blocks)
+    return {app_id: route_label(urls.get(app_id, ""), blocks.get(app_id, {}), hosts, codes) for app_id in ids}
 
 
-def route_label(url: str, block: dict[str, Any], hosts: frozenset[str] = frozenset()) -> dict[str, str]:
+def route_label(
+    url: str, block: dict[str, Any], hosts: frozenset[str] = frozenset(), email_codes: bool = False,
+) -> dict[str, str]:
     """The browser (``routing.label``) that runs one queued application: its apply link plus its open block's
     payload (``{}`` = none) and the user's learned blocked ``hosts`` (``learned.blocked_hosts``). The label
     carries the plain reason ("Job360's browser was blocked twice on <site>"). Pure; ``queue_browsers`` and
     ``blockers`` share it."""
+    if blocked_service.assistant_reads_code(block, email_codes):  # F8: the assistant reads it, on the user's PC
+        return routing.label(routing.Route("own_browser", "email_code"), site=routing.site_of(url)[1])
     reason = str(block.get("reason") or "")
     handoff = blocked_service.captcha_handoff(block)
     by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER

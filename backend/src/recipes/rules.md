@@ -142,7 +142,7 @@ Job360's browser (the `browser` tool) goes FIRST for everything else, job forms 
 so it works with the user's computer off. Only when it stops on a task (a sign-in wall, a CAPTCHA or bot check,
 or a safety stop: its `needs_you` / open `blocked`) does that task wait for the user's own browser: the one your
 app drives on the user's PC, there only while the PC is on and the user agrees. A scheduled cloud run never has
-one: leave the task on Needs you and go on. Passwords and MFA are the user's alone, and so is a one-time code unless Email codes (below) allows it; no browser
+one: leave the task on Needs you and go on. Passwords and MFA are the user's alone, and so is a one-time code unless Email codes (below) allows it (then it is yours); no browser
 solves a CAPTCHA: it is always solved by the user, on Needs you while Job360's browser holds the page
 (Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your own
 browser: turn your PC on", "Your own browser: runs when your PC is on" (LinkedIn) or "You: on the site".
@@ -461,7 +461,9 @@ host, sender host, purpose and received time, and refuses (403 setting off, 422 
 record `blocked` otp_needed, never type it. Stored = type the code only into the code box of that same site,
 once. Never write the code into an event, note, ask, chat or memory; never keep it. A password is never
 typed, whatever the setting (hard line 5). Job360's own browser refuses code boxes: type it in the browser
-your app drives; a scheduled cloud run records `blocked` otp_needed.
+your app drives; a scheduled cloud run records `blocked` otp_needed. While Email codes is on a code box is yours,
+never the user's: Job360 opens no ask for it and sends the job to the PC queue (your PC session reads the code
+there), so never ask_user for an emailed code. Two refused or missing codes on one job hand it back to the user.
 
 EARLIER APPLICATION (before applying): Job360's own duplicate check
 (`duplicate.flag`, `already_applied`) sees only what Job360 recorded. Before
@@ -537,7 +539,8 @@ sends against the user's limits (a contact with an application is job outreach, 
 Gmail draft; the saved message shows under People to reach on Needs you;
 the user sends. A LinkedIn message is sent only while you hold the person (own_browser_queue take) AND
 check_outreach(contact_id, message_id, session) says `send`: owner_clicked (the user pressed Send on that exact draft),
-or, on the new-connection path only, connect_no_note, auto_connect, auto_after_accept or auto_follow_up. A person
+or, on the new-connection path only, connect_no_note, auto_connect, auto_note (a note to someone not connected,
+only with `outreach_send` auto), auto_after_accept or auto_follow_up. A person
 already connected, or one who replied, always needs the user's Send; follow get_recipe("own_browser"). An other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's
 Gmail Sent folder for a message to that address since this version was saved,
@@ -731,16 +734,16 @@ quick_apply_warning, posting_closed, account_creation, otp_needed,
 id_or_payment_asked, assessment_required, manual_only, site_limit_reached, already_applied_on_site, other
 (`already_applied_on_site` = the site says you already applied: the job leaves the queue, is never retried,
 and the user is asked "Mark it applied?"; `posting_closed` = the page says it is filled or closed; `account_creation` = a sign-up wall; `otp_needed` = a
-one-time code you may not use (Email codes); `id_or_payment_asked` = selfie, ID, card or SSN: never entered, never retried; `assessment_required`
+one-time code (yours while Email codes is on, else the user's); `id_or_payment_asked` = selfie, ID, card or SSN: never entered, never retried; `assessment_required`
 = timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
 limit message: stop this site for the run); `step` is plain text up to 120 characters;
 `page_host` is the host only (jobs.example.com), never a full URL; `detail`
-is up to 300 plain characters. `posting_closed` read on the ad's own page adds `evidence`:
-page_says_closed | http_404 | http_410 (what the page itself showed; never an email). Then Job360
-closes the job itself (`withdrawn` "posting closed"; the user can Undo it on the website); without
-it, or on another site, the user decides. Any other key is 422; never put a password, a
+is up to 300 plain characters. `posting_closed` needs `evidence` read on the ad's own page (page_host = the ad's site):
+page_says_closed | http_404 | http_410 (what the page itself showed; never an email; none = 422). Then Job360
+closes the job itself (`withdrawn` "posting closed"; the user can Undo it on the website); on another
+site the user decides. Any other key is 422; never put a password, a
 token or page text in it. Job360 fills in who you are and opens one Needs-you
-ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
+ask for the user (none for posting_closed). Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped | own_browser} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with

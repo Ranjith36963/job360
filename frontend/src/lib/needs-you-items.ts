@@ -5,7 +5,7 @@
 
 import { listAsks } from "@/lib/api";
 import type { NeedsYouCount as NeedsYouCountOut } from "@/lib/api";
-import type { Ask, CvToApproveRow, ReadyCardData } from "@/lib/api";
+import type { Ask, CvToApproveRow, ReadyCardData, SiteSignIn } from "@/lib/api";
 import { groupAsks } from "@/lib/job-cards";
 import { newestAt, sortByUrgency } from "@/lib/needs-you-rank";
 import type { JobRankInput } from "@/lib/needs-you-rank";
@@ -96,21 +96,23 @@ export function sortJobs<T extends JobRankInput>(jobs: T[], key: SortKey): T[] {
 
 // ---- Filter chips ----
 
-/** "all", "other", or the kind of a job's first blocker (the server's `job_ids_by_kind`). */
+/** One of the server's fixed filter keys ("all", "signin_captcha" ... "other"). */
 export type Chip = string;
-/** The chip for each kind of blocker that waits on the user, in the order they show. */
-export const KIND_CHIPS: { key: string; label: string }[] = [
-  { key: "confirm_sent", label: "Confirm sent" },
-  { key: "posting_closed", label: "Posting closed" },
-  { key: "site_step", label: "On the site" },
-  { key: "approve_cv", label: "Approve CV" },
-  { key: "answers", label: "Answer once" },
-  { key: "send_yes", label: "Send" },
-  { key: "apply_by_hand", label: "Apply" },
-  { key: "outreach_send", label: "Notes" },
+/** The fixed filters, in the server's order (backend needs_you_count.FILTERS). The server's answer is what the page
+ *  shows; this table only gives a label to a link or a back-trail, and the fallback when an old answer has none. */
+export const FILTER_CHIPS: { key: string; label: string; kind: "todo" | "view" | "stat" }[] = [
+  { key: "all", label: "All", kind: "todo" },
+  { key: "signin_captcha", label: "Sign in / CAPTCHA", kind: "todo" },
+  { key: "check_send", label: "Check & send", kind: "todo" },
+  { key: "answer_once", label: "Answer once", kind: "todo" },
+  { key: "cv_weak", label: "CV still weak", kind: "todo" },
+  { key: "finish_by_hand", label: "Finish by hand", kind: "todo" },
+  { key: "went_out", label: "Did it go out?", kind: "todo" },
+  { key: "strong_cvs", label: "Strong CVs (AI reviewed)", kind: "view" },
+  { key: "posting_closed", label: "Posting closed", kind: "stat" },
+  { key: "other", label: "Other", kind: "todo" },
 ];
-export const chipLabel = (key: Chip): string =>
-  key === "all" ? "All" : key === "other" ? "Other" : (KIND_CHIPS.find((c) => c.key === key)?.label ?? key);
+export const chipLabel = (key: Chip): string => FILTER_CHIPS.find((c) => c.key === key)?.label ?? key;
 
 // ---- One count ----
 
@@ -119,37 +121,46 @@ export type NeedsYouCount = {
   jobs: number;
   other: number;
   byChip: Record<Chip, number>;
-  /** The chips to show, in order: All, then each kind that waits on the user, then Other. */
+  /** The chips to show: ALL the server's filters, in its fixed order, at zero too. */
   chips: Chip[];
-  /** The jobs that wait on the user (the page's rows), and the same ids by first-blocker kind. */
+  /** "todo" | "view" | "stat" per chip: a view is not a to-do and a stat is a count only. */
+  kinds: Record<Chip, string>;
+  /** The jobs that wait on the user (the page's rows). */
   jobIds: number[];
+  /** The jobs of each filter (a job is in every filter it has an owner need in). */
   idsByKind: Record<string, number[]>;
   /** Open asks tied to a job that is not a row (e.g. proof missing on a closed job): listed in Other. */
   otherAskIds: number[];
   /** The Answer-once card has rows waiting: it shows under All and Answer once. */
   answerOnce: boolean;
+  /** Jobs waiting on one sign-in, one card per site (their ids are not in `jobIds`); under Sign in / CAPTCHA. */
+  siteSignins: SiteSignIn[];
 };
 
-/** The page's count IS the server's (GET /api/needs-you-count): N = jobs waiting on you + Other, All = N = the
- *  chips' sum, and the rows are exactly `job_ids`. The nav badge and the dashboard headline read the same
- *  response; nothing is counted or derived here. */
+/** The page's count IS the server's (GET /api/needs-you-count): N = jobs waiting on you + Other, All = N, and the
+ *  chips are the server's fixed `filters`, every one always shown. The nav badge and the dashboard headline read the
+ *  same response; nothing is counted or derived here. */
 export function fromServerCount(c: NeedsYouCountOut): NeedsYouCount {
-  const idsByKind = c.job_ids_by_kind ?? {};
-  // The Answer-once card is one item on the server's n while any of its rows wait (`answer_once`).
-  const answerOnce = (c.answer_once ?? 0) > 0 ? 1 : 0;
-  const extra: Record<string, number> = { answers: answerOnce };
-  const size = (k: string) => (idsByKind[k]?.length ?? 0) + (extra[k] ?? 0);
-  const kinds = KIND_CHIPS.map((k) => k.key).filter((k) => size(k) > 0);
-  const byChip: Record<Chip, number> = { all: c.n, other: c.other };
-  for (const k of kinds) byChip[k] = size(k);
+  const answerOnce = (c.answer_once ?? 0) > 0;
+  const served = new Map((c.filters ?? []).map((f) => [f.key, f]));
+  const byChip: Record<Chip, number> = {};
+  const kinds: Record<Chip, string> = {};
+  const idsByKind: Record<string, number[]> = {};
+  for (const f of FILTER_CHIPS) {
+    const s = served.get(f.key);
+    byChip[f.key] = s ? s.count : f.key === "all" ? c.n : f.key === "other" ? c.other : 0;
+    kinds[f.key] = s?.kind ?? f.kind;
+    if (f.key !== "all") idsByKind[f.key] = s?.job_ids ?? [];
+  }
   return {
-    n: c.n, jobs: c.jobs, other: c.other, byChip, chips: ["all", ...kinds, ...(c.other > 0 ? ["other"] : [])],
-    jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [], answerOnce: answerOnce > 0,
+    n: c.n, jobs: c.jobs, other: c.other, byChip, chips: FILTER_CHIPS.map((f) => f.key), kinds,
+    jobIds: c.job_ids ?? [], idsByKind, otherAskIds: c.other_ask_ids ?? [], answerOnce,
+    siteSignins: c.site_signins ?? [],
   };
 }
 export const EMPTY_COUNT: NeedsYouCount = fromServerCount({
   n: 0, jobs: 0, other: 0, jobs_waiting_on_you: 0, by_actor: {}, by_kind: {}, job_ids: [], job_ids_by_kind: {}, other_ask_ids: [],
-  answer_once: 0,
+  answer_once: 0, filters: [], site_signins: [],
 });
 
 /** "57 things need you" (owner plan §2.6). */

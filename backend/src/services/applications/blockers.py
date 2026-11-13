@@ -18,10 +18,14 @@ Owner answers 2026-10-31 applied here:
   browser hit it, and its open ask and its ``blocked`` event are ONE blocker.
 A closed application (rejected, withdrawn, ghosted, hired, declined) has none. A form yes older than its
 time-to-live reads ``Send`` again; the finer fingerprint (changed cover letter, form page) stays with the gate.
+Owner 2026-11-13 (Needs you F5 + F10): a job the user's own rule drops (below the line, ``below_line`` skip: the
+rule ``spine.open_queue`` uses) has no place in the batch and nothing on the user or the user's PC but a proof or
+an open ask; an open job with a CV, no fill and not queued is the ASSISTANT's ("queue or drop this job").
 """
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 from contextvars import ContextVar
@@ -38,6 +42,7 @@ from src.services.applications import (
     queue_preflight,
     ready,
     send_need,
+    site_signin,
     spine,
     test_marker,
     which_browser,
@@ -74,6 +79,9 @@ _SITE_WORDS = {
     "upload_failed": "attach your CV", "upload": "attach your CV",
     blocked.ALREADY_APPLIED: "mark it applied",
 }
+_OWNER_SIDE = ("you", "your_pc")
+_DROPPED_GONE = ("review_cv", "fix_cv", "queued")  # a dropped job gets no CV look and no batch place either
+_NOT_ON_YOU_LOG_MAX = 50
 _FILL_TYPES = (
     "blocked", "unblocked", "form_filled", "form_swept", "submit_approved", "submit_declined", "cv_seen",
     "artifact_saved", "submit_mode_set", "duplicate_cleared",
@@ -186,13 +194,15 @@ def _needs(
 
 def _answer_blockers(
     app_id: int, ask_rows: list[dict[str, Any]], flags: list[dict[str, Any]], since: Any, unknown_block: bool,
-    saved: Optional[Any] = None,
+    fill_id: Optional[int] = None, saved: Optional[Any] = None,
 ) -> list[Blocker]:
     need = _needs(ask_rows, flags, saved)
     ask_id: Optional[int] = int(ask_rows[0]["id"]) if ask_rows else None
     to_answer = sum(1 for c in need.values() if c == "answer") or (1 if unknown_block else 0)
     to_ok = sum(1 for c in need.values() if c == "ok")
-    ref = {"ask_id": ask_id} if ask_id else None
+    ref: Optional[dict[str, Any]] = {"ask_id": ask_id} if ask_id else None
+    if fill_id is not None:  # the answers are tied to an open form: the filters read this fact, not the label
+        ref = {**(ref or {}), "fill_event_id": int(fill_id)}
     out: list[Blocker] = []
     if to_answer:
         out.append(_b("answers", "you", f"answer {_plural(to_answer, 'question', 'questions')}", since, ref))
@@ -249,6 +259,11 @@ async def blockers_for(
 SUBSTEPS: ContextVar[Optional[dict[str, float]]] = ContextVar("blockers_substeps", default=None)
 
 
+# Where a caller that wants it (the Needs-you filters) collects the jobs whose newest CV a strong review cleared
+# on its own (``kit.reviews_clearing``), so that rule runs once. None = nobody asked. Ids only.
+CLEARED: ContextVar[Optional[set[int]]] = ContextVar("blockers_cleared", default=None)
+
+
 class _Lap:
     """Times the parts of one ``_fill`` run into ``SUBSTEPS`` (a no-op when nobody asked)."""
 
@@ -272,6 +287,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     lap("events")
     blocks = await blocked.open_blocks(db, user_id, ids)
     lap("blocks")
+    codes = await blocked.codes_mine(user_id, blocks)  # F8: read the setting live, only when a code box is open
     cvs = await ready.newest_cv_by_app(db, user_id, ids)
     lap("cvs")
     cur = await db._db.execute(
@@ -293,7 +309,6 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         open_asks.setdefault(int(d["application_id"]), []).append(d)
     queued_at = await spine.queued_at_by_app(db, user_id, None)
     hosts = await learned.blocked_hosts(db, user_id) if queued_at else frozenset()
-    position = {a: n for n, (a, _t) in enumerate(sorted(queued_at.items(), key=lambda kv: (_when(kv[1]), kv[0])), 1)}
     lap("asks_queue")
     line = await spine.user_score_line(user_id)
     today_iso = (await spine.user_today(db, user_id)).isoformat()
@@ -316,11 +331,11 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         reason = str(blocks.get(app_id, {}).get("reason") or "")
         # The gate's own rule (kit._filled_with_latest_cv): a fill older than the newest saved CV is no fill.
         cv_saves = [int(e["id"]) for e in last["artifact_saved"] if e["payload"].get("kind") == "cv"]
-        stale = bool(fill) and bool(cv_saves) and max(cv_saves) > fill_id
+        fill_stale = bool(fill) and bool(cv_saves) and max(cv_saves) > fill_id
         modes = [e["payload"].get("submit_mode") for e in last["submit_mode_set"]]
         browsers = frozenset(which_browser.read(e["payload"]) for e in [*last["form_filled"][-1:], *last["form_swept"]])
         state[app_id] = {
-            "stale": stale, "browsers": browsers, "dup_cleared": bool(last["duplicate_cleared"]),
+            "stale": fill_stale, "browsers": browsers, "dup_cleared": bool(last["duplicate_cleared"]),
             "override": modes[-1] if modes and modes[-1] in ("confirm", "auto_when_sure") else None,
             "fill": fill, "fill_open": fill_open, "approved": approved[-1] if approved else None, "cv": cv,
             "seen": seen, "block": blocks.get(app_id), "reason": reason,
@@ -328,7 +343,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             "swept": bool(fill) and any(int(e["id"]) > fill_id for e in last["form_swept"]),
             "below": settings_line_side(a.get("fit_score"), line) == "below",
         }
-        if fill_open and not stale and fill and isinstance(fill["payload"].get("answers"), list):
+        if fill_open and not fill_stale and fill and isinstance(fill["payload"].get("answers"), list):
             fills[app_id] = {
                 "job_country": a.get("job_country"), "job_company": a.get("job_company"),
                 "filled_at": fill["recorded_at"], "answers": fill["payload"]["answers"],
@@ -339,8 +354,11 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     # connection each, on the menu badge of every page); none when neither has anything to judge.
     loaded: Optional[tuple[Any, list[dict[str, Any]]]] = None
     lap("state")
+    below = [i for i in ids if state[i]["below"]]
     open_form = any(state[i]["fill_open"] and not state[i]["stale"] and state[i]["approved"] is None for i in ids)
-    if fills or unseen or open_form or any(k["kind"] in asks.QUESTION_FAMILY for ks in open_asks.values() for k in ks):
+    if fills or unseen or below or open_form or any(
+        k["kind"] in asks.QUESTION_FAMILY for ks in open_asks.values() for k in ks
+    ):
         from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
 
         loaded = await asyncio.to_thread(load_profile_with_overlay, user_id)
@@ -348,12 +366,20 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
     lap("flags")
     reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded))
+    if (cleared := CLEARED.get()) is not None:
+        cleared.update(i for i in reviewed if i not in receipts and apps[i]["status"] == "considering")
     # Owner 2026-11-13: an unreviewed CV, or a weak one with tries left, is the assistant's to review / fix first.
     turns = await kit.assistant_cv_turns(db, user_id, {
         i: cv for i, cv in unseen.items()
         if i not in reviewed and i not in receipts and apps[i]["status"] == "considering"
     })
     lap("reviews")
+    # F5: the user's own rule drops it (below the line, below_line skip), read the way open_queue reads it.
+    dropped = _dropped(below, apps, line, _or_empty(loaded))
+    queued_at = {a: t for a, t in queued_at.items() if a not in dropped}
+    # A batch place counts only the jobs open_queue keeps: drop every queued job the rule drops, not only `ids`
+    # (#1598 review: numbered before the drop, a kept job read "in batch #2" while first in the real batch).
+    position = await _batch_places(db, user_id, loaded) if queued_at else {}
     # F6: for each filled form with no yes, would the gate ask the owner (send_need)? Display only.
     cfg = rules_effective(_or_empty(loaded))
     cands: dict[int, send_need.Facts] = {}
@@ -394,6 +420,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
 
     silent = await auto_applied.silent_submits(db, user_id, ids, now)
     lap("outreach_confirm")
+    stale: list[int] = []
     for app_id in ids:
         a, s, out = apps[app_id], state[app_id], result[app_id]
         if (conf := confirmed.get(app_id)) is not None and a["status"] not in _DEAD:
@@ -413,6 +440,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and reason == "posting_closed":
             ref = {"event_id": block_ev["id"]} if block_ev else None
             out.append(_b("posting_closed", "you", "skip or keep", block_since, ref))
+        elif considering and blocked.assistant_reads_code(s["block"] or {}, codes):
+            # F8: use_email_codes is on, so the code box is the assistant's (Gmail), never the owner's.
+            ref = {"event_id": block_ev["id"]} if block_ev else None
+            out.append(_b("assistant_step", "assistant", blocked.CODE_WORDS, block_since, ref))
         elif considering and (site_asks or (s["block"] is not None and reason != "unknown_question")):
             ask_kind = site_asks[0]["kind"] if site_asks else ""
             word = _SITE_WORDS.get(reason) or _SITE_WORDS.get(ask_kind) or "finish on the site"
@@ -421,6 +452,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 ask_id = (s["block"] or {}).get("ask_id")
             ref = {k: v for k, v in (("ask_id", ask_id),
                                      ("event_id", block_ev["id"] if block_ev else None)) if v is not None}
+            if reason in site_signin.SIGN_IN_REASONS and (host := site_signin.host_of(s["block"] or {}, a["job_url"])):
+                ref["signin_host"] = host  # one sign-in on this site clears it: Needs you groups by host
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
         why = owner_why.get(app_id)
@@ -438,8 +471,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             fill_at = s["fill"]["recorded_at"] if s["fill"] else block_since
             since = min((k["asked_at"] for k in question_asks), key=_when, default=fill_at)
             saved = _saved_fn(loaded, a, memory) if question_asks else None
+            open_fill = int(s["fill"]["id"]) if s["fill_open"] and s["fill"] else None
             out += _answer_blockers(
-                app_id, question_asks, mine_flags, since, reason == "unknown_question", saved)
+                app_id, question_asks, mine_flags, since, reason == "unknown_question", open_fill, saved)
         if considering and s["cv"] and not s["seen"] and app_id not in receipts and app_id not in reviewed:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
             if (turn := turns.get(app_id)) is not None:
@@ -471,12 +505,20 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and app_id in queued_at:
             browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {}, hosts)
             if browser["kind"] == "own_browser":
-                out.append(_b("queued", "your_pc", "apply on the site", queued_at[app_id]))
+                out.append(_b("queued", "your_pc", "apply from your PC", queued_at[app_id]))
             else:
-                out.append(_b("queued", "assistant", f"in batch #{position[app_id]}", queued_at[app_id]))
-        elif considering and s["cv"] and not s["fill"]:
+                place = position.get(app_id)  # None: open_queue left it out, so no number is claimed
+                out.append(_b("queued", "assistant", f"in batch #{place}" if place else "in the batch",
+                              queued_at[app_id]))
+        elif considering and s["cv"] and not s["fill"] and app_id not in dropped:
             cv_ref = {"artifact_id": s["cv"]["artifact_id"]}
-            out.append(_b("apply_by_hand", "you", "apply on the site", s["cv"]["created_at"], cv_ref))
+            if a.get("fit_recorded_at"):
+                # F10: never queued (or taken off) with a CV and no fill: the assistant queues or drops it.
+                out.append(_b("assistant_step", "assistant", "queue or drop this job", s["cv"]["created_at"],
+                              {**cv_ref, "reason": "not_queued"}))
+                stale.append(app_id)
+            else:  # no fit read yet: nothing was judged, so the old rule stands (the user applies by hand)
+                out.append(_b("apply_by_hand", "you", "apply on the site", s["cv"]["created_at"], cv_ref))
         if considering and not s["below"] and app_id not in queued_at:
             if not a.get("fit_recorded_at"):
                 out.append(_b("assistant_step", "assistant", "judge the fit", a["updated_at"]))
@@ -493,7 +535,44 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         if considering and reason == blocked.ALREADY_APPLIED:
             # The site says the user already applied: only their answer waits ("mark it applied"), nothing else.
             out[:] = [b for b in out if b["kind"] in ("confirm_sent", "site_step")]
+        if app_id in dropped:  # F5: only a proof or an open ask (answered or withdrawn, never hidden) stays
+            out[:] = [b for b in out if b["kind"] == "confirm_sent" or (b["ref"] or {}).get("ask_id") or (
+                b["actor"] not in _OWNER_SIDE and b["kind"] not in _DROPPED_GONE)]
+    if dropped or stale:
+        get_audit_logger().info(
+            "blockers_not_on_you",
+            extra={"event": "blockers_not_on_you", "user_id": safe_log_value(user_id),
+                   "below_line_skip": sorted(dropped)[:_NOT_ON_YOU_LOG_MAX],
+                   "not_queued": sorted(stale)[:_NOT_ON_YOU_LOG_MAX],
+                   "result": "ok"},
+        )
     lap("derive")
+
+
+async def _batch_places(
+    db: Any, user_id: str, loaded: Optional[tuple[Any, list[dict[str, Any]]]],
+) -> dict[int, int]:
+    """Each queued job's place in the batch, 1-based: read off ``spine.open_queue`` itself, the batch the
+    assistant works, so a job the user's own rule drops (or one no longer considered) holds no place."""
+    if loaded is None:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - profile imports spine
+
+        profile = await asyncio.to_thread(load_profile, user_id)
+    else:
+        profile = _or_empty(loaded)
+    order, _ = await spine.open_queue(db, user_id, profile)
+    return {a: n for n, a in enumerate(order, 1)}
+
+
+def _dropped(below: list[int], apps: dict[int, dict[str, Any]], line: Optional[int], profile: Any) -> set[int]:
+    """Which ``below`` jobs the user's own rule drops: ``assistant_settings.drops_below_line``, the rule
+    ``spine.below_line_dropped`` (and so ``open_queue``) applies, with the score line this derivation read."""
+    if not below or profile is None:
+        return set()
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415 - profile imports spine
+
+    cfg = dataclasses.replace(rules.effective(profile.assistant_settings), apply_min_score=line)
+    return {i for i in below if rules.drops_below_line(apps[i].get("fit_score"), cfg)}
 
 
 def _or_empty(loaded: Optional[tuple[Any, list[dict[str, Any]]]]) -> Any:
@@ -577,6 +656,27 @@ async def _linkedin_follow_ups(
     return out
 
 
+async def _auto_states(db: JobDatabase, user_id: str, contact_ids: list[int]) -> dict[int, str]:
+    """``{contact_id: saved LinkedIn state}`` (``unknown`` when none) while ``outreach_send`` is auto, else ``{}``.
+    One query for all of them (the batch must not grow its query count with the people)."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if cfg.outreach_send != rules.OUTREACH_SEND_AUTO or not contact_ids:
+        return {}
+    cur = await db._db.execute(
+        "SELECT contact_id, value FROM contact_edits WHERE user_id = ? AND field = 'linkedin_state' "  # noqa: S608
+        f"AND contact_id IN ({_marks(contact_ids)}) ORDER BY id ASC",
+        (user_id, *contact_ids),
+    )
+    out = dict.fromkeys(contact_ids, "unknown")
+    for r in await cur.fetchall():
+        out[int(r["contact_id"])] = str(r["value"] or "") or "unknown"
+    return out
+
+
 async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> dict[int, list[Blocker]]:
     """The unsent notes of these applications as blockers: on the user (Send, or an email) or, once approved,
     on the user's PC. A declined note waits on nobody. A LinkedIn note over the connection-note limit to
@@ -596,21 +696,39 @@ async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: date
     from src.services.applications import contacts  # noqa: PLC0415 - contacts imports the spine package
 
     too_long = await contacts.over_limit_notes(db, user_id, [int(p["id"]) for p in people])
+    states = await _auto_states(db, user_id, [int(p["id"]) for p in people])  # {} unless outreach_send is auto
+    auto = bool(states)
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    unknown: set[int] = set()
     for p in people:
-        task = own_browser.derive(rows.get(int(p["id"]), []), now)
+        mine = rows.get(int(p["id"]), [])
+        state = states.get(int(p["id"]), "")
+        task = own_browser.derive(mine, now, auto, note_ok=state == "not_connected")
         if task is not None and task["state"] == "declined":
             continue
+        # Without a click only a request without a note / a note to someone not connected / the message after a
+        # request goes alone: the same filter the own-browser queue applies.
+        if task is not None and task.get("auto") and not (
+            state == "connected" if own_browser.invite_facts(mine) is not None else state == "not_connected"
+        ):
+            task = None
         actor = "your_pc" if task is not None and task["state"] in ("queued", "in_progress") else "you"
+        if auto and state == "unknown" and actor == "you" and own_browser.invite_facts(mine) is None:
+            actor = "assistant"  # the state is read first (check_outreach linkedin_state_unknown), never the user's job
+            unknown.add(int(p["id"]))
         if int(p["id"]) in too_long:
             actor = "assistant"
+            unknown.discard(int(p["id"]))
         grouped.setdefault((int(p["application_id"]), actor), []).append(p)
     out: dict[int, list[Blocker]] = {}
     for (app_id, actor), group in grouped.items():
         n, since = len(group), min((g["occurred_at"] for g in group), key=_when)
         label = _plural(n, "LinkedIn note", "LinkedIn notes") if actor == "your_pc" else f"send {_plural(n, 'note', 'notes')}"  # noqa: E501
         ref: dict[str, Any] = {"contact_ids": [int(g["id"]) for g in group]}
-        if actor == "assistant":
+        if actor == "assistant" and all(int(g["id"]) in unknown for g in group):
+            label = f"read LinkedIn state for {_plural(n, 'person', 'people')}"
+            ref["reason"] = "linkedin_state_unknown"
+        elif actor == "assistant":
             label = f"rewrite {_plural(n, 'LinkedIn note', 'LinkedIn notes')} (over the limit)"
             ref["reason"] = "note_too_long"
         out.setdefault(app_id, []).append(_b("outreach_send", actor, label, since, ref))

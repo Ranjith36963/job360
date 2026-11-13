@@ -889,6 +889,14 @@
       },
       "ApplicationDetailOut": {
         "properties": {
+          "approvals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ApprovalOut"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ApplicationArtifactOut"
@@ -2344,6 +2352,51 @@
           "needs_sponsorship"
         ],
         "title": "ApplicationVisaOut",
+        "type": "object"
+      },
+      "ApprovalOut": {
+        "description": "Who approved one thing (\"You approved\" / \"AI reviewed\"), read off stored rows (approval.py). ``ref`` is the\nevent the tag belongs to (``ref_kind`` event), or an outreach row. ``reviewer`` is caller text, cut short.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "integer"
+          },
+          "ref_kind": {
+            "default": "event",
+            "title": "Ref Kind",
+            "type": "string"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "what",
+          "at",
+          "ref"
+        ],
+        "title": "ApprovalOut",
         "type": "object"
       },
       "ArtifactDiffBaseOut": {
@@ -10942,6 +10995,14 @@
             "title": "By Kind",
             "type": "object"
           },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NeedsYouFilterOut"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
           "job_ids": {
             "default": [],
             "items": {
@@ -10995,6 +11056,14 @@
                 "type": "null"
               }
             ]
+          },
+          "site_signins": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SiteSignInOut"
+            },
+            "title": "Site Signins",
+            "type": "array"
           }
         },
         "required": [
@@ -11003,6 +11072,42 @@
           "other"
         ],
         "title": "NeedsYouCountOut",
+        "type": "object"
+      },
+      "NeedsYouFilterOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "job_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "count",
+          "kind"
+        ],
+        "title": "NeedsYouFilterOut",
         "type": "object"
       },
       "NextStepOut": {
@@ -16076,6 +16181,16 @@
             ],
             "title": "Application Id"
           },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -16386,6 +16501,53 @@
           }
         },
         "title": "SetupProgressOut",
+        "type": "object"
+      },
+      "SignedInOut": {
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "unblocked": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Unblocked",
+            "type": "array"
+          }
+        },
+        "required": [
+          "host",
+          "unblocked"
+        ],
+        "title": "SignedInOut",
+        "type": "object"
+      },
+      "SiteSignInOut": {
+        "properties": {
+          "app_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "App Ids",
+            "type": "array"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "word",
+          "app_ids"
+        ],
+        "title": "SiteSignInOut",
         "type": "object"
       },
       "StatsBandOut": {
@@ -31838,7 +32000,7 @@
     },
     "/api/profile/questionnaire": {
       "get": {
-        "description": "Ask once (owner 2026-11-02): up to 10 common questions per country the user works in, still guessed\nor not known, most-guessed first (``ask_once.questionnaire``). Read-only.",
+        "description": "Ask once (owner 2026-11-02): up to 10 common questions per country the user works in or has a queued\njob in, still guessed or not known, most-guessed first (``ask_once.questionnaire``). Read-only.",
         "operationId": "get_questionnaire_api_profile_questionnaire_get",
         "parameters": [
           {
@@ -33233,6 +33395,81 @@
         "summary": "Report Wrong Fact Route",
         "tags": [
           "changes"
+        ]
+      }
+    },
+    "/api/sites/{host}/signed-in": {
+      "post": {
+        "description": "\"I've signed in\" on a Needs-you site card (diagnosis D): for each of the user's jobs with an open\nsign-in / create-account / code block on ``host``, records ``unblocked`` {user_did_it} and ``site_account``\n{host}; their asks close. 409 when none waits. Session only; no MCP tool (an agent unblocks per job).",
+        "operationId": "site_signed_in_api_sites__host__signed_in_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "title": "Host",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedInOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Site Signed In",
+        "tags": [
+          "asks"
         ]
       }
     },
