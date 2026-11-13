@@ -26,7 +26,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Literal, Optional, Union
+from typing import Annotated, Any, Awaitable, Callable, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer
@@ -1388,6 +1388,8 @@ class WhatsNewResponse(BaseModel):
     next_since: str
     next_after_id: Optional[int]
     truncated: bool
+    # Only with ``newest=true``: the smallest event id on this page - pass it as ``before_id`` for the next older page.
+    next_before_id: Optional[int] = None
     # Always the user's open asks, whatever `since` says.
     open_asks: list[AskOut]
     # S7 - applied jobs with no proof after PROOF_NO_PROOF_AFTER_DAYS and no ask yet.
@@ -4654,8 +4656,13 @@ async def whats_new(
     inbox_stale_alerts: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+    # Annotated, not `= Query(..)`: the MCP tool calls this function directly and passes neither.
+    newest: Annotated[bool, Query()] = False,
+    before_id: Annotated[Optional[int], Query()] = None,
 ) -> dict[str, Any]:
+    if before_id is not None and not newest:
+        raise HTTPException(status_code=422, detail="before_id only works with newest=true")
     return await spine.whats_new(
         db, user.id, since=since, after_id=after_id, limit=limit,
-        inbox_offset=inbox_offset, inbox_stale_alerts=inbox_stale_alerts,
+        inbox_offset=inbox_offset, inbox_stale_alerts=inbox_stale_alerts, newest=newest, before_id=before_id,
     )

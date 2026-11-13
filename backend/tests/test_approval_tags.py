@@ -211,6 +211,18 @@ async def test_answers_web_verify_is_you_guess_without_decision_is_ai_memory_is_
     assert saved not in got
 
 
+@pytest.mark.asyncio
+async def test_chat_approval_and_chat_verified_answers_get_no_ai_tag(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 40)
+        fill = await _fill(fixture_user_id, app_id)  # a guessed answer, filled by the agent
+        await _add(fixture_user_id, app_id, "submit_approved", {"form_filled_event_id": fill, "where": "chat"}, AGENT)
+        await _add(fixture_user_id, app_id, "answer_verified", {"question": "Why us?", "key": "why", "form_filled_event_id": fill}, AGENT)
+        await _add(fixture_user_id, app_id, "applied", {}, AGENT)
+        got = await _read(fixture_user_id, app_id)
+    assert got == {}  # the owner decided in chat: not "AI reviewed", and not "You approved" either (no web click)
+
+
 # ---- no record, no leak, no write -----------------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_no_records_other_user_and_simulation_give_nothing_and_a_read_writes_nothing(authenticated_async_context, fixture_user_id):

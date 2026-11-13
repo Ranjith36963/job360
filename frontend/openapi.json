@@ -20452,6 +20452,17 @@
             ],
             "title": "Next After Id"
           },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before Id"
+          },
           "next_since": {
             "title": "Next Since",
             "type": "string"
@@ -34203,6 +34214,32 @@
               "default": false,
               "title": "Inbox Stale Alerts",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "newest",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Newest",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Id"
             }
           },
           {

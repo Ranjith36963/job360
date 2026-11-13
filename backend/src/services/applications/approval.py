@@ -9,8 +9,9 @@ Read-only and batched: one query per table for all the asked applications, alway
   the owner's click and gets no tag.
 * ``ai`` needs a record written by an agent (``recorded_by`` ``token:`` or ``agent:``): a ``cv_sent_on_review``
   (the server wrote it when the CV went on a strong review), a LinkedIn request or message that went without a
-  Send (the rows ``sent_alone`` lists), an agent ``applied`` with no web ``submit_approved`` on the newest fill, or
-  an agent fill whose answers are ``guessed`` / ``written`` with no owner decision on that fill.
+  Send (the rows ``sent_alone`` lists), an agent ``applied`` with no ``submit_approved``
+  (by anyone, chat included) on the newest fill, or an agent fill whose answers are ``guessed`` / ``written`` with
+  no ``answer_verified`` / ``answer_corrected`` (by anyone) on it.
 * no record, no tag. Nothing pending is tagged. Fills and decisions are paired with ``agreement._groups`` and
   ``agreement._paired``; the CV mark is ``kit.cv_mark_matches``; the LinkedIn decision is ``sent_alone``'s.
 """
@@ -83,14 +84,15 @@ def _form_marks(evs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         fill = _int(e["payload"].get("form_filled_event_id")) or _int(stamp.get("form_filled_event_id"))
         return {"id": e["id"], "fill": fill}
 
-    web = [e for e in evs if e["by"] == "web" and grp is not None and _paired(bound(e), grp)]
+    paired = [e for e in evs if grp is not None and _paired(bound(e), grp)]  # whoever recorded the decision
+    web = [e for e in paired if e["by"] == "web"]
     out: list[dict[str, Any]] = []
     yes = [e for e in web if e["event_type"] == "submit_approved"]
     applied = [e for e in evs if e["event_type"] == "applied" and _agent(e["by"])]
     if yes:
         top = max(yes, key=lambda e: e["id"])
         out.append(_item("you", "submit", top["at"], top["id"]))
-    elif applied:
+    elif applied and not any(e["event_type"] == "submit_approved" for e in paired):
         top = max(applied, key=lambda e: e["id"])
         if grp is None or top["id"] > grp["start"]:
             out.append(_item("ai", "submit", top["at"], top["id"]))
@@ -98,7 +100,7 @@ def _form_marks(evs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if decided:
         top = max(decided, key=lambda e: e["id"])
         out.append(_item("you", "answers", top["at"], top["id"]))
-    elif grp is not None:
+    elif grp is not None and not any(e["event_type"] in ("answer_verified", "answer_corrected") for e in paired):
         fill = next(e for e in evs if e["id"] == max(fills))
         answers = fill["payload"].get("answers")
         rows = answers if isinstance(answers, list) else []
