@@ -6522,5 +6522,13 @@
 {"name":"joinup.ch (newest page)","ats":"joinup","board":"all","source":"career-ops"},
 {"name":"tbca","ats":"prevueaps","board":"tbca","source":"career-ops"},
 {"name":"Ridgefield School District","ats":"redrover","board":"1651","source":"career-ops"},
-{"name":"Senjob (Senegal)","ats":"senjob","board":"all","source":"career-ops"}
+{"name":"Senjob (Senegal)","ats":"senjob","board":"all","source":"career-ops"},
+{"name":"freelancermap: machine learning","ats":"freelancermap","board":"machine-learning","source":"hunt-kit"},
+{"name":"freelancermap: artificial intelligence","ats":"freelancermap","board":"artificial-intelligence","source":"hunt-kit"},
+{"name":"freelancermap: data scientist","ats":"freelancermap","board":"data-scientist","source":"hunt-kit"},
+{"name":"freelancermap (newest)","ats":"freelancermap","board":"all","source":"hunt-kit"},
+{"name":"Free-Work: machine learning (freelance)","ats":"freework","board":"machine-learning","source":"hunt-kit"},
+{"name":"Free-Work: artificial intelligence (freelance)","ats":"freework","board":"artificial-intelligence","source":"hunt-kit"},
+{"name":"Free-Work: data scientist (freelance)","ats":"freework","board":"data-scientist","source":"hunt-kit"},
+{"name":"Free-Work: freelance (newest)","ats":"freework","board":"all","source":"hunt-kit"}
 ]
