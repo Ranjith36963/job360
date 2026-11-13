@@ -55,6 +55,7 @@ KIT_FILES: dict[str, str] = {
     "kit_co8.py": "text/plain; charset=utf-8",
     "kit_eu1.py": "text/plain; charset=utf-8",
     "kit_eu2.py": "text/plain; charset=utf-8",
+    "kit_eu3.py": "text/plain; charset=utf-8",
     "kit_asia2.py": "text/plain; charset=utf-8",
     "kit_markets4.py": "text/plain; charset=utf-8",
     "kit_feeds.py": "text/plain; charset=utf-8",

@@ -382,6 +382,7 @@ def test_companies_json_valid() -> None:
     ok |= {"telegramchannel"}  # the kit_co8 type
     ok |= {"relocateme", "techjobs", "iamexpat", "ictjob", "berlinstartup"}  # the kit_eu1 types
     ok |= {"stepstone", "swissjobs", "itjobspt", "magnetme"}  # the kit_eu2 types
+    ok |= {"freelancermap", "freework"}  # the kit_eu3 types
     ok |= {"neogov", "applitrack", "schoolspring", "edjoin"}  # the kit_pubsec types
     ok |= {"radancy", "ukgready", "earcu", "beesite", "workablemarketplace"}  # the kit_ats_misc3 types
     ok |= {"geekhunter", "likeit", "onstrider", "micro1", "alignerr"}  # the kit_market5 types

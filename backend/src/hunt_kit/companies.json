@@ -6542,5 +6542,13 @@
 {"name":"jobs.ch: machine learning","ats":"swissjobs","board":"jobs.ch/machine-learning","source":"hunt-kit"},
 {"name":"jobs.ch: artificial intelligence","ats":"swissjobs","board":"jobs.ch/artificial-intelligence","source":"hunt-kit"},
 {"name":"jobup.ch: machine learning","ats":"swissjobs","board":"jobup.ch/machine-learning","source":"hunt-kit"},
-{"name":"jobup.ch: artificial intelligence","ats":"swissjobs","board":"jobup.ch/artificial-intelligence","source":"hunt-kit"}
+{"name":"jobup.ch: artificial intelligence","ats":"swissjobs","board":"jobup.ch/artificial-intelligence","source":"hunt-kit"},
+{"name":"freelancermap: machine learning","ats":"freelancermap","board":"machine-learning","source":"hunt-kit"},
+{"name":"freelancermap: artificial intelligence","ats":"freelancermap","board":"artificial-intelligence","source":"hunt-kit"},
+{"name":"freelancermap: data scientist","ats":"freelancermap","board":"data-scientist","source":"hunt-kit"},
+{"name":"freelancermap (newest)","ats":"freelancermap","board":"all","source":"hunt-kit"},
+{"name":"Free-Work: machine learning (freelance)","ats":"freework","board":"machine-learning","source":"hunt-kit"},
+{"name":"Free-Work: artificial intelligence (freelance)","ats":"freework","board":"artificial-intelligence","source":"hunt-kit"},
+{"name":"Free-Work: data scientist (freelance)","ats":"freework","board":"data-scientist","source":"hunt-kit"},
+{"name":"Free-Work: freelance (newest)","ats":"freework","board":"all","source":"hunt-kit"}
 ]
