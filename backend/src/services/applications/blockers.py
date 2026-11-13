@@ -41,6 +41,7 @@ from src.services.applications import (
     own_browser,
     queue_preflight,
     ready,
+    site_signin,
     spine,
     test_marker,
 )
@@ -372,6 +373,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 ask_id = (s["block"] or {}).get("ask_id")
             ref = {k: v for k, v in (("ask_id", ask_id),
                                      ("event_id", block_ev["id"] if block_ev else None)) if v is not None}
+            if reason in site_signin.SIGN_IN_REASONS and (host := site_signin.host_of(s["block"] or {}, a["job_url"])):
+                ref["signin_host"] = host  # one sign-in on this site clears it: Needs you groups by host
             since = site_asks[0]["asked_at"] if site_asks and not block_ev else block_since
             out.append(_b("site_step", "you", word, since, ref or None))
         if s["fill_open"] or question_asks or reason == "unknown_question":
@@ -516,6 +519,27 @@ async def _linkedin_follow_ups(
     return out
 
 
+async def _auto_states(db: JobDatabase, user_id: str, contact_ids: list[int]) -> dict[int, str]:
+    """``{contact_id: saved LinkedIn state}`` (``unknown`` when none) while ``outreach_send`` is auto, else ``{}``.
+    One query for all of them (the batch must not grow its query count with the people)."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    if cfg.outreach_send != rules.OUTREACH_SEND_AUTO or not contact_ids:
+        return {}
+    cur = await db._db.execute(
+        "SELECT contact_id, value FROM contact_edits WHERE user_id = ? AND field = 'linkedin_state' "  # noqa: S608
+        f"AND contact_id IN ({_marks(contact_ids)}) ORDER BY id ASC",
+        (user_id, *contact_ids),
+    )
+    out = dict.fromkeys(contact_ids, "unknown")
+    for r in await cur.fetchall():
+        out[int(r["contact_id"])] = str(r["value"] or "") or "unknown"
+    return out
+
+
 async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> dict[int, list[Blocker]]:
     """The unsent notes of these applications as blockers: on the user (Send, or an email) or, once approved,
     on the user's PC. A declined note waits on nobody. A LinkedIn note over the connection-note limit to
@@ -535,21 +559,39 @@ async def _outreach(db: JobDatabase, user_id: str, app_ids: list[int], now: date
     from src.services.applications import contacts  # noqa: PLC0415 - contacts imports the spine package
 
     too_long = await contacts.over_limit_notes(db, user_id, [int(p["id"]) for p in people])
+    states = await _auto_states(db, user_id, [int(p["id"]) for p in people])  # {} unless outreach_send is auto
+    auto = bool(states)
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    unknown: set[int] = set()
     for p in people:
-        task = own_browser.derive(rows.get(int(p["id"]), []), now)
+        mine = rows.get(int(p["id"]), [])
+        state = states.get(int(p["id"]), "")
+        task = own_browser.derive(mine, now, auto, note_ok=state == "not_connected")
         if task is not None and task["state"] == "declined":
             continue
+        # Without a click only a request without a note / a note to someone not connected / the message after a
+        # request goes alone: the same filter the own-browser queue applies.
+        if task is not None and task.get("auto") and not (
+            state == "connected" if own_browser.invite_facts(mine) is not None else state == "not_connected"
+        ):
+            task = None
         actor = "your_pc" if task is not None and task["state"] in ("queued", "in_progress") else "you"
+        if auto and state == "unknown" and actor == "you" and own_browser.invite_facts(mine) is None:
+            actor = "assistant"  # the state is read first (check_outreach linkedin_state_unknown), never the user's job
+            unknown.add(int(p["id"]))
         if int(p["id"]) in too_long:
             actor = "assistant"
+            unknown.discard(int(p["id"]))
         grouped.setdefault((int(p["application_id"]), actor), []).append(p)
     out: dict[int, list[Blocker]] = {}
     for (app_id, actor), group in grouped.items():
         n, since = len(group), min((g["occurred_at"] for g in group), key=_when)
         label = _plural(n, "LinkedIn note", "LinkedIn notes") if actor == "your_pc" else f"send {_plural(n, 'note', 'notes')}"  # noqa: E501
         ref: dict[str, Any] = {"contact_ids": [int(g["id"]) for g in group]}
-        if actor == "assistant":
+        if actor == "assistant" and all(int(g["id"]) in unknown for g in group):
+            label = f"read LinkedIn state for {_plural(n, 'person', 'people')}"
+            ref["reason"] = "linkedin_state_unknown"
+        elif actor == "assistant":
             label = f"rewrite {_plural(n, 'LinkedIn note', 'LinkedIn notes')} (over the limit)"
             ref["reason"] = "note_too_long"
         out.setdefault(app_id, []).append(_b("outreach_send", actor, label, since, ref))

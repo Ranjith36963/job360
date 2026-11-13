@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
 import { AskText } from "./AskText";
 import { JobCards } from "./JobCards";
+import { SiteSignInCards } from "./SiteSignInCards";
 import { useLiveAsks, useLiveRefresh, useLiveRequests } from "./useLiveLists";
 import type { JobCardsReport } from "./JobCards";
 import { groupAsks } from "@/lib/job-cards";
@@ -510,6 +511,10 @@ export function NeedsYou({ aside, focusJob = null }: { aside?: ReactNode; focusJ
         )}
         {/* Memory first (plan S3): old saved answers Memory now covers; the owner deletes each one. Silent when none. */}
         {(active === "all" || active === "answers") && <MemoryCoveredAnswers />}
+        {/* One card per site whose sign-in unblocks several jobs (diagnosis D); those jobs are not rows below. */}
+        {(active === "all" || active === "site_step") && count && (
+          <SiteSignInCards sites={count.siteSignins} onChanged={() => { void load(); setCountTick((t) => t + 1); }} />
+        )}
         <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} fold={fold} jobIds={count ? count.jobIds : countFailed ? undefined : []} idsByKind={count?.idsByKind} linkedinPerDay={linkedinPerDay} focusJob={focusJob} />
         {/* The own-browser Run now sits beside the title (RunNowPanel); its tasks are listed on Home's queue. */}
       </section>

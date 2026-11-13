@@ -212,6 +212,15 @@ BOARD_SOURCES = (
     "redrover",
     "senjob",
     "telegramchannel",
+    "relocateme",
+    "techjobs",
+    "iamexpat",
+    "ictjob",
+    "berlinstartup",
+    "stepstone",
+    "swissjobs",
+    "itjobspt",
+    "magnetme",
 )
 FEED_SOURCES = (
     "freehire",
@@ -410,7 +419,7 @@ ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
     "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5",
-    "kit_co7", "kit_co8",
+    "kit_co7", "kit_co8", "kit_eu1", "kit_eu2",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2994,7 +3003,7 @@ _FEED_HOSTS = (
 _AGGREGATOR_HOSTS = re.compile(
     r"(?:^|\.)(?:linkedin\.com|lnkd\.in|indeed\.[a-z.]+|glassdoor\.[a-z.]+|ziprecruiter\.[a-z.]+|monster\.[a-z.]+|"
     r"reed\.co\.uk|totaljobs\.com|cv-library\.co\.uk|jooble\.org|adzuna\.[a-z.]+|jobrapido\.com|simplyhired\.com|"
-    r"careerbuilder\.com|naukri\.com|stepstone\.[a-z.]+|seek\.com\.au|jobstreet\.com|dice\.com|wellfound\.com|"
+    r"careerbuilder\.com|naukri\.com|stepstone\.(?!de$)[a-z.]+|seek\.com\.au|jobstreet\.com|dice\.com|wellfound\.com|"
     r"builtin\.com|otta\.com|welcometothejungle\.com|hiring\.cafe|ycombinator\.com)$", re.I)
 _SLUG = r"([A-Za-z0-9_.-]+)"
 _SLUG_BLOCK = {"embed", "jobs", "job", "j", "o", "share", "api", "widget", "www", "app", "v1", "careers",
@@ -3113,6 +3122,17 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("senjob", re.compile(r"^(?:www\.)?senjob\.com$")),
     # career-ops public Telegram channels (kit_co8): the handle is the first path segment, or the second after /s/
     ("telegramchannel", re.compile(r"^t\.me$")),
+    # European boards, part 1 (kit_eu1): one site each (the techjobs token is a category page, not in the link)
+    ("relocateme", re.compile(r"^relocate\.me$")),
+    ("techjobs", re.compile(r"^(swissdevjobs\.ch|germantechjobs\.de)$")),
+    ("iamexpat", re.compile(r"^www\.iamexpat\.nl$")),
+    ("ictjob", re.compile(r"^www\.ictjob\.(?:be|lu)$")),
+    ("berlinstartup", re.compile(r"^berlinstartupjobs\.com$")),
+    # European boards, part 2 (kit_eu2): the StepStone / jobs.ch / jobup.ch tokens are search words, not in the link
+    ("stepstone", re.compile(r"^www\.stepstone\.de$")),
+    ("swissjobs", re.compile(r"^www\.(?:jobs|jobup)\.ch$")),
+    ("itjobspt", re.compile(r"^www\.itjobs\.pt$")),
+    ("magnetme", re.compile(r"^magnet\.me$")),
     ("adpmyjobs", re.compile(r"^myjobs\.adp\.com$")),
     ("eploy", re.compile(r"^([a-z0-9-]+\.eploy\.net)$")),
     # generic ATS, part 5: the tenant is the subdomain (SelfRecruit, Enlizt, Hurma, Spark) or a path segment (Compleo)
@@ -3292,6 +3312,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "scalis":  # https://<tenant>.scalis.ai/...: www/app/api are vendor hosts, not tenants
             tok = "" if m.group(1) in ("www", "app", "api") else m.group(1)
         elif ats == "profession":  # https://www.profession.hu/allas/<slug>-<id>: the category is not in the link
+            tok = ""
+        elif ats in ("relocateme", "techjobs", "iamexpat", "ictjob", "berlinstartup",
+                     "stepstone", "swissjobs", "itjobspt", "magnetme"):  # kit_eu1/2: no token in the link
             tok = ""
         elif ats in ("onstrider", "micro1", "alignerr"):  # one site each: the job link carries no board token
             tok = ""
