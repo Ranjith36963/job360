@@ -286,3 +286,27 @@ async def test_posting_closed_is_a_stat_proven_closes_and_open_blocks_count_but_
         # The stat moves nothing else: the proven job is not in All; the unproven one is still the owner's choice.
         assert proven not in by["all"]["job_ids"] and unproven in by["all"]["job_ids"]
         assert by["all"]["count"] == got["n"]
+
+
+@pytest.mark.asyncio
+async def test_site_signin_jobs_group_into_one_card_counted_once_in_n_and_signin_captcha(authenticated_async_context):
+    """Merge of the fixed filters with diagnosis D: two jobs on one sign-in are no rows, ONE card, counted once."""
+    async with authenticated_async_context() as web:
+        one, two, cap = [await _bring(web, n) for n in range(1, 4)]
+        for app_id, reason in ((one, "login_needed"), (two, "login_needed"), (cap, "captcha")):
+            await _event(web, app_id, "blocked", {"reason": reason, "step": "open_form", "page_host": HOST})
+        got = await _count(web)
+        by = _by_key(got)
+        grouped = {one, two}
+        assert grouped.isdisjoint(got["job_ids"])
+        for key, f in by.items():
+            assert grouped.isdisjoint(f["job_ids"]), key
+        assert len(got["site_signins"]) == 1
+        card = got["site_signins"][0]
+        assert card["host"] == HOST and sorted(card["app_ids"]) == sorted(grouped)
+        assert cap in got["job_ids"]
+        assert got["n"] == len(got["job_ids"]) + 1 + got["other"] + (1 if got["answer_once"] else 0)
+        assert by["all"]["count"] == got["n"]
+        # the card once, plus the CAPTCHA job (a site step too) = 2; never 3 (the two jobs) + 1
+        assert by["signin_captcha"]["count"] == 2
+        assert by["signin_captcha"]["job_ids"] == [cap]
