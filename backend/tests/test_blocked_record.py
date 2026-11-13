@@ -131,7 +131,8 @@ def test_gate_asks_blocked_and_a_yes_does_not_clear_it():
 async def test_every_reason_is_accepted_and_stored_with_the_server_assistant(authenticated_async_context, reason):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        resp = await _event(client, app_id, "blocked", _blocked(reason=reason, detail="a short note"))
+        proof = {"evidence": "http_404"} if reason == "posting_closed" else {}  # 2026-11-13: required with it
+        resp = await _event(client, app_id, "blocked", _blocked(reason=reason, detail="a short note", **proof))
         assert resp.status_code == 201, resp.text
         assert resp.json()["status"] == "considering"  # note-family: never moves the status
         controls = (await client.get(f"/api/applications/{app_id}/controls")).json()

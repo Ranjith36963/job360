@@ -4324,7 +4324,9 @@ async def _record_event(
         if body.event_type == "answer_corrected":
             _check_answer_corrected(user, application_id, payload)
         # S11a: a version's artifact_saved event and a hide are corrected only by the user's buttons.
-        await hiding.refuse_correction(db, user.id, application_id, body.corrects_event_id)
+        await hiding.refuse_correction(
+            db, user.id, application_id, body.corrects_event_id, body.event_type, by_user=actor_for(user) == "web"
+        )
         if body.event_type == process_log.PROCESS_LOG:
             await process_log.check(
                 db, user, application_id, payload=payload, source=source,
@@ -4493,6 +4495,7 @@ def _queue_refused(user: CurrentUser, application_id: int, event_type: str, stat
         "bad_reason": "unqueued takes only an optional reason: " + ", ".join(queue_preflight.UNQUEUE_REASONS),
         "not_open": "not open",
         "already_queued": "already queued",
+        "closed_posting": spine.CLOSED_POSTING_NOTE,
         "not_queued": "not queued",
         "corrects_non_queue_event": f"{event_type} may only correct a queued or unqueued event",
     }[reason]
@@ -4534,6 +4537,12 @@ async def _check_queue_event(
         )
         if await cur.fetchone() is None:
             raise _queue_refused(user, application_id, event_type, 422, "corrects_non_queue_event")
+    # App 146 (checker 2026-11-13): only the user undoes a closed_posting unqueue, also through a correction
+    # (a queued, or an unqueued retracting the closed one, would put the job back on the queue).
+    if actor_for(user) != "web" and (event_type == "queued" or corrects_event_id is not None) and (
+        await spine.unqueued_as_closed(db, user.id, application_id)
+    ):
+        raise _queue_refused(user, application_id, event_type, 409, "closed_posting")
     if corrects_event_id is None:
         is_queued = application_id in await spine.queued_at_by_app(db, user.id, [application_id])
         if event_type == "queued" and is_queued:
