@@ -19,6 +19,7 @@ Word by word, no regex on caller text; inputs capped by ``cv_review.shape_proble
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from src.core import settings
@@ -55,6 +56,8 @@ _OUTER = ".,;:!?()[]{}\"'‘’“”"
 # Closed: ad-title words a headline may NOT borrow from the ad (rules 7): the profile must hold them itself.
 SENIORITY_WORDS = frozenset("senior sr snr lead principal staff head manager director chief vp".split())
 
+
+logger = logging.getLogger(__name__)
 
 def _at(where: dict[str, list[Any]], code: str, n: int) -> None:
     got = where.setdefault(code, [])
@@ -201,6 +204,24 @@ def _title_bank(job_title: str) -> str:
     return " ".join(keep)
 
 
+def _line_no(x: Any) -> int:
+    return int(str(x).partition(":")[0])
+
+
+def _label_hints(where: dict[str, list[Any]], lines: list[str], profile: Any) -> None:
+    """``skills_label_unknown`` (``"n:word+word"``): a line already downgraded whose items are ALL profile items and
+    only whose label has a word that is no skills-group word. Said apart: the reviewer sees the label is the problem."""
+    book = cv_review.skill_book(profile)
+    for n in sorted({n for v in where.values() for n in v if isinstance(n, int)}):
+        if n > len(lines):
+            continue
+        bad = cv_review.label_unknown_words(lines[n - 1].strip().lstrip(cv_review._BULLETS + " \t"), book)
+        if bad:
+            got = where.setdefault("skills_label_unknown", [])
+            got.append(f"{n}:{'+'.join(bad)}")
+            logger.info("cv_review skills_label_unknown line=%s words=%s", n, ",".join(bad))
+
+
 def judge(text: str, rows: list[dict[str, Any]], profile: Any,
           job_title: str = "") -> tuple[dict[str, list[Any]], list[str], int]:
     """``(where, content lines, held count)``: each code with the line numbers it came from, in line order. Rows whose
@@ -264,4 +285,5 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
         if len(ns) > settings.CV_REVIEW_QUOTE_REUSE_MAX:
             for n in ns:
                 _at(where, "evidence_reused", n)
-    return {k: sorted(v) for k, v in where.items()}, content, held
+    _label_hints(where, lines, profile)
+    return {k: sorted(v, key=_line_no) for k, v in where.items()}, content, held
