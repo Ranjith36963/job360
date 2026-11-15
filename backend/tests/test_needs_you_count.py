@@ -11,6 +11,8 @@ Real Postgres, real HTTP doors. The number must be the Needs-you page's own tota
 """
 from __future__ import annotations
 
+import logging
+import logging.handlers
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -301,8 +303,25 @@ async def test_the_total_equals_the_pages_rules_over_the_pages_own_reads(authent
         assert await _count(client) == expected
 
 
+@pytest.fixture
+def audit_tee_installed():
+    """Install the audit-to-DB tee exactly as ``api.main.lifespan`` does (``setup_audit_logger``), then take
+    the handlers it added back off. Without it the no-audit-row test below passes vacuously whenever no earlier
+    test in the process installed the tee, and fails (#1597) when one did."""
+    from src.utils.logger import setup_audit_logger
+
+    audit = logging.getLogger("job360.audit")
+    before = list(audit.handlers)
+    setup_audit_logger()
+    assert any(isinstance(h, logging.handlers.QueueHandler) for h in audit.handlers), "tee not installed"
+    yield
+    for h in list(audit.handlers):
+        if h not in before:
+            audit.removeHandler(h)
+
+
 @pytest.mark.asyncio
-async def test_session_only_and_it_writes_no_audit_row(authenticated_async_context):
+async def test_session_only_and_it_writes_no_audit_row(authenticated_async_context, audit_tee_installed, caplog):
     from src.api.main import app
     from src.utils import audit_trail
 
@@ -318,6 +337,14 @@ async def test_session_only_and_it_writes_no_audit_row(authenticated_async_conte
         audit_trail.flush()
         assert _sql("SELECT COUNT(*) FROM audit_log WHERE user_id = ?", (user_id,))[0][0] == rows
         assert (await client.get("/api/changes")).json()["cursor"] == before.json()["cursor"]
+        # the diagnostic line is kept, on the plain module logger (ids and counts only)
+        # count only this call's records: an earlier test may already have set job360.* to INFO, so the
+        # calls above can be in caplog too (CI shard 1, 2 == 1)
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="job360.needs_you"):
+            await _count(client)
+        lines = [r for r in caplog.records if r.name == "job360.needs_you" and r.getMessage() == "needs_you_filters"]
+        assert len(lines) == 1 and lines[0].user_id == user_id and lines[0].result == "ok"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
                            headers={"Authorization": f"Bearer {token}"}) as agent:
         resp = await agent.get("/api/needs-you-count")
