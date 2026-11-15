@@ -58,7 +58,7 @@ DOWNGRADES = (
     "quote_too_thin", "evidence_wrong_record", "claim_not_in_quote", "evidence_reused", "cv_checks_found",
     "ats_format", "jd_not_judged", "jd_no_must", "jd_too_few", "jd_term_not_in_ad", "jd_evidence_not_in_profile",
     "jd_term_not_in_cv",
-    "jd_gap_claimed", "jd_coverage_low", "jd_terms_dropped", "retry_limit",
+    "jd_gap_claimed", "jd_coverage_low", "jd_terms_dropped", "retry_limit", "skills_label_unknown",
 )
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
@@ -240,6 +240,10 @@ GENERIC_LABEL_WORDS = frozenset({
     "frontend", "data", "engineering", "cloud", "ops", "ai", "ml", "agents", "llms", "web", "devops", "databases",
     "and", "agentic", "machine", "learning", "apis", "programming", "infrastructure", "automation", "generative",
     "genai", "mlops", "llmops", "platforms", "analytics",
+    # rules 7 (2026-11-15, apps 455 460 461): kinds of skills writers abbreviate; never a fact. Not "practice",
+    # "evaluation" or "experience": those can state a claim.
+    "infra", "ci", "cd", "systems", "tooling", "devtools", "testing", "observability", "monitoring", "security",
+    "mobile",
 })
 _NEVER_LABEL_WORDS = frozenset({"education", "experience", "work", "employment"})
 
@@ -290,6 +294,29 @@ def profile_items(profile: Any) -> frozenset[str]:
     return skill_book(profile).items
 
 
+def _group_words(book: SkillBook) -> frozenset[str]:
+    return frozenset().union(*(k for k, _ in book.groups)) if book.groups else frozenset()
+
+
+def _bad_label_word(w: str, book: SkillBook, group_words: frozenset[str]) -> bool:
+    named = w in group_words
+    generic = w in GENERIC_LABEL_WORDS or w in book.items  # "Python and APIs:" names a skill (rules 7)
+    # a closed generic word is never an employer, even when a certificate says it ("AWS Certified AI
+    # Practitioner" keeps "AI and LLMs:" a skills group; dry run 2026-11-12)
+    return w in _NEVER_LABEL_WORDS or not (named or generic) or (
+        w in book.entities and not named and w not in GENERIC_LABEL_WORDS)
+
+
+def label_unknown_words(line: str, book: SkillBook) -> list[str]:
+    """The label words that alone keep a skills line from being held: a list line whose every item is a profile item
+    but whose label has a word that is no skills-group word (``skills_label_unknown``). Else ``[]``."""
+    parts = list_parts(line)
+    if parts is None or not {_norm(i) for i in parts[1]} <= book.items:
+        return []
+    group_words = _group_words(book)
+    return [w for w in sorted(_label_words(parts[0]) - {"and"}) if _bad_label_word(w, book, group_words)]
+
+
 def list_line_holds(line: str, book: SkillBook) -> bool:
     """A skills line the profile holds item by item (production 2026-11-10, apps 848-882): EVERY item a whole
     profile item, in any order, under a label that is a skills group, never a fact. Each label word is a word of one
@@ -302,15 +329,9 @@ def list_line_holds(line: str, book: SkillBook) -> bool:
     if parts is None:
         return False
     label = _label_words(parts[0]) - {"and"}
-    group_words = frozenset().union(*(k for k, _ in book.groups)) if book.groups else frozenset()
-    for w in label:
-        named = w in group_words
-        generic = w in GENERIC_LABEL_WORDS or w in book.items  # "Python and APIs:" names a skill (rules 7)
-        # a closed generic word is never an employer, even when a certificate says it ("AWS Certified AI
-        # Practitioner" keeps "AI and LLMs:" a skills group; dry run 2026-11-12)
-        if w in _NEVER_LABEL_WORDS or not (named or generic) or (
-                w in book.entities and not named and w not in GENERIC_LABEL_WORDS):
-            return False
+    group_words = _group_words(book)
+    if any(_bad_label_word(w, book, group_words) for w in label):
+        return False
     got = {_norm(i) for i in parts[1]}
     if not got <= book.items:
         return False
@@ -983,6 +1004,17 @@ async def verify(
 _WHERE_LISTED = 10
 
 
+LABEL_WORDS_ADVICE = "Skills, Technologies, Infrastructure, Cloud, Data, DevOps, Tools"
+
+
+def _label_advice(entry: str) -> str:
+    """``"31:infra-ish"`` (where entry ``line:word+word``) -> the agent-facing text for that skills line."""
+    n, _, words = entry.partition(":")
+    quoted = " ".join(f"'{w}'" for w in words.split("+") if w)
+    return (f"skills line {n}: label word {quoted} is no skills-group word; use one of: {LABEL_WORDS_ADVICE}, ... "
+            "or the profile's own group label; keep the items")
+
+
 def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optional[str]:
     """The reply line when a CLAIMED strong review was STORED weak: every code and the review lines it came from, so a
     run never reports "strong" for a weak store and one rewrite fixes every line named."""
@@ -997,6 +1029,9 @@ def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optiona
         jd = stored.get("jd") or {}
         if code == "jd_coverage_low":
             at = [f"{jd.get('covered')} of {jd.get('must')} had must-haves named, bar {jd.get('bar')}"]
+        if code == "skills_label_unknown":
+            parts.append("; ".join(_label_advice(str(x)) for x in at[:_WHERE_LISTED]))
+            continue
         parts.append(f"{code}: {label}{', '.join(at[:_WHERE_LISTED])}{more}" if at else code)
     return ("cv_reviewed claimed strong but STORED WEAK: " + "; ".join(parts) + ". Line N = get_application's "
             "review.lines[N-1] (your row n); jd item N = your jd[N-1]. Rewrite only those lines; report this CV as "
