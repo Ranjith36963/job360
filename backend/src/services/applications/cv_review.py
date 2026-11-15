@@ -69,7 +69,8 @@ MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # {n, verdict, evidence}, hard facts pinned to the row's quotes, no word-overlap rule (5, review_rows); ATS format and
 # the ad's requirements (6, cv_format + review_jd); headline / summary lines judged on facts against the whole profile,
 # no quote asked, the headline may use the ad's title words; generic skills labels widened (7, owner 2026-11-12)
-RULES = 7
+# 8 (2026-11-15): #1610 label false-weaks spent apps' budgets; one fresh budget, strong reviews stay valid
+RULES = 8
 MAX_LINES = 200
 EVIDENCE_MAX, QUOTE_MIN_CHARS, QUOTE_MAX_CHARS = 3, 3, 600
 WHERE_STORED = 20  # line numbers stored per code

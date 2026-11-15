@@ -167,7 +167,7 @@ async def test_through_the_door_the_ads_title_frees_the_headline(authenticated_a
         events = (await client.get(f"/api/applications/{app_id}")).json()["events"]
     got = next(e["payload"] for e in events if e["id"] == resp.json()["event_id"])
     assert (got["confidence"], got["downgraded"], got["rules"]) == ("strong", [], cv_review.RULES), got
-    assert cv_review.RULES == 7
+    assert cv_review.RULES == 8
 
 
 # Checker round 1 (2026-11-12): the TOP is the headline and summary only; a bullet is never one.
