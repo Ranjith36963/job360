@@ -1442,7 +1442,14 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
         return ["this lane requires NO tags at all, so merging it would be merging on "
                 "nothing. FIX: give the lane a `requires:` list in "
                 ".github/merge-policy.yml (that is the owner's decision)."]
-    by_name = {r.get("name", ""): r for r in runs}
+    # The NEWEST run per name, not whichever the API lists last (#1611, 2026-11-15: a draft's
+    # `skipped` reviewer run, then a `success` on ready, same sha). `>=` keeps the last of two
+    # runs that tie, the old behaviour. A run still going sorts newest, so it is still waited for.
+    by_name: dict[str, dict] = {}
+    for r in runs:
+        k = r.get("name", "")
+        if k not in by_name or _newest_first(r) >= _newest_first(by_name[k]):
+            by_name[k] = r
     # Same early-`neutral` rule as judge_check_runs (2026-10-26): on 12 of the
     # last 30 PRs this cage alone posted a red "concluded `neutral`" for CodeQL
     # while an Analyze job still ran, then went green minutes later.
@@ -3590,6 +3597,35 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
            for r in judge_tags(_prod_req, _ci_gone, workflows_pending=True))
        and bool(judge_tags(_prod_req, _ci_gone, workflows_pending=True)),
        f"got {judge_tags(_prod_req, _ci_gone, workflows_pending=True)}", T)
+    # #1611 (2026-11-15): a PR opened as a draft ran both reviewer jobs `skipped`, then
+    # again on ready, `success`, same head sha. judge_tags kept whichever run the API
+    # listed LAST, not the newest, and refused forever. Newest per name wins.
+    _sec_rs = [r for r in _full if r["name"] != "reviewer-security"]
+    _rv_old = {"name": "reviewer-security", "status": "completed",
+               "conclusion": "skipped", "completed_at": "2026-11-15T10:00:00Z", "id": 1}
+    _rv_new = {"name": "reviewer-security", "status": "completed",
+               "conclusion": "success", "completed_at": "2026-11-15T10:30:00Z", "id": 2}
+    ok("a draft's old `skipped` reviewer-security then a newer `success` passes (API order old, new)",
+       not judge_tags(["security"], _sec_rs + [_rv_old, _rv_new]),
+       f"got {judge_tags(['security'], _sec_rs + [_rv_old, _rv_new])}", T)
+    ok("...and in the other API order (new, old) too",
+       not judge_tags(["security"], _sec_rs + [_rv_new, _rv_old]),
+       f"got {judge_tags(['security'], _sec_rs + [_rv_new, _rv_old])}", T)
+    ok("a NEWER `skipped` reviewer-security after an older `success` still refuses (both orders)",
+       all(any("tag `security` needs `reviewer-security`" in r and "skipped" in r
+               for r in judge_tags(["security"], _sec_rs + pair))
+           for pair in ([{**_rv_new, "id": 1, "completed_at": "2026-11-15T10:00:00Z"},
+                         {**_rv_old, "id": 2, "completed_at": "2026-11-15T10:30:00Z"}],
+                        [{**_rv_old, "id": 2, "completed_at": "2026-11-15T10:30:00Z"},
+                         {**_rv_new, "id": 1, "completed_at": "2026-11-15T10:00:00Z"}])),
+       "a real newer skip was masked by an older success", T)
+    _rv_going = {"name": "reviewer-security", "status": "in_progress", "conclusion": None,
+                 "completed_at": None, "id": 3}
+    ok("a NEWER in-progress reviewer-security still waits, even after an older `success` (both orders)",
+       all(any("tag `security` needs `reviewer-security`" in r and "not finished" in r
+               for r in judge_tags(["security"], _sec_rs + pair))
+           for pair in ([_rv_new, _rv_going], [_rv_going, _rv_new])),
+       "an in-flight review was ignored because an older run had passed", T)
     _sec_req = ["security"]
     _sec_full = [{"name": n, "status": "completed", "conclusion": "success"}
                  for n in TAG_CHECKS["security"]]
