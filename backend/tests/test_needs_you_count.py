@@ -338,6 +338,9 @@ async def test_session_only_and_it_writes_no_audit_row(authenticated_async_conte
         assert _sql("SELECT COUNT(*) FROM audit_log WHERE user_id = ?", (user_id,))[0][0] == rows
         assert (await client.get("/api/changes")).json()["cursor"] == before.json()["cursor"]
         # the diagnostic line is kept, on the plain module logger (ids and counts only)
+        # count only this call's records: an earlier test may already have set job360.* to INFO, so the
+        # calls above can be in caplog too (CI shard 1, 2 == 1)
+        caplog.clear()
         with caplog.at_level(logging.INFO, logger="job360.needs_you"):
             await _count(client)
         lines = [r for r in caplog.records if r.name == "job360.needs_you" and r.getMessage() == "needs_you_filters"]
