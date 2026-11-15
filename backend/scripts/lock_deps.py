@@ -66,7 +66,8 @@ def pip_audit_cmd() -> list[str]:
 def run_pip_audit() -> str | None:
     """pip-audit's JSON on the current locks, or None (with a warning) if it cannot run."""
     try:
-        done = subprocess.run(pip_audit_cmd(), cwd=BACKEND, capture_output=True, text=True, timeout=600)
+        done = subprocess.run(pip_audit_cmd(), cwd=BACKEND, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=600)
     except (OSError, subprocess.SubprocessError) as exc:  # not installed, or timed out
         print(f"WARNING: pip-audit could not run ({exc!r}); skipping the CVE step", flush=True)
         return None
