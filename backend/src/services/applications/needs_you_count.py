@@ -24,6 +24,7 @@ and people are left out. Nothing is judged by its words: a real "Simulation Engi
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
@@ -33,7 +34,11 @@ from src.core import settings
 from src.services.applications import asks as asks_service
 from src.services.applications import inbox_items, outcome_suggestions, site_signin, spine, test_marker
 from src.services.profile import ask_once, setting_requests
-from src.utils.logger import get_audit_logger, safe_log_value
+from src.utils.logger import safe_log_value
+
+# A plain module logger, never the audit logger: the badge is a GET (a navigation), and every audit record is teed
+# into the audit_log table, which moves /api/changes (#1597 wrote a row per badge call).
+logger = logging.getLogger("job360.needs_you")
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -241,7 +246,7 @@ async def jobs_by_first_blocker(db: JobDatabase, user_id: str, tests: Optional[s
     for key in members:
         members[key].sort(key=lambda i: (order.get(i, len(order)), i))
     if unknown:  # an owner kind the table does not know: filed under Other, and said here so it can be added
-        get_audit_logger().info("needs_you_filter_unknown_kind", extra={
+        logger.info("needs_you_filter_unknown_kind", extra={
             "event": "needs_you_filter_unknown_kind", "user_id": safe_log_value(user_id), "reason": "kind_not_in_table",
             "jobs": {str(a): [safe_log_value(k, max_len=40) for k in ks] for a, ks in sorted(unknown.items())[:50]}})
     return {
@@ -312,7 +317,7 @@ async def needs_you_count(
     mark("pc_idle")
     n = len(first["job_ids"]) + len(first["site_signins"]) + other + (1 if answer_once else 0)
     filters = _filters(members, n, general, other, answer_once, len(first["site_signins"]))
-    get_audit_logger().info("needs_you_filters", extra={
+    logger.info("needs_you_filters", extra={
         "event": "needs_you_filters", "user_id": safe_log_value(user_id), "n": n, "result": "ok",
         "counts": {f["key"]: f["count"] for f in filters}})
     return {
