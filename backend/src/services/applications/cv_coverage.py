@@ -29,6 +29,9 @@ MAX_PIECES = 60_000  # per text
 MAX_PIECE_CHARS = 100  # a longer "word" is junk and is dropped
 _RUN_MAX = _KEYWORD_MAX_WORDS  # a spelling variant may be split over this many pieces
 _SPLIT_CHARS = "/|•:-‐‑‒–—―−"
+_HARD_SPLIT_CHARS = "/|•:"  # a real word boundary: a spelling fold never crosses it (a hyphen or dash is soft)
+_FOLD_MIN_CHARS = 4  # a term shorter than this (letters and digits) is never folded
+_FOLD_RUN_MAX = 3  # a folded spelling spans at most this many pieces ("Next" "JS", "Node" "." "js")
 _EXTRA_EDGE = "`*_~<>@…‘’“”«»"
 _LEAD_STRIP = _OUTER_PUNCT.replace(".", "") + _EXTRA_EDGE + "#"  # keep a leading "." (".NET")
 _TRAIL_STRIP = _OUTER_PUNCT + _EXTRA_EDGE  # keep a trailing "#" ("C#")
@@ -42,10 +45,13 @@ class Tokens:
         self.norm: list[str] = []
         self.orig: list[str] = []
         self.span: list[Optional[tuple[int, int]]] = []
+        self.hard: list[bool] = []  # this piece starts after a real word boundary ("/", ",", a bracket ...)
+        self._carry = False
         self._scan(self.src)
         self.idx = _index(self.norm)
         self._idx_orig: Optional[dict[str, list[int]]] = None
         self._loose: Optional[set[str]] = None
+        self._fold: Optional[dict[str, tuple[int, int]]] = None
 
     def _scan(self, text: str) -> None:
         n = len(text)
@@ -58,6 +64,7 @@ class Tokens:
             while j < n and not text[j].isspace():
                 j += 1
             self._token(text[i:j], i)
+            self._carry = not text[j - 1].isalnum() and text[j - 1] not in "#+"  # "Python," / "(React)": a boundary
             i = j
 
     def _token(self, raw: str, base: int) -> None:
@@ -72,6 +79,8 @@ class Tokens:
             piece = tok[start:k]
             lead = len(piece) - len(piece.lstrip(_LEAD_STRIP))
             core = piece[lead:].rstrip(_TRAIL_STRIP)
+            if start > 0 and tok[start - 1] in _HARD_SPLIT_CHARS:
+                self._carry = True
             if core.endswith("'s") and len(core) > 3:
                 core = core[:-2].rstrip(_TRAIL_STRIP)
             if core and len(core) <= MAX_PIECE_CHARS:
@@ -79,6 +88,8 @@ class Tokens:
                 self.norm.append(core.casefold())
                 self.orig.append(core)
                 self.span.append((a, a + len(core)) if exact else None)
+                self.hard.append(self._carry or lead > 0)
+                self._carry = False
             start = k + 1
 
     def _pos(self, needle: list[str], case: bool) -> int:
@@ -120,7 +131,35 @@ class Tokens:
                     hay = self.norm[pos : pos + len(needle)]
                     if len(hay) == len(needle) and all(_same(a, b) for a, b in zip(hay, needle)):
                         return " ".join(self.orig[pos : pos + len(needle)])
-        return ""
+        return self._spelled(t)
+
+    def _spelled(self, t: Tokens) -> str:
+        """The term in another spelling of the same word-run (app 479, 2026-11-15: the ad's ``NextJs`` is the CV's
+        ``Next.js``): its letters and digits equal those of 1-3 adjacent text pieces, every join a dot, a hyphen or a
+        space, never a ``/ | : •``, a comma or a bracket. A term with such a boundary of its own ("CI/CD"), under
+        :data:`_FOLD_MIN_CHARS` characters, or with a symbol (``C#``, ``.NET``) is not folded. This text's own
+        spelling, else ``""``."""
+        key = _loose_key(t.norm)
+        if len(key) < _FOLD_MIN_CHARS or any(t.hard[1:]):
+            return ""
+        hit = self.fold.get(key)
+        return " ".join(self.orig[hit[0] : hit[0] + hit[1]]) if hit else ""
+
+    @property
+    def fold(self) -> dict[str, tuple[int, int]]:
+        """``{letters and digits of a run of pieces: (first piece, piece count)}``, first occurrence, soft joins."""
+        if self._fold is None:
+            out: dict[str, tuple[int, int]] = {}
+            keys = ["".join(c for c in p if c.isalnum()) for p in self.norm]
+            for i in range(len(keys)):
+                acc = ""
+                for k in range(1, _FOLD_RUN_MAX + 1):
+                    if i + k > len(keys) or not keys[i + k - 1] or (k > 1 and self.hard[i + k - 1]):
+                        break
+                    acc += keys[i + k - 1]
+                    out.setdefault(acc, (i, k))
+            self._fold = out
+        return self._fold
 
     def claims(self, term: Any) -> bool:
         """A reader would see the term here: :meth:`match`, or its letters and digits run together (looser)."""

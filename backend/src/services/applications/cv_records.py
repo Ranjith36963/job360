@@ -131,10 +131,15 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
     headline: Optional[int] = None
     seen_heading = False
     n = 0
+    first = True
+    names = cv_review._name_words(profile)
     for line in (ln.strip() for ln in str(cv_text or "").splitlines()):
         if not line or n >= len(content):
             continue
         is_content = line == content[n]
+        name_line, first = first and not is_content and _is_name(line, names), False
+        if name_line:  # the name in capitals reads as a heading, yet it is no section: it must not end the top
+            continue
         heading = cv_review.is_heading(line)
         if not heading and _marked(line):  # a bullet is a record's line, never the headline or summary
             break
@@ -155,6 +160,12 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
                 headline = n + 1
         n += is_content
     return frozenset(out), headline
+
+
+def _is_name(line: str, names: set[str]) -> bool:
+    """The CV's first line is the profile's name (the line ``cv_review.content_lines`` leaves out for that reason)."""
+    words = set(evidence._words(line))
+    return bool(names and words and words <= names)
 
 
 def _marked(line: str) -> bool:
