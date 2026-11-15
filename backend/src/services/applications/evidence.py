@@ -45,7 +45,10 @@ _MAX_PRIOR = 500
 def clean(text: Any) -> str:
     """NFKC (fullwidth digits are digits, a no-break space a space) with format characters (zero-width spaces and
     joiners, Unicode ``Cf``) dropped: "Le\u200bd" is "Led", never a word no list knows (checker 2026-11-10)."""
-    return "".join(c for c in unicodedata.normalize("NFKC", str(text or "")) if unicodedata.category(c) != "Cf")
+    s = str(text or "")
+    if s.isascii():  # NFKC leaves ASCII unchanged and no ASCII character is Cf: the same result, without a
+        return s     # per-character pass (the hostile-text bound, CI 2026-11-15: 2.004 s of a 2.0 s budget)
+    return "".join(c for c in unicodedata.normalize("NFKC", s) if unicodedata.category(c) != "Cf")
 
 
 def _words(text: str) -> list[str]:
