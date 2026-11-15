@@ -24,9 +24,11 @@ target as flags. The output is pip-compile's format (pins, hashes, `# via`).
 from __future__ import annotations
 
 import datetime as dt
+import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Collection
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parent.parent
@@ -34,6 +36,9 @@ RUNTIME = "requirements.lock.txt"
 EXTRAS = {"requirements-dev.lock.txt": "dev", "requirements-browser.lock.txt": "browser"}
 TARGET = ["--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu"]
 COOLDOWN_DAYS = 7
+# New CVEs are handled automatically: main() runs pip-audit on the current locks and upgrades every
+# flagged package that has a fix. Add a package here only if it must skip the cooldown for some
+# other reason.
 # A package named here ignores the cooldown and is moved to its newest release: a known
 # critical advisory outweighs a few days of waiting. Keep the reason, and drop the entry once
 # the fixed release is older than COOLDOWN_DAYS (the lock then keeps it on its own).
@@ -47,16 +52,78 @@ COOLDOWN_EXEMPT = ("certifi", "pillow", "opentelemetry-api")
 COMMAND = "python scripts/lock_deps.py   (from backend/, needs uv; see that file)"
 
 
-def compile_lock(uv: str, output: str, extra: str | None, upgrade: bool, cutoff: str) -> None:
+LOCKS = (RUNTIME, "requirements-browser.lock.txt", "requirements-dev.lock.txt")
+
+
+def pip_audit_cmd() -> list[str]:
+    """The same audit as .github/workflows/security.yml, plus JSON output."""
+    cmd = ["pip-audit", "--progress-spinner", "off", "--require-hashes", "--disable-pip", "-f", "json"]
+    for lock in LOCKS:
+        cmd += ["-r", lock]
+    return cmd
+
+
+def run_pip_audit() -> str | None:
+    """pip-audit's JSON on the current locks, or None (with a warning) if it cannot run."""
+    try:
+        done = subprocess.run(pip_audit_cmd(), cwd=BACKEND, capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError) as exc:  # not installed, or timed out
+        print(f"WARNING: pip-audit could not run ({exc!r}); skipping the CVE step", flush=True)
+        return None
+    return done.stdout  # exit 1 just means vulns were found; the JSON is still on stdout
+
+
+def parse_audit(raw: str | None) -> list[tuple[str, str, str, list[str]]]:
+    """(package, version, vuln id, fix versions) for every vuln in pip-audit's JSON."""
+    try:
+        deps = json.loads(raw or "")["dependencies"]
+    except (ValueError, KeyError, TypeError):
+        print("WARNING: pip-audit gave no usable JSON (network error?); skipping the CVE step", flush=True)
+        return []
+    return [(d["name"].lower(), d.get("version", "?"), v["id"], list(v.get("fix_versions") or []))
+            for d in deps for v in d.get("vulns") or []]
+
+
+def packages_to_upgrade(findings: list[tuple[str, str, str, list[str]]]) -> set[str]:
+    out: set[str] = set()
+    for pkg, version, vuln, fixes in findings:
+        if fixes:
+            print(f"{pkg} {version}: {vuln} -> upgrading (fix {', '.join(fixes)})", flush=True)
+            out.add(pkg)
+        else:
+            print(f"WARNING: {pkg} {version}: {vuln} has no fix version yet; leaving it", flush=True)
+    return out
+
+
+def cve_upgrades() -> set[str]:
+    return packages_to_upgrade(parse_audit(run_pip_audit()))
+
+
+def post_check() -> int:
+    """Audit the new locks: non-zero if anything is still vulnerable."""
+    findings = parse_audit(run_pip_audit())
+    for pkg, version, vuln, fixes in findings:
+        print(f"STILL VULNERABLE: {pkg} {version}: {vuln} (fix {', '.join(fixes) or 'none yet'})", flush=True)
+    return 1 if findings else 0
+
+
+def build_compile_cmd(uv: str, output: str, extra: str | None, upgrade: bool, cutoff: str, now: str,
+                      cve: Collection[str] = ()) -> list[str]:
     cmd = [uv, "pip", "compile", "pyproject.toml", "--quiet", "--generate-hashes", *TARGET,
            "--exclude-newer", cutoff, "--custom-compile-command", COMMAND, "--output-file", output]
     if extra:
         cmd += ["--extra", extra, "--constraints", RUNTIME]
     if upgrade:
         cmd.append("--upgrade")
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for pkg in COOLDOWN_EXEMPT:
+    for pkg in (*COOLDOWN_EXEMPT, *sorted(set(cve) - set(COOLDOWN_EXEMPT))):
         cmd += ["--exclude-newer-package", f"{pkg}={now}", "--upgrade-package", pkg]
+    return cmd
+
+
+def compile_lock(uv: str, output: str, extra: str | None, upgrade: bool, cutoff: str,
+                 cve: Collection[str] = ()) -> None:
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cmd = build_compile_cmd(uv, output, extra, upgrade, cutoff, now, cve)
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, cwd=BACKEND, check=True)
 
@@ -68,10 +135,11 @@ def main(argv: list[str]) -> int:
         return 2
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=COOLDOWN_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     upgrade = "--upgrade" in argv
-    compile_lock(uv, RUNTIME, None, upgrade, cutoff)
+    cve = cve_upgrades()
+    compile_lock(uv, RUNTIME, None, upgrade, cutoff, cve)
     for output, extra in EXTRAS.items():
-        compile_lock(uv, output, extra, upgrade, cutoff)
-    return 0
+        compile_lock(uv, output, extra, upgrade, cutoff, cve)
+    return post_check()
 
 
 if __name__ == "__main__":
