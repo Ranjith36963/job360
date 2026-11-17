@@ -8135,6 +8135,11 @@ export interface components {
              */
             duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
              * Outcome
              * @default done
              * @enum {string}

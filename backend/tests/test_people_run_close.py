@@ -62,15 +62,33 @@ async def test_reach_is_refused_until_every_new_person_has_a_note(authenticated_
 async def test_one_tool_out_is_not_a_failed_people_run(authenticated_async_context):
     async with authenticated_async_context() as client:
         async with await _agent(client) as agent:
-            for reason in ("tool_unavailable", "paid_plan_needed", "sign_in_needed"):
+            for reason in ("tool_unavailable", "paid_plan_needed", "sign_in_needed", "no_work", "needs_user"):
                 body = {"duty": "network", "outcome": "failed", "reason": reason}
                 refused = await agent.post("/api/schedule/done", json=body)
                 assert refused.status_code == 409 and "not a failed people run" in refused.text, refused.text
-            partial = await agent.post("/api/schedule/done", json={"duty": "network", "outcome": "partial"})
+            said = "Sprouts: 0 at these domains; Clay: none; Vibe: no names; company pages 403."
+            partial = await agent.post("/api/schedule/done", json={"duty": "network", "outcome": "partial", "note": said})
             assert partial.status_code == 200, partial.text
             blocked = await agent.post("/api/schedule/done", json={
-                "duty": "network", "outcome": "failed", "reason": "network_blocked"})
+                "duty": "network", "outcome": "failed", "reason": "network_blocked", "note": said})
             assert blocked.status_code == 200, blocked.text
+
+
+@pytest.mark.asyncio
+async def test_stopping_short_names_what_each_free_lookup_returned(authenticated_async_context):
+    """2026-11-17 20:48 run: Sprouts loaded but never called, Clay and Vibe never loaded, nothing found."""
+    async with authenticated_async_context() as client:
+        app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
+        async with await _agent(client) as agent:
+            body = {"duty": "reach", "application_ids": [app_id], "outcome": "partial",
+                    "note": "Apollo people search not on plan; about pages 403; web search gave no proven names."}
+            refused = await agent.post("/api/schedule/done", json=body)
+            assert refused.status_code == 409, refused.text
+            assert "missing: sprouts, clay, vibe" in refused.json()["detail"]
+            body["note"] = "Sprouts: no one at the domain. Clay: none. Vibe: company matched, no names."
+            assert (await agent.post("/api/schedule/done", json=body)).status_code == 200
+            done = await agent.post("/api/schedule/done", json={"duty": "network"})
+            assert done.status_code == 200, done.text  # a run that reached 5 needs no report
 
 
 @pytest.mark.asyncio
