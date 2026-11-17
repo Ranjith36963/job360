@@ -16,6 +16,7 @@ It holds the loaded profile in memory for the request only and logs nothing.
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -34,6 +35,8 @@ class Memo:
     memory_q: dict[tuple[Optional[str], str], tuple[bool, Optional[str]]] = field(default_factory=dict)
     # blockers' one profile read of this request: (profile or None, overlay rows); None = it read none
     loaded: Optional[tuple[Any, list[dict[str, Any]]]] = None
+    # whose profile ``loaded`` is: a reader for another user never gets it (None = the scope names nobody)
+    user_id: Optional[str] = None
 
 
 MEMO: ContextVar[Optional[Memo]] = ContextVar("needs_you_derive_memo", default=None)
@@ -45,8 +48,8 @@ def current() -> Optional[Memo]:
 
 
 @contextmanager
-def scope() -> Iterator[Memo]:
-    memo = Memo()
+def scope(user_id: Optional[str] = None) -> Iterator[Memo]:
+    memo = Memo(user_id=user_id)
     token = MEMO.set(memo)
     try:
         yield memo
@@ -92,3 +95,31 @@ def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[s
     if pair not in memo.memory_q:
         memo.memory_q[pair] = real(key, question)
     return memo.memory_q[pair]
+
+
+async def profile_with_overlay_or_load(user_id: str) -> tuple[Any, list[dict[str, Any]]]:
+    """``(profile, overlay rows)`` exactly as ``storage.load_profile_with_overlay(user_id)`` returns them.
+
+    In a scope for THIS user the request's one read is reused (loaded now, off the loop, by the first reader
+    that needs it); anywhere else, or for another user, it is a plain read off the loop, as before. The profile
+    is the overlaid one (``load_profile``'s default), so every reader that took ``load_profile(user_id)`` can
+    take it from here unchanged."""
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
+
+    memo = current()
+    if memo is None or memo.user_id != user_id:
+        return await asyncio.to_thread(load_profile_with_overlay, user_id)
+    if memo.loaded is not None:
+        return memo.loaded
+    fresh: tuple[Any, list[dict[str, Any]]] = await asyncio.to_thread(load_profile_with_overlay, user_id)
+    memo.loaded = fresh
+    return fresh
+
+
+async def profile_or_load(user_id: str) -> Any:
+    """``storage.load_profile(user_id)`` (the overlaid profile, or None), shared like the one above."""
+    if current() is None:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - profile imports spine
+
+        return await asyncio.to_thread(load_profile, user_id)
+    return (await profile_with_overlay_or_load(user_id))[0]
