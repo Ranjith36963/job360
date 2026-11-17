@@ -2446,6 +2446,20 @@ def compute_answers(
     profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None,
     *, job_country_only: bool = False,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    """:func:`_compute_answers`, run once per profile / overlay / place within one Needs-you request
+    (:mod:`derive_memo`; callers must not mutate the result) and every time anywhere else."""
+    from src.services.applications import derive_memo  # noqa: PLC0415 - tiny; kept off the import path
+
+    answers: tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]] = derive_memo.answers_for(
+        profile, overlay, country, company_key, job_country_only,
+        lambda: _compute_answers(profile, overlay, country, company_key, job_country_only=job_country_only))
+    return answers
+
+
+def _compute_answers(
+    profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None,
+    *, job_country_only: bool = False,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The answer blocks (every item tagged with its source) and the ``missing``
     list for ``country`` (the JOB's country; ``None`` = unknown). Empty / null =
     absent, not an item (rule #29); ``False`` and ``0`` are real answers.

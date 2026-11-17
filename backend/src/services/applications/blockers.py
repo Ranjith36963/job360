@@ -36,6 +36,7 @@ from src.core import settings
 from src.services.applications import (
     asks,
     blocked,
+    derive_memo,
     kit,
     needs_you_count,
     own_browser,
@@ -362,6 +363,8 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
         from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
 
         loaded = await asyncio.to_thread(load_profile_with_overlay, user_id)
+        if (shared := derive_memo.current()) is not None:
+            shared.loaded = loaded  # the request's ONE profile read: answer_once reads the same objects
     lap("profile")
     flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
     lap("flags")
@@ -609,7 +612,8 @@ def _saved_fn(loaded: Optional[tuple[Any, list[dict[str, Any]]]], app: dict[str,
 
     def saved(row: dict[str, Any]) -> bool:
         if ready._approved_record(profile, str(row.get("question") or ""), company,
-                                  str(row.get("key") or "") or None, country) is not None:
+                                  str(row.get("key") or "") or None, country,
+                                  memo=derive_memo.approved_memo(profile)) is not None:
             return True
         if country not in memory:
             blocks, _missing = kit.compute_answers(profile, overlay, country, None)
