@@ -4351,7 +4351,8 @@ async def _record_event(
                 raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
             payload, review_where = await cv_review_service.verify(db, user, application_id, payload)
             review_warning = " ".join(w for w in (cv_review_service.weak_warning(payload, review_where),
-                                                  cv_review_service.missing_warning(payload)) if w) or None
+                                                  cv_review_service.missing_warning(payload),
+                                                  cv_review_service.no_codes_warning(payload)) if w) or None
         if body.event_type == email_codes_service.EVENT_TYPE:
             # Owner 2026-11-07: an emailed one-time code may be typed only with use_email_codes on and every rule
             # checked here (M5: the MCP record_event tool calls this route function). Never the code itself.
