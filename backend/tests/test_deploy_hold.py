@@ -5,6 +5,7 @@ random lock key.
 """
 import asyncio
 import random
+import time
 from unittest.mock import patch
 
 import pytest
@@ -23,6 +24,9 @@ def _own_key(monkeypatch):
     monkeypatch.setattr(deploy_hold, "_PROBE_TTL_S", 0.0)
     monkeypatch.setattr(deploy_hold, "_probe_cache", None)
     monkeypatch.setattr(deploy_hold, "_serving", False)
+    # The hold window counts from _BOOT_AT (module import). A CI shard reaches these tests 10-15 minutes after
+    # import, past DEPLOY_HOLD_MAX_SECONDS, so "within the window" must start now, not at import (#1635 CI, 2026-11-17).
+    monkeypatch.setattr(deploy_hold, "_BOOT_AT", time.monotonic())
 
 
 async def _deployz():
