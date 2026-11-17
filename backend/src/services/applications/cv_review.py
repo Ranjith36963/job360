@@ -217,8 +217,8 @@ _LABEL_CHARS = frozenset(" &/+-")
 _LABEL_JOINERS = frozenset({"&", "and", "/", "+"})
 
 
-def list_parts(line: str) -> Optional[tuple[list[str], list[str]]]:
-    """``(label words, items)`` of a list line, ``[Label:] item, item | item`` (2+ items of at most
+def list_parts(line: str, min_items: int = 2) -> Optional[tuple[list[str], list[str]]]:
+    """``(label words, items)`` of a list line, ``[Label:] item, item | item`` (``min_items`` of at most
     :data:`_ITEM_MAX_WORDS` words; a label of at most :data:`_LABEL_MAX_WORDS` words of letters), else ``None``.
     Split with ``cv_checks._split_items`` (a character scan, no regex on caller text)."""
     s = line.strip().lstrip(_BULLETS + " \t")
@@ -229,9 +229,17 @@ def list_parts(line: str) -> Optional[tuple[list[str], list[str]]]:
         return None
     words = label.replace("&", " & ").replace("/", " / ").split()
     items = cv_checks._split_items(body)
-    if len(words) > _LABEL_MAX_WORDS or len(items) < 2 or any(len(i.split()) > _ITEM_MAX_WORDS for i in items):
+    if len(words) > _LABEL_MAX_WORDS or len(items) < min_items or any(len(i.split()) > _ITEM_MAX_WORDS for i in items):
         return None
     return [w.casefold() for w in words], items
+
+
+def skills_parts(line: str) -> Optional[tuple[list[str], list[str]]]:
+    """:func:`list_parts` of a SKILLS line: also a LABELLED line of one item ("Skills: prompt engineering", apps 952
+    958 1016); a bare single item is no list. Only the hold rules read it: the profile's own group labels
+    (:func:`skill_book`) and every other list reader keep the 2+ item list."""
+    parts = list_parts(line, 1)
+    return parts if parts and (parts[0] or len(parts[1]) >= 2) else None
 
 
 # Closed and hard-coded: generic skill-category words a CV may label a skills line with. Never an employer, title,
@@ -326,7 +334,7 @@ def list_line_holds(line: str, book: SkillBook) -> bool:
     :data:`_NEVER_LABEL_WORDS`. A label made only of profile group words claims THOSE groups: its items must come
     from them ("Agents: Python, SQL" is weak when Python is not in "Agents & LLMs"). A label with a generic word no
     group uses ("Backend & Data") may take any profile item. One item the profile lacks keeps it a claim."""
-    parts = list_parts(line)
+    parts = skills_parts(line)
     if parts is None:
         return False
     label = _label_words(parts[0]) - {"and"}
