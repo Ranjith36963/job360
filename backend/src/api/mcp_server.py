@@ -1624,7 +1624,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         (reach also lists `application_ids`: find people for those only; network lists `max_people`);
         inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
         build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
-        those application_ids (at most 200 per call);
+        those application_ids (all in one call);
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop.
         With `duties` it CLAIMS each due duty for 30 minutes (without `duties` it only reads).
         `pc_idle` (own-browser tasks wait, no PC session worked them): tell the user its `text` once.

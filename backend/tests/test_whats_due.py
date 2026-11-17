@@ -78,7 +78,7 @@ def test_the_inbox_runs_on_a_schedule_only_in_auto_mode(mode, every, hours):
     answer = schedule.due_now(_facts(inbox_mode=mode, check_every=every), NOW)
     assert _duties(answer) == (["inbox"] if hours else [])
     if hours:
-        assert answer["due"][0]["recipe"] == "daily"
+        assert answer["due"][0]["recipe"] == "inbox"
 
 
 @pytest.mark.parametrize(
@@ -354,7 +354,7 @@ def test_run_now_reach_needs_ids_and_inbox_needs_auto_mode():
     assert reach["due"] == [{"duty": "reach", "recipe": "reach", "reason": "run_now", "application_ids": [4, 5]}]
     stamps = {"inbox": NOW - timedelta(hours=1)}
     inbox = schedule.due_now(_pressed(1, duty="inbox", inbox_mode="auto", stamps=stamps), NOW)
-    assert inbox["due"] == [{"duty": "inbox", "recipe": "daily", "reason": "run_now"}]
+    assert inbox["due"] == [{"duty": "inbox", "recipe": "inbox", "reason": "run_now"}]
     assert schedule.due_now(_pressed(1, duty="inbox", inbox_mode="ask"), NOW)["due"] == []
 
 

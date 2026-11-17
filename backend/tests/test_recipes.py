@@ -243,7 +243,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "write", "reach", "daily", "feedback", "prep", "debrief", "review", "own_browser", "cv", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "write", "reach", "daily", "feedback", "prep", "debrief", "review", "own_browser", "cv", "inbox", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")

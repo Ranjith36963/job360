@@ -13,7 +13,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    `declined` or empty: STOP, read no email, record nothing, do not ask. `ask`:
    ask in chat "Can I check your Gmail now?" and STOP unless they say yes.
    `auto` (or `scheduled`): go on. **A scheduled run** (the user's task woke you): call `whats_due` first and run only what
-   it lists (`inbox` = this recipe, `hunt`, `batch`); `nothing_due`: STOP. After each one, `mark_done` it.
+   it lists (`inbox` = `get_recipe("inbox")`, `hunt`, `batch`); `nothing_due`: STOP. After each one, `mark_done` it.
 0b. **Check the pause.** Read `settings`. If `settings.paused` is true, do ALL
    apply work as stopped: fill no forms, submit nothing, start no application
    (the inbox check goes on only if its mode allows it). `pause_reason` is the

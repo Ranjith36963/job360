@@ -6900,7 +6900,7 @@
           "recipe": {
             "enum": [
               "hunt",
-              "daily",
+              "inbox",
               "batch",
               "reach"
             ],

@@ -2585,6 +2585,12 @@ async def mark_inbox_checked(
         raise AssertionError("unreachable")  # pragma: no cover
     # The inbox duty is done (owner 2026-10-23): whats_due counts the next check from now.
     await schedule.mark(db, user.id, "inbox", datetime.now(timezone.utc))
+    # One line per cursor move (ids count and SQL statements only): shows a long list was split, not refused.
+    get_audit_logger().info(
+        "inbox_cursor_moved",
+        extra={"event": "inbox_cursor_moved", "user_id": safe_log_value(user.id),
+               "count": len(resp["application_ids"]), "statements": resp.get("statements", 1)},
+    )
     return resp
 
 
