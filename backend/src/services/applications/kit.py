@@ -1136,9 +1136,31 @@ async def _gate_cv_review(
     return cv_review.STRONG if application_id in cleared else cv_review.WEAK
 
 
+async def read_cv_reviews(db: JobDatabase, user_id: str, application_ids: list[int]) -> list[dict[str, Any]]:
+    """The user's ``cv_reviewed`` events for these applications, payload parsed, newest first (``id DESC``): the
+    ONE read :func:`reviews_clearing` and :func:`assistant_cv_turns` share through their ``rows=`` keyword (the
+    payloads are large; the menu badge read and parsed them twice per request). Each caller keeps only its own
+    applications' rows, in this order."""
+    if not application_ids:
+        return []
+    app_ids = sorted(set(application_ids))
+    cur = await db._db.execute(
+        "SELECT id, application_id, event_type, payload, recorded_at, recorded_by FROM application_events "  # noqa: S608
+        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({','.join('?' for _ in app_ids)}) "
+        "ORDER BY id DESC",
+        (user_id, cv_review.EVENT_TYPE, *app_ids),
+    )
+    rows = []
+    for r in await cur.fetchall():
+        ev = dict(r)
+        ev["payload"] = _json(ev.get("payload"))
+        rows.append(ev)
+    return rows
+
+
 async def reviews_clearing(
     db: JobDatabase, user_id: str, cvs: dict[int, dict[str, Any]], *, log: bool = False, auto_only: bool = True,
-    profile: Any = None,
+    profile: Any = None, rows: Optional[list[dict[str, Any]]] = None,
 ) -> dict[int, dict[str, Any]]:
     """THE rule for "a strong review clears this CV" (owner 2026-11-09), shared by the gate's receipt check
     (:func:`cv_cleared_by`), the ``approve_cv`` blocker, the Needs-you card and the batch's due rule. ``cvs`` is
@@ -1146,7 +1168,8 @@ async def reviews_clearing(
     cleared: ``cv_auto_approve`` on in auto mode, the newest stored review of exactly that CV (id + sha) is
     ``strong``, and the CV's save-time checks name no unsupported numbers or terms. Three queries at most,
     however many applications. ``log`` writes the per-application decision event (decision points only).
-    ``profile``: the caller's profile already read for this request (None = read it here)."""
+    ``profile``: the caller's profile already read for this request (None = read it here). ``rows``: the
+    :func:`read_cv_reviews` result the caller already read (None = read it here); only ``cvs``' applications count."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
@@ -1159,20 +1182,14 @@ async def reviews_clearing(
     # ``submit_mode`` (a granted run in confirm mode still shows the card, the safe side).
     if not cfg.cv_auto_approve or (auto_only and cfg.submit_mode != settings_rules.AUTO_SUBMIT_MODE):
         return {}
-    app_ids = sorted(cvs)
-    marks = ",".join("?" for _ in app_ids)
-    cur = await db._db.execute(
-        "SELECT id, application_id, event_type, payload, recorded_at, recorded_by FROM application_events "  # noqa: S608
-        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({marks}) ORDER BY id DESC",
-        (user_id, cv_review.EVENT_TYPE, *app_ids),
-    )
+    if rows is None:
+        rows = await read_cv_reviews(db, user_id, list(cvs))
     newest: dict[int, dict[str, Any]] = {}
-    for r in await cur.fetchall():
-        ev = dict(r)
-        ev["payload"] = _json(ev.get("payload"))
-        app_id, want = int(ev["application_id"]), cvs[int(ev["application_id"])]
-        p = ev["payload"]
-        if app_id not in newest and cv_review.review_valid(p, want["artifact_id"], want["sha"]):
+    for ev in rows:
+        app_id = int(ev["application_id"])
+        if app_id in cvs and app_id not in newest and cv_review.review_valid(
+            ev["payload"], cvs[app_id]["artifact_id"], cvs[app_id]["sha"]
+        ):
             newest[app_id] = ev
     strong = {a: ev for a, ev in newest.items() if ev["payload"].get("confidence") == cv_review.STRONG}
     if not strong:
@@ -1203,25 +1220,25 @@ async def reviews_clearing(
 REVIEW_CV, FIX_CV = "review_cv", "fix_cv"
 
 
-async def assistant_cv_turns(db: JobDatabase, user_id: str, cvs: dict[int, dict[str, Any]]) -> dict[int, str]:
+async def assistant_cv_turns(
+    db: JobDatabase, user_id: str, cvs: dict[int, dict[str, Any]], *, rows: Optional[list[dict[str, Any]]] = None,
+) -> dict[int, str]:
     """THE rule for "this unapproved CV is the assistant's turn, not the user's" (owner 2026-11-13), shared by the
     blockers, the Approve CV card and so the batch's waiting-on-you tally. ``cvs`` is ``{application_id:
     {artifact_id, sha}}``; returns ``{application_id: review_cv | fix_cv}``: :data:`REVIEW_CV` when exactly that
     CV has no valid stored review, :data:`FIX_CV` when its newest is weak and tries are left (counted as
     ``cv_review.tries_left_for_apps`` counts them). A strong review, or a weak one with no tries left, is absent:
-    it stays the user's. Never the submit gate: check_submit still needs the user's approval. One query."""
+    it stays the user's. Never the submit gate: check_submit still needs the user's approval. One query, or
+    none with ``rows`` (the :func:`read_cv_reviews` result the caller read; only ``cvs``' applications count)."""
     if not cvs:
         return {}
     app_ids = sorted(cvs)
-    cur = await db._db.execute(
-        "SELECT application_id, payload FROM application_events "  # noqa: S608 - placeholders only
-        f"WHERE user_id = ? AND event_type = ? AND application_id IN ({','.join('?' for _ in app_ids)}) "
-        "ORDER BY id DESC",
-        (user_id, cv_review.EVENT_TYPE, *app_ids),
-    )
+    if rows is None:
+        rows = await read_cv_reviews(db, user_id, app_ids)
     by_app: dict[int, list[dict[str, Any]]] = {}
-    for app_id, raw in await cur.fetchall():
-        by_app.setdefault(int(app_id), []).append({"payload": _json(raw)})
+    for ev in rows:
+        if int(ev["application_id"]) in cvs:
+            by_app.setdefault(int(ev["application_id"]), []).append({"payload": ev["payload"]})
     out: dict[int, str] = {}
     for a in app_ids:
         evs, want = by_app.get(a, []), cvs[a]
