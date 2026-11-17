@@ -365,14 +365,15 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     lap("profile")
     flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
     lap("flags")
-    reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded))
+    cv_rows = await kit.read_cv_reviews(db, user_id, list(unseen))  # ONE read, parsed once, for both rules
+    reviewed = await kit.reviews_clearing(db, user_id, unseen, profile=_or_empty(loaded), rows=cv_rows)
     if (cleared := CLEARED.get()) is not None:
         cleared.update(i for i in reviewed if i not in receipts and apps[i]["status"] == "considering")
     # Owner 2026-11-13: an unreviewed CV, or a weak one with tries left, is the assistant's to review / fix first.
     turns = await kit.assistant_cv_turns(db, user_id, {
         i: cv for i, cv in unseen.items()
         if i not in reviewed and i not in receipts and apps[i]["status"] == "considering"
-    })
+    }, rows=cv_rows)
     lap("reviews")
     # F5: the user's own rule drops it (below the line, below_line skip), read the way open_queue reads it.
     dropped = _dropped(below, apps, line, _or_empty(loaded))
