@@ -60,6 +60,48 @@ def role_core(title: str, location: str = "") -> str:
     return " ".join(core.casefold().split())
 
 
+def role_words(title: str, location: str = "") -> str:
+    """``role_core`` with every non-letter/digit read as a space: "Graduate AI Engineer- PE Firm-CTO Office"
+    and "Graduate AI Engineer - PE Firm - CTO Office" give the same words (prod 2026-11-17). A character
+    scan, no regex on caller text. A comparison key only."""
+    core = role_core(title, location)
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in core).split())
+
+
+async def open_same_role(
+    db: JobDatabase, user_id: str, *, title: str, location: str = "", exclude_application_id: int
+) -> list[int]:
+    """Ids of THIS user's OPEN applications (not ``exclude_application_id``) whose ``role_words`` equal
+    this title's, whatever company label they carry, when the role has at least
+    ``POSSIBLE_DUPLICATE_MIN_WORDS`` words (a short title like "AI Engineer" says nothing). At most
+    ``POSSIBLE_DUPLICATE_MAX_IDS``, oldest first. Scoped by user (rules 12/25). Never raises: a failure
+    is logged and returns []; a bring must never fail on it.
+
+    Why: open_duplicate_of matches the whole company key, and an agent that writes the agency's client
+    into the label ("Robert Walters (PE firm client)") slips past it - prod 2026-11-17, the same role
+    brought four times."""
+    try:
+        want = role_words(title, location)
+        if len(want.split()) < settings.POSSIBLE_DUPLICATE_MIN_WORDS:
+            return []
+        cur = await db._db.execute(
+            "SELECT id, status, job_title, job_location FROM applications WHERE user_id = ? AND id <> ? ORDER BY id",
+            (user_id, exclude_application_id),
+        )
+        found: list[int] = []
+        for r in await cur.fetchall():
+            if str(r["status"]) in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
+                continue
+            if role_words(str(r["job_title"] or ""), str(r["job_location"] or "")) == want:
+                found.append(int(r["id"]))
+                if len(found) >= settings.POSSIBLE_DUPLICATE_MAX_IDS:
+                    break
+        return found
+    except Exception:  # noqa: BLE001 - a bring must never fail on an advisory check
+        log.warning("same_role_check_failed", extra={"user_id": safe_log_value(user_id)}, exc_info=True)
+        return []
+
+
 async def open_duplicate_of(
     db: JobDatabase, user_id: str, *, company: str, title: str, location: str = ""
 ) -> Optional[int]:
