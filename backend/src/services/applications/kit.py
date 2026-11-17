@@ -3997,7 +3997,8 @@ async def check_form(
         # Memory filled with no confirmation (owner 2026-11-17, "use memory for right to work").
         log.info("form_check_memory_cleared", extra={
             "event": "form_check_memory_cleared", "user_id": safe_log_value(user.id),
-            "application_id": application_id, "keys": cleared, "country": country, "reason": "users_own_memory",
+            "application_id": application_id, "keys": [safe_log_value(k, max_len=120) for k in cleared],
+            "country": safe_log_value(country or ""), "reason": "users_own_memory",
         })
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
