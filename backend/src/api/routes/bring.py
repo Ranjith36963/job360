@@ -379,6 +379,66 @@ class BringJobResponse(BaseModel):
     matched_on: Optional[Literal["same_title_and_company", "same_url", "same_company_and_role", "repost"]] = None
     differs: list[str] = Field(default_factory=list)
     next: Optional[str] = None
+    # Hunt recipe v24 (owner 2026-11-17), agent brings only: things to fix that do not block the bring,
+    # each {"code", "reason", "next"} plus its facts. Closed codes BRING_WARNING_CODES:
+    # ``possible_duplicate`` (+ ``application_ids``: OPEN applications with the same role words under
+    # another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+BRING_WARNING_CODES = ("possible_duplicate", "board_link")
+_DUPLICATE_NEXT = (
+    "compare place and ad text with get_application for each id; the same role = keep the older one and "
+    "close this one (record_event unqueued {reason: \"duplicate\"} if it is queued, else withdrawn "
+    "\"duplicate of an earlier application\"); a different role = keep both."
+)
+_BOARD_NEXT = (
+    "search the employer's own careers page for this role; the same job there = update_job(application_id, "
+    "apply_url=<that page>); none = keep this link."
+)
+
+
+async def _bring_warnings(
+    db: JobDatabase, user_id: str, body: BringJobRequest, application_id: int, *, new_application: bool,
+) -> list[dict[str, Any]]:
+    """The agent-bring reply warnings (BRING_WARNING_CODES), each logged with ids and reason codes only."""
+    from src.services.applications import reposts as reposts_service  # noqa: PLC0415
+    from src.services.applications.job_checks import apply_host, classify_host  # noqa: PLC0415
+
+    out: list[dict[str, Any]] = []
+    if new_application:
+        same = await reposts_service.open_same_role(
+            db, user_id, title=body.title, location=body.location, exclude_application_id=application_id,
+        )
+        if same:
+            out.append({
+                "code": "possible_duplicate", "application_ids": same,
+                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role under "
+                          "another company label: possibly the same job (an agency and its client, or a renamed "
+                          "employer).",
+                "next": _DUPLICATE_NEXT,
+            })
+            get_audit_logger().info(
+                "job_bring_possible_duplicate",
+                extra={
+                    "event": "job_bring_possible_duplicate", "user_id": user_id, "application_id": application_id,
+                    "matched_ids": same, "reason": "same_role_words", "status": "warned",
+                },
+            )
+    host = apply_host(body.apply_url)
+    if host and classify_host(host) == "job_board":
+        out.append({
+            "code": "board_link", "host": host,
+            "reason": f"{host} is a job board, not the employer's own page.", "next": _BOARD_NEXT,
+        })
+        get_audit_logger().info(
+            "job_bring_board_link",
+            extra={
+                "event": "job_bring_board_link", "user_id": user_id, "application_id": application_id,
+                "host": host, "reason": "board_link", "status": "warned",
+            },
+        )
+    return out
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -767,7 +827,12 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
             await duty_trigger.ignite(
                 user.id, ("reach", "batch"), "job_queued", [int(birth["application_id"])], db=db
             )
+    warnings = (
+        await _bring_warnings(db, user.id, body, birth["application_id"], new_application=not birth["existing"])
+        if actor_for(user) != "web" else []
+    )
     return BringJobResponse(
+        warnings=warnings,
         queued=queued,
         queue_note=queue_note,
         # THIS caller's snapshot, never the shared row (P0 2026-10-14).

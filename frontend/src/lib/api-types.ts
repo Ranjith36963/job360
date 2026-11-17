@@ -5402,6 +5402,10 @@ export interface components {
             } | null;
             /** Status */
             status: string;
+            /** Warnings */
+            warnings?: {
+                [key: string]: unknown;
+            }[];
         };
         /** BrowserActionRequest */
         BrowserActionRequest: {
