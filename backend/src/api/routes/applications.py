@@ -2585,6 +2585,12 @@ async def mark_inbox_checked(
         raise AssertionError("unreachable")  # pragma: no cover
     # The inbox duty is done (owner 2026-10-23): whats_due counts the next check from now.
     await schedule.mark(db, user.id, "inbox", datetime.now(timezone.utc))
+    # One line per cursor move (ids count and SQL statements only): shows a long list was split, not refused.
+    get_audit_logger().info(
+        "inbox_cursor_moved",
+        extra={"event": "inbox_cursor_moved", "user_id": safe_log_value(user.id),
+               "count": len(resp["application_ids"]), "statements": resp.get("statements", 1)},
+    )
     return resp
 
 
@@ -4310,6 +4316,7 @@ async def _record_event(
         payload = spine.validate_auto_email_payload(body.event_type, payload)
         payload = interview_payloads.validate(body.event_type, payload)
         # Owner 2026-11-03: which browser did it - checked here, so every event validator below never sees it.
+        browser_named = isinstance(payload, dict) and which_browser.KEY in payload
         payload, browser = which_browser.split(user.id, application_id, body.event_type, payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
@@ -4374,10 +4381,18 @@ async def _record_event(
                 raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
             stored = blocked_service.check_payload(user, body.event_type, payload, detail)
             stored = which_browser.stamp(stored, browser)
-            return await blocked_service.record(
+            recorded = await blocked_service.record(
                 db, user, application_id, body.event_type, stored,
                 occurred_at=occurred_at, follow_up_on=follow_up_on_arg,
             )
+            if body.event_type == "blocked" and not browser_named and actor_for(user) != "web":
+                get_audit_logger().info("blocked_no_browser", extra={
+                    "event": "blocked_no_browser", "user_id": safe_log_value(user.id),
+                    "application_id": application_id, "reason": safe_log_value(str(stored.get("reason") or "")),
+                    "stored_browser": browser or which_browser.UNKNOWN,
+                })
+                recorded = {**recorded, "warnings": [*recorded.get("warnings", []), which_browser.BLOCKED_NO_BROWSER]}
+            return recorded
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to

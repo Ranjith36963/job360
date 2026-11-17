@@ -113,9 +113,9 @@ async def test_bad_input_is_refused_and_writes_nothing(authenticated_async_conte
         assert (await _mark(client, [a], future)).status_code == 422
         assert (await _mark(client, [a], "yesterday")).status_code == 422
         assert (await _mark(client, [a], "2026-10-15T10:00:00")).status_code == 422  # no timezone
-        monkeypatch.setattr(settings, "INBOX_CHECK_MAX_APPLICATIONS", 1)
-        too_many = await _mark(client, [a, a + 1])
-        assert too_many.status_code == 422 and "INBOX_CHECK_MAX_APPLICATIONS" in too_many.text
+        monkeypatch.setattr(settings, "INBOX_CHECK_MAX_APPLICATIONS", 1)  # one id per SQL statement
+        split = await _mark(client, [a, a + 987654321])  # a foreign id in a later statement still writes nothing
+        assert split.status_code == 404
         assert (await _row(client, a))["inbox_checked_at"] is None
         # inside the clock-skew allowance: accepted but held at now, never ahead of it
         soon = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()

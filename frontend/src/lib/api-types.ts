@@ -6695,7 +6695,7 @@ export interface components {
              * Recipe
              * @enum {string}
              */
-            recipe: "hunt" | "daily" | "batch" | "reach";
+            recipe: "hunt" | "inbox" | "batch" | "reach";
             search?: components["schemas"]["InboxSearchOut"] | null;
         };
         /** DuplicateOut */
@@ -8159,6 +8159,13 @@ export interface components {
             failures_in_row: number;
             /** Last Tick At */
             last_tick_at: string;
+            /** Next Batch */
+            next_batch?: number[];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
             /**
              * Outcome
              * @default done

@@ -50,31 +50,38 @@ async def mark_checked(
     db: JobDatabase, user_id: str, application_ids: list[int], checked_at: Optional[str] = None
 ) -> dict[str, Any]:
     """Set ``inbox_checked_at`` on each of THIS user's applications. All or nothing: an id
-    that is not the caller's is a 404 and nothing is written (never a partial cursor)."""
+    that is not the caller's is a 404 and nothing is written (never a partial cursor).
+
+    Any number of ids (2026-11-17): Gmail runs passed every open application (390+) in one call and
+    a 200-id cap refused it every hour (422) until the model split the list itself. Job360 now does the
+    splitting: ``INBOX_CHECK_MAX_APPLICATIONS`` is the ids per SQL statement, one commit for all."""
     ids = sorted({int(i) for i in application_ids})
     if not ids:
         raise SpineError(422, "application_ids must name at least one application")
-    cap = settings.INBOX_CHECK_MAX_APPLICATIONS
-    if len(ids) > cap:
-        raise SpineError(422, f"at most {cap} application_ids per call (INBOX_CHECK_MAX_APPLICATIONS)")
+    step = max(1, settings.INBOX_CHECK_MAX_APPLICATIONS)
+    chunks = [ids[i: i + step] for i in range(0, len(ids), step)]
     when = _checked_at(checked_at)
-    marks = ",".join("?" for _ in ids)
-    cur = await db._db.execute(
-        f"SELECT id FROM applications WHERE user_id = ? AND id IN ({marks})",  # noqa: S608 - placeholders only
-        [user_id, *ids],
-    )
-    owned = {int(r[0]) for r in await cur.fetchall()}
+    owned: set[int] = set()
+    for part in chunks:
+        marks = ",".join("?" for _ in part)
+        cur = await db._db.execute(
+            f"SELECT id FROM applications WHERE user_id = ? AND id IN ({marks})",  # noqa: S608 - placeholders only
+            [user_id, *part],
+        )
+        owned |= {int(r[0]) for r in await cur.fetchall()}
     missing = [i for i in ids if i not in owned]
     if missing:
         raise SpineError(404, f"application not found: {missing}")
     # The cursor only moves forward: an older checked_at never rewinds a newer one.
-    await db._db.execute(
-        f"UPDATE applications SET inbox_checked_at = ? WHERE user_id = ? AND id IN ({marks}) "  # noqa: S608
-        "AND (inbox_checked_at IS NULL OR inbox_checked_at < ?)",
-        [when, user_id, *ids, when],
-    )
+    for part in chunks:
+        marks = ",".join("?" for _ in part)
+        await db._db.execute(
+            f"UPDATE applications SET inbox_checked_at = ? WHERE user_id = ? AND id IN ({marks}) "  # noqa: S608
+            "AND (inbox_checked_at IS NULL OR inbox_checked_at < ?)",
+            [when, user_id, *part, when],
+        )
     await db._db.commit()
-    return {"application_ids": ids, "inbox_checked_at": when}
+    return {"application_ids": ids, "inbox_checked_at": when, "statements": len(chunks)}
 
 
 async def search_plan(db: JobDatabase, user_id: str) -> dict[str, Any]:
