@@ -211,6 +211,21 @@ async def test_paging_uses_a_cursor_and_limit_bounds(authenticated_async_context
 
 
 @pytest.mark.asyncio
+async def test_next_tells_the_run_to_keep_going_while_items_remain(authenticated_async_context, fixture_user_id):
+    """2026-11-17: two real runs stopped after one batch with ~219 items left; the reply now says to go on."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        made = [await _job(client, f"n{i}", cv=CV + "\n" * i) for i in range(3)]
+        page1 = await _cv_work(client, limit=2, include_profile=False)
+        assert page1["next_after"] == made[1]
+        assert page1["next"] == (
+            f"Keep going: fetch the next page with after={made[1]} (include_profile=false). "
+            "The run ends only when 10 new CVs are written this run or no items are left.")
+        page2 = await _cv_work(client, limit=2, after=page1["next_after"], include_profile=False)
+        assert page2["next_after"] is None and page2["next"] is None
+
+
+@pytest.mark.asyncio
 async def test_a_cursor_survives_rows_turning_strong_between_pages(authenticated_async_context, fixture_user_id):
     """D1: with an offset, rows 1-2 turning strong made offset=2 skip rows 3-4."""
     async with authenticated_async_context() as client:

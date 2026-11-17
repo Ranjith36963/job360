@@ -138,9 +138,13 @@ async def cv_work(
             # rebuilds it from lines. Unreviewed CVs carry none (the reviewer reads review.lines): tokens per run.
             "cv_text": texts.get(app_id) if (view.get("review") or {}).get("state") == "weak" else None,
         })
+    next_after = page[-1] if page and start + limit < len(ids) else None
     out: dict[str, Any] = {
-        "items": items, "total_needing_work": len(ids),
-        "next_after": page[-1] if page and start + limit < len(ids) else None,
+        "items": items, "total_needing_work": len(ids), "next_after": next_after,
+        # 2026-11-17: two runs stopped after one batch with ~219 left; the reply itself says to go on.
+        "next": None if next_after is None else (
+            f"Keep going: fetch the next page with after={next_after} (include_profile=false). "
+            "The run ends only when 10 new CVs are written this run or no items are left."),
     }
     if include_profile:
         out["profile"] = compact_profile(user_id)
@@ -148,5 +152,5 @@ async def cv_work(
         "cv_work", extra={"event": "cv_work", "user_id": safe_log_value(user_id), "queued": len(queue_order),
                           "needing": len(ids), "returned": len(items), "after": safe_log_value(after), "result": "ok",
                           "with_cv_text": sum(1 for i in items if i["cv_text"] is not None),
-                          "with_jd_terms": with_terms})
+                          "with_jd_terms": with_terms, "more": next_after is not None})
     return out

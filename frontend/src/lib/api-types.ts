@@ -6343,6 +6343,8 @@ export interface components {
         CvWorkOut: {
             /** Items */
             items: components["schemas"]["CvWorkItemOut"][];
+            /** Next */
+            next?: string | null;
             /** Next After */
             next_after?: number | null;
             /** Profile */
