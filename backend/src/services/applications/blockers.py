@@ -24,7 +24,6 @@ an open ask; an open job with a CV, no fill and not queued is the ASSISTANT's ("
 """
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import json
 import time
@@ -360,11 +359,7 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
     if fills or unseen or below or open_form or any(
         k["kind"] in asks.QUESTION_FAMILY for ks in open_asks.values() for k in ks
     ):
-        from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415 - profile imports spine
-
-        loaded = await asyncio.to_thread(load_profile_with_overlay, user_id)
-        if (shared := derive_memo.current()) is not None:
-            shared.loaded = loaded  # the request's ONE profile read: answer_once reads the same objects
+        loaded = await derive_memo.profile_with_overlay_or_load(user_id)  # the request's ONE profile read
     lap("profile")
     flags = await ready.answer_flags_for(db, user_id, fills, loaded=loaded)
     lap("flags")
@@ -559,9 +554,7 @@ async def _batch_places(
     """Each queued job's place in the batch, 1-based: read off ``spine.open_queue`` itself, the batch the
     assistant works, so a job the user's own rule drops (or one no longer considered) holds no place."""
     if loaded is None:
-        from src.services.profile.storage import load_profile  # noqa: PLC0415 - profile imports spine
-
-        profile = await asyncio.to_thread(load_profile, user_id)
+        profile = await derive_memo.profile_or_load(user_id)
     else:
         profile = _or_empty(loaded)
     order, _ = await spine.open_queue(db, user_id, profile)
@@ -666,9 +659,8 @@ async def _auto_states(db: JobDatabase, user_id: str, contact_ids: list[int]) ->
     One query for all of them (the batch must not grow its query count with the people)."""
     from src.services.profile import assistant_settings as rules  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile  # noqa: PLC0415
 
-    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    cfg = rules.effective((await derive_memo.profile_or_load(user_id) or UserProfile()).assistant_settings)
     if cfg.outreach_send != rules.OUTREACH_SEND_AUTO or not contact_ids:
         return {}
     cur = await db._db.execute(

@@ -3458,11 +3458,9 @@ async def _current_assistant_notes(user_id: str) -> list[str]:
 async def user_score_line(user_id: str) -> Optional[int]:
     """The user's OWN score line (``assistant_settings.apply_min_score``) as the
     profile reads it now, or ``None`` when they have not set one (no default)."""
-    import asyncio  # noqa: PLC0415 — stdlib, only this reader needs it
+    from src.services.applications import derive_memo  # noqa: PLC0415 - tiny; the badge shares one profile read
 
-    from src.services.profile.storage import load_profile  # noqa: PLC0415 — profile ↔ spine import cycle
-
-    profile = await asyncio.to_thread(load_profile, user_id)
+    profile = await derive_memo.profile_or_load(user_id)
     if profile is None or profile.assistant_settings.apply_min_score is None:
         return None
     return int(profile.assistant_settings.apply_min_score)

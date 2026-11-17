@@ -69,11 +69,15 @@ async def test_morning_check_settings_read_is_off_the_loop(authenticated_async_c
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("module", "name"), [("setting_requests", "list_waiting"), ("ask_once", "open_questions")])
+# ask_once-questionnaire (was open_questions): #1623/this PR - the badge reuses the request's profile instead of calling open_questions.
+# storage-load_profile_with_overlay: the request's one profile read (derive_memo) itself, not only the build above.
+@pytest.mark.parametrize(("module", "name"), [
+    ("setting_requests", "list_waiting"), ("ask_once", "questionnaire"), ("storage", "load_profile_with_overlay"),
+])
 async def test_needs_you_count_reads_are_off_the_loop(authenticated_async_context, monkeypatch, module, name):
-    from src.services.profile import ask_once, setting_requests
+    from src.services.profile import ask_once, setting_requests, storage
 
-    owner = {"setting_requests": setting_requests, "ask_once": ask_once}[module]
+    owner = {"setting_requests": setting_requests, "ask_once": ask_once, "storage": storage}[module]
     seen: list[int] = []
     monkeypatch.setattr(owner, name, _recorded(getattr(owner, name), seen))
     async with authenticated_async_context() as client:

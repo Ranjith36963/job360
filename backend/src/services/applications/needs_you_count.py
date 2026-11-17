@@ -272,21 +272,19 @@ async def needs_you_count(
 
     The whole request shares one :mod:`derive_memo` scope: the profile's answers are read once per country, never
     once per row, fill and step (2026-11-17: 1.1-1.3 s on a large account). Nothing outlives the request."""
-    with derive_memo.scope():
+    with derive_memo.scope(user_id):
         return await _needs_you_count(db, user_id, timings)
 
 
-def _open_questions(user_id: str, countries: list[str]) -> int:
-    """``ask_once.open_questions``, over the profile the blockers step already read for this request when it
-    read one (the same objects, so the kit's answers are shared); else it reads its own, as before."""
-    memo = derive_memo.current()
-    if memo is None or memo.loaded is None:
-        return ask_once.open_questions(user_id, countries)
+async def _open_questions(user_id: str, countries: list[str]) -> int:
+    """``ask_once.open_questions``, over the request's one profile read (the same objects, so the kit's answers
+    are shared); the first reader of the request loads it."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
 
-    loaded, overlay = memo.loaded
     try:
-        return sum(len(c["questions"]) for c in ask_once.questionnaire(loaded or UserProfile(), overlay, countries))
+        loaded, overlay = await derive_memo.profile_with_overlay_or_load(user_id)
+        groups = await asyncio.to_thread(ask_once.questionnaire, loaded or UserProfile(), overlay, countries)
+        return sum(len(c["questions"]) for c in groups)
     except Exception:  # noqa: BLE001 - the count must answer; the card's own read shows the error
         logger.exception("needs_you_count.open_questions failed")
         return 0
@@ -334,7 +332,7 @@ async def _needs_you_count(
     mark("inbox")
     other = general + len(other_ask_ids) + waiting_settings + len(suggestions) + open_mail + connections
     # Answer once (owner 2026-11-02): the questionnaire is ONE card, counted once while any row waits.
-    answer_once = await asyncio.to_thread(_open_questions, user_id, await spine.queued_countries(db, user_id))
+    answer_once = await _open_questions(user_id, await spine.queued_countries(db, user_id))
     mark("answer_once")
     # Owner #12: one line for the jobs on the user's PC when no session in their own browser worked the queue.
     from src.services.applications import own_browser  # noqa: PLC0415 - own_browser -> contacts -> this package

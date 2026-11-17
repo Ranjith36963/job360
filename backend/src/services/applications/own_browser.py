@@ -438,13 +438,13 @@ def idle_fact(last: Optional[datetime], waiting: int, now: datetime) -> Optional
 
 async def pc_idle(db: JobDatabase, user_id: str, now: datetime, waiting: int) -> Optional[dict[str, Any]]:
     """:func:`idle_fact` for this user; ``None`` while paused (nothing is meant to run) or nothing waits."""
+    from src.services.applications import derive_memo  # noqa: PLC0415
     from src.services.profile import assistant_settings as rules  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     if waiting <= 0:
         return None
-    cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    cfg = rules.effective((await derive_memo.profile_or_load(user_id) or UserProfile()).assistant_settings)
     if rules.is_paused(cfg.paused_until, now):
         return None
     return idle_fact(await last_pc_activity_at(db, user_id), waiting, now)

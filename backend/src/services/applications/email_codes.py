@@ -182,11 +182,9 @@ def codes_on(profile: Any) -> bool:
 async def codes_are_assistants(user_id: str) -> bool:
     """True when this user's setting makes a code box the assistant's. Read live every time (turning it off
     hands the code back at once), never baked into a stored block."""
-    import asyncio  # noqa: PLC0415
+    from src.services.applications import derive_memo  # noqa: PLC0415
 
-    from src.services.profile.storage import load_profile  # noqa: PLC0415 - profile <-> spine cycle
-
-    return codes_on(await asyncio.to_thread(load_profile, user_id))
+    return codes_on(await derive_memo.profile_or_load(user_id))
 
 
 async def refused_tries(db: JobDatabase, user_id: str, application_id: int) -> int:
