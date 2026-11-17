@@ -156,6 +156,10 @@ async def _due(client: AsyncClient) -> dict[str, Any]:
     return resp.json()
 
 
+_SKIP = {"skipped": "not used in this test run"}
+_HUNT_REPORT = {"sources": {"mail": _SKIP, "kit": _SKIP, "connectors": _SKIP, "web": _SKIP, "browser": _SKIP}}
+
+
 def _row_count() -> int:
     from src.repositories import pgsync
 
@@ -246,7 +250,8 @@ async def test_a_token_sees_and_marks_only_its_own_user(authenticated_async_cont
             transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
         ) as agent:
             assert [d["duty"] for d in (await _due(agent))["due"]] == ["hunt"]
-            assert (await agent.post("/api/schedule/done", json={"duty": "hunt"})).status_code == 200
+            # 2026-11-17: an assistant's hunt mark carries its report (tests/test_hunt_enforce.py).
+            assert (await agent.post("/api/schedule/done", json={"duty": "hunt", "report": _HUNT_REPORT})).status_code == 200
         assert (await _due(client))["nothing_due"] is True
     from src.repositories import pgsync
 
@@ -292,7 +297,7 @@ async def test_the_mcp_tools_answer_through_the_same_routes(authenticated_async_
             await _patch(client, HUNT, 12)
             due = await tools.get_tool("whats_due").fn()
             assert [d["duty"] for d in due["due"]] == ["hunt"]
-            marked = await tools.get_tool("mark_done").fn(duty="hunt")
+            marked = await tools.get_tool("mark_done").fn(duty="hunt", report=_HUNT_REPORT)
             assert marked["duty"] == "hunt"
             assert (await tools.get_tool("whats_due").fn())["nothing_due"] is True
             with pytest.raises(Exception):  # noqa: B017 - a closed set: anything else is refused
