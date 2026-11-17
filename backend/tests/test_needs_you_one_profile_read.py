@@ -26,14 +26,24 @@ _AD = {"title": "Data Engineer", "company": "Northwind", "location": "London", "
 
 
 class _Connects:
-    """Every new sync Postgres connection (``pgsync.connect`` -> ``psycopg.connect``), with its thread."""
+    """Every new sync Postgres connection (``pgsync.connect`` -> ``psycopg.connect``) the REQUEST opens, with its
+    thread. The audit trail's listener thread (``utils/audit_trail``) is not the request: it writes the audit rows
+    the seeding queued, one connection each, whenever it gets to them, and only in a worker where an earlier test
+    installed it (#1628 CI: 3 of 5 connections were its writes). Its queue is drained first and its thread left out."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.utils import audit_trail
+
+        audit_trail.flush()
+        listener = audit_trail._listener
+        listener_thread = getattr(listener, "_thread", None) if listener is not None else None
+        audit_ident = listener_thread.ident if listener_thread is not None else None
         self.threads: list[int] = []
         real = psycopg.connect
 
         def counting(*args: Any, **kwargs: Any) -> Any:
-            self.threads.append(threading.get_ident())
+            if threading.get_ident() != audit_ident:
+                self.threads.append(threading.get_ident())
             return real(*args, **kwargs)
 
         monkeypatch.setattr(psycopg, "connect", counting)
