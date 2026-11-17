@@ -133,10 +133,16 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
     n = 0
     first = True
     names = cv_review._name_words(profile)
+    places, links = cv_review.place_words(profile), cv_review.own_links(profile)
     for line in (ln.strip() for ln in str(cv_text or "").splitlines()):
         if not line or n >= len(content):
             continue
         is_content = line == content[n]
+        if not is_content and cv_review.is_contact_line(line, places, links):
+            # the raw CV text keeps this very line as a header-shaped line a record holds (apps 952 958 1016): a
+            # contact line is no job header and no section, it never ends the top
+            first = False
+            continue
         name_line, first = first and not is_content and _is_name(line, names), False
         if name_line:  # the name in capitals reads as a heading, yet it is no section: it must not end the top
             continue

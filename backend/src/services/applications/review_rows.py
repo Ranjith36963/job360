@@ -165,7 +165,7 @@ def held_numbers(text: str, profile: Any) -> list[int]:
 def _list_in_record(body: str, record: Optional[tuple[str, str]]) -> bool:
     """A skills list under a job / project header is held only when that record's own text names every item (B5):
     "LangGraph, MCP" under Tidewater is a claim about Tidewater. Free sections (``None``) hold by the profile."""
-    parts = cv_review.list_parts(body)
+    parts = cv_review.skills_parts(body)
     return record is None or parts is None or all(
         f" {' '.join(evidence._words(i))} " in record[1] for i in parts[1])
 
