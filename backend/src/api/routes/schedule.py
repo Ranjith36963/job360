@@ -396,7 +396,8 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
     unknown = sorted(k for k in report.sources if k not in HUNT_SOURCES)
     if unknown:
         codes.append("source_unknown")
-        problems.append(f"unknown sources {', '.join(unknown)}: count them under one of {', '.join(HUNT_SOURCES)}")
+        # Never echo the caller's key text (the 422 detail is logged): a count and the closed set only.
+        problems.append(f"{len(unknown)} unknown source keys: count them under one of {', '.join(HUNT_SOURCES)}")
     states = {k: _source_state(v) for k, v in report.sources.items() if k in HUNT_SOURCES}
     unclear = [k for k in HUNT_SOURCES if k in states and states[k] is None]
     if unclear:

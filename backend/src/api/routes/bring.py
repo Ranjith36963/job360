@@ -449,6 +449,16 @@ async def _bring_warnings(
 BOARD_SEARCH_ORIGINS = ("ai_hunt", "your_mail")
 
 
+def _board_name(host: str) -> str:
+    """The closed board name a board host matched (a JOB_BOARD_HOSTS / JOB_BOARD_FAMILIES entry): the value
+    logged, never the caller's host text (log injection)."""
+    labels = host.split(".")
+    for apex in settings.JOB_BOARD_HOSTS:
+        if host == apex or host.endswith("." + apex):
+            return apex
+    return next((f for f in settings.JOB_BOARD_FAMILIES if f in labels), "other")
+
+
 def _refuse_unsearched_board_link(body: BringJobRequest, user_id: str) -> None:
     from src.services.applications.job_checks import apply_host, classify_host  # noqa: PLC0415
 
@@ -459,13 +469,14 @@ def _refuse_unsearched_board_link(body: BringJobRequest, user_id: str) -> None:
         return
     get_audit_logger().info(
         "job_bring_board_refused",
-        extra={"event": "job_bring_board_refused", "user_id": user_id, "host": host,
+        extra={"event": "job_bring_board_refused", "user_id": user_id, "board": _board_name(host),
                "reason": "employer_search_missing", "status": "refused"},
     )
     raise HTTPException(
         status_code=422,
         detail=(
-            f"{host} is a job board: search the employer's own careers page for this role and bring that link; "
+            f"This apply link is on a job board ({_board_name(host)}): search the employer's own careers page "
+            "for this role and bring that link; "
             'if none, resend with employer_search "not_found". Nothing was recorded.'
         ),
     )

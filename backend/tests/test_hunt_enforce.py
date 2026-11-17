@@ -153,7 +153,8 @@ async def test_an_agent_board_link_without_employer_search_is_refused(authentica
         assert "employer's own careers page" in resp.json()["detail"]
         assert 'employer_search "not_found"' in resp.json()["detail"]
     refused = [r for r in caplog.records if r.getMessage() == "job_bring_board_refused"]
-    assert [r.host for r in refused] == ["www.shine.com", "www.adzuna.co.uk"]
+    assert [r.board for r in refused] == ["shine.com", "adzuna"], "a closed board name, never the caller's host"
+    assert not any(hasattr(r, "host") for r in refused)
     assert {r.reason for r in refused} == {"employer_search_missing"}
 
 
