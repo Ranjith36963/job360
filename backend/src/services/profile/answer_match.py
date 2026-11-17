@@ -89,17 +89,98 @@ def _pick(cands: list[dict[str, Any]]) -> tuple[Optional[dict[str, Any]], Option
     return (cands[0] if cands else None), None
 
 
+def _is_usable(rec: Any, company_key: Optional[str], country: Optional[str]) -> bool:
+    """An approved record this lookup may read at all (the one filter every lookup shares)."""
+    return (
+        isinstance(rec, dict) and rec.get("approved") is True and _in_scope(rec, company_key)
+        and fits_country(rec, country)
+        and not str(rec.get("topic") or "").casefold().startswith(NEVER_REUSED_TOPIC_PREFIXES)
+    )
+
+
+_Entry = tuple[dict[str, Any], str, bool, bool]  # (record, topic_key, company-scoped, bound to a country)
+
+
+def _level(entries: list[_Entry]) -> list[dict[str, Any]]:
+    """:func:`_candidates`' precedence over one stage's matches: the company's own (scoped) records before
+    the unscoped, and within a level the country-bound ones first."""
+    for scoped in (True, False):
+        cands = [e for e in entries if e[2] is scoped]
+        bound = [e[0] for e in cands if e[3]]
+        if bound:
+            return bound
+        if cands:
+            return [e[0] for e in cands]
+    return []
+
+
+class AnswerIndex:
+    """The usable records of ONE answers list for ONE (company_key, country), read once.
+
+    Built by the caller (:func:`build_index`) and handed to :func:`resolve_answer`, :func:`find_answer`,
+    :func:`conflicts`, :func:`conflicting_topics` and :func:`superseded` as ``index=``. A lookup with it
+    returns exactly what the same lookup without it returns (``tests/test_answer_index.py``); it only
+    skips rescanning every record per topic. An index whose answers list, company or country is not the
+    lookup's is ignored (:meth:`matches`), so a wrong one can only be slow, never wrong. The answers list
+    must not change while the index is in use: build one per request, never keep it."""
+
+    __slots__ = ("answers", "company_key", "country", "entries", "by_topic", "_wordings")
+
+    def __init__(self, answers: Any, company_key: Optional[str], country: Optional[str]) -> None:
+        self.answers = answers
+        self.company_key = company_key
+        self.country = country
+        self.entries: list[_Entry] = [
+            (r, topic_key(r.get("topic")), bool(str(r.get("company") or "").strip()),
+             bool(str(r.get("country") or "").strip()))
+            for r in (answers if isinstance(answers, list) else []) if _is_usable(r, company_key, country)
+        ]
+        grouped: dict[str, list[_Entry]] = {}
+        for e in self.entries:
+            grouped.setdefault(e[1], []).append(e)
+        self.by_topic = {t: _level(es) for t, es in grouped.items()}  # each topic's winning level, saved order
+        self._wordings: Optional[list[set[str]]] = None  # per entry, built on the first wording lookup
+
+    def matches(self, answers: Any, company_key: Optional[str], country: Optional[str]) -> bool:
+        return answers is self.answers and company_key == self.company_key and country == self.country
+
+    def for_topic(self, topic: Any) -> list[dict[str, Any]]:
+        return list(self.by_topic.get(topic_key(topic), ()))
+
+    def candidates(self, topic: Optional[str], question: Optional[str]) -> list[dict[str, Any]]:
+        """:func:`_candidates` over these records: the topic stage, then the wording / alias stage."""
+        want = normalize_question(question)
+        if topic:
+            got = self.by_topic.get(topic_key(topic))
+            if got:
+                return list(got)
+        if want:
+            if self._wordings is None:
+                self._wordings = [_wordings(e[0]) for e in self.entries]
+            return _level([e for e, w in zip(self.entries, self._wordings) if want in w])
+        return []
+
+
+def build_index(answers: Any, *, company_key: Optional[str] = None, country: Optional[str] = None) -> AnswerIndex:
+    """One :class:`AnswerIndex` for ``answers`` as seen from ``company_key`` and ``country``."""
+    return AnswerIndex(answers, company_key, country)
+
+
+def _usable_index(
+    index: Optional[AnswerIndex], answers: Any, company_key: Optional[str], country: Optional[str],
+) -> Optional[AnswerIndex]:
+    return index if index is not None and index.matches(answers, company_key, country) else None
+
+
 def _candidates(
     answers: Any, *, topic: Optional[str], question: Optional[str],
-    company_key: Optional[str], country: Optional[str],
+    company_key: Optional[str], country: Optional[str], index: Optional[AnswerIndex] = None,
 ) -> list[dict[str, Any]]:
     """The approved, in-scope records at the first level that matches (see :func:`resolve_answer`)."""
-    usable = [
-        r for r in (answers if isinstance(answers, list) else [])
-        if isinstance(r, dict) and r.get("approved") is True and _in_scope(r, company_key)
-        and fits_country(r, country)
-        and not str(r.get("topic") or "").casefold().startswith(NEVER_REUSED_TOPIC_PREFIXES)
-    ]
+    idx = _usable_index(index, answers, company_key, country)
+    if idx is not None:
+        return idx.candidates(topic, question)
+    usable = [r for r in (answers if isinstance(answers, list) else []) if _is_usable(r, company_key, country)]
     want = normalize_question(question)
     stages: list[Callable[[dict[str, Any]], bool]] = []
     if topic:
@@ -122,33 +203,38 @@ def _candidates(
 
 def resolve_answer(
     answers: Any, *, topic: Optional[str] = None, question: Optional[str] = None,
-    company_key: Optional[str] = None, country: Optional[str] = None,
+    company_key: Optional[str] = None, country: Optional[str] = None, index: Optional[AnswerIndex] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """``(record, note)``. Only approved, in-scope answers. Order: the ``topic``
     (canonical key), then the question wording or an alias; within each, the
     company-scoped answer (narrower) before the unscoped one, and an answer bound to
     the job's country before one bound to none. Two disagreeing candidates at one
-    level = ``(None, note)``; nothing matching = ``(None, None)``."""
-    return _pick(_candidates(answers, topic=topic, question=question, company_key=company_key, country=country))
+    level = ``(None, note)``; nothing matching = ``(None, None)``. ``index``: see :class:`AnswerIndex`."""
+    return _pick(_candidates(answers, topic=topic, question=question, company_key=company_key, country=country,
+                             index=index))
 
 
 def find_answer(
     answers: Any, *, topic: Optional[str] = None, question: Optional[str] = None,
-    company_key: Optional[str] = None, country: Optional[str] = None,
+    company_key: Optional[str] = None, country: Optional[str] = None, index: Optional[AnswerIndex] = None,
 ) -> Optional[dict[str, Any]]:
     """The approved answer record from :func:`resolve_answer`, else ``None``. Never a guess."""
-    return resolve_answer(answers, topic=topic, question=question, company_key=company_key, country=country)[0]
+    return resolve_answer(answers, topic=topic, question=question, company_key=company_key, country=country,
+                          index=index)[0]
 
 
 def conflicts(
     answers: Any, *, country: Optional[str] = None, company_key: Optional[str] = None,
+    index: Optional[AnswerIndex] = None,
 ) -> list[dict[str, Any]]:
     """Saved topics whose approved answers disagree for ``country`` (and ``company_key``; none = the
     general answers only) AT ONE SCOPE: the same canonical topic (case-insensitive) resolving, after
     :func:`resolve_answer`'s precedence, to two different answers. A narrower answer (bound to this
     country, or this company's own) overriding a broader one is no conflict. ``[{topic, question, values}]``
     in saved order, ``values`` the distinct answers as saved. Read-only: nothing is rewritten, and
-    :func:`resolve_answer` already returns no answer for these."""
+    :func:`resolve_answer` already returns no answer for these. ``index`` (:class:`AnswerIndex`): one pass
+    over the records instead of one per topic."""
+    idx = _usable_index(index, answers, company_key, country)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for rec in answers if isinstance(answers, list) else []:
@@ -156,7 +242,8 @@ def conflicts(
         if not topic or topic in seen:
             continue
         seen.add(topic)
-        cands = _candidates(answers, topic=topic, question=None, company_key=company_key, country=country)
+        cands = (idx.for_topic(topic) if idx is not None else
+                 _candidates(answers, topic=topic, question=None, company_key=company_key, country=country))
         if _pick(cands)[1]:
             values: list[str] = []
             for c in cands:
@@ -170,18 +257,22 @@ def conflicts(
 
 def conflicting_topics(
     answers: Any, *, country: Optional[str] = None, company_key: Optional[str] = None,
+    index: Optional[AnswerIndex] = None,
 ) -> set[str]:
     """The :func:`topic_key` of every :func:`conflicts` topic: a record on one of these topics, however it
     was matched (item key, question wording or topic), is no answer for this job (fail closed)."""
-    return {topic_key(c["topic"]) for c in conflicts(answers, country=country, company_key=company_key)}
+    return {topic_key(c["topic"]) for c in conflicts(answers, country=country, company_key=company_key,
+                                                      index=index)}
 
 
 def superseded(
     rec: dict[str, Any], answers: Any, *, country: Optional[str] = None, company_key: Optional[str] = None,
+    index: Optional[AnswerIndex] = None,
 ) -> bool:
     """True when ``rec`` has a topic whose resolved answer (:func:`resolve_answer`: the narrower scope
     wins) is a different answer, so ``rec`` is a broader answer overridden for this job."""
     if not topic_key(rec.get("topic")):
         return False
-    won = find_answer(answers, topic=str(rec.get("topic")), company_key=company_key, country=country)
+    won = find_answer(answers, topic=str(rec.get("topic")), company_key=company_key, country=country,
+                      index=index)
     return won is not None and normalize_question(won.get("answer")) != normalize_question(rec.get("answer"))
