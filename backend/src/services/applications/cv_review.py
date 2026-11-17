@@ -992,6 +992,9 @@ async def verify(
         logger.info("cv_reviewed downgraded application=%s codes=%s checks=%s content=%s covered=%s",
                     safe_log_value(application_id), ",".join(down),
                     ",".join(where.get("cv_checks_found") or []), len(content), covered)
+    if claimed == WEAK and not down:   # apps 874, 886 (2026-11-15): a reviewer-only weak
+        logger.info("cv_reviewed weak_without_codes application=%s content=%s covered=%s",
+                    safe_log_value(application_id), len(content), covered)
     stored = {
         "artifact_id": payload["artifact_id"], "sha256": payload["sha256"], "claimed": claimed,
         "confidence": STRONG if claimed == STRONG and not down else WEAK, "downgraded": down,
@@ -1014,6 +1017,20 @@ def _label_advice(entry: str) -> str:
     quoted = " ".join(f"'{w}'" for w in words.split("+") if w)
     return (f"skills line {n}: label word {quoted} is no skills-group word; use one of: {LABEL_WORDS_ADVICE}, ... "
             "or the profile's own group label; keep the items")
+
+
+NO_CODES_HINT = (
+    "Job360 found no problem in this review: every line it checked holds. If every row is supported and every must "
+    "the profile has is named, record this same CV again as strong (a re-review of the same version costs no try)."
+)
+
+
+def no_codes_warning(stored: dict[str, Any]) -> Optional[str]:
+    """A reviewer claimed weak but Job360's own checks found nothing (no downgrade codes): a hint, never an override;
+    the stored confidence stays what the reviewer claimed."""
+    if stored.get("claimed") != WEAK or stored.get("downgraded"):
+        return None
+    return NO_CODES_HINT
 
 
 def weak_warning(stored: dict[str, Any], where: dict[str, list[Any]]) -> Optional[str]:
