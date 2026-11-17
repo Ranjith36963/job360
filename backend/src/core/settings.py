@@ -603,7 +603,15 @@ ATS_EXTRA_EMAIL_SENDERS: dict[str, tuple[str, ...]] = {
 }
 # A batch mark covers at most this many applications (one list_applications page).
 INBOX_CHECK_MAX_APPLICATIONS = int(os.getenv("INBOX_CHECK_MAX_APPLICATIONS", "200"))
-JOB_BOARD_HOSTS = ("linkedin.com",)  # plus indeed.<tld>, handled in job_checks
+# A job board's own domain (a host matches when it IS one or ends with "." + one; never a substring).
+# Hunt recipe v24 (owner 2026-11-17): a bring with such a link gets a `board_link` reply warning.
+JOB_BOARD_HOSTS = ("linkedin.com", "reed.co.uk", "shine.com", "naukri.com", "totaljobs.com", "whatjobs.com")
+# Boards on many country domains: <name>.<tld>, <name>.co.<cc> or <name>.com.<cc> (job_checks._is_board_family).
+JOB_BOARD_FAMILIES = ("indeed", "adzuna", "glassdoor")
+# An agent bring whose role words equal an OPEN application's (another company label) gets a
+# `possible_duplicate` reply warning; titles shorter than this many words are too generic to compare.
+POSSIBLE_DUPLICATE_MIN_WORDS = 3
+POSSIBLE_DUPLICATE_MAX_IDS = 10
 JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
 JOB_CHECK_FULL_MIN_WORDS = 150     # at or above this the ad is treated as complete
 JOB_CHECK_REPOST_GAP_DAYS = 3      # listing date vs employer date further apart than this = reposted

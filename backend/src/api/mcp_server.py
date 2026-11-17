@@ -1233,7 +1233,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Job facts (pass when known): `country` = the job's ISO alpha-2 code ("FR", "US"),
         `remote` = true/false, `found_on` = one of
         "indeed", "linkedin", "company_careers", "job_board", "referral",
-        "visa_sponsor_list", "pasted_by_user", "other". Fix them later with update_job.
+        "visa_sponsor_list", "pasted_by_user", "other". Fix later: update_job.
 
         Ad dates (YYYY-MM-DD, when the ad shows them): `posted_at` = the listing's date,
         `employer_published_at` = the employer's own posting date. `test`=true: a practice job, kept off lists.
@@ -1249,7 +1249,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `listed_people` (max 10): people the ad names, each {"name", "role",
         "linkedin_url"}; saved as this job's contacts (found_via "job_ad").
         `known_people`: see rules. `client_key`: retry = first reply.
-        `duplicate_of` = your open application for that role: nothing new made."""
+        `duplicate_of` = your open application for that role: nothing new made. `warnings`: do each `next`."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         description, visa_detail = _unfence_in(description), _unfence_in(visa_detail)
         try:
@@ -1286,6 +1286,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 "already_existed": resp.already_existed,
                 "duplicate_of": resp.duplicate_of,
                 "matched_on": resp.matched_on, "differs": resp.differs, "next": resp.next,
+                "warnings": resp.warnings,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )

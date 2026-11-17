@@ -326,11 +326,14 @@ def _is_or_under(host: str, apex: str) -> bool:
     return host == apex or host.endswith("." + apex)
 
 
-def _is_indeed(host: str) -> bool:
+def _is_board_family(host: str) -> bool:
+    """indeed.com, uk.indeed.com, indeed.de, indeed.co.uk, adzuna.com.au, glassdoor.co.in: a label of
+    ``JOB_BOARD_FAMILIES`` right before the public suffix, exact labels only (never a substring)."""
     labels = host.split(".")
-    if len(labels) >= 2 and labels[-2] == "indeed" and len(labels[-1]) >= 2:
-        return True  # indeed.com, uk.indeed.com, indeed.de
-    return len(labels) >= 3 and labels[-3] == "indeed" and labels[-2] in ("co", "com") and len(labels[-1]) == 2
+    families = settings.JOB_BOARD_FAMILIES
+    if len(labels) >= 2 and labels[-2] in families and len(labels[-1]) >= 2:
+        return True
+    return len(labels) >= 3 and labels[-3] in families and labels[-2] in ("co", "com") and len(labels[-1]) == 2
 
 
 def classify_host(host: str) -> str:
@@ -341,7 +344,7 @@ def classify_host(host: str) -> str:
         return "unknown"
     if any(_is_or_under(host, a) for a in settings.OFFICIAL_ATS_HOSTS):
         return "official_ats"
-    if any(_is_or_under(host, b) for b in settings.JOB_BOARD_HOSTS) or _is_indeed(host):
+    if any(_is_or_under(host, b) for b in settings.JOB_BOARD_HOSTS) or _is_board_family(host):
         return "job_board"
     return "unknown"
 
