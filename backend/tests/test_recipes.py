@@ -535,3 +535,35 @@ def test_the_write_recipe_sets_each_kind_its_length_and_who_sends_it():
         assert kind in text, kind
     for recipe in ("reach", "own_browser"):
         assert 'get_recipe("write")' in load_recipe(recipe).text, recipe
+
+
+def test_the_own_browser_recipe_is_the_whole_pc_run_with_its_closed_tokens():
+    """The PC task is three stable lines (get_recipe("own_browser"), obey Job360); every rule of the run lives here:
+    start, LinkedIn safety, the queue kinds, the CV file step, the job-alert sweep, the summary and the hard lines."""
+    from src.api.routes.recipes import load_recipe
+
+    text = load_recipe("own_browser").text
+    flat_text = flat(text)
+    assert len(text.splitlines()) <= 70
+    for token in (
+        "weekly_limit", "invited", "after_connect", "upload_failed", "hold_released", "check_submit",
+        "check_outreach", "LINKEDIN_PAUSED_UNTIL", "apply_min_score", "job360_cv", "~/li_state.json",
+    ):
+        assert token in text, token
+    for words in (
+        "between 04:00 and 00:00 uk time", "now + 6 hours", "4 linkedin job pages a minute, 40 a run, 150 a uk day",
+        "one `session` label", "at most 40 minutes", "browser not available",
+        "notes used up", "sends skipped", "never release `weekly_limit` for it",
+        "cv_<application_id>.pdf", "python -i -c", "file_upload",
+        "email_code", "learned_bot_check", "captcha_handoff", "job360_login_required",
+        "linkedin_search", "profile_read", "linkedin_check_pending", "duty:linkedin_search",
+        "equal `total`", "componentkey job-card-component-ref-<id>", "get_recipe(\"doctor\")", "a fresh helper",
+        "save_fit", "never apply in b", "get_recipe(\"apply\")", "get_recipe(\"rules\")",
+    ):
+        assert words in flat_text, words
+    # nothing owner-specific: the country example is generic
+    assert "gb or in" not in flat_text and "950" not in text
+    # the two things this run never does are stated as refusals, never as a step to take
+    assert "never call whats_due with duties and never call mark_done" in flat_text
+    for match in re.finditer("mark_done", flat_text):
+        assert flat_text[: match.start()].endswith("never call "), flat_text[max(0, match.start() - 40): match.end()]
