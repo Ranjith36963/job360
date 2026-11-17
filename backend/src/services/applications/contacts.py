@@ -39,6 +39,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlsplit
 
 from src.core import settings
 from src.repositories import pg
@@ -199,6 +200,30 @@ def _validate_source_url(raw: Optional[str]) -> Optional[str]:
     if any(ord(c) < 32 or ord(c) == 127 or c.isspace() for c in value):
         raise SpineError(422, "source_url must not contain spaces or control characters")
     return value
+
+
+PROOF_HOST_REFUSED = (
+    "source_url is on {host}, a people directory or contact-data broker: it never proves the person works there. "
+    "Pass the company's own page (team, about, blog, press), a news article, a speaker page or a GitHub profile "
+    "that names them and this company, or leave this person out."
+)
+
+
+def _refuse_directory_proof(user_id: str, clean: Optional[str]) -> Optional[str]:
+    """People hunt (owner, 2026-11-17): a directory or broker page is never proof
+    (settings.CONTACT_PROOF_REFUSED_HOSTS). Checked on add_contact and update_contact only: the bring
+    path keeps a job ad link, and a user's own imported list is theirs."""
+    if not clean:
+        return clean
+    host = (urlsplit(clean).hostname or "").lower().rstrip(".")
+    for refused in settings.CONTACT_PROOF_REFUSED_HOSTS:
+        if host == refused or host.endswith("." + refused):
+            get_audit_logger().info(
+                "contact_proof_refused", extra={"event": "contact_proof_refused", "user_id": user_id,
+                                                "reason": "directory_host", "host": refused},
+            )
+            raise SpineError(422, PROOF_HOST_REFUSED.format(host=refused))
+    return clean
 
 
 def _validate_company(raw: Optional[str]) -> Optional[str]:
@@ -743,7 +768,7 @@ async def add_contact(
     clean_linkedin = _validate_linkedin_url(linkedin_url)
     clean_notes = _validate_notes(notes)
     clean_found_via = _validate_found_via(found_via)
-    clean_source_url = _validate_source_url(source_url)
+    clean_source_url = _refuse_directory_proof(user_id, _validate_source_url(source_url))
     clean_company = _validate_company(company)
     clean_email_source = _validate_email_source(email_source)
     if clean_email_source and not clean_email:
@@ -1194,7 +1219,7 @@ async def update_contact(
         # '' clears it (stored as the edit value '', read back as None).
         given["found_via"] = _validate_found_via(found_via) or ""
     if source_url is not None:
-        given["source_url"] = _validate_source_url(source_url) or ""  # '' clears it
+        given["source_url"] = _refuse_directory_proof(user_id, _validate_source_url(source_url)) or ""  # '' clears it
     if company is not None:
         given["company"] = _validate_company(company) or ""  # '' clears it (read back as None)
         if contact.get("application_id") is None and not company_key(given["company"]):

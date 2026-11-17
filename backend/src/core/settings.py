@@ -694,6 +694,12 @@ CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
 CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
 CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
 CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
+# People hunt (owner, 2026-11-17): contact-data brokers and people directories never prove a person works
+# somewhere, so add_contact / update_contact refuse them as source_url (a host or any subdomain of it).
+CONTACT_PROOF_REFUSED_HOSTS: tuple[str, ...] = (
+    "rocketreach.co", "zoominfo.com", "contactout.com", "signalhire.com", "apollo.io", "lusha.com",
+    "theorg.com", "insideorg.com", "tal.club", "wellfound.com",
+)
 CONTACT_COMPANY_MAX_CHARS = int(os.getenv("CONTACT_COMPANY_MAX_CHARS", "200"))
 CONTACT_SHARED_MAX_CHARS = int(os.getenv("CONTACT_SHARED_MAX_CHARS", "300"))
 CONTACT_PHONE_MAX_CHARS = int(os.getenv("CONTACT_PHONE_MAX_CHARS", "40"))
