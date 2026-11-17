@@ -48,6 +48,7 @@ from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import country_pages
 from src.services.profile.answer_match import (
     AMBIGUOUS,
+    build_index,
     conflicting_topics,
     fits_country,
     superseded,
@@ -2588,7 +2589,8 @@ def _compute_answers(
     # Two saved answers to one topic that disagree at one scope (the GB twins "Yes" and "No", 2026-11-03):
     # neither rides in the kit, however each is worded; the topic is listed in `missing` as ambiguous. A
     # broader answer a narrower one overrides (bound to this country, or this company's own) is left out.
-    bad = conflicting_topics(info.answers, country=country, company_key=company_key)
+    index = build_index(info.answers, company_key=company_key, country=country)  # read once, not per topic / record
+    bad = conflicting_topics(info.answers, country=country, company_key=company_key, index=index)
     ambiguous: dict[str, str] = {}
     for rec in _records(info.answers):
         if rec.get("approved") is True and _present(rec.get("answer")) and _present(rec.get("question")):
@@ -2602,7 +2604,7 @@ def _compute_answers(
             if topic_key(rec.get("topic")) in bad:
                 ambiguous.setdefault(topic_key(rec.get("topic")), str(rec["topic"]))
                 continue
-            if superseded(rec, info.answers, country=country, company_key=company_key):
+            if superseded(rec, info.answers, country=country, company_key=company_key, index=index):
                 continue
             out["approved_text"].append(
                 _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),

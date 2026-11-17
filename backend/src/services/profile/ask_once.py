@@ -15,6 +15,7 @@ from ``common_questions`` rows that are guessed (to verify) or not known, most-g
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Iterable, Optional
 
 from src.services.profile import common_questions
@@ -175,6 +176,25 @@ def _is_kit_key(template: str, key: str) -> bool:
 
 
 def memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[str]]:
+    """:func:`_memory_question`, read once per distinct (key, question). Pure: it takes no user data and reads
+    only module constants and the lru-cached catalog, and returns an immutable tuple, so one answer is right
+    for every user. Anything but a str / None pair (never a caller today) is computed afresh, uncached."""
+    if (key is None or isinstance(key, str)) and isinstance(question, str):
+        return _memory_question_cached(key, question)
+    return _memory_question(key, question)
+
+
+@lru_cache(maxsize=8192)
+def _memory_question_cached(key: Optional[str], question: str) -> tuple[bool, Optional[str]]:
+    return _memory_question(key, question)
+
+
+def reset_memory_question_cache() -> None:
+    """Empty the :func:`memory_question` cache (a new Needs-you request starts cold: ``derive_memo.scope``)."""
+    _memory_question_cached.cache_clear()
+
+
+def _memory_question(key: Optional[str], question: str) -> tuple[bool, Optional[str]]:
     """``(in_memory_family, kit_key)`` for a form question. In a family when ``key`` is a catalog Memory key,
     when :func:`is_country_specific`, or when the wording is a catalog Memory row's (or names its field). The
     kit key (``right_to_work.{cc}.needs_sponsorship``) is the ONE catalog row whose own field word the
@@ -318,22 +338,23 @@ def questionnaire(
     known (``summary()``'s to_verify + missing), guessed first, then by how many forms ask it. A row the
     user already remembered is done: a global one for every country, a country-specific one
     (:func:`is_country_specific`) for its country only (``fits_country``). Read-only."""
-    from src.services.profile.answer_match import conflicts, find_answer, topic_key  # noqa: PLC0415
+    from src.services.profile.answer_match import build_index, conflicts, find_answer, topic_key  # noqa: PLC0415
 
     # extra_countries: the queued jobs' countries (2026-11-13), so a US / NL / SE job has a slot here.
     rows = [r for r in common_questions.common_questions(profile, overlay, extra_countries) if not r["per_job"]]
     saved = getattr(getattr(profile, "user_info", None), "answers", None) or []
     out: list[dict[str, Any]] = []
     for cc in common_questions._countries(profile, extra_countries):
+        index = build_index(saved, country=cc)  # the saved answers read once for this country, not once per row
         todo = [
             {**r, "topic": _key(r), "question": r["question"].replace("{country}", cc)}
             for r in rows
             if r["country"] in (cc, None) and not r["verified"]
-            and find_answer(saved, topic=_key(r), country=cc) is None
+            and find_answer(saved, topic=_key(r), country=cc, index=index) is None
         ]
         todo.sort(key=lambda r: (r["label"] != "guessed", -int(r["seen"])))
         # Two saved answers to one topic that disagree (case-insensitive): asked, never picked. Shown first.
-        for c in reversed(conflicts(saved, country=cc)):
+        for c in reversed(conflicts(saved, country=cc, index=index)):
             row = next((r for r in todo if topic_key(r["topic"]) == topic_key(c["topic"])), None)
             if row is None:
                 row = _conflict_row(c, cc)

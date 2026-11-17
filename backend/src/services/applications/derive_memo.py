@@ -49,6 +49,11 @@ def current() -> Optional[Memo]:
 
 @contextmanager
 def scope(user_id: Optional[str] = None) -> Iterator[Memo]:
+    from src.services.profile.ask_once import reset_memory_question_cache  # noqa: PLC0415 - profile imports spine
+
+    # Each Needs-you request starts ask_once.memory_question's (pure, bounded) cache cold. Callers outside a scope
+    # keep it warm; two requests at once can only cost each other speed, never change an answer.
+    reset_memory_question_cache()
     memo = Memo(user_id=user_id)
     token = MEMO.set(memo)
     try:

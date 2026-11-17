@@ -325,12 +325,8 @@ def _approved_record(
     conflict scan per (country, company) instead of being redone per answer and per fill."""
     from src.services.profile.answer_match import normalize_question, topic_key  # noqa: PLC0415
 
-    records: list[dict[str, Any]] = [
-        rec for rec in kit._records(profile.user_info.answers)
-        if rec.get("approved") is True and kit._present(rec.get("answer"))
-    ]
+    job_only, records = _approved_lists(profile, memo)
     want_q, want_topic = normalize_question(question), topic_key(topic) if topic else ""
-    job_only: list[dict[str, Any]] = [r for r in records if r.get("job_only")]
     for job in reversed(job_only):  # the newest Verify wins
         by_topic = bool(want_topic) and topic_key(job.get("topic")) == want_topic
         # "???" has no wording: then only the exact same text is the same question ("!!!" is not).
@@ -339,7 +335,6 @@ def _approved_record(
         if by_topic or by_words:
             hit: dict[str, Any] = job
             return hit
-    records = [r for r in records if not r.get("job_only")]
     if memo is None:
         return _saved_record(records, question, company_key, topic, country, {})
     # The saved (non-job_only) records are the same for every call sharing ``memo``: one answer per question.
@@ -353,25 +348,55 @@ def _approved_record(
     company_key = company_key if company_key in memo["companies"] else None
     key = ("saved", question, company_key, topic, country)
     if key not in memo:
-        memo[key] = _saved_record(records, question, company_key, topic, country, memo)
+        memo[key] = _saved_record(records, question, company_key, topic, country, memo, indexed=True)
     hit_saved: Optional[dict[str, Any]] = memo[key]
     return hit_saved
 
 
+def _approved_lists(
+    profile: Any, memo: Optional[dict[Any, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``(job_only, saved)``: the approved, answered records of ``profile``'s saved answers, the user's own
+    per-application Verify / Edit ones and the rest. With a ``memo`` (ONE base profile) they are built once and
+    the same two lists come back every time, so an index over ``saved`` stays valid; without one, built per call."""
+    answers = profile.user_info.answers
+    lists = memo.get("lists") if memo is not None else None
+    if lists is None or lists[0] is not answers:
+        records = [rec for rec in kit._records(answers)
+                   if rec.get("approved") is True and kit._present(rec.get("answer"))]
+        lists = (answers, [r for r in records if r.get("job_only")], [r for r in records if not r.get("job_only")])
+        if memo is not None:
+            memo["lists"] = lists
+    return lists[1], lists[2]
+
+
 def _saved_record(
     records: list[dict[str, Any]], question: str, company_key: Optional[str], topic: Optional[str],
-    country: Optional[str], memo: dict[Any, Any],
+    country: Optional[str], memo: dict[Any, Any], *, indexed: bool = False,
 ) -> Optional[dict[str, Any]]:
-    """:func:`_approved_record`'s reading of the saved answers (``records``, no ``job_only``)."""
-    from src.services.profile.answer_match import conflicting_topics, resolve_answer, topic_key  # noqa: PLC0415
+    """:func:`_approved_record`'s reading of the saved answers (``records``, no ``job_only``). ``indexed``: ``memo``
+    outlives this call, so ``records`` are read once per (country, company) into an
+    :class:`answer_match.AnswerIndex` that every question of the memo shares."""
+    from src.services.profile.answer_match import (  # noqa: PLC0415
+        build_index,
+        conflicting_topics,
+        resolve_answer,
+        topic_key,
+    )
 
+    index = None
+    if indexed:
+        index = memo.get(("index", country, company_key))
+        if index is None or not index.matches(records, company_key, country):
+            index = memo[("index", country, company_key)] = build_index(records, company_key=company_key,
+                                                                         country=country)
     rec, note = resolve_answer(records, topic=topic or None, question=question, company_key=company_key,
-                               country=country)
+                               country=country, index=index)
     if rec is None or note:
         return None  # nothing saved, or two saved answers disagree: never pick one (the user is asked)
     if ("conflicts", country, company_key) not in memo:
         memo[("conflicts", country, company_key)] = conflicting_topics(records, country=country,
-                                                                         company_key=company_key)
+                                                                         company_key=company_key, index=index)
     if topic_key(rec.get("topic")) in memo[("conflicts", country, company_key)]:
         return None
     return rec
