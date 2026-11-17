@@ -6695,7 +6695,7 @@ export interface components {
              * Recipe
              * @enum {string}
              */
-            recipe: "hunt" | "daily" | "batch" | "reach";
+            recipe: "hunt" | "inbox" | "batch" | "reach";
             search?: components["schemas"]["InboxSearchOut"] | null;
         };
         /** DuplicateOut */

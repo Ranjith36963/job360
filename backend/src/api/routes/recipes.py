@@ -29,7 +29,7 @@ RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 # AND a row here; tests/test_recipes.py pins that the two agree.
 RECIPE_NAMES: tuple[str, ...] = (
     "setup", "hunt", "research", "apply", "batch", "forms", "ats", "doctor", "write", "reach", "daily", "feedback",
-    "prep", "debrief", "review", "own_browser", "cv", "rules",
+    "prep", "debrief", "review", "own_browser", "cv", "inbox", "rules",
 )
 
 # Old names that still load: assistants that learned `get_recipe("second_look")` keep working.

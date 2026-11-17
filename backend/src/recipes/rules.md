@@ -397,7 +397,7 @@ PAUSED: every run stops at once, reads nothing, records nothing, does
 not ask.
 
 SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
-runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
+runs only what it lists, in order (`inbox` = get_recipe("inbox"), `hunt`,
 `reach` = get_recipe("reach") for its `application_ids` only, `batch`: claim it with `whats_due(duties=["batch"])`, or
 `mark_done` batch is refused), then `mark_done` each (reach with
 its `application_ids`); `nothing_due` = end at once without

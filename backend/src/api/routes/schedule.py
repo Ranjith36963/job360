@@ -46,7 +46,7 @@ class InboxSearchOut(BaseModel):
 
 class DueItemOut(BaseModel):
     duty: Duty
-    recipe: Literal["hunt", "daily", "batch", "reach"]
+    recipe: Literal["hunt", "inbox", "batch", "reach"]
     reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications", "run_now"]
     # Only on `reach`: the applications to find people for this run (newest first).
     application_ids: Optional[list[int]] = None

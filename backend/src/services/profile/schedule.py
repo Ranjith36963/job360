@@ -9,7 +9,7 @@ Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
 
 * ``hunt`` (recipe ``hunt``) - ``assistant_settings.hunt_every_hours`` is set and at least that
   many hours have passed since the last hunt (never done = due).
-* ``inbox`` (recipe ``daily``) - ``preferences.daily_check`` is ``auto`` (or the older
+* ``inbox`` (recipe ``inbox``) - ``preferences.daily_check`` is ``auto`` (or the older
   ``scheduled``) and ``preferences.check_every`` hours have passed (empty = 24, the daily
   recipe's own "once a day"). ``ask`` / ``paused`` / empty never run on a schedule: nobody is
   there to say yes.

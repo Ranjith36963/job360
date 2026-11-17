@@ -601,7 +601,8 @@ ATS_EXTRA_EMAIL_SENDERS: dict[str, tuple[str, ...]] = {
     "myworkdayjobs.com": ("myworkday.com",),
     "workable.com": ("workablemail.com",),
 }
-# A batch mark covers at most this many applications (one list_applications page).
+# mark_inbox_checked takes any number of ids and moves the cursor this many per SQL statement (2026-11-17:
+# it used to refuse more than this, and Gmail runs with 390+ open applications got a 422 every hour).
 INBOX_CHECK_MAX_APPLICATIONS = int(os.getenv("INBOX_CHECK_MAX_APPLICATIONS", "200"))
 # A job board's own domain (a host matches when it IS one or ends with "." + one; never a substring).
 # Hunt recipe v24 (owner 2026-11-17): a bring with such a link gets a `board_link` reply warning.
@@ -1097,7 +1098,7 @@ ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUE
 SCHEDULE_TICK_HOURS = int(os.getenv("SCHEDULE_TICK_HOURS", "1"))
 SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch", "reach", "network")
 SCHEDULE_DUTY_RECIPES: dict[str, str] = {
-    "hunt": "hunt", "inbox": "daily", "batch": "batch", "reach": "reach", "network": "reach",
+    "hunt": "hunt", "inbox": "inbox", "batch": "batch", "reach": "reach", "network": "reach",
 }
 # Owner 2026-10-24 - the PEOPLE hunt (duty `reach`): open applications (considering/applied) brought or
 # applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
