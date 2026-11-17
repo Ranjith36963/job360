@@ -9,7 +9,7 @@ uses). Both take the user from the session / token / OAuth subject, never from i
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -248,6 +248,58 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
     )
 
 
+# 2026-11-17 (20:08 people run): the run saved 10 people, wrote no outreach note for any of them, and marked
+# network failed with tool_unavailable because one lookup (Crustdata) was out of credits, although web search,
+# company pages and three other lookups were there. The recipe said both; only Job360's reply is obeyed.
+_ONE_TOOL_DOWN = frozenset({"tool_unavailable", "paid_plan_needed", "sign_in_needed"})
+
+
+async def _refuse_undrafted_people(
+    db: JobDatabase, user: CurrentUser, duty: str, ids: list[int], now: datetime
+) -> None:
+    """A people run (reach or network) ends only when every person it saved has an outreach draft. The people
+    this assistant saved since the run took the duty (or in the last ``DUTY_CLAIM_MINUTES``) with no
+    ``message`` row are listed in a 409 that says what to do next (rule #12: scoped by user)."""
+    stamps = await schedule.load_stamps(db, user.id)
+    window = timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+    since = stamps.get(schedule.RUNNING + duty)
+    if since is None or now - since >= window:
+        since = now - window
+    scope, args = ("ac.application_id IS NULL", ()) if duty == "network" else (
+        f"ac.application_id IN ({', '.join('?' for _ in ids)})", tuple(ids)
+    )
+    cur = await db._db.execute(
+        "SELECT ac.id, ac.name, ac.created_at FROM application_contacts ac "  # noqa: S608 - placeholders only
+        f"WHERE ac.user_id = ? AND ac.added_by <> 'web' AND {scope} "
+        "AND NOT EXISTS (SELECT 1 FROM contact_outreach o WHERE o.contact_id = ac.id "
+        "AND o.entry = 'message') ORDER BY ac.id",
+        (user.id, *args),
+    )
+    missing = []
+    for row in await cur.fetchall():
+        r = dict(row)
+        try:
+            at = datetime.fromisoformat(str(r["created_at"]))
+        except ValueError:
+            continue
+        if (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) >= since:
+            missing.append(r)
+    if not missing:
+        return
+    _log("people_run_refused", user, duty=duty, reason="no_draft", contacts=str(len(missing)))
+    first = missing[0]
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"{len(missing)} people saved this run have no outreach note; next: contact {first['id']} "
+            f"({first['name']}). Write one note per person (get_recipe(\"write\"); a LinkedIn connection note of "
+            "200 characters or fewer), have the Doctor check it (get_recipe(\"doctor\")), save it with save_artifact "
+            "(kind outreach, contact_id, channel linkedin), call check_outreach, then mark_done again. "
+            f"Contact ids: {', '.join(str(r['id']) for r in missing[:10])}."
+        ),
+    )
+
+
 @router.post("/schedule/done", response_model=MarkDoneOut, dependencies=AUTH_FIRST)
 async def mark_done(
     body: MarkDoneIn,
@@ -277,6 +329,19 @@ async def mark_done(
         if actor_for(user) != "web":
             claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
         later = await _refuse_early_batch_stop(db, user, claimed_at)
+    if body.duty in ("reach", "network") and actor_for(user) != "web":
+        if body.outcome == "failed" and body.reason in _ONE_TOOL_DOWN:
+            _log("people_run_refused", user, duty=body.duty, reason=body.reason)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"One tool being out ({body.reason}) is not a failed people run: web search, the company's own "
+                    "team, about, blog and press pages, GitHub, speaker pages and every other lookup you have still "
+                    "work. Find people with them and save them; when they truly found nobody, mark_done with outcome "
+                    "partial and say in note which sources you tried."
+                ),
+            )
+        await _refuse_undrafted_people(db, user, body.duty, ids, now)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
     _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "",
          next_batch=str(len(later)))
