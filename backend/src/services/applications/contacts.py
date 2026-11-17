@@ -1040,6 +1040,20 @@ async def get_owned_contact(db: JobDatabase, user_id: str, contact_id: int) -> O
     return dict(row) if row else None
 
 
+async def get_owned_contacts(db: JobDatabase, user_id: str, contact_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """:func:`get_owned_contact` for many ids in ONE statement: ``{id: row}``, foreign or unknown ids absent."""
+    if not contact_ids:
+        return {}
+    marks = ",".join("?" for _ in contact_ids)
+    cur = await db._db.execute(
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, "  # noqa: S608
+        "company, email_source, relationship, shared, phone, links, "
+        f"added_by, created_at FROM application_contacts WHERE user_id = ? AND id IN ({marks})",
+        (user_id, *contact_ids),
+    )
+    return {int(r["id"]): dict(r) for r in await cur.fetchall()}
+
+
 async def list_contacts(
     db: JobDatabase, user_id: str, application_id: int, *, include_text: bool = True
 ) -> list[dict[str, Any]]:
@@ -1077,7 +1091,11 @@ async def _edit_history(db: JobDatabase, user_id: str, contact_id: int) -> dict[
         "WHERE user_id = ? AND contact_id = ? ORDER BY id ASC",
         (user_id, contact_id),
     )
-    rows = [dict(r) for r in await cur.fetchall()]
+    return _group_edit_rows([dict(r) for r in await cur.fetchall()])
+
+
+def _group_edit_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Pure: one contact's edit rows (oldest first) grouped by field, as :func:`_edit_history` returns them."""
     by_field: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         by_field.setdefault(r["field"], []).append(
@@ -1087,6 +1105,28 @@ async def _edit_history(db: JobDatabase, user_id: str, contact_id: int) -> dict[
             }
         )
     return by_field
+
+
+async def _edit_histories(
+    db: JobDatabase, user_id: str, contact_ids: list[int]
+) -> dict[int, dict[str, list[dict[str, Any]]]]:
+    """:func:`_edit_history` for many contacts in ONE statement: ``{contact_id: by_field}`` (an unedited
+    contact maps to ``{}``)."""
+    out: dict[int, dict[str, list[dict[str, Any]]]] = {cid: {} for cid in contact_ids}
+    if not contact_ids:
+        return out
+    marks = ",".join("?" for _ in contact_ids)
+    cur = await db._db.execute(
+        "SELECT contact_id, field, value, recorded_at, recorded_by, is_initial FROM contact_edits "  # noqa: S608
+        f"WHERE user_id = ? AND contact_id IN ({marks}) ORDER BY id ASC",
+        (user_id, *contact_ids),
+    )
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        grouped.setdefault(int(r["contact_id"]), []).append(dict(r))
+    for cid, rows in grouped.items():
+        out[cid] = _group_edit_rows(rows)
+    return out
 
 
 def _validators_by_field() -> dict[str, Any]:
@@ -1457,6 +1497,24 @@ async def _outreach_rows(db: JobDatabase, contact_id: int) -> list[dict[str, Any
     return [dict(r) for r in await cur.fetchall()]
 
 
+async def _outreach_rows_by_contact(db: JobDatabase, contact_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+    """:func:`_outreach_rows` for many contacts in ONE statement: ``{contact_id: rows oldest first}`` (a contact
+    with no rows maps to ``[]``)."""
+    out: dict[int, list[dict[str, Any]]] = {cid: [] for cid in contact_ids}
+    if not contact_ids:
+        return out
+    marks = ",".join("?" for _ in contact_ids)
+    cur = await db._db.execute(
+        "SELECT id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, recorded_by, "  # noqa: S608
+        f"source_message_id, follow_up_on, label FROM contact_outreach WHERE contact_id IN ({marks}) ORDER BY id ASC",
+        tuple(contact_ids),
+    )
+    for r in await cur.fetchall():
+        row = dict(r)
+        out[int(row["contact_id"])].append(row)
+    return out
+
+
 def _outreach_view(rows: list[dict[str, Any]], *, include_text: bool = True) -> dict[str, Any]:
     messages = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "message"]
     sent = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "sent"]
@@ -1607,6 +1665,20 @@ async def _linkedin_state_now(db: JobDatabase, user_id: str, contact_id: int) ->
     return str((row[0] if row else "") or "") or "unknown"
 
 
+async def _linkedin_states_now(db: JobDatabase, user_id: str, contact_ids: list[int]) -> dict[int, str]:
+    """:func:`_linkedin_state_now` for many contacts in ONE statement: ``{contact_id: state}``."""
+    if not contact_ids:
+        return {}
+    marks = ",".join("?" for _ in contact_ids)
+    cur = await db._db.execute(
+        "SELECT contact_id, value FROM contact_edits "  # noqa: S608 - only "?" is formatted in
+        f"WHERE user_id = ? AND field = 'linkedin_state' AND contact_id IN ({marks}) ORDER BY id ASC",
+        (user_id, *contact_ids),
+    )
+    newest = {int(r["contact_id"]): str(r["value"] or "") for r in await cur.fetchall()}  # later rows win
+    return {cid: newest.get(cid) or "unknown" for cid in contact_ids}
+
+
 async def over_limit_notes(db: JobDatabase, user_id: str, contact_ids: list[int]) -> dict[int, dict[str, int]]:
     """``{contact_id: {limit, chars}}`` for each of these people whose NEWEST drafted LinkedIn message is over the
     connection-note limit while they are not known to be connected (``own_browser.note_over_limit``). Such a
@@ -1632,8 +1704,9 @@ async def over_limit_notes(db: JobDatabase, user_id: str, contact_ids: list[int]
         return {}
     premium = await _linkedin_premium_by_user(user_id, next(iter(long)))
     out: dict[int, dict[str, int]] = {}
+    states = await _linkedin_states_now(db, user_id, list(long))
     for cid, chars in long.items():
-        limit = own_browser.note_over_limit("linkedin", await _linkedin_state_now(db, user_id, cid), chars, premium)
+        limit = own_browser.note_over_limit("linkedin", states[cid], chars, premium)
         if limit is not None:
             out[cid] = {"limit": limit, "chars": chars}
     return out
@@ -2222,6 +2295,39 @@ async def _full_contact_view(
     message/sent/reply text; every other reader keeps the default (full)."""
     contact_id = base["id"]
     edits = await _edit_history(db, user_id, contact_id)
+    rows = await _outreach_rows(db, contact_id)
+    note_rewrite = None if _note_closed(rows) else (await over_limit_notes(db, user_id, [contact_id])).get(contact_id)
+    return _contact_view(user_id, base, edits, rows, note_rewrite, include_text=include_text)
+
+
+def _note_closed(rows: list[dict[str, Any]]) -> bool:
+    """A sent / reply / skipped mark is newer than the newest message: no over-limit rewrite is waiting."""
+    last_msg = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
+    return any(r["entry"] in ("sent", "reply", "skipped") and int(r["id"]) > last_msg for r in rows)
+
+
+async def contact_views_batch(
+    db: JobDatabase, user_id: str, bases: list[dict[str, Any]], rows_by_id: dict[int, list[dict[str, Any]]],
+    over: dict[int, dict[str, int]],
+) -> dict[int, dict[str, Any]]:
+    """:func:`_full_contact_view` for many contacts: ONE edit-history read for all of them, the outreach rows and
+    over-limit map the caller already read (``over`` = :func:`over_limit_notes` for these ids). ``{id: view}``."""
+    edits = await _edit_histories(db, user_id, [int(b["id"]) for b in bases])
+    return {
+        int(b["id"]): _contact_view(
+            user_id, b, edits[int(b["id"])], rows_by_id[int(b["id"])],
+            None if _note_closed(rows_by_id[int(b["id"])]) else over.get(int(b["id"])),
+        )
+        for b in bases
+    }
+
+
+def _contact_view(
+    user_id: str, base: dict[str, Any], edits: dict[str, list[dict[str, Any]]], rows: list[dict[str, Any]],
+    note_rewrite: Optional[dict[str, int]], *, include_text: bool = True,
+) -> dict[str, Any]:
+    """Pure body of :func:`_full_contact_view` once its reads are done (so a batch reader shares it)."""
+    contact_id = base["id"]
     view = _serialize(base)
     history: dict[str, list[dict[str, Any]]] = {}
     for field in settings.CONTACT_EDIT_FIELDS:
@@ -2271,16 +2377,13 @@ async def _full_contact_view(
     dup_edits = edits.get("duplicate_of") or []
     view["duplicate_of"] = _duplicate_of(dup_edits[-1]["value"]) if dup_edits else None
     view["reachable"] = is_reachable(view)
-    rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
     view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
     view["own_browser_task"] = own_browser.public_task(own_browser.derive(rows, datetime.now(timezone.utc)))
     # One LinkedIn follow-up is due (any person, with a job or not): the assistant drafts it.
     view["linkedin_follow_up_due"] = own_browser.follow_up_due(rows, datetime.now(timezone.utc))
     # A newest draft over the note limit that nobody has sent or skipped: the assistant's job, not the user's.
-    last_msg = max((int(r["id"]) for r in rows if r["entry"] == "message"), default=0)
-    closed = any(r["entry"] in ("sent", "reply", "skipped") and int(r["id"]) > last_msg for r in rows)
-    view["note_rewrite"] = None if closed else (await over_limit_notes(db, user_id, [contact_id])).get(contact_id)
+    view["note_rewrite"] = note_rewrite
     return view
 
 
