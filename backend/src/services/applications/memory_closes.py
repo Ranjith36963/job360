@@ -94,12 +94,14 @@ def covered(ask: dict[str, Any], country: Optional[str], by_key: dict[str, dict[
 def row_covered(row: Any, country: Optional[str], by_key: dict[str, dict[str, Any]]) -> bool:
     """Pure: ONE question row is a Memory fact the user has set, in their own word, for ``country`` (the rule
     :func:`covered` applies to every row of an ask; the Needs-you blockers use it per row, so the two never drift)."""
-    from src.services.applications import kit  # noqa: PLC0415 - kit imports this package
-    from src.services.profile.ask_once import memory_question  # noqa: PLC0415
+    from src.services.applications import (
+        derive_memo,  # noqa: PLC0415 - one reading per request
+        kit,  # noqa: PLC0415 - kit imports this package
+    )
 
     if not country or not isinstance(row, dict):
         return False
-    family, template = memory_question(str(row.get("key") or "") or None, str(row.get("question") or ""))
+    family, template = derive_memo.memory_question(str(row.get("key") or "") or None, str(row.get("question") or ""))
     if not family or template is None:
         return False
     item, _why = kit._memory_answer(by_key, template, country)
