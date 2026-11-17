@@ -91,6 +91,8 @@ class MarkDoneIn(BaseModel):
     # How the run ended (owner 2026-10-25). `failed` needs a `reason`; done/partial may carry one.
     outcome: Outcome = "done"
     reason: Optional[RunReason] = None
+    # Prose about the run (at most 300 characters); a people run that stops short names each free lookup here.
+    note: str = Field(default="", max_length=300)
 
 
 class MarkDoneOut(BaseModel):
@@ -251,7 +253,11 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
 # 2026-11-17 (20:08 people run): the run saved 10 people, wrote no outreach note for any of them, and marked
 # network failed with tool_unavailable because one lookup (Crustdata) was out of credits, although web search,
 # company pages and three other lookups were there. The recipe said both; only Job360's reply is obeyed.
-_ONE_TOOL_DOWN = frozenset({"tool_unavailable", "paid_plan_needed", "sign_in_needed"})
+# 2026-11-17 (20:48 run, after that fix): five jobs due, two minutes of work, Sprouts loaded but never called,
+# Clay and Vibe never loaded, then failed/no_work. A people run that was given work never has "no work", never
+# asks the user, and does not stop short without saying what each free lookup returned.
+_ONE_TOOL_DOWN = frozenset({"tool_unavailable", "paid_plan_needed", "sign_in_needed", "no_work", "needs_user"})
+_FREE_LOOKUPS = ("sprouts", "clay", "vibe")
 
 
 async def _refuse_undrafted_people(
@@ -335,10 +341,21 @@ async def mark_done(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"One tool being out ({body.reason}) is not a failed people run: web search, the company's own "
-                    "team, about, blog and press pages, GitHub, speaker pages and every other lookup you have still "
+                    f"{body.reason} is not a failed people run: the jobs were due, and web search, the company's own "
+                    "team, about, blog and press pages, GitHub, speaker pages, Sprouts, Clay and Vibe still "
                     "work. Find people with them and save them; when they truly found nobody, mark_done with outcome "
-                    "partial and say in note which sources you tried."
+                    "partial and say in note what each source returned."
+                ),
+            )
+        unsaid = [n for n in _FREE_LOOKUPS if n not in (body.note or "").lower()]
+        if body.outcome in ("partial", "failed") and unsaid:
+            _log("people_run_refused", user, duty=body.duty, reason="lookups_unreported")
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A people run that stops short says in note what each free lookup returned; missing: "
+                    f"{', '.join(unsaid)}. Load their tools (search your tool list for Sprouts, Clay and Vibe), call "
+                    "each once per company with the company's domain, save who they prove, then mark_done again."
                 ),
             )
         await _refuse_undrafted_people(db, user, body.duty, ids, now)

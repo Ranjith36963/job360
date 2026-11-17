@@ -1662,6 +1662,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         try:
             body = schedule_route.MarkDoneIn.model_validate({
                 "duty": duty, "application_ids": application_ids, "outcome": outcome, "reason": reason or None,
+                "note": note,
             })
         except ValidationError as exc:
             raise _validation_error(exc) from None

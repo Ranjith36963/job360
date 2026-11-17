@@ -10580,6 +10580,12 @@
             "title": "Duty",
             "type": "string"
           },
+          "note": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Note",
+            "type": "string"
+          },
           "outcome": {
             "default": "done",
             "enum": [
