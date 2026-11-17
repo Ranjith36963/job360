@@ -8159,6 +8159,13 @@ export interface components {
             failures_in_row: number;
             /** Last Tick At */
             last_tick_at: string;
+            /** Next Batch */
+            next_batch?: number[];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
             /**
              * Outcome
              * @default done

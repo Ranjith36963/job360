@@ -31,6 +31,12 @@ EVENTS = frozenset({"form_checked", "form_filled", "form_swept", "submit_attempt
 # ``by`` values only Job360's browser writes (blocked.BY_BROWSER, browser.replay_and_hold's refill / restore).
 _JOB360_BY = frozenset({"browser", "refill", "restore"})
 BAD_VALUE = "browser must be one of: " + ", ".join(BROWSERS)
+# 2026-11-17: runs kept recording ``blocked`` with no ``browser`` (bulk apply prompt v15-v22). A warning, never a
+# 422: the PC loop command (frontend PC_LOOP_COMMAND) and older routines record ``blocked`` without it.
+BLOCKED_NO_BROWSER = (
+    'blocked was recorded without "browser": pass browser (job360, own_browser or manual) on every blocked '
+    "event, so Job360 knows which browser met the block and where the job goes next"
+)
 # Set only by server code around its own write (Job360's browser recording its submit click): never a caller's.
 SERVER_SAYS: ContextVar[Optional[str]] = ContextVar("which_browser_server_says", default=None)
 

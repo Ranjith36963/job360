@@ -99,6 +99,9 @@ class MarkDoneOut(BaseModel):
     last_tick_at: str
     outcome: Outcome = "done"
     failures_in_row: int = 0
+    # 2026-11-17: a batch stop - queued rows queued after this run's claim; they wait for the next batch.
+    next_batch: list[int] = Field(default_factory=list)
+    note: str = ""
 
 
 class RunProblemOut(BaseModel):
@@ -195,19 +198,31 @@ _NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
 BATCH_NOT_CLAIMED = 'You did not claim the batch: call whats_due(duties=["batch"]) first. Nothing was recorded.'
 
 
-async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
+def _next_batch_note(later: list[int]) -> str:
+    if not later:
+        return ""
+    return (f"{len(later)} jobs queued after this run claimed the batch wait for the next batch: "
+            f"{', '.join(str(i) for i in later[:20])}.")
+
+
+async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_at: Optional[datetime]) -> list[int]:
     """2026-10-30: a batch run stops early (partial, no outside blocker) only when every queued job waits
     on the owner or is blocked. While a queued row still needs no owner input (own browser, no hold, ask,
-    block or filled form) the run is refused with 409 and told which row to work next."""
+    block or filled form) the run is refused with 409 and told which row to work next. 2026-11-17: only rows
+    queued at or before this run's claim (``claimed_at``; None = the website, every row) count; the rest wait
+    for the next batch and are returned."""
     from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
 
-    rows = await queue_preflight.fillable_rows(db, user.id)
+    later = await queue_preflight.queued_after_claim(db, user.id, claimed_at)
+    note = (" " + _next_batch_note(later)) if later else ""
+    rows = await queue_preflight.fillable_rows(db, user.id, queued_by=claimed_at)
     if not rows:
         # 2026-11-01 (31 Oct runs): every run asked one question, then stopped while 22 queued jobs had no
         # CV. A missing CV needs no owner input, whatever else the row waits on.
-        cvs = await queue_preflight.cv_rows(db, user.id)
+        cvs = await queue_preflight.cv_rows(db, user.id, queued_by=claimed_at)
         if not cvs:
-            return
+            return later
+        _log("batch_stop_refused", user, reason="cv_missing", rows=str(len(cvs)), later=str(len(later)))
         first = cvs[0]
         raise HTTPException(
             status_code=409,
@@ -216,9 +231,10 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
                 f"({first['company'] or 'unknown company'}). Keep working: write its tailored CV and save it "
                 "with save_artifact kind cv. An open question, a site block or the user's own browser does not "
                 "stop CV writing; questions to the user are not a reason to stop. "
-                f"Ids: {', '.join(str(r['id']) for r in cvs[:5])}."
+                f"Ids: {', '.join(str(r['id']) for r in cvs[:5])}.{note}"
             ),
         )
+    _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)))
     first = rows[0]
     raise HTTPException(
         status_code=409,
@@ -227,7 +243,7 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser) -> None:
             f"({first['company'] or 'unknown company'}). Keep working: write its CV and fill its form. "
             "A partial run ends only when every queued job is waiting on the owner or blocked. Large tool "
             "outputs and outputs saved to a file are normal; they are not a reason to stop. "
-            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}."
+            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}.{note}"
         ),
     )
 
@@ -254,10 +270,16 @@ async def mark_done(
     # batch back. Only an assistant's whats_due(duties=["batch"]) claims, so only an assistant is refused.
     if body.duty == "batch" and actor_for(user) != "web" and not await schedule.claim_live(db, user.id, "batch", now):
         raise HTTPException(status_code=409, detail=BATCH_NOT_CLAIMED)
+    later: list[int] = []
     if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
-        await _refuse_early_batch_stop(db, user)
+        # The website never claims (None: every queued row counts); an assistant's claim was checked above.
+        claimed_at = None
+        if actor_for(user) != "web":
+            claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
+        later = await _refuse_early_batch_stop(db, user, claimed_at)
     await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
-    _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "")
+    _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "",
+         next_batch=str(len(later)))
     failures = int((await schedule.load_runs(db, user.id)).get(body.duty, {}).get("failures") or 0)
     if body.duty == "hunt" and body.outcome != "failed":  # Ignition: a finished hunt starts reach and the batch
         from src.services.browser_agent import duty_trigger  # noqa: PLC0415
@@ -265,7 +287,8 @@ async def mark_done(
         await duty_trigger.ignite(user.id, ("reach", "batch"), "hunt_done", db=db)
     stamp = now.isoformat(timespec="seconds")
     return MarkDoneOut(
-        duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=body.outcome, failures_in_row=failures
+        duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=body.outcome, failures_in_row=failures,
+        next_batch=later, note=_next_batch_note(later),
     )
 
 

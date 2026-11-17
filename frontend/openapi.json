@@ -10644,6 +10644,18 @@
             "title": "Last Tick At",
             "type": "string"
           },
+          "next_batch": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Next Batch",
+            "type": "array"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
           "outcome": {
             "default": "done",
             "enum": [

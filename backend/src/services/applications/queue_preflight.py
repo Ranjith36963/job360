@@ -162,17 +162,49 @@ async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tupl
     return sorted(fifo_ids, key=lambda i: (i not in sent, i in waiting, i in filled)), waiting
 
 
-async def fillable_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+def queued_after(queued_at: dict[int, str], cutoff: Optional[datetime]) -> set[int]:
+    """2026-11-17: the ids queued AFTER ``cutoff`` (a batch run's claim): a hunt adding rows mid-run kept the
+    run's ``mark_done`` refused until it gave up. ``None`` = no cutoff; an unreadable time counts as before."""
+    if cutoff is None:
+        return set()
+    later: set[int] = set()
+    for app_id, at in queued_at.items():
+        try:
+            when = datetime.fromisoformat(str(at))
+        except ValueError:
+            continue
+        if (when if when.tzinfo else when.replace(tzinfo=timezone.utc)) > cutoff:
+            later.add(app_id)
+    return later
+
+
+async def queued_after_claim(db: JobDatabase, user_id: str, cutoff: Optional[datetime]) -> list[int]:
+    """Open queued rows queued after ``cutoff`` (they wait for the next batch), sorted. Scoped by ``user_id``."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    if cutoff is None:
+        return []
+    open_ids = await schedule._open_queue_ids(db, user_id)
+    if not open_ids:
+        return []
+    return sorted(queued_after(await spine.queued_at_by_app(db, user_id, open_ids), cutoff))
+
+
+async def fillable_rows(
+    db: JobDatabase, user_id: str, *, queued_by: Optional[datetime] = None
+) -> list[dict[str, Any]]:
     """Queued rows a run can still work with NO owner input (2026-10-30), oldest queued first: Job360's own
-    browser runs them, no live hold, no open ask, no open block and no ``form_filled`` yet. Scoped by
-    ``user_id``; read-only. ``[{"id", "company"}]``."""
+    browser runs them, no live hold, no open ask, no open block and no ``form_filled`` yet. ``queued_by``
+    (a batch run's claim) leaves out rows queued after it. Scoped by ``user_id``; read-only.
+    ``[{"id", "company"}]``."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
     open_ids = await schedule._open_queue_ids(db, user_id)
     if not open_ids:
         return []
     queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
-    ids = sorted(open_ids, key=lambda i: (str(queued_at.get(i) or ""), i))
+    later = queued_after(queued_at, queued_by)
+    ids = sorted((i for i in open_ids if i not in later), key=lambda i: (str(queued_at.get(i) or ""), i))
     skip = await _open_ask_apps(db, user_id, ids) | await _filled_apps(db, user_id, ids)
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
     blocks = await blocked_service.open_blocks(db, user_id, ids)
@@ -220,11 +252,11 @@ async def closed_recheck_ids(db: JobDatabase, user_id: str, blocks: dict[int, di
     return out
 
 
-async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+async def cv_rows(db: JobDatabase, user_id: str, *, queued_by: Optional[datetime] = None) -> list[dict[str, Any]]:
     """Queued rows still missing their tailored CV (owner 2026-11-01), oldest queued first. Writing a CV needs
     neither the owner nor a browser, so an open ask, a site block or the owner's own browser does not excuse
     it; only another session's live hold, a closed posting and a site saying the user already applied do.
-    Scoped by ``user_id``; read-only.
+    ``queued_by`` (a batch run's claim) leaves out rows queued after it. Scoped by ``user_id``; read-only.
     ``[{"id", "company"}]``."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
@@ -232,7 +264,8 @@ async def cv_rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
     if not open_ids:
         return []
     queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
-    ids = sorted(open_ids, key=lambda i: (str(queued_at.get(i) or ""), i))
+    later = queued_after(queued_at, queued_by)
+    ids = sorted((i for i in open_ids if i not in later), key=lambda i: (str(queued_at.get(i) or ""), i))
     skip = await _with_kind(db, user_id, ids, "cv") | await cv_skip_ids(db, user_id, ids)
     todo = [i for i in ids if i not in skip]
     if not todo:
