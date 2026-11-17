@@ -56,6 +56,18 @@ class DueItemOut(BaseModel):
     search: Optional[InboxSearchOut] = None
 
 
+class KnownListOut(BaseModel):
+    """2026-11-17 hunt: the user's known jobs as two plain-text downloads (curl them; no copying by hand).
+    ``urls_url``: one job link per line (``urls`` lines, the kit's ``--known``); ``ct_url``:
+    ``company ||| title ||| id`` per application (``total`` lines). Signed, read-only, this user only."""
+
+    urls_url: str
+    ct_url: str
+    total: int
+    urls: int
+    expires_at: str
+
+
 class WhatsDueOut(BaseModel):
     due: list[DueItemOut]
     nothing_due: bool
@@ -81,6 +93,35 @@ class WhatsDueOut(BaseModel):
     # Owner #12: own-browser tasks wait and no session in the user's own browser worked them for over
     # PC_IDLE_WARN_HOURS (or ever): tell the user to start their PC browser session. A scheduled run never works them.
     pc_idle: Optional[PcIdleOut] = None
+    # An assistant's read for the hunt (no `duties`, or `duties` with hunt): its known list (KnownListOut).
+    known_list: Optional[KnownListOut] = None
+
+
+class HuntSourceIn(BaseModel):
+    """One hunt source: what it did, or why it was not used (the exact reason or error)."""
+
+    model_config = ConfigDict(extra="forbid")
+    calls: Optional[int] = Field(default=None, ge=0)
+    ads: Optional[int] = Field(default=None, ge=0)
+    brought: Optional[int] = Field(default=None, ge=0)
+    skipped: Optional[str] = Field(default=None, max_length=300)
+
+
+class HuntKitIn(BaseModel):
+    """The hunt kit's funnel: results, new after the known drop, passing the title/place pre-filter, read in full."""
+
+    model_config = ConfigDict(extra="forbid")
+    results: int = Field(ge=0)
+    new: int = Field(ge=0)
+    prefilter_passed: int = Field(ge=0)
+    read_in_full: int = Field(ge=0)
+    unread_reason: Optional[str] = Field(default=None, max_length=300)
+
+
+class HuntReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sources: dict[str, HuntSourceIn] = Field(default_factory=dict)
+    kit: Optional[HuntKitIn] = None
 
 
 class MarkDoneIn(BaseModel):
@@ -93,6 +134,8 @@ class MarkDoneIn(BaseModel):
     reason: Optional[RunReason] = None
     # Prose about the run (at most 300 characters); a people run that stops short names each free lookup here.
     note: str = Field(default="", max_length=300)
+    # Only with `hunt` (2026-11-17): every source's counts or exact skip reason, and the kit funnel (HUNT_SOURCES).
+    report: Optional[HuntReportIn] = None
 
 
 class MarkDoneOut(BaseModel):
@@ -189,6 +232,15 @@ async def whats_due(
 
     waiting = len(await own_browser.queue_tasks(db, user, now))
     answer["pc_idle"] = await own_browser.pc_idle(db, user.id, now, waiting)
+    if actor_for(user) != "web" and (not duties or "hunt" in duties):
+        from src.services.applications import known_list  # noqa: PLC0415 - profile <-> spine cycle
+
+        try:
+            answer["known_list"] = await known_list.mint(db, user.id, now)
+        except known_list.KnownListError:  # no SESSION_SECRET: the run falls back to list_applications
+            answer["known_list"] = None
+        if answer["known_list"]:
+            _log("known_list_minted", user, total=str(answer["known_list"]["total"]))
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 
@@ -306,6 +358,76 @@ async def _refuse_undrafted_people(
     )
 
 
+# 2026-11-17 hunt run (the first on recipe hunt.md): it never used web search, connectors or a browser and said
+# nothing about them, and read 52 of its 370 new kit ads in full. Only Job360's reply is obeyed, so an
+# assistant's hunt ends with a report that names every source and the kit funnel.
+HUNT_SOURCES = ("mail", "kit", "connectors", "web", "browser")
+HUNT_REPORT_SHAPE = (
+    'report: {"sources": {"mail": S, "kit": S, "connectors": S, "web": S, "browser": S}, "kit": {"results": N, '
+    '"new": N, "prefilter_passed": N, "read_in_full": N}}, each S = {calls, ads, brought} or '
+    '{skipped: "<exact reason or error>"}'
+)
+
+
+def _source_state(src: HuntSourceIn) -> Optional[str]:
+    counted = None not in (src.calls, src.ads, src.brought)
+    said = bool((src.skipped or "").strip())
+    if counted and src.skipped is None:
+        return "ran"
+    if said and src.calls is None and src.ads is None and src.brought is None:
+        return "skipped"
+    return None
+
+
+def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> None:
+    """Refuse (422, saying exactly what is missing) an assistant's hunt report that is short; log the counts."""
+    if report is None:
+        _log("hunt_report_refused", user, codes="report_missing", missing="report")
+        raise HTTPException(
+            status_code=422, detail=f"A hunt run ends with a {HUNT_REPORT_SHAPE}. Nothing was recorded."
+        )
+    codes: list[str] = []
+    problems: list[str] = []
+    missing = [k for k in HUNT_SOURCES if k not in report.sources]
+    if missing:
+        codes.append("source_missing")
+        problems.append(f"sources {', '.join(missing)} are missing: use each one, or send it as "
+                        '{skipped: "<exact reason or error>"}')
+    unknown = sorted(k for k in report.sources if k not in HUNT_SOURCES)
+    if unknown:
+        codes.append("source_unknown")
+        problems.append(f"unknown sources {', '.join(unknown)}: count them under one of {', '.join(HUNT_SOURCES)}")
+    states = {k: _source_state(v) for k, v in report.sources.items() if k in HUNT_SOURCES}
+    unclear = [k for k in HUNT_SOURCES if k in states and states[k] is None]
+    if unclear:
+        codes.append("source_unclear")
+        problems.append(f"sources {', '.join(unclear)} need all of calls, ads, brought, or only a non-empty skipped")
+    kit = report.kit
+    if kit is None and states.get("kit") == "ran":
+        codes.append("kit_missing")
+        problems.append("kit: {results, new, prefilter_passed, read_in_full} is missing")
+    if kit is not None and not (kit.read_in_full <= kit.prefilter_passed <= kit.new <= kit.results):
+        codes.append("kit_counts")
+        problems.append("kit counts must keep read_in_full <= prefilter_passed <= new <= results")
+    elif kit is not None and kit.read_in_full < kit.prefilter_passed and not (kit.unread_reason or "").strip():
+        codes.append("kit_unread")
+        problems.append(f"you read {kit.read_in_full} of {kit.prefilter_passed} kit ads that passed the pre-filter: "
+                        "read every one in full (batches of at most 40, up to 8 helpers), or say why in "
+                        "kit.unread_reason")
+    if codes:
+        _log("hunt_report_refused", user, codes=",".join(codes), missing=",".join(missing))
+        raise HTTPException(
+            status_code=422, detail=f"Hunt report refused: {'; '.join(problems)}. The full shape: {HUNT_REPORT_SHAPE}. "
+                                    "Nothing was recorded; fix it, then mark_done again.",
+        )
+    get_audit_logger().info("hunt_report_ok", extra={
+        "event": "hunt_report_ok", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
+        "sources": ",".join(f"{k}:{states[k]}" for k in HUNT_SOURCES), "result": "ok",
+        **({f"kit_{k}": getattr(kit, k) for k in ("results", "new", "prefilter_passed", "read_in_full")}
+           if kit else {}),
+    })
+
+
 @router.post("/schedule/done", response_model=MarkDoneOut, dependencies=AUTH_FIRST)
 async def mark_done(
     body: MarkDoneIn,
@@ -319,10 +441,15 @@ async def mark_done(
         raise HTTPException(status_code=422, detail="reach needs application_ids: the applications this run worked")
     if body.duty != "reach" and body.application_ids is not None:
         raise HTTPException(status_code=422, detail="application_ids is only for duty reach")
+    if body.duty != "hunt" and body.report is not None:
+        raise HTTPException(status_code=422, detail="report is only for duty hunt")
     if body.outcome == "failed" and body.reason is None:
         raise HTTPException(status_code=422, detail="a failed run needs a reason (one of the closed list)")
     if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
         raise HTTPException(status_code=404, detail="application not found")
+    # A failed hunt (closed reason, backed off, carded) may end before any source ran; a report it sends is checked.
+    if body.duty == "hunt" and actor_for(user) != "web" and (body.outcome != "failed" or body.report is not None):
+        _check_hunt_report(user, body.report)
     now = datetime.now(timezone.utc)
     # S5 (prod, 4 runs): a run closed a batch it never claimed (a plain whats_due, or none), pushing the next
     # batch back. Only an assistant's whats_due(duties=["batch"]) claims, so only an assistant is refused.

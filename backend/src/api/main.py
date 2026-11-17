@@ -48,6 +48,7 @@ from src.api.routes import (
     files,
     health,
     hunt_kit,
+    known_list,
     morning_check,
     oauth,
     own_browser,
@@ -297,6 +298,8 @@ app.include_router(calendar.router, prefix="/api")  # PUBLIC token .ics feed + s
 app.include_router(recipes.router, prefix="/api")
 # PUBLIC static hunt kit the user's own assistant runs (owner 2026-10-13; Job360 still never searches)
 app.include_router(hunt_kit.router, prefix="/api")
+# PUBLIC signed read-only link to the user's known jobs for a hunt run (2026-11-17; whats_due mints it)
+app.include_router(known_list.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
 app.include_router(doctor.router, prefix="/api")  # agent doctor + report_missing_tool (feature 7)
 app.include_router(connectors.router, prefix="/api")  # the connector check (owner 2026-10-25)

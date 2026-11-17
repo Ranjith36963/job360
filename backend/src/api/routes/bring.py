@@ -306,6 +306,9 @@ class BringJobRequest(BaseModel):
     # key + same body returns the FIRST reply (already_existed=true), writing nothing;
     # another body under it is a 409 (services/idempotency).
     client_key: Optional[str] = None
+    # 2026-11-17 hunt: an assistant's hunt or mail job whose apply link is a job board's page must say it
+    # searched the employer's own careers page and found no posting there ("not_found"); else 422.
+    employer_search: Optional[Literal["not_found"]] = None
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -441,6 +444,33 @@ async def _bring_warnings(
     return out
 
 
+# 2026-11-17 hunt run: 2 of its 4 jobs kept a Shine / Adzuna link although the reply warned `board_link`;
+# a warning that does not block is read past. A hunt or mail bring with a board link now says it searched.
+BOARD_SEARCH_ORIGINS = ("ai_hunt", "your_mail")
+
+
+def _refuse_unsearched_board_link(body: BringJobRequest, user_id: str) -> None:
+    from src.services.applications.job_checks import apply_host, classify_host  # noqa: PLC0415
+
+    if body.origin not in BOARD_SEARCH_ORIGINS or body.employer_search is not None:
+        return
+    host = apply_host(body.apply_url)
+    if not host or classify_host(host) != "job_board":
+        return
+    get_audit_logger().info(
+        "job_bring_board_refused",
+        extra={"event": "job_bring_board_refused", "user_id": user_id, "host": host,
+               "reason": "employer_search_missing", "status": "refused"},
+    )
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"{host} is a job board: search the employer's own careers page for this role and bring that link; "
+            'if none, resend with employer_search "not_found". Nothing was recorded.'
+        ),
+    )
+
+
 def _repost_sentence(repost: dict[str, Any]) -> str:
     return (
         f" Among jobs you brought: this title at this company was first brought on {repost['first_seen']} "
@@ -492,6 +522,10 @@ async def bring_job(
     here on. A repeated ``client_key`` returns the first reply (slice 25).
     """
     from src.services import idempotency  # noqa: PLC0415
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
+
+    if actor_for(user) != "web":
+        _refuse_unsearched_board_link(body, user.id)
 
     async def _write() -> dict[str, Any]:
         return (await _bring_job(body, db, user)).model_dump()
@@ -499,7 +533,8 @@ async def bring_job(
     # The MCP tool sends "" where a web body leaves the visa text out (None); both mean
     # "not said", so they hash the same and the two doors share one key space.
     key_body = {
-        **body.model_dump(exclude={"client_key"}),
+        # employer_search left out when unset, so keys stored before the field existed still match.
+        **body.model_dump(exclude={"client_key"} | ({"employer_search"} if body.employer_search is None else set())),
         "visa_detail": body.visa_detail or "", "visa_country": body.visa_country or "",
     }
     try:
