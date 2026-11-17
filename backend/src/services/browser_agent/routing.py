@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -165,6 +166,7 @@ def _matches(host: str, domains: tuple[str, ...]) -> bool:
     return any(host == d or host.endswith("." + d) for d in domains)
 
 
+@lru_cache(maxsize=4096)
 def site_of(url: str) -> tuple[str, str, str]:
     """``(site_kind, site_key, tenant_host)`` of a page, from ``guard.canonical_host`` only (S0: no page text).
     LinkedIn is answered first, before any task is inferred. A non-empty web link whose host cannot be named
@@ -172,7 +174,9 @@ def site_of(url: str) -> tuple[str, str, str]:
     it to the own browser as ``link_unclear``, and it is never called LinkedIn. ATS keys come from
     ``sites.SITES`` (one list), a job board from ``JOB_BOARDS``, Oracle HCM from its host plus its
     candidate-experience path; anything else is ``("company", "host:" + host, host)``. A link with no web
-    host at all is ``("company", "host:", "")``."""
+    host at all is ``("company", "host:", "")``.
+    Pure (link in, three strings out: no I/O, settings or user data), so it is memoised: the needs-you badge
+    asked for each queued link three times."""
     from src.services.browser_agent.sites import SITES  # noqa: PLC0415 - sites imports nothing back
 
     text = _web_url(url)
