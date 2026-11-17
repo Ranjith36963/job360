@@ -82,3 +82,11 @@ async def test_update_contact_refuses_a_directory_page_too(authenticated_async_c
         assert bad.status_code == 422 and "never proves" in bad.text
         good = await client.patch(f"/api/contacts/{cid}", json={"source_url": "https://northwind.example/blog/7"})
         assert good.status_code == 200 and good.json()["source_url"] == "https://northwind.example/blog/7"
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_url_is_a_422_not_a_500(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await _add_contact(client, app_id, source_url="http://[bad")
+        assert resp.status_code == 422 and "not a valid url" in resp.text.lower(), resp.text

@@ -215,7 +215,10 @@ def _refuse_directory_proof(user_id: str, clean: Optional[str]) -> Optional[str]
     path keeps a job ad link, and a user's own imported list is theirs."""
     if not clean:
         return clean
-    host = (urlsplit(clean).hostname or "").lower().rstrip(".")
+    try:
+        host = (urlsplit(clean).hostname or "").lower().rstrip(".")
+    except ValueError as exc:  # e.g. an unbalanced IPv6 bracket: a clean 422, never a 500
+        raise SpineError(422, "source_url is not a valid URL") from exc
     for refused in settings.CONTACT_PROOF_REFUSED_HOSTS:
         if host == refused or host.endswith("." + refused):
             get_audit_logger().info(
