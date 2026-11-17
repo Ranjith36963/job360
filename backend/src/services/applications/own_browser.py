@@ -27,6 +27,7 @@ handed out; nobody gets a second request.
 """
 from __future__ import annotations
 
+import asyncio
 import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -458,9 +459,8 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
-    auto = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings).outreach_send == (
-        rules.OUTREACH_SEND_AUTO
-    )
+    profile = await asyncio.to_thread(load_profile, user_id)  # sync Postgres read: never on the event loop
+    auto = rules.effective((profile or UserProfile()).assistant_settings).outreach_send == rules.OUTREACH_SEND_AUTO
 
     # Only a person whose NEWEST decision is an approval of their NEWEST message, a LinkedIn one with no
     # sent / reply mark since: finished approvals must never fill the LIMIT.
@@ -491,20 +491,26 @@ async def _contact_tasks(db: JobDatabase, user_id: str, now: datetime) -> list[d
         (user_id, APPROVED, DECLINED, auto, RELEASED, INVITED, QUEUE_MAX),
     )
     ids += [c for c in (int(dict(r)["contact_id"]) for r in await cur.fetchall()) if c not in ids]
-    out: list[dict[str, Any]] = []
+    # A FIXED number of reads for the whole page (never one per contact): the owned contacts, their outreach rows,
+    # the over-limit map and their edit history, each keyed by contact id; every task is then built in Python.
+    owned = await contacts.get_owned_contacts(db, user_id, ids)
+    ids = [c for c in ids if c in owned]
+    rows_by_id = await contacts._outreach_rows_by_contact(db, ids)  # noqa: SLF001
+    tasks: dict[int, dict[str, Any]] = {}
     for contact_id in ids:
-        base = await contacts.get_owned_contact(db, user_id, contact_id)
-        if base is None:
-            continue
-        rows = await _rows(db, contact_id)
+        rows = rows_by_id[contact_id]
         task = derive(rows, now, auto, note_ok=True)  # the state filter below drops anyone not not_connected
         if task is None or task["state"] not in ("queued", "in_progress"):
             continue
         if follow_up_held(rows, task["message_id"], now):
             continue  # one follow-up, only once due, never after a reply
-        if await contacts.over_limit_notes(db, user_id, [contact_id]):
-            continue  # a stored draft over the note limit is the assistant's rewrite, never a send
-        view = await contacts._full_contact_view(db, user_id, base)
+        tasks[contact_id] = task
+    over = await contacts.over_limit_notes(db, user_id, list(tasks))
+    kept = [c for c in tasks if c not in over]  # a stored draft over the note limit is the assistant's rewrite
+    views = await contacts.contact_views_batch(db, user_id, [owned[c] for c in kept], rows_by_id, over)
+    out: list[dict[str, Any]] = []
+    for contact_id in kept:
+        task, rows, view = tasks[contact_id], rows_by_id[contact_id], views[contact_id]
         state, invited = view.get("linkedin_state"), invite_facts(rows) is not None
         if state == "pending" or (state == "not_connected" and invited):
             continue  # pending: never messaged; nobody gets a second request
