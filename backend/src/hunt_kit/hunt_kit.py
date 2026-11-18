@@ -696,6 +696,21 @@ def title_ok(title: str, matcher: Callable[[str], bool] | None = None) -> bool:
     return (matcher or _DEFAULT_MATCHER)(title)
 
 
+# Words a title_hint reports. A hint is evidence for the assistant judging the title, never a rule: nothing drops on it.
+LEVEL_WORDS = frozenset(("intern", "graduate", "junior", "associate", "mid", "senior", "lead", "staff", "principal",
+                         "head", "director", "vp", "chief", "manager"))
+
+
+def title_hint(title: str, targets: Callable[[str], bool], years: int | None) -> dict[str, Any]:
+    """--every-title: signals for the assistant that judges this title. It reads them; it may ignore them."""
+    words = "".join(c if c.isalnum() else " " for c in (title or "").lower()).split()  # word by word, no regex
+    return {
+        "matched_target_phrase": targets(title or ""),
+        "level_words": [w for w in words if w in LEVEL_WORDS],
+        "guessed_min_years": years,
+    }
+
+
 def sentences(text: str) -> list[str]:
     """Split text into sentences (newlines also end a sentence)."""
     out: list[str] = []
@@ -1212,7 +1227,7 @@ FINGERPRINT_ARGS = (
     "titles", "exclude_title_words", "work_countries", "remote", "visa_onsite", "maybe_relocation",
     "only_countries", "exclude_countries", "any_location", "max_years", "days", "sources", "companies",
     "universe", "companies_extra", "skip_companies", "limit_boards", "freehire_pages", "workday_max",
-    "open_days", "retry_dead",
+    "open_days", "retry_dead", "every_title",
 )
 
 
@@ -1762,7 +1777,12 @@ class Collector:
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
         self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
         self.board_outcomes: dict[str, str] = {}  # "ats:token" -> "ok" | "404" for boards that gave a clear answer
-        self.matcher = make_title_matcher(args.titles, args.exclude_title_words)
+        # --every-title: the assistant judges titles, so no title, exclude-word or years test drops a job here;
+        # --titles only seeds search-style boards and the title_hint. Readers' detail gates then pass every title.
+        self.every_title = bool(getattr(args, "every_title", False))
+        self.target_phrases = make_title_matcher(args.titles, "")
+        self.matcher = (lambda _t: True) if self.every_title else make_title_matcher(
+            args.titles, args.exclude_title_words)
         self.cursor: dict[str, int] = {}  # {ats: next offset into its open list}; moved on at the end of run()
         self.rotation: dict[str, dict[str, Any]] = {}  # per rotated slow ATS: pool size, start, slice keys
         self.visited: set[str] = set()  # "ats:token" of boards whose task ran to its end this session
@@ -1886,7 +1906,7 @@ class Collector:
         # A feed field stating the employer's floor (Naukri minimumExperience) beats a guess from the text.
         stated = raw.get("years")
         y = stated if isinstance(stated, int) and not isinstance(stated, bool) and stated > 0 else years_min(desc)
-        if y is not None and y >= a.max_years:
+        if y is not None and y >= a.max_years and not self.every_title:
             return
         if not within_days(raw.get("posted", ""), a.days):
             return
@@ -1911,6 +1931,8 @@ class Collector:
         }
         if row == "visa_maybe_register":
             rec["sponsor_register"] = reg_ids
+        if self.every_title:
+            rec["title_hint"] = title_hint(title, self.target_phrases, y)
         key = job_key(rec)
         with self.lock:
             if url in self.seen_url:
@@ -3689,6 +3711,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--exclude-countries", default="", help="optional ISO2 filter: drop these countries")
     p.add_argument("--any-location", action="store_true", help="keep every title match regardless of place")
     p.add_argument("--max-years", type=int, default=5, help="drop jobs whose minimum stated years >= N")
+    p.add_argument(
+        "--every-title", action="store_true",
+        help="keep every title: no --titles, --exclude-title-words or --max-years drop; each job gets a title_hint "
+             "(a signal only) and YOU judge the titles (--titles still seeds search-style boards)",
+    )
     p.add_argument("--days", type=int, default=30, help="only jobs posted in the last N days")
     p.add_argument(
         "--workday-max",

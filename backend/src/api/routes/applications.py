@@ -1240,6 +1240,9 @@ class RecordEventResponse(BaseModel):
     # it didn't touch it (omitted `follow_up_on`, or a duplicate source that
     # wrote nothing at all — S corollary of R2).
     follow_up_on: Optional[str]
+    # PC run pc-1905 (2026-11-18): an application a PC run lets go (``hold_released``) gets the queue's next step,
+    # "Keep going: N tasks still wait; call take again." (``own_browser.next_after_hold_release``); else absent/null.
+    next: Optional[str] = None
 
 
 class ReceiptFileOut(BaseModel):
@@ -2623,6 +2626,8 @@ async def match_email(
             "has_subject": bool(body.subject.strip()),
             "candidate_count": len(result["candidates"]),
             "application_ids": [c["application_id"] for c in result["candidates"]],
+            # closed reason codes per candidate (2026-11-18): shows WHICH tie listed it, e.g. an ATS vs the job site
+            "reasons": [c["reasons"] for c in result["candidates"]],
             "truncated": result["truncated"],
             "result": "ok",
         },
@@ -3606,6 +3611,7 @@ async def get_application_kit(
     response: Response,
     include_text: bool = Query(True),
     session: str = Query(""),
+    compact: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -3620,12 +3626,14 @@ async def get_application_kit(
     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant
     session's own short label (``kit.clean_session``; 422 otherwise): it is stored on
     the ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.
-    ``Cache-Control: no-store``."""
+    ``compact=true`` (PC runs) is the same kit, read and hold with the long text swapped for sizes
+    and pointers (``kit.compact_kit``). ``Cache-Control: no-store``."""
     response.headers["Cache-Control"] = "no-store"
     try:
         label = kit_service.clean_session(session)
         return await kit_service.build_kit(
             db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text, session=label,
+            compact=compact,
         )
     except SpineError as exc:
         _raise(exc)
@@ -4500,6 +4508,15 @@ async def _record_event(
                 db, user, application_id, int(result["event_id"]), source,
             )):
                 result, warnings = {**result, "status": "applied"}, [*warnings, sent]
+        if stored_type == "hold_released" and actor_for(user) != "web" and not result.get("already_existed"):
+            from src.services.applications import own_browser as own_browser_service  # noqa: PLC0415
+
+            # PC run pc-1905: the release reply said "keep going"; this one said nothing, and the run ended.
+            nxt = await own_browser_service.next_after_hold_release(
+                db, user, application_id, datetime.now(timezone.utc)
+            )
+            if nxt is not None:
+                result = {**result, "next": nxt}
         return {**result, "warnings": warnings}
     except SpineError as exc:
         _raise(exc)

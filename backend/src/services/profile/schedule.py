@@ -58,6 +58,10 @@ RUNNING = "running:"  # + duty: the slot that says a run has this duty now (owne
 # past its interval, the hunt queue hold and any back-off, until its next mark_done.
 RUN_NOW = "run_now:"
 RUN_NOW_MINUTES = 15
+# + duty: claims of that duty that ran out with no mark_done, in a row (``failures``); a mark_done that is not
+# failed clears it. Prod 2026-11-18: two batch runs claimed at 16:29 and 17:07, read kits, never marked done;
+# the claims expired silently and whats_due kept saying failures_in_row 0.
+LAPSED = "lapsed:"
 INBOX_AUTO_MODES = frozenset({"auto", "scheduled"})
 INBOX_DEFAULT_HOURS = 24
 _EVERY_RE = re.compile(r"^(\d{1,3})h$")
@@ -141,6 +145,9 @@ class DueFacts:
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
     running: dict[str, datetime] = field(default_factory=dict)
+    # Claims that ran out with no mark_done, in a row, per duty (LAPSED slots): shown in failures_in_row only,
+    # never a back-off (a lapsed claim frees its duty at once).
+    lapsed: dict[str, int] = field(default_factory=dict)
     # Duties the user pressed Run now for: {duty: pressed_at} (RUN_NOW slots).
     forced: dict[str, datetime] = field(default_factory=dict)
     # 2026-11-18 hunt: the user saved no target titles and the run invented 23. A due hunt then says `needs`.
@@ -271,7 +278,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         "run_now": sorted(forced_due),
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
         "last_tick_at": _iso(f.stamps.get(TICK)),
-        "failures_in_row": {d: int(f.failures.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
+        "failures_in_row": {d: int(f.failures.get(d, 0)) + int(f.lapsed.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
         "expected_every_hours": settings.SCHEDULE_TICK_HOURS,
         "checked_at": _iso(now),
     }
@@ -323,6 +330,48 @@ async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime)
             got.add(duty)
     await db._db.commit()
     return got
+
+
+async def sweep_lapsed(db: JobDatabase, user_id: str, now: datetime) -> list[str]:
+    """Count every claim that ran out with no ``mark_done``: ONE delete per duty frees the expired claim, so
+    each lapse is counted once however many reads race, then the duty's LAPSED slot adds one. Logged as
+    ``duty_claim_lapsed``. Returns the duties that lapsed (rule #12: scoped by user)."""
+    from src.utils.logger import safe_log_value  # noqa: PLC0415
+
+    cutoff = (now - timedelta(minutes=settings.DUTY_CLAIM_MINUTES)).astimezone(timezone.utc).isoformat(
+        timespec="microseconds"
+    )
+    lapsed: list[str] = []
+    for duty in settings.SCHEDULE_DUTIES:
+        cur = await db._db.execute(
+            "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ? AND done_at <= ? RETURNING done_at",
+            (user_id, RUNNING + duty, cutoff),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            continue
+        claimed_at = str(dict(row)["done_at"])
+        await db._db.execute(
+            "INSERT INTO assistant_duty_runs (user_id, duty, done_at, failures) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, "
+            "failures = assistant_duty_runs.failures + 1",
+            (user_id, LAPSED + duty, claimed_at),
+        )
+        log.warning("duty_claim_lapsed", extra={
+            "event": "duty_claim_lapsed", "user_id": safe_log_value(user_id), "duty": duty,
+            "claimed_at": safe_log_value(claimed_at), "reason": "no_mark_done"})
+        lapsed.append(duty)
+    if lapsed:
+        await db._db.commit()
+    return lapsed
+
+
+async def load_lapsed(db: JobDatabase, user_id: str) -> dict[str, int]:
+    """``{duty: claims lapsed in a row}`` (LAPSED slots; rule #12)."""
+    cur = await db._db.execute(
+        "SELECT duty, failures FROM assistant_duty_runs WHERE user_id = ? AND duty LIKE ?", (user_id, LAPSED + "%")
+    )
+    return {str(dict(r)["duty"])[len(LAPSED):]: int(dict(r)["failures"] or 0) for r in await cur.fetchall()}
 
 
 async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
@@ -382,6 +431,10 @@ async def mark(
     await db._db.execute(  # the run is over: the duty is free for the next run
         "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, RUNNING + duty)
     )
+    if not failed:  # a run that ended done or partial ends the lapses in a row
+        await db._db.execute(
+            "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, LAPSED + duty)
+        )
     await db._db.execute(
         "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
         "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
@@ -534,7 +587,7 @@ REACH_SCAN_LIMIT = 200
 async def _reach_ids(
     db: JobDatabase, user_id: str, now: datetime, line: Optional[int] = None, stamp: str = "reach:"
 ) -> list[int]:
-    """Open applications for the people hunt this run (see the module docstring), newest first.
+    """Open applications for the people hunt this run (see the module docstring), in ``_reach_order``.
     ``line`` is the user's score line; applications scored below it are left out. ``stamp`` names whose tries
     count: the scheduled run's (``reach:``) or the user's own browser's (``own_browser:reach:``)."""
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
@@ -544,7 +597,8 @@ async def _reach_ids(
     retry_after = (now - timedelta(hours=settings.REACH_RETRY_HOURS)).astimezone(timezone.utc).isoformat()
     test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
-        "SELECT a.id, a.fit_score FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "  # noqa: S608
+        "SELECT a.id, a.fit_score, a.created_at FROM applications a "  # noqa: S608
+        "WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "
         "AND (a.created_at >= ? OR EXISTS (SELECT 1 FROM application_events e WHERE e.application_id = a.id "
         "     AND e.user_id = a.user_id AND e.event_type = 'applied' AND e.occurred_at >= ?)) "
         "AND (SELECT COUNT(*) FROM application_contacts c WHERE c.application_id = a.id "
@@ -555,15 +609,54 @@ async def _reach_ids(
         (user_id, since, since, settings.REACH_TARGET_PEOPLE, stamp, retry_after, settings.REACH_MAX_ATTEMPTS,
          *test_params, REACH_SCAN_LIMIT),
     )
-    candidates = [
-        int(row["id"]) for row in map(dict, await cur.fetchall())
-        if rules.line_side(row["fit_score"], line) != "below"
-    ]
+    rows = [row for row in map(dict, await cur.fetchall()) if rules.line_side(row["fit_score"], line) != "below"]
+    candidates = await _reach_order(db, user_id, rows, now, stamp)
     pending_only = await _pending_only(db, user_id, candidates)
     duplicates = await _duplicates(db, user_id, candidates)
     if duplicates:
         log.info("reach_duplicates_skipped user=%s ids=%s", user_id, ",".join(str(a) for a in sorted(duplicates)))
     return [a for a in candidates if a not in pending_only and a not in duplicates][: settings.REACH_MAX_PER_RUN]
+
+
+def _when(raw: Any) -> datetime:
+    try:
+        at = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+async def _reach_order(
+    db: JobDatabase, user_id: str, rows: list[dict[str, Any]], now: datetime, stamp: str
+) -> list[int]:
+    """2026-11-18 coverage audit: reach took the 5 NEWEST each run, so when more than 5 applications arrived
+    between runs (25 a day, two runs a day), the older ones waited behind every newer one and could age out of
+    REACH_WINDOW_DAYS never searched. Order now: never worked and brought over REACH_FIRST_TRY_HOURS ago (oldest
+    first: each gets its first search within a day); then never worked (newest first); then worked before
+    (longest ago first)."""
+    if not rows:
+        return []
+    ids = [int(r["id"]) for r in rows]
+    marks = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        f"SELECT duty, done_at FROM assistant_duty_runs WHERE user_id = ? AND duty IN ({marks})",  # noqa: S608
+        (user_id, *(stamp + str(i) for i in ids)),
+    )
+    worked = {str(dict(r)["duty"])[len(stamp):]: _when(dict(r)["done_at"]) for r in await cur.fetchall()}
+    overdue_at = now - timedelta(hours=settings.REACH_FIRST_TRY_HOURS)
+    overdue, fresh, again = [], [], []
+    for r in rows:
+        made = _when(r["created_at"])
+        if str(r["id"]) in worked:
+            again.append((worked[str(r["id"])], r["id"]))
+        elif made <= overdue_at:
+            overdue.append((made, r["id"]))
+        else:
+            fresh.append((made, r["id"]))
+    if overdue:
+        log.info("reach_overdue user=%s ids=%s", user_id, ",".join(str(i) for _, i in sorted(overdue)[:20]))
+    return ([int(i) for _, i in sorted(overdue)] + [int(i) for _, i in sorted(fresh, reverse=True)]
+            + [int(i) for _, i in sorted(again)])
 
 
 async def _duplicates(db: JobDatabase, user_id: str, app_ids: list[int]) -> set[int]:
@@ -642,6 +735,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         running={k[len(RUNNING):]: v for k, v in stamps.items() if k.startswith(RUNNING)},
         forced={k[len(RUN_NOW):]: v for k, v in stamps.items() if k.startswith(RUN_NOW)},
         failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
+        lapsed=await load_lapsed(db, user_id),
         people_hunt=cfg.people_hunt,
         titles_missing=not [t for t in (profile.preferences.target_job_titles or []) if str(t).strip()],
         reach_ids=await _reach_ids(db, user_id, now, cfg.apply_min_score) if cfg.people_hunt else [],

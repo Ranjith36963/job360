@@ -10,7 +10,7 @@ uses). Both take the user from the session / token / OAuth subject, never from i
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -258,6 +258,7 @@ async def whats_due(
     ``mark_done``. The website's own read only looks."""
     _limit(user, "read", settings.SCHEDULE_READS_MAX_PER_HOUR)
     now = datetime.now(timezone.utc)
+    await schedule.sweep_lapsed(db, user.id, now)  # a claim that ran out with no mark_done counts, once
     answer = schedule.due_now(await schedule.load_facts(db, user.id, now), now)
     if duties:
         wanted = set(duties)
@@ -302,6 +303,14 @@ _NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
 BATCH_NOT_CLAIMED = 'You did not claim the batch: call whats_due(duties=["batch"]) first. Nothing was recorded.'
 
 
+_STEP_WORDS = {"refill": "refill the form", "fill": "fill the form"}
+
+
+def _row_steps(rows: list[dict[str, Any]]) -> str:
+    """``125 (refill the form); 133 (fill the form)``: what each row the batch stop names still needs."""
+    return "; ".join(f"{r['id']} ({_STEP_WORDS.get(str(r.get('step')), 'fill the form')})" for r in rows)
+
+
 def _next_batch_note(later: list[int]) -> str:
     if not later:
         return ""
@@ -328,16 +337,19 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
         if no_cv:
             _log("batch_stop_no_cv_left", user, rows=str(len(no_cv)), ids=",".join(str(r["id"]) for r in no_cv[:20]))
         return later
-    _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)))
+    # 2026-11-18 (20:55 run): the log named no rows, so the queue/gate disagreement on 125 and 136 was invisible.
+    _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)),
+         ids=safe_log_value(",".join(f"{r['id']}:{r['step']}" for r in rows[:20])))
     first = rows[0]
     raise HTTPException(
         status_code=409,
         detail=(
-            f"{len(rows)} queued jobs still need no owner input; next: application {first['id']} "
-            f"({first['company'] or 'unknown company'}). Keep working: fill its form (its CV is saved). "
-            "A partial run ends only when every queued job is waiting on the owner or blocked. Large tool "
-            "outputs and outputs saved to a file are normal; they are not a reason to stop. "
-            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}.{note}"
+            f"{len(rows)} queued jobs still need no owner input (no open ask, no block); next: application "
+            f"{first['id']} ({first['company'] or 'unknown company'}). Keep working: {first['step']} its form (its CV "
+            "is saved), then check_submit. A partial run ends only when every queued job is waiting on the owner or "
+            "blocked. Large tool outputs and outputs saved to a file are normal; they are not a reason to stop. "
+            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}. "
+            f"Each: {_row_steps(rows[:5])}.{note}"
         ),
     )
 
@@ -365,18 +377,47 @@ def _run_since(stamps: dict[str, datetime], duty: str, now: datetime) -> datetim
 
 
 async def _people_score(db: JobDatabase, user: CurrentUser, duty: str, ids: list[int], now: datetime) -> PeopleScoreOut:
-    """Job360's count (rule #12: scoped by user). reach: everyone saved at each listed job, whoever saved them and
-    when. network: new people with no job this assistant saved since the run took the duty."""
+    """Job360's count (rule #12: scoped by user). reach: everyone saved at each listed job's COMPANY (on that job,
+    another job there, or no job), whoever saved them and when, each person once (2026-11-18: Robert Walters 954/955
+    and an existing YAL contact were not counted). network: new people with no job this assistant saved since the
+    run took the duty."""
     target = settings.NETWORK_MAX_PER_RUN if duty == "network" else settings.REACH_TARGET_PER_JOB
     score = PeopleScoreOut(target=target, minimum=target if duty == "network" else settings.REACH_MIN_PER_JOB)
     if duty == "reach":
+        from src.services.applications import contacts  # noqa: PLC0415 - profile <-> spine cycle
+
         cur = await db._db.execute(
-            "SELECT application_id, COUNT(*) AS n FROM application_contacts "  # noqa: S608 - placeholders only
-            f"WHERE user_id = ? AND application_id IN ({', '.join('?' for _ in ids)}) GROUP BY application_id",
+            "SELECT id, job_company FROM applications "  # noqa: S608 - placeholders only
+            f"WHERE user_id = ? AND id IN ({', '.join('?' for _ in ids)})",
             (user.id, *ids),
         )
-        got = {int(dict(r)["application_id"]): int(dict(r)["n"]) for r in await cur.fetchall()}
-        score.per_job = {str(i): got.get(i, 0) for i in ids}
+        job_key = {
+            int(r["id"]): contacts.company_key(str(r["job_company"] or "")) for r in map(dict, await cur.fetchall())
+        }
+        cur = await db._db.execute(
+            "SELECT ac.application_id, ac.name, ac.linkedin_url, ac.company, a.job_company "
+            "FROM application_contacts ac "
+            "LEFT JOIN applications a ON a.id = ac.application_id WHERE ac.user_id = ?",
+            (user.id,),
+        )
+        people: dict[str, set[str]] = {}
+        for row in map(dict, await cur.fetchall()):
+            key = contacts.contact_company_key(row)
+            if key:
+                who = (contacts.linkedin_identity_key(str(row["linkedin_url"] or ""))
+                       or contacts.name_identity_key(str(row["name"] or "")))
+                people.setdefault(key, set()).add(who)
+        per_job = {}
+        for i in ids:
+            key = job_key.get(i, "")
+            if key:
+                per_job[str(i)] = len(people.get(key, set()))
+            else:  # no company to match on: the people on this job only
+                cur = await db._db.execute(
+                    "SELECT COUNT(*) FROM application_contacts WHERE user_id = ? AND application_id = ?", (user.id, i))
+                got = await cur.fetchone()
+                per_job[str(i)] = int(got[0]) if got else 0
+        score.per_job = per_job
         return score
     since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
     cur = await db._db.execute(

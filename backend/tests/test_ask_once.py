@@ -395,3 +395,46 @@ async def test_the_assistant_drafts_every_memory_question_and_the_users_edit_is_
         after = [q["topic"] for c in (await client.get("/api/profile/questionnaire")).json()["countries"]
                  if c["country"] == "GB" for q in c["questions"]]
         assert "salary.GB" not in after and "right_to_work.GB.work_authorization" in after
+
+
+@pytest.mark.asyncio
+async def test_get_profile_tells_the_assistant_to_draft_a_missing_answer_never_to_leave_it():
+    """Owner 2026-11-18: get_profile's text still said "ask only that, once, then save it; never guess",
+    which contradicts drafting every Answer-once question. It now says draft a guess the user confirms."""
+    from src.api.mcp_server import build_server
+
+    text = " ".join(next(t.description or "" for t in await build_server().list_tools() if t.name == "get_profile").split())
+    assert "never guess" not in text
+    assert 'A missing key means "not answered": draft a guess (user_info.answers, approved: false)' in text
+
+
+@pytest.mark.asyncio
+async def test_the_assistant_drafts_from_the_same_places_the_card_asks(authenticated_async_context, fixture_user_id):
+    """Owner 2026-11-18: the card asked 81 questions (queued jobs' countries too) while get_profile listed only
+    10 for the assistant to draft, so most boxes stayed empty. Both now read the same places; the hourly Apply
+    run drafts them first."""
+    from src.api.mcp_server import build_server
+    from src.api.routes.recipes import load_recipe
+
+    async with authenticated_async_context() as client:
+        saved = await client.patch("/api/profile", json={"edits": [{"path": "user_info.right_to_work", "value": {
+            "countries": [{"country": "GB", "work_authorization": "citizen"}]}}]})
+        assert saved.status_code == 200, saved.text
+        gr = await _bring(client, "Acme", "GR")  # a queued job in a country the profile has no row for
+        queued = await client.post(f"/api/applications/{gr}/events", json={"event_type": "queued", "payload": {}})
+        assert queued.status_code == 201, queued.text
+        card = {c["country"] for c in (await client.get("/api/profile/questionnaire")).json()["countries"]}
+    assert "GR" in card
+    from src.api import mcp_server
+
+    async with authenticated_async_context():
+        mcp_server._current_user.set(mcp_server.CurrentUser(
+            id=fixture_user_id, email="e2e@example.com", email_verified=True, auth_via="token", actor_name="cc"))
+        try:
+            payload = await build_server()._tool_manager.get_tool("get_profile").fn(view="full")
+        finally:
+            mcp_server._current_user.set(None)
+    places = {r.get("country") for r in payload.get("common_questions_open") or [] if r.get("country")}
+    assert "GR" in places, "the assistant is told to draft the queued country's questions too"
+    batch = " ".join(load_recipe("batch").text.split())
+    assert "`answers.draft_now` set: FIRST draft every listed Answer once question" in batch

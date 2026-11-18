@@ -7,7 +7,9 @@ Job360 never sees, keeps or logs the code: the event is refused unless ALL of th
 * ``to`` is the user's own email (the account email or the profile's ``contact.email``);
 * ``form_host`` is a site this application already names (its job link, a ``form_filled`` host, a ``blocked``
   ``page_host``) and the sender's domain is that host, shares its registrable domain, or is that host's applicant
-  system (``sites.SITES``). Exact host and label-boundary compares only, never a substring;
+  system (``sites.SITES``), or the sender's registrable domain is the EMPLOYER's own (:func:`employer_domain`: the
+  application's job link when it is the employer's own site; unknown = not accepted). Exact host and
+  label-boundary compares only, never a substring;
 * neither the sender nor the form is an account-security, mail or payment provider (:data:`FORBIDDEN_DOMAINS`),
   and the subject has no password / reset / bank / payment word (:data:`FORBIDDEN_WORDS`, word by word);
 * ``purpose`` is ``apply`` or ``verify_email``;
@@ -103,6 +105,32 @@ def sender_matches(sender_host: str, form_host: str) -> bool:
     return any(_within(sender_host, d) for d in _ats_domains(form_host))
 
 
+def employer_domain(job_url: str) -> str:
+    """The registrable domain of the job's OWN site (``www.wsp.com`` -> ``wsp.com``), "" when the link is an
+    applicant system, a job board or a shared host (many employers' jobs live there, so it names none of them) or
+    no http(s) link at all. Only data Job360 stores (the application's job link); "" = unknown, never a guess."""
+    from src.core import settings  # noqa: PLC0415
+    from src.services.applications.job_checks import apply_host, classify_host  # noqa: PLC0415
+
+    host = _host(apply_host(job_url or ""))
+    if not host or classify_host(host) != "unknown" or host in settings.SHARED_ATS_HOSTS:
+        return ""
+    if any(_within(host, d) for d in settings.ATS_EMAIL_ONLY_HOSTS):  # an applicant system: many employers live there
+        return ""
+    return registrable(host)
+
+
+def sender_match(sender_host: str, form_host: str, employer: str = "") -> str:
+    """Why the sender may send this code: ``form_site`` (:func:`sender_matches`), ``employer_site`` (its
+    registrable domain IS the employer's own, exact compare; owner 2026-11-18: a WSP form on an applicant-system host
+    whose code came from wsp.com) or ``none`` (a third party)."""
+    if sender_matches(sender_host, form_host):
+        return "form_site"
+    if sender_host and form_host and employer and registrable(sender_host) == employer:
+        return "employer_site"
+    return "none"
+
+
 def forbidden(host: str) -> bool:
     from src.services.fetch.guard import is_linkedin_host  # noqa: PLC0415
 
@@ -126,6 +154,7 @@ def _when(value: Any) -> Optional[datetime]:
 
 def problems(
     payload: Any, *, own_emails: set[str], known_hosts: set[str], now: datetime, used_last_hour: int = 0,
+    employer_domain: str = "",
 ) -> list[str]:
     """Every reason this code may NOT be used (empty = it may). Pure: no DB, no clock of its own."""
     if not isinstance(payload, dict):
@@ -141,7 +170,7 @@ def problems(
     form, sender = _host(payload["form_host"]), sender_domain(payload["sender"])
     if not form or form not in known_hosts:
         out.append("form_host_unknown")
-    if not sender or not sender_matches(sender, form):
+    if not sender or sender_match(sender, form, employer_domain) == "none":
         out.append("sender_not_site")
     if (sender and forbidden(sender)) or (form and forbidden(form)):
         out.append("sender_forbidden")
@@ -231,13 +260,16 @@ async def check(
     own = {str(e).strip().casefold() for e in (user.email, profile.user_info.contact.get("email")) if e}
     recent = [e for e in await kit._events(db, user.id, application_id, (EVENT_TYPE,))
               if (t := _when(e["recorded_at"])) is not None and when - t < timedelta(hours=1)]
+    employer = employer_domain(str(app_row.get("job_url") or ""))
     found = problems(payload, own_emails=own, known_hosts=await _known_hosts(db, user.id, application_id, app_row),
-                     now=when, used_last_hour=len(recent))
+                     now=when, used_last_hour=len(recent), employer_domain=employer)
     form = _host(payload.get("form_host")) if isinstance(payload, dict) else ""
     sender = sender_domain(payload.get("sender")) if isinstance(payload, dict) else ""
     get_audit_logger().info("email_code_check", extra={
         **audit, "form_host": safe_log_value(form, max_len=100), "sender_host": safe_log_value(sender, max_len=100),
         "result": "refused" if found else "ok", "reasons": ",".join(found),
+        # which rule let the sender in (form_site | employer_site | none) and whether the employer's domain was known
+        "sender_match": sender_match(sender, form, employer), "employer_domain_known": bool(employer),
     })
     if found:
         raise SpineError(422, "email code refused: " + "; ".join(found) + ". Record blocked otp_needed instead.")

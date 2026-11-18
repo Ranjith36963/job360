@@ -828,9 +828,20 @@ async def _other_jobs_named(db: JobDatabase, user_id: str, app_row: dict[str, An
         company = str(dict(row)["job_company"] or "").strip()
         if len(company) < 3 or company.lower() == own or company in named:
             continue
-        if re.search(rf"(?<!\w){re.escape(company)}(?!\w)", text, re.IGNORECASE):
+        hits = re.finditer(rf"(?<!\w){re.escape(company)}(?!\w)", text, re.IGNORECASE)
+        if any(not _inside_host(text, m.start(), m.end()) for m in hits):
             named.append(company)
     return named
+
+
+def _inside_host(text: str, start: int, end: int) -> bool:
+    """2026-11-18 (WSP block, assistant-browser run 17:05): ``text[start:end]`` is one label of a longer dotted
+    host name ("lbg" in ``lbg.wd3.myworkdayjobs.com``). A tenant host carries the employer's short name, and two
+    jobs on one ATS host are two applications: a host names a SITE, never another job. Plain index checks only."""
+    def joined(dot: int, word: int) -> bool:
+        return 0 <= dot < len(text) and 0 <= word < len(text) and text[dot] == "." and text[word].isalnum()
+
+    return joined(start - 1, start - 2) or joined(end, end + 1)
 
 
 async def _first_proof_ask(
@@ -858,10 +869,14 @@ async def create_ask(
     asked_by: str,
     kind: str = "",
     questions: Optional[list[dict[str, Any]]] = None,
+    *,
+    own_words: bool = False,
 ) -> dict[str, Any]:
     """Record one ask. 422 on empty/oversized text, 404 if the application is
     not the caller's, 429 when too many asks are already open. ``kind`` (ASK_KINDS, "" = unsaid)
-    and ``questions`` (validate_questions) are optional; a blocker carries no questions."""
+    and ``questions`` (validate_questions) are optional; a blocker carries no questions.
+    ``own_words``: Job360 wrote the question itself for THIS ``application_id`` (``blocked.ask_question``), so
+    the one-ask-per-job name scan does not run: it is keyed by the application, never by a site's name."""
     if kind and kind not in ASK_KINDS:
         raise SpineError(422, f"kind must be one of {', '.join(ASK_KINDS)}")
     clean_qs = validate_questions(questions)
@@ -880,7 +895,13 @@ async def create_ask(
     app_row = await get_owned_application(db, user_id, application_id) if application_id is not None else None
     if application_id is not None and app_row is None:
         raise SpineError(404, "application not found")
-    if app_row is not None and (others := await _other_jobs_named(db, user_id, app_row, f"{clean_q}\n{clean_ctx}")):
+    if app_row is not None and not own_words and (
+        others := await _other_jobs_named(db, user_id, app_row, f"{clean_q}\n{clean_ctx}")
+    ):
+        get_audit_logger().info("ask_refused", extra={
+            "event": "ask_refused", "user_id": safe_log_value(user_id), "reason": "names_other_job",
+            "application_id": safe_log_value(str(application_id)), "named": len(others),
+        })
         raise SpineError(
             422,
             f"one ask per job: this ask also names {', '.join(others)} (another open application). "

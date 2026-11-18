@@ -1382,19 +1382,31 @@ async def _open_ask_kinds(db: JobDatabase, user_id: str, application_id: int) ->
     """Kinds of this application's open asks (one query; mirrors ``asks._job_has_open_ask``). Left out: the
     doctor's "keep this lesson?" ask (a question row keyed ``doctor_repeat_*``) and the proof ask
     (context ``proof_missing:*``): neither is about the form. Outreach files no ask."""
+    return (await open_ask_kinds_for_apps(db, user_id, [application_id])).get(application_id, ())
+
+
+async def open_ask_kinds_for_apps(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, tuple[str, ...]]:
+    """``{application_id: kinds}`` of the open asks the submit gate counts, for many rows in one query; rows with
+    none are absent. The ONE truth for "this row waits on the owner": ``check_submit`` (``open_ask_decision``) and
+    the queue's ``waiting_on_owner`` / batch stop (``queue_preflight``) both read it (2026-11-18, batch run
+    20:55: the queue called rows with an open ask "needs nothing" while the gate said ``question_open``)."""
     from src.services.applications import asks as asks_service  # noqa: PLC0415 - keep the import graph flat
 
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
     cur = await db._db.execute(
-        "SELECT kind, context, questions FROM application_asks WHERE user_id = ? AND application_id = ? "
-        "AND answered_at IS NULL AND withdrawn_at IS NULL",
-        (user_id, application_id),
+        "SELECT application_id, kind, context, questions FROM application_asks "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND application_id IN ({marks}) AND answered_at IS NULL AND withdrawn_at IS NULL "
+        "ORDER BY id",
+        [user_id, *ids],
     )
-    kinds: list[str] = []
-    for kind, context, questions in await cur.fetchall():
+    kinds: dict[int, list[str]] = {}
+    for app_id, kind, context, questions in await cur.fetchall():
         if str(context or "").startswith("proof_missing:") or asks_service.is_doctor_only(questions):
             continue
-        kinds.append(str(kind or "") or "question")
-    return tuple(kinds)
+        kinds.setdefault(int(app_id), []).append(str(kind or "") or "question")
+    return {app_id: tuple(k) for app_id, k in kinds.items()}
 
 
 async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -3038,11 +3050,12 @@ def kit_missing(missing: list[dict[str, str]]) -> list[dict[str, str]]:
 
 async def build_kit(
     db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime, include_text: bool = True,
-    session: str = "",
+    session: str = "", compact: bool = False,
 ) -> dict[str, Any]:
     """Build the kit for one application and record that it was read.
     ``session`` is the caller's own label (:func:`clean_session`, already cleaned):
     it is stored on the ``kit_read`` and tells two sessions of one assistant apart.
+    ``compact`` (PC runs) builds the same kit, then :func:`compact_kit` drops the long text.
 
     404 for an application that is not the caller's (no link row is written);
     429 over ``KIT_READS_MAX_PER_HOUR``. Writes one ``kit_read`` event (the
@@ -3174,7 +3187,7 @@ async def build_kit(
         "application_id": application_id, "kit_event_id": event["event_id"], "missing_count": len(missing),
         "hold": bool(hold), "session": safe_log_value(session, max_len=SESSION_MAX_CHARS),
         "duplicate": dup["flag"], "surface": "mcp" if user.auth_via != "session" else "web",
-        "result": "ok", "known_people_count": people_here["count"],
+        "result": "ok", "known_people_count": people_here["count"], "compact": compact,
     })
     out: dict[str, Any] = {
         "kit": {"id": event["event_id"], "sha256": kit_sha, "generated_at": now.isoformat()},
@@ -3213,6 +3226,62 @@ async def build_kit(
         out["cv_none_reason"] = NO_CV_REASON
     if letter is None:
         out["cover_letter_none_reason"] = NO_LETTER_REASON
+    return compact_kit(out, approved_total=len(approved)) if compact else out
+
+
+# The settings a form task reads in the compact kit; the rest: get_profile `settings`.
+_COMPACT_SETTINGS = ("paused", "pause_reason", "paused_until", "submit_mode", "use_email_codes", "submit_preview")
+# What a compact answer keeps (falsy optional fields are dropped).
+_COMPACT_ANSWER_KEYS = ("key", "value", "source", "state", "company", "topic", "label", "remembered_at")
+COMPACT_FULL = "get_application_kit(application_id, session, compact=false)"
+
+
+def compact_kit(full: dict[str, Any], *, approved_total: int) -> dict[str, Any]:
+    """The kit for one PC-run task (owner, 2026-11-18: the 15:06 run filled its context on ~34,000-character
+    kits). Keeps ids, the form URL, file links, hashes, the short answers to type and every gate fact; the
+    long parts become sizes plus a pointer: document text (``TEXT_MORE``), the approved essays (check_form
+    returns the value for each live question), ``last_fill``, ``known_people`` and the instruction lines
+    (``COMPACT_FULL``). Pure: same kit_read, links and hold as the full kit."""
+    out = dict(full)
+    # The ad's checks were read when the job was judged; their codes stay, the quotes and reasons do not.
+    job = {k: v for k, v in full["job"].items() if v is not None and k != "checks"}
+    out["job"] = {**job, "checks": {str(c.get("code")): c.get("ok") for c in full["job"]["checks"]}}
+    for kind in ("cv", "cover_letter"):
+        doc = full.get(kind)
+        if doc is not None:  # sha256 / chars stay those of the FULL text; the pointer is in `instructions`
+            out[kind] = {k: v for k, v in doc.items() if k not in ("text_truncated", "text_more")} | {"text": ""}
+    answers = {
+        group: [{k: item[k] for k in _COMPACT_ANSWER_KEYS if k in ("key", "value", "source", "state") or item.get(k)}
+                for item in items]
+        for group, items in full["answers"].items() if group != "approved_text" and items
+    }
+    out["answers"] = answers
+    if approved_total:
+        out["answers_omitted"] = approved_total
+    else:
+        out.pop("answers_omitted", None)
+    # Each setting as its effective value ({value, effective} rows in the full kit).
+    out["settings"] = {
+        k: v["effective"] if isinstance(v, dict) and "effective" in v else v
+        for k, v in full["settings"].items() if k in _COMPACT_SETTINGS
+    }
+    people = full["known_people"]
+    out["known_people"] = {"count": people["count"], "people": [], "truncated": bool(people["count"])}
+    out["last_fill"] = []
+    cv_chars = (full.get("cv") or {}).get("chars", 0)
+    letter_chars = (full.get("cover_letter") or {}).get("chars", 0)
+    out["instructions"] = [
+        f"COMPACT kit. Left out: cv text {cv_chars} chars, cover_letter text {letter_chars} chars "
+        f"({TEXT_MORE}); {approved_total} approved_text answers (check_form returns the saved value for each "
+        f"live question); {len(full['last_fill'])} last_fill answers, {people['count']} known_people, the other "
+        f"settings and the instruction lines ({COMPACT_FULL}). Upload from `file.url`; type only kit or "
+        "check_form answers; never guess.",
+    ]
+    if "country_instructions" in full:
+        out["instructions"].append(
+            f"country_instructions: the user's own rules for jobs in {full['country_instructions']['country']}; "
+            "follow them on this application."
+        )
     return out
 
 

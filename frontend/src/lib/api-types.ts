@@ -798,7 +798,8 @@ export interface paths {
          *     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant
          *     session's own short label (``kit.clean_session``; 422 otherwise): it is stored on
          *     the ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.
-         *     ``Cache-Control: no-store``.
+         *     ``compact=true`` (PC runs) is the same kit, read and hold with the long text swapped for sizes
+         *     and pointers (``kit.compact_kit``). ``Cache-Control: no-store``.
          */
         get: operations["get_application_kit_api_applications__application_id__kit_get"];
         put?: never;
@@ -10060,6 +10061,8 @@ export interface components {
             event_type: string;
             /** Follow Up On */
             follow_up_on: string | null;
+            /** Next */
+            next?: string | null;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */
@@ -13406,6 +13409,7 @@ export interface operations {
             query?: {
                 include_text?: boolean;
                 session?: string;
+                compact?: boolean;
             };
             header?: {
                 authorization?: string | null;

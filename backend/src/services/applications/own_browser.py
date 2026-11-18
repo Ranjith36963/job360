@@ -75,6 +75,8 @@ HELD_BACK_WHY = ("weekly_limit", "release_backoff", "pace_gap", "daily_max", "cl
 # An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
 # returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
+# How long after its newest take a session still counts as the live PC run (the recipe's 40-minute cap + margin).
+PC_RUN_MINUTES = 45
 DECISIONS = ("approve", "decline")
 WHY_WORDS = {
     "job360_login_required": "Job360's browser hit a sign-in page.",
@@ -420,15 +422,60 @@ async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetim
     return max(seen) if seen else None
 
 
-async def stamp_take(db: JobDatabase, user_id: str, now: datetime) -> None:
+async def stamp_take(db: JobDatabase, user_id: str, now: datetime, session: str = "") -> None:
     """One slot per user: the newest own-browser take, whatever it answered (owner #12: a PC session that is up
-    but finds nothing to do, or is told to wait, is alive). Not a scheduled duty: ``whats_due`` never reads it."""
+    but finds nothing to do, or is told to wait, is alive), and that take's ``session`` label (``state``; read by
+    :func:`next_after_hold_release`). Not a scheduled duty: ``whats_due`` never reads it."""
     await db._db.execute(
-        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
-        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
-        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat()),
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at, state) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, state = EXCLUDED.state",
+        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat(), json.dumps({"session": session})),
     )
     await db._db.commit()
+
+
+async def next_after_hold_release(
+    db: JobDatabase, user: CurrentUser, application_id: int, now: datetime
+) -> Optional[str]:
+    """The ``next`` of an assistant's ``hold_released`` reply: the release reply's "Keep going" sentence
+    (:func:`_keep_going`) when the session that held this application (its newest labelled kit read by this actor)
+    is the one that last took from the PC queue inside :data:`PC_RUN_MINUTES`; else ``None`` (a cloud apply run
+    never takes PC tasks). PC run pc-1905 (2026-11-18): an application is closed with ``hold_released``, not
+    ``release``, and that reply said nothing, so the run went to its summary with ~45 tasks waiting."""
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? AND event_type = 'kit_read' "
+        "AND recorded_by = ? ORDER BY id DESC LIMIT 1",
+        (user.id, application_id, actor_for(user)),
+    )
+    row = await cur.fetchone()
+    held_by = ""
+    if row is not None:
+        raw = dict(row)["payload"]
+        payload = raw if isinstance(raw, dict) else json.loads(raw or "{}")
+        held_by = str(payload.get("session") or "")
+    cur = await db._db.execute(
+        "SELECT done_at, state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user.id, TAKE_SLOT)
+    )
+    slot = await cur.fetchone()
+    took = ""
+    if slot is not None:
+        got = dict(slot)
+        try:
+            state = json.loads(got["state"] or "{}")
+        except ValueError:
+            state = {}
+        fresh = _when(got["done_at"])
+        if isinstance(state, dict) and fresh is not None and now - fresh <= timedelta(minutes=PC_RUN_MINUTES):
+            took = str(state.get("session") or "")
+    if not held_by or held_by != took:
+        _log("own_browser_hold_release_next", user.id, "not_pc_run", application_id=application_id,
+             pc_session=bool(took))
+        return None
+    nxt = await _keep_going(db, user, held_by, "application", "hold_released", now, f"application:{application_id}")
+    got_next = nxt["next"]
+    return str(got_next) if got_next is not None else None
 
 
 async def load_li_state(db: JobDatabase, user_id: str) -> dict[str, Any]:
@@ -660,8 +707,20 @@ async def _application_tasks(
                                     route=learned.LEARNED_ROUTE)
         if route.kind == "own_browser":
             routes.append((app_id, route))
+    # 2026-11-18 (pc-1307 .. pc-1810): Revolut 787 (fit 40, line 60) was taken and let go every hour; the kit
+    # always stops a job the user's own rule drops, so it is never a PC task (the batch queue's rule).
+    dropped = await spine.below_line_dropped(db, user.id, [a for a, _ in routes])
+    # Same day: a fixed order behind a 60-minute cooldown (the run's own cadence) and a QUEUE_MAX cut gave the
+    # same first jobs every hour and never reached the rest. A job never let go comes first, in the order above;
+    # then the one let go longest ago. Read before the cut, so a job past QUEUE_MAX gets its turn.
+    last_try = await _last_released(db, user.id, [a for a, _ in routes if a not in dropped])
+    kept = [(a, r) for a, r in routes if a not in dropped]
+    kept.sort(key=lambda ar: (ar[0] in last_try, last_try.get(ar[0], "")))  # stable: ties keep the order above
+    if routes:
+        _log("own_browser_application_order", user.id, "ok", total=len(routes), below_line=sorted(dropped),
+             tried=len(last_try), first=[a for a, _ in kept[:3]])
     out: list[dict[str, Any]] = []
-    for app_id, route in routes:
+    for app_id, route in kept:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
             continue
         a = apps[app_id]
@@ -684,7 +743,8 @@ async def queue_tasks(
     """The tasks that wait for the user's own browser: approved, unsent LinkedIn drafts (oldest approval first),
     then the signed-in LinkedIn hunt and people search when due (``pc_duties``, owner 2026-11-03), then
     applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
-    batch-queued Easy Apply applications (an apply link on linkedin.com, no open block). With a
+    batch-queued Easy Apply applications (an apply link on linkedin.com, no open block); applications never let go
+    first, then the one let go longest ago, and never one the user's own rule drops below the line. With a
     ``session`` (an assistant's read) an application another session holds is left out; the website passes none."""
     from src.services.applications import pc_duties  # noqa: PLC0415
 
@@ -825,7 +885,7 @@ def _next_step(task: dict[str, Any]) -> str:
                 f'then own_browser_queue release (session, task_id="{task["task_id"]}", reason="done"), or reason '
                 "captcha | login_wall | other when you could not finish it")
     if task["kind"] == "application":
-        return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
+        return f'get_application_kit(application_id={task["application_id"]}, session="<your session>", compact=true)'
     done = ("Connect, Send without a note, then own_browser_queue release reason invited" if task.get("no_note")
             else "Connect, Add a note, paste the draft exactly, send, then record_event outreach_sent"
             if task.get("linkedin_state") == "not_connected" and not task.get("owner_yes", True)
@@ -855,7 +915,7 @@ async def take(
     if not label:
         raise SpineError(422, "session is needed: a short label that tells your sessions apart")
     actor = actor_for(user)
-    await stamp_take(db, user.id, now)
+    await stamp_take(db, user.id, now, label)
     win = await window(db, user.id, now)
     if win["why"] == "paused":
         _log("own_browser_take", user.id, "paused")
@@ -1003,6 +1063,20 @@ async def _recently_released(db: JobDatabase, user_id: str, app_ids: list[int], 
         (user_id, cutoff, *app_ids),
     )
     return {int(dict(r)["application_id"]) for r in await cur.fetchall()}
+
+
+async def _last_released(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, str]:
+    """``{application_id: recorded_at}`` of each application's newest ``hold_released`` (any session): when it was
+    last tried and let go. Applications never let go are absent. One query, scoped by ``user_id``."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT application_id, MAX(recorded_at) AS last FROM application_events WHERE user_id = ? "  # noqa: S608
+        f"AND event_type = 'hold_released' AND application_id IN ({marks}) GROUP BY application_id",
+        (user_id, *app_ids),
+    )
+    return {int(dict(r)["application_id"]): str(dict(r)["last"]) for r in await cur.fetchall()}
 
 
 async def _keep_going(
