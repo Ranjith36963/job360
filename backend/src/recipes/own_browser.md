@@ -38,6 +38,8 @@ This is the whole run on the user's PC, only while it is on. Every LinkedIn step
 6. After every alert, `own_browser_queue(action="save_state", state=...)` with the new cursor and counts.
 **C. Never apply in B:** the jobs you bring are queued; the CV review and bulk apply runs (or the next PC run, as Easy Apply tasks) take them.
 
+**Close the run's tabs** before the summary: tabs_close_mcp on every tab this run opened (the whole tab group), so no group is left open for the next hourly run; a close that times out: note it once in the summary.
+
 **Summary** (from what Job360 STORED): A) tasks taken by kind; LinkedIn sent and invited (who); applications submitted (company, title, check_submit's answer); blocked or stopped (why); asks sent. B) alerts swept (rows, dropped by reason, opened, brought: company, title, score, link). LinkedIn pause, if any, first. Anything the user must do.
 
 **Other assistants** (web research). Every detail below comes from search summaries and none is confirmed.
