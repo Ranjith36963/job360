@@ -622,3 +622,16 @@ def test_forms_recipe_never_confirms_the_users_own_right_to_work_per_form():
     text = load_recipe("forms").text
     assert "confirmed with the user on this form" not in text
     assert "answer from the user's own Memory record for that country, filled without asking" in text
+
+
+def test_the_pc_alert_ranking_comes_from_the_users_own_profile_only():
+    """Audit 6.3 (owner rule 2026-11-18, "Claude is the intelligence"): step B4 ranked every user's LinkedIn
+    alerts by one owner's junior titles. The order comes from the profile's own target titles and level; no
+    title list is written into the recipe."""
+    from src.api.routes.recipes import load_recipe
+
+    lines = [flat(line) for line in load_recipe("own_browser").text.splitlines()]
+    rank = next(line for line in lines if line.startswith("4. rank the rest:"))
+    assert "the profile's own target titles and level (get_profile, step 1) first" in rank
+    for title in ("junior", "graduate", "forward deployed", "agentic", "ai-native"):
+        assert title not in flat(load_recipe("own_browser").text), title
