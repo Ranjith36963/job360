@@ -31,7 +31,7 @@ Duty = Literal["hunt", "inbox", "batch", "reach", "network"]
 Outcome = Literal["done", "partial", "failed"]
 RunReason = Literal[
     "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
-    "needs_user", "error",
+    "needs_user", "error", "no_review",
 ]
 
 
@@ -136,6 +136,9 @@ class MarkDoneIn(BaseModel):
     note: str = Field(default="", max_length=300)
     # Only with `hunt` (2026-11-17): every source's counts or exact skip reason, and the kit funnel (HUNT_SOURCES).
     report: Optional[HuntReportIn] = None
+    # Only with reach/network (2026-11-18): true when the Doctor check AND a separate reviewer checked every person
+    # and note this run saved. An assistant's people run marked done without it is recorded partial, no_review.
+    reviewed: bool = False
 
 
 class MarkDoneOut(BaseModel):
@@ -310,6 +313,10 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
 # asks the user, and does not stop short without saying what each free lookup returned.
 _ONE_TOOL_DOWN = frozenset({"tool_unavailable", "paid_plan_needed", "sign_in_needed", "no_work", "needs_user"})
 _FREE_LOOKUPS = ("sprouts", "clay", "vibe")
+NO_REVIEW_NOTE = (
+    "Recorded as partial (no_review): a people run is done only after the Doctor check (get_recipe(\"doctor\")) and "
+    "a separate reviewer checked every person and note. Next run: do both, then mark_done with reviewed=true."
+)
 
 
 async def _refuse_undrafted_people(
@@ -487,8 +494,16 @@ async def mark_done(
                 ),
             )
         await _refuse_undrafted_people(db, user, body.duty, ids, now)
-    await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=body.outcome, reason=body.reason or "")
-    _log("schedule_duty_done", user, duty=body.duty, outcome=body.outcome, reason=body.reason or "",
+    if body.reviewed and body.duty not in ("reach", "network"):
+        raise HTTPException(status_code=422, detail="reviewed is only for duty reach or network")
+    outcome, reason, said = body.outcome, body.reason, ""
+    if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "done" and not body.reviewed:
+        # 2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer.
+        outcome, reason = "partial", "no_review"
+        said = NO_REVIEW_NOTE
+        _log("people_run_unreviewed", user, duty=body.duty, reason="no_review")
+    await schedule.mark(db, user.id, body.duty, now, ids or None, outcome=outcome, reason=reason or "")
+    _log("schedule_duty_done", user, duty=body.duty, outcome=outcome, reason=reason or "",
          next_batch=str(len(later)))
     failures = int((await schedule.load_runs(db, user.id)).get(body.duty, {}).get("failures") or 0)
     if body.duty == "hunt" and body.outcome != "failed":  # Ignition: a finished hunt starts reach and the batch
@@ -497,8 +512,8 @@ async def mark_done(
         await duty_trigger.ignite(user.id, ("reach", "batch"), "hunt_done", db=db)
     stamp = now.isoformat(timespec="seconds")
     return MarkDoneOut(
-        duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=body.outcome, failures_in_row=failures,
-        next_batch=later, note=_next_batch_note(later),
+        duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=outcome, failures_in_row=failures,
+        next_batch=later, note=said or _next_batch_note(later),
     )
 
 

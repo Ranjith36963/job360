@@ -7065,7 +7065,8 @@
                   "network_blocked",
                   "rate_limited",
                   "needs_user",
-                  "error"
+                  "error",
+                  "no_review"
                 ],
                 "type": "string"
               },
@@ -10790,7 +10791,8 @@
                   "network_blocked",
                   "rate_limited",
                   "needs_user",
-                  "error"
+                  "error",
+                  "no_review"
                 ],
                 "type": "string"
               },
@@ -10809,6 +10811,11 @@
                 "type": "null"
               }
             ]
+          },
+          "reviewed": {
+            "default": false,
+            "title": "Reviewed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -15724,7 +15731,8 @@
               "network_blocked",
               "rate_limited",
               "needs_user",
-              "error"
+              "error",
+              "no_review"
             ],
             "title": "Reason",
             "type": "string"
