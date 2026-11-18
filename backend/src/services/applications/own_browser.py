@@ -660,8 +660,20 @@ async def _application_tasks(
                                     route=learned.LEARNED_ROUTE)
         if route.kind == "own_browser":
             routes.append((app_id, route))
+    # 2026-11-18 (pc-1307 .. pc-1810): Revolut 787 (fit 40, line 60) was taken and let go every hour; the kit
+    # always stops a job the user's own rule drops, so it is never a PC task (the batch queue's rule).
+    dropped = await spine.below_line_dropped(db, user.id, [a for a, _ in routes])
+    # Same day: a fixed order behind a 60-minute cooldown (the run's own cadence) and a QUEUE_MAX cut gave the
+    # same first jobs every hour and never reached the rest. A job never let go comes first, in the order above;
+    # then the one let go longest ago. Read before the cut, so a job past QUEUE_MAX gets its turn.
+    last_try = await _last_released(db, user.id, [a for a, _ in routes if a not in dropped])
+    kept = [(a, r) for a, r in routes if a not in dropped]
+    kept.sort(key=lambda ar: (ar[0] in last_try, last_try.get(ar[0], "")))  # stable: ties keep the order above
+    if routes:
+        _log("own_browser_application_order", user.id, "ok", total=len(routes), below_line=sorted(dropped),
+             tried=len(last_try), first=[a for a, _ in kept[:3]])
     out: list[dict[str, Any]] = []
-    for app_id, route in routes:
+    for app_id, route in kept:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
             continue
         a = apps[app_id]
@@ -684,7 +696,8 @@ async def queue_tasks(
     """The tasks that wait for the user's own browser: approved, unsent LinkedIn drafts (oldest approval first),
     then the signed-in LinkedIn hunt and people search when due (``pc_duties``, owner 2026-11-03), then
     applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
-    batch-queued Easy Apply applications (an apply link on linkedin.com, no open block). With a
+    batch-queued Easy Apply applications (an apply link on linkedin.com, no open block); applications never let go
+    first, then the one let go longest ago, and never one the user's own rule drops below the line. With a
     ``session`` (an assistant's read) an application another session holds is left out; the website passes none."""
     from src.services.applications import pc_duties  # noqa: PLC0415
 
@@ -1003,6 +1016,20 @@ async def _recently_released(db: JobDatabase, user_id: str, app_ids: list[int], 
         (user_id, cutoff, *app_ids),
     )
     return {int(dict(r)["application_id"]) for r in await cur.fetchall()}
+
+
+async def _last_released(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, str]:
+    """``{application_id: recorded_at}`` of each application's newest ``hold_released`` (any session): when it was
+    last tried and let go. Applications never let go are absent. One query, scoped by ``user_id``."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT application_id, MAX(recorded_at) AS last FROM application_events WHERE user_id = ? "  # noqa: S608
+        f"AND event_type = 'hold_released' AND application_id IN ({marks}) GROUP BY application_id",
+        (user_id, *app_ids),
+    )
+    return {int(dict(r)["application_id"]): str(dict(r)["last"]) for r in await cur.fetchall()}
 
 
 async def _keep_going(
