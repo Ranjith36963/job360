@@ -244,6 +244,7 @@ async def whats_due(
     ``mark_done``. The website's own read only looks."""
     _limit(user, "read", settings.SCHEDULE_READS_MAX_PER_HOUR)
     now = datetime.now(timezone.utc)
+    await schedule.sweep_lapsed(db, user.id, now)  # a claim that ran out with no mark_done counts, once
     answer = schedule.due_now(await schedule.load_facts(db, user.id, now), now)
     if duties:
         wanted = set(duties)

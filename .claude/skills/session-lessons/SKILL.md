@@ -261,6 +261,13 @@ delete a lesson; if one stops being true, say so on its line and why.
   The rule above already named `whats_due`; the session read it as a read. **Rule:** `whats_due` with
   `duties` from an assistant is a claim (`routes/schedule.py` `whats_due`); watch with no `duties`,
   `whats_new`, or the run transcripts.
+- 2026-11-18: #1646 told the batch recipe to skip every row whose `preflight.waiting_on_owner` was true, before
+  opening it. That flag counted ANY open ask, while the row's own `waiting_on` (blockers.py) drops the asks of a
+  fill a newer CV made stale ("refill the form", the assistant's step). The 12:41 run skipped about 46 such rows
+  (the "48 ready to send"), app 361's country with them, and `mark_done` accepted the stop because
+  `fillable_rows` also counted any fill as done. 0 submitted; Kits caught it. Fixed in #1660. **Rule:** before a
+  recipe (or a stop rule) acts on a summary flag, check on live data that the flag agrees with the per-row state it
+  summarises (`waiting_on`, `next`), and add a test that asserts the two agree.
 
 ## Reference index (open these before "borrowing" anything)
 
