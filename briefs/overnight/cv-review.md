@@ -17,3 +17,8 @@ Coverage: every queued job without a strong CV is done this run or listed as lef
 - Decision taken without the owner: read Kits' section "the 20:33 run hit the target" as true for that run only; this 22:33 run missed it,
   so I fixed the recipe before starting audit section 2. No new refusals added.
 - Needs the owner: none yet.
+
+## 23:00 check (no new run yet; next run 23:33)
+- #1679 merged at 23:00 UTC (CI, security and bugs reviewers green), 33 minutes before the 23:33 run, outside the no-merge window. I did not verify the Railway deploy (no Railway access in this session); the 23:33 run will show whether the recipe text is live.
+- No `orders-cv-review.md` from Kits yet.
+- Next: score the 23:33 run at the 23:58 check-in. Audit section 2 waits for that result, so that one run tests #1679 alone.
