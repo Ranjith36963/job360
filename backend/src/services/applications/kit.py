@@ -2366,6 +2366,39 @@ _SENSITIVE_PATH = {
 }
 
 
+# The overlay path each Memory kit block is read from (``ready``'s card and gate read this same map).
+MEMORY_BLOCK_PATH = {
+    "contact": "user_info.contact", "right_to_work": "user_info.right_to_work",
+    "logistics": "user_info.logistics", "languages": "user_info.languages",
+    "equality": "user_info.equality", "salary": "preferences.salary_by_country",
+}
+
+
+def memory_key_is_users(rtw: Any, saved_by: Any, key: str) -> bool:
+    """True when the Memory row behind kit ``key`` is the user's own word: the ONE reading check_form
+    (:func:`form_check` ``users``) and check_submit's gate (``ready._user_check``) share, so they never
+    disagree (owner 2026-11-17, "use memory for right to work"). ``saved_by`` = who wrote the block's newest
+    overlay row. A country key whose row is assistant-drafted is not the user's; an unmarked row in a block
+    that carries draft marks is (:func:`country_pages.key_is_users`); with no marks, the web must have saved
+    the block last. Nothing saved, or an assistant's write, is not the user's word."""
+    if not saved_by:
+        return False
+    owned = country_pages.key_is_users(rtw, key)
+    return owned is True or (owned is None and not is_assistant_actor(str(saved_by)))
+
+
+def users_memory_keys(profile: Any, overlay: list[dict[str, Any]],
+                      answers: dict[str, list[dict[str, Any]]]) -> frozenset[str]:
+    """The kit's Memory keys whose row is the user's own word (:func:`memory_key_is_users`)."""
+    by = {str(r["path"]): r.get("set_by") for r in overlay}
+    rtw = profile.user_info.right_to_work
+    return frozenset(
+        str(i["key"]) for block in answers.values() for i in block
+        if i.get("source") == "memory" and memory_key_is_users(
+            rtw, by.get(MEMORY_BLOCK_PATH.get(str(i["key"]).split(".", 1)[0], "")), str(i["key"]))
+    )
+
+
 def edit_is_sensitive(path: str, value: Any) -> bool:
     """True when saving ``value`` at overlay ``path`` stores a sensitive answer (equality,
     expected salary, current salary, sanctions or visa status). An empty value is the
@@ -2643,6 +2676,9 @@ def _compute_answers(
             # empty is read from the region's page, then ANY's.
             for item in via_items:
                 field = item["key"].rsplit(".", 1)[1]
+                # The copy stands where the region / ANY row stands: never the confirmation of whichever
+                # block was read last (the equality path; production 2026-11-17, application 1031).
+                current[0] = "" if item.get("state") == "confirmed" else "user_info.right_to_work"
                 if f"right_to_work.{country}.{field}" not in have:
                     out["right_to_work"].append(
                         _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
@@ -2651,6 +2687,7 @@ def _compute_answers(
                 have = {i["key"] for block in out.values() for i in block}
         if region and f"salary.{country}" not in have:
             for item in [i for i in out["salary"] if i["key"] == f"salary.{region}"]:
+                current[0] = "" if item.get("state") == "confirmed" else "preferences.salary_by_country"
                 out["salary"].append(
                     _mk(f"salary.{country}", item["value"], "memory", item["saved_at"],
                           applies_via=region, **({"confirmed": False} if item.get("confirmed") is False else {}))
@@ -2969,6 +3006,15 @@ async def _answers_for(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], *, job_country_only: bool = False
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """:func:`_application_answers` by user id (the receipt has no ``CurrentUser``)."""
+    profile, country, answers, missing, _overlay = await _answers_and_overlay(
+        db, user_id, app_row, job_country_only=job_country_only)
+    return profile, country, answers, missing
+
+
+async def _answers_and_overlay(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], *, job_country_only: bool = False
+) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]], list[dict[str, Any]]]:
+    """:func:`_answers_for` plus the overlay rows it read (who saved each Memory block: check_form)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
@@ -2978,7 +3024,7 @@ async def _answers_for(
     job_company_key = await _job_company_key(db, app_row)
     answers, missing = compute_answers(
         profile, overlay, country, job_company_key or None, job_country_only=job_country_only)
-    return profile, country, answers, missing
+    return profile, country, answers, missing, overlay
 
 
 def kit_missing(missing: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -3712,6 +3758,7 @@ def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
     records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
     country: Optional[str] = None, instructions: Optional[dict[str, Any]] = None,
+    users: Optional[frozenset[str]] = None,
 ) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
@@ -3730,7 +3777,9 @@ def form_check(
     Memory first (owner 2026-11-05): a question in Memory's families (:func:`ask_once.memory_question`) is
     answered from Memory only (:func:`_memory_answer`), never from a saved answer. ``instructions`` (the
     user's own rules, :func:`user_instructions`) come first in the result and win wherever they speak.
-    Never logs, never writes, never guesses."""
+    ``users`` (:func:`users_memory_keys`, check_form passes it): a Memory answer is the user's own exactly
+    when check_submit's gate reads it so, and a sensitive one (right to work, sponsorship...) is then filled
+    with no ``needs_confirmation`` (owner 2026-11-17). Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
     # A topic whose saved answers disagree (conflicting_topics) is never answered, however the question
@@ -3872,7 +3921,11 @@ def form_check(
         # A private question answered with the user's own confirmed answer is filled as it is (owner,
         # 2026-10-26); only an answer the user has not stood behind waits for them on this form.
         owned = item.get("state") == "confirmed" and (item.get("source") != "approved_text" or item.get("by_user"))
-        if (sensitive and not owned) or item.get("confirmed") is False:
+        wait = (sensitive and not owned) or item.get("confirmed") is False
+        if users is not None and item.get("source") == "memory":
+            # The gate's own reading (memory_key_is_users): the user's own Memory row is filled as it is.
+            wait = (sensitive or item.get("confirmed") is False) and str(item["key"]) not in users
+        if wait:
             row["needs_confirmation"] = True
             confirm.append(text)
         answered.append(row)
@@ -3926,7 +3979,7 @@ async def check_form(
             "result": "refused",
         })
         raise SpineError(404, "application not found")
-    profile, country, answers, _missing = await _application_answers(db, user, app_row)
+    profile, country, answers, _missing, overlay = await _answers_and_overlay(db, user.id, app_row)
     documents = {}
     for kind in _DOCUMENT_LABELS:
         row = await spine.latest_artifact(db, user.id, application_id, kind)
@@ -3935,7 +3988,18 @@ async def check_form(
     out = form_check(
         answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None, documents,
         country=country, instructions=user_instructions(profile, country),
+        users=users_memory_keys(profile, overlay, answers),
     )
+    cleared = sorted({str(a["key"]) for a in out["answered"] if a["source"] == "memory"
+                      and not a.get("needs_confirmation") and _question_is_sensitive(a["question"], str(a["key"]))})
+    if cleared:
+        # Keys and a reason code only, never a question or a value: the sensitive answers the user's own
+        # Memory filled with no confirmation (owner 2026-11-17, "use memory for right to work").
+        log.info("form_check_memory_cleared", extra={
+            "event": "form_check_memory_cleared", "user_id": safe_log_value(user.id),
+            "application_id": safe_log_value(application_id), "keys": safe_log_value(",".join(cleared)),
+            "country": safe_log_value(country or ""), "reason": "users_own_memory",
+        })
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
         "questions_count": out["questions_count"], "answered": out["counts"]["answered"],

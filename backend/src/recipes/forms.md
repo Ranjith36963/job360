@@ -14,7 +14,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    "cv" and this job's `application_id` sends the saved CV; `fill` sets up to 40 fields in ONE call and reads each
    back: prefer it to one `type` per field). After a page changes, use the refs it returned.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
-   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing: ONE `ask_user` for this job, every question in `questions` with an honest `source` and an answer (your best guess = `guess`; never empty, never ask the user to paste question text); `over_limit` = shorten; essay: a `draft` row, type only the approved text. **Done when** the form is loaded and in front.
+   user ONCE for its `missing` (and to confirm `needs_confirmation`; a sensitive answer from the user's own Memory for this job's country is filled without asking) before typing: ONE `ask_user` for this job, every question in `questions` with an honest `source` and an answer (your best guess = `guess`; never empty, never ask the user to paste question text); `over_limit` = shorten; essay: a `draft` row, type only the approved text. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.

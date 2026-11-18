@@ -351,7 +351,7 @@ that, do not call `answer_ask` for that fact - use it in the form and leave the
 ask open.
 
 Sensitive questions on ANY job, in any country (right to work, nationality, passport or ID numbers, date of birth, health, criminal record, money history, plus the UK
-ones: SC / DV clearance, BPSS, ITAR / export control, non-compete, interview recording, "previously employed by", day rate): check_form flags them `needs_confirmation`; raise each with `ask_user` so it shows on Needs you. Explain the question to the user in one sentence, then ask; never infer the answer. ITAR "US person" is not work
+ones: SC / DV clearance, BPSS, ITAR / export control, non-compete, interview recording, "previously employed by", day rate): a sensitive answer from the user's own Memory for this job's country is filled without asking; ask only when check_form flags `needs_confirmation`, and raise each such one with `ask_user` so it shows on Needs you. Explain the question to the user in one sentence, then ask; never infer the answer. ITAR "US person" is not work
 authorisation, and a non-compete is not "worked for a competitor". Save right to work, clearance and day rate as the
 SENSITIVE rule above says (remember: true only after a yes); save non-compete, interview-recording consent and
 "previously employed by" as `user_info.answers` with that job's `company`.
