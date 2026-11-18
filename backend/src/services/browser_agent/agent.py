@@ -426,7 +426,7 @@ class BrowserPool:
         if same_kind >= (self.max_live if is_live else self.max_sessions):
             raise BrowserError(
                 "busy", "all_browsers_busy",
-                "Every Job360 browser is in use right now. Try again in a few minutes, or use your own browser.",
+                "Every Job360 browser is in use right now. Try again in a few minutes, or use your assistant browser.",
             )
         browser = await self._ensure_browser()
         # Slice 2: the user's saved sign-ins (cookies + site storage) ride into the new browser.
@@ -549,7 +549,7 @@ BLOCKED_HOP = (
 UNREACHABLE_HOP = "That site could not be found or did not answer. Open another link."
 # Owner 2026-10-26: linkedin.com runs only in the user's own browser; Job360's browser never opens it.
 LINKEDIN_REFUSED = (
-    "LinkedIn opens only in the user's own browser (their choice). Leave this task in the own-browser queue."
+    "LinkedIn opens only in the user's assistant browser (their choice). Leave this task in the own-browser queue."
 )
 
 
@@ -1091,7 +1091,7 @@ ALREADY_APPLIED_DETAIL = (
 
 CAPTCHA_DETAIL = (
     "This page asks for a human check (CAPTCHA). Job360's browser never solves one and does nothing more on "
-    "this page: stop this job; the user finishes it with their own browser."
+    "this page: stop this job; the user finishes it with their assistant browser."
 )
 
 

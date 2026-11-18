@@ -48,7 +48,7 @@ function sendStatus(
   if (kind === "own_browser") {
     return {
       state: "needs-own-browser",
-      text: "Your PC: needs your own browser.",
+      text: "Your PC: needs your assistant browser.",
     };
   }
   if (kind === "human") {

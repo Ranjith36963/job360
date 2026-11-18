@@ -44,7 +44,7 @@ async function ready() {
 describe("My PC-on time", () => {
   it("shows the row and its help, empty when nothing is set (any time)", async () => {
     await ready();
-    expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Your own browser");
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Assistant browser (your Chrome)");
     expect(screen.getByTestId("assistant-tab")).toHaveTextContent("My PC-on time");
     expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Blank = any time.");
     expect((screen.getByTestId("pc-on-from") as HTMLInputElement).value).toBe("");

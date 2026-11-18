@@ -14,7 +14,7 @@ describe("browser-labels", () => {
     const block = /LABELS: dict\[str, str\] = \{([\s\S]*?)\}/.exec(py)?.[1] ?? "";
     const server = Object.fromEntries([...block.matchAll(/"(\w+)":\s*"([^"]*)"/g)].map((m) => [m[1], m[2]]));
     expect(server).toEqual(BROWSER_LABELS);
-    expect(OWN_BROWSER_LABEL).toBe("Needs your own browser: turn your PC on");
+    expect(OWN_BROWSER_LABEL).toBe("Needs your assistant browser: turn your PC on");
   });
 
   it("the LinkedIn chip equals the server's routing.LINKEDIN_LABEL and does not read as broken", () => {
@@ -34,7 +34,7 @@ describe("browser-labels", () => {
   });
 
   it("link_unclear has the broken-link chip text", () => {
-    expect(ROUTE_LABELS.link_unclear).toBe("This link looks broken or disguised: your own browser checks it");
+    expect(ROUTE_LABELS.link_unclear).toBe("This link looks broken or disguised: your assistant browser checks it");
     expect(routeLabel("link_unclear")).toBe(ROUTE_LABELS.link_unclear);
   });
 

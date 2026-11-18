@@ -461,7 +461,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
         )}
 
         {!perms && (
-        <Section title="Your own browser" hint="Job360's browser goes first">
+        <Section title="Assistant browser (your Chrome)" hint="Job360's browser goes first">
           <Row title="My PC-on time" sub={PC_ON_HELP}>
             <div className="flex flex-wrap items-center gap-2" data-testid="pc-on-row">
               <div role="group" aria-label="Days your PC is on" className="flex flex-wrap gap-1">

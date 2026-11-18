@@ -47,7 +47,7 @@ export const ROUTINE_PROMPT = [
 ].join("\n");
 
 /** The no-cloud fallback: an assistant session left open on the user's own computer. */
-export const PC_LOOP_COMMAND = `/loop 5m Check Job360 for jobs I pressed Send on: whats_new since your last check, and take each submit_approved event (where=web) whose application is still open. For each, one at a time: follow get_recipe("apply") with my own browser to fill the form, call check_submit with that form_url right before the final click, submit only when it says submit, then record_application. CAPTCHA or sign-in: record_event blocked and move on. Never type a password.`;
+export const PC_LOOP_COMMAND = `/loop 5m Check Job360 for jobs I pressed Send on: whats_new since your last check, and take each submit_approved event (where=web) whose application is still open. For each, one at a time: follow get_recipe("apply") with my assistant browser to fill the form, call check_submit with that form_url right before the final click, submit only when it says submit, then record_application. CAPTCHA or sign-in: record_event blocked and move on. Never type a password.`;
 
 const RESULT_WORDS: Record<string, string> = {
   started: "started",
@@ -215,7 +215,7 @@ export function SendStartsAssistantCard() {
           <summary className="cursor-pointer">No cloud? Use a session on your own computer instead</summary>
           <p className="mt-2">
             Leave your assistant open on your computer with this running. It checks every 5 minutes and applies with
-            your own browser and your own sign-ins (your computer must be on):
+            your assistant browser and your own sign-ins (your computer must be on):
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(PC_LOOP_COMMAND, "Command")}>

@@ -20,7 +20,7 @@ describe("BrowserReason shows the server's reason code in plain words", () => {
 
   it("link_unclear renders its plain line for an own-browser chip", () => {
     render(<BrowserReason label={label("own_browser", "link_unclear")} testid="why" />);
-    expect(screen.getByTestId("why")).toHaveTextContent("The apply link has no clear web address, so your own browser checks it.");
+    expect(screen.getByTestId("why")).toHaveTextContent("The apply link has no clear web address, so your assistant browser checks it.");
   });
 
   it("only_you says the step is the user's", () => {

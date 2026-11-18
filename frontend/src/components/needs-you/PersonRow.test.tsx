@@ -137,25 +137,25 @@ describe("PersonRow", () => {
       "You said Send. Goes out next time your assistant runs.");
   });
 
-  it("queued and Job360's browser gave up: needs your own browser", () => {
+  it("queued and Job360's browser gave up: needs your assistant browser", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
-      send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Sign-in wall" } }));
+      send_browser: { kind: "own_browser", label: "Needs your assistant browser: turn your PC on", reason: "Sign-in wall" } }));
     const el = screen.getByTestId("send-status-4");
     expect(el.textContent).toBe(
-      "Your PC: needs your own browser.");
+      "Your PC: needs your assistant browser.");
     expect(el).toHaveAttribute("data-state", "needs-own-browser");
     expect(screen.getByText("Don't send")).toBeInTheDocument();
   });
 
   it("queued for LinkedIn's own browser by the user's choice: waiting, not broken, no reason code shown", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
-      send_browser: { kind: "own_browser", label: "Your own browser: runs when your PC is on", reason: "linkedin_own_browser" } }));
+      send_browser: { kind: "own_browser", label: "Your assistant browser: runs when your PC is on", reason: "linkedin_own_browser" } }));
     const el = screen.getByTestId("send-status-4");
     expect(el.textContent).toBe(
       "Goes out next time your assistant runs on your PC.");
     expect(el).toHaveAttribute("data-state", "waiting-own-browser");
     expect(el).not.toHaveClass("text-warning");
-    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your own browser: runs when your PC is on");
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your assistant browser: runs when your PC is on");
     expect(screen.getByTestId("send-browser-label-4").textContent).not.toMatch(/turn your PC on/);
     expect(screen.queryByTestId("send-browser-reason-4")).toBeNull();
     expect(screen.getByText("Don't send")).toBeInTheDocument();
@@ -201,8 +201,8 @@ describe("PersonRow", () => {
 
   it("shows the send browser label, and its reason only for own_browser or human", () => {
     const { unmount } = show(person({ linkedin_state: "connected",
-      send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360's browser failed twice" } }));
-    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Needs your own browser: turn your PC on");
+      send_browser: { kind: "own_browser", label: "Needs your assistant browser: turn your PC on", reason: "Job360's browser failed twice" } }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Needs your assistant browser: turn your PC on");
     expect(screen.getByTestId("send-browser-reason-4")).toHaveTextContent("Job360's browser failed twice");
     unmount();
     show(person({ linkedin_state: "connected", send_browser: { kind: "job360", label: "Job360's browser", reason: "first choice" } }));
@@ -212,11 +212,11 @@ describe("PersonRow", () => {
 
   it("names the own browser beside Send when the backend sent no label (LinkedIn goes only there), and the backend's label when it did", () => {
     const { unmount } = show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you") }));
-    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your own browser: runs when your PC is on");
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your assistant browser: runs when your PC is on");
     unmount();
     show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you"),
-      send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360's browser could not sign in" } }));
-    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Needs your own browser: turn your PC on");
+      send_browser: { kind: "own_browser", label: "Needs your assistant browser: turn your PC on", reason: "Job360's browser could not sign in" } }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Needs your assistant browser: turn your PC on");
     expect(screen.getByTestId("own-browser-send-4")).toHaveTextContent(/^Send$/);
   });
 

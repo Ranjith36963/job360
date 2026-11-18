@@ -32,11 +32,11 @@ function respond(by: Record<string, number>, rows?: unknown[]) {
       { id: 1, job_title: "Greenhouse Job", queue_position: 1, browser: chip("job360", "I'll use Job360's browser") },
       {
         id: 2, job_title: "LinkedIn Job", queue_position: 2,
-        browser: chip("own_browser", "Your own browser: runs when your PC is on", "linkedin_own_browser"),
+        browser: chip("own_browser", "Your assistant browser: runs when your PC is on", "linkedin_own_browser"),
       },
       {
         id: 3, job_title: "Stuck Job", queue_position: 3,
-        browser: chip("own_browser", "Needs your own browser: turn your PC on", "job360_login_required"),
+        browser: chip("own_browser", "Needs your assistant browser: turn your PC on", "job360_login_required"),
       },
     ],
     total: 3,
@@ -54,7 +54,7 @@ describe("BatchQueueCard browser chip and filter", () => {
     expect(a).toHaveTextContent("I'll use Job360's browser");
     expect(a).toHaveAttribute("data-kind", "job360");
     const b = screen.getByTestId("queue-browser-2");
-    expect(b).toHaveTextContent("Your own browser: runs when your PC is on");
+    expect(b).toHaveTextContent("Your assistant browser: runs when your PC is on");
     expect(b).toHaveAttribute("data-kind", "own_browser");
     expect(screen.getByTestId("queue-browser-why-3")).toHaveTextContent("Job360's browser hit a sign-in wall");
   });
@@ -65,7 +65,7 @@ describe("BatchQueueCard browser chip and filter", () => {
     await screen.findByTestId("queue-filter");
     expect(screen.getByTestId("queue-filter-all")).toHaveTextContent("All 3");
     expect(screen.getByTestId("queue-filter-job360")).toHaveTextContent("Job360's browser 1");
-    expect(screen.getByTestId("queue-filter-own_browser")).toHaveTextContent("Your own browser 2");
+    expect(screen.getByTestId("queue-filter-own_browser")).toHaveTextContent("Assistant browser 2");
     expect(screen.getByTestId("queue-filter-all")).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByTestId("queue-filter-own_browser"));
@@ -91,7 +91,7 @@ describe("BatchQueueCard browser chip and filter", () => {
   });
 });
 
-const OWN = chip("own_browser", "Your own browser: runs when your PC is on", "linkedin_own_browser");
+const OWN = chip("own_browser", "Your assistant browser: runs when your PC is on", "linkedin_own_browser");
 
 function respondMixed() {
   listApplications.mockResolvedValue({
@@ -171,7 +171,7 @@ const queue = (over: Record<string, unknown> = {}) => ({
 });
 const task = (over: Record<string, unknown>) => ({
   kind: "application", what: "", name: "", application_id: null, contact_id: null, message_id: null, claim: null,
-  browser: chip("own_browser", "Needs your own browser: turn your PC on", "job360_login_required"), ...over,
+  browser: chip("own_browser", "Needs your assistant browser: turn your PC on", "job360_login_required"), ...over,
 });
 
 describe("BatchQueueCard own-browser tasks", () => {
@@ -200,7 +200,7 @@ describe("BatchQueueCard own-browser tasks", () => {
     expect(screen.getByTestId("batch-remove-2")).toBeInTheDocument();
     expect(screen.getByTestId("batch-dont-send-9")).toBeInTheDocument();
     // One number: the filter chip counts 2 + 2 extras.
-    expect(screen.getByTestId("queue-filter-own_browser")).toHaveTextContent("Your own browser 4");
+    expect(screen.getByTestId("queue-filter-own_browser")).toHaveTextContent("Assistant browser 4");
     expect(screen.getByTestId("queue-filter-all")).toHaveTextContent("All 6");
   });
 

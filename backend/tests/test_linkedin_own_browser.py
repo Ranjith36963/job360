@@ -13,7 +13,7 @@ from src.api.routes import browser as browser_routes
 from src.services.applications import own_browser, spine
 from src.services.browser_agent import routing
 
-LINKEDIN = {"kind": "own_browser", "label": "Your own browser: runs when your PC is on", "reason": "linkedin_own_browser"}
+LINKEDIN = {"kind": "own_browser", "label": "Your assistant browser: runs when your PC is on", "reason": "linkedin_own_browser"}
 JOB360 = {"kind": "job360", "label": "I'll use Job360's browser", "reason": "default"}
 _AD = {
     "title": "Data Engineer", "company": "Northwind", "location": "London", "country": "GB", "remote": False,
@@ -109,7 +109,7 @@ async def test_job360s_browser_refuses_to_open_linkedin():
                 doc_kind="", gate=None, files=None,
             )
         assert (exc.value.status, exc.value.reason) == ("refused", "linkedin_own_browser")
-        assert "own browser" in exc.value.detail
+        assert "assistant browser" in exc.value.detail
     _refuse_linkedin("https://boards.greenhouse.io/acme/jobs/1")  # any other site: no refusal
 
 
@@ -243,7 +243,7 @@ async def test_an_unnamed_link_is_listed_as_link_unclear_and_never_counts_toward
 
     user_id = authenticated_async_context.fixture_user_id
     unclear = {"kind": "own_browser", "reason": "link_unclear",
-               "label": "This link looks broken or disguised: your own browser checks it"}
+               "label": "This link looks broken or disguised: your assistant browser checks it"}
     async with authenticated_async_context() as client:
         real = [await _bring(client, n, f"https://www.linkedin.com/jobs/view/{n}") for n in range(10)]
         odd = await _bring(client, 30, "https://www.ⓛinkedin.com/jobs/view/30")

@@ -43,7 +43,7 @@ beforeEach(() => {
   toastApiError.mockReset();
 });
 
-describe("Run my own-browser tasks now", () => {
+describe("Run my assistant-browser tasks now", () => {
   it("is absent when no card needs the owner's Chrome", async () => {
     getOwnBrowserQueue.mockResolvedValue(queue({ count: 0 }));
     render(<RunNowPanel />);
@@ -56,7 +56,7 @@ describe("Run my own-browser tasks now", () => {
     render(<RunNowPanel />);
     fireEvent.click(await screen.findByTestId("own-browser-run-now"));
     await waitFor(() => expect(runOwnBrowserNow).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Your own-browser tasks are starting"));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Your assistant-browser tasks are starting"));
     expect(screen.queryByText(/run 360 batch/)).toBeNull();
   });
 
@@ -74,11 +74,11 @@ describe("Run my own-browser tasks now", () => {
   it("shows the queue count when the queue answers, in either shape", async () => {
     getOwnBrowserQueue.mockResolvedValue(queue({ count: 10 }));
     const first = render(<RunNowPanel />);
-    expect(await screen.findByTestId("own-browser-count")).toHaveTextContent("10 waiting for your own browser");
+    expect(await screen.findByTestId("own-browser-count")).toHaveTextContent("10 waiting for your assistant browser");
     first.unmount();
     getOwnBrowserQueue.mockResolvedValue(queue({ count: 1, open_now: true }));
     render(<RunNowPanel />);
-    expect(await screen.findByTestId("own-browser-count")).toHaveTextContent("1 waiting for your own browser");
+    expect(await screen.findByTestId("own-browser-count")).toHaveTextContent("1 waiting for your assistant browser");
     expect(screen.getByTestId("own-browser-window")).toHaveTextContent("Open now");
   });
 
@@ -112,14 +112,14 @@ describe("OwnBrowserQueueCard", () => {
     getOwnBrowserQueue.mockResolvedValue(queue());
     render(<RunNowPanel />);
     expect(await screen.findByTestId("own-browser-window")).toHaveTextContent("Any time your PC is on");
-    expect(screen.getByTestId("own-browser-queue")).toHaveTextContent("waiting for your own browser");
-    expect(screen.getByTestId("own-browser-count")).toHaveTextContent("2 waiting for your own browser");
+    expect(screen.getByTestId("own-browser-queue")).toHaveTextContent("waiting for your assistant browser");
+    expect(screen.getByTestId("own-browser-count")).toHaveTextContent("2 waiting for your assistant browser");
     expect(screen.queryByTestId("own-browser-run-now-done")).toBeNull();
     fireEvent.click(screen.getByTestId("own-browser-run-now"));
     expect(await screen.findByTestId("own-browser-run-now-done")).toHaveTextContent(
       "Open for the next 60 minutes. Your assistant on your PC takes them one at a time.");
     expect(runOwnBrowserNow).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("own-browser-run-now")).toHaveTextContent("Run my own-browser tasks now");
+    expect(screen.getByTestId("own-browser-run-now")).toHaveTextContent("Run my assistant-browser tasks now");
   });
 
   it("window text: open now, opens later, closed", () => {
@@ -177,10 +177,10 @@ describe("RunNowPanel duties", () => {
   it("a failed queue read keeps the last good count and the Run now button", async () => {
     getOwnBrowserQueue.mockResolvedValueOnce(queue({ count: 3 })).mockResolvedValue(null);
     render(<RunNowPanel />);
-    expect(await screen.findByTestId("own-browser-count")).toHaveTextContent("3 waiting for your own browser");
+    expect(await screen.findByTestId("own-browser-count")).toHaveTextContent("3 waiting for your assistant browser");
     window.dispatchEvent(new CustomEvent("job360:changes", { detail: { areas: ["other"], full: false, seq: 2 } }));
     await waitFor(() => expect(getOwnBrowserQueue).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId("own-browser-count")).toHaveTextContent("3 waiting for your own browser");
+    expect(screen.getByTestId("own-browser-count")).toHaveTextContent("3 waiting for your assistant browser");
     fireEvent.click(screen.getByTestId("own-browser-run-now"));
     expect(await screen.findByTestId("own-browser-run-now-done")).toBeInTheDocument();
   });

@@ -311,4 +311,4 @@ async def test_run_my_own_browser_tasks_now_opens_the_queue_and_starts_the_routi
             await _settle()
             started = _started(mocked)
         assert set(started) == {"own_browser"} and len(started["own_browser"]) == 1
-        assert "Run my own-browser tasks now" in started["own_browser"][0]
+        assert "Run my assistant-browser tasks now" in started["own_browser"][0]

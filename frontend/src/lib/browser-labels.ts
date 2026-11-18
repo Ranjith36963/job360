@@ -6,13 +6,13 @@
  */
 export const BROWSER_LABELS = {
   job360: "I'll use Job360's browser",
-  own_browser: "Needs your own browser: turn your PC on",
+  own_browser: "Needs your assistant browser: turn your PC on",
   human: "You: on the site",
 } as const;
 
 /** The chip for linkedin.com (owner, 2026-10-26): the user's own browser by their choice, nothing failed.
  *  Equals the server's `routing.LINKEDIN_LABEL` (a test pins both). */
-export const LINKEDIN_OWN_BROWSER_LABEL = "Your own browser: runs when your PC is on";
+export const LINKEDIN_OWN_BROWSER_LABEL = "Your assistant browser: runs when your PC is on";
 /** The route reason the server sends with it. */
 export const LINKEDIN_OWN_BROWSER_REASON = "linkedin_own_browser";
 
@@ -20,17 +20,17 @@ export const LINKEDIN_OWN_BROWSER_REASON = "linkedin_own_browser";
  *  `{date}`, `{until}`, `{n}` and `{cap}` are filled from closed values. Assistant-neutral. */
 export const ROUTE_LABELS = {
   default: "I'll use Job360's browser",
-  linkedin_own_browser: "Your own browser: runs when your PC is on",
-  learned_blocked: "Job360's browser was blocked on {site} on {date}: your own browser until {until}",
-  learned_login: "{site} asks you to sign in: your own browser, or sign in once in Job360's browser",
+  linkedin_own_browser: "Your assistant browser: runs when your PC is on",
+  learned_blocked: "Job360's browser was blocked on {site} on {date}: your assistant browser until {until}",
+  learned_login: "{site} asks you to sign in: your assistant browser, or sign in once in Job360's browser",
   probe: "Trying Job360's browser on {site} again",
   at_cap: "Today's LinkedIn limit is used ({n} of {cap}): waits until tomorrow",
   linkedin_paused: "LinkedIn showed a limit warning: LinkedIn tasks paused until {date}",
-  account_step: "This site wants a new account: your own browser, or sign in once in Job360's browser",
+  account_step: "This site wants a new account: your assistant browser, or sign in once in Job360's browser",
   linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
-  link_unclear: "This link looks broken or disguised: your own browser checks it",
-  learned_bot_check: "Job360's browser was blocked twice on {site}: your own browser runs it",
-  captcha_handoff: "Job360's browser hit a CAPTCHA on {site}: your own browser, you solve it, it fills the rest",
+  link_unclear: "This link looks broken or disguised: your assistant browser checks it",
+  learned_bot_check: "Job360's browser was blocked twice on {site}: your assistant browser runs it",
+  captcha_handoff: "Job360's browser hit a CAPTCHA on {site}: your assistant browser, you solve it, it fills the rest",
   email_code: "Your assistant reads the code from Gmail: runs when your PC is on",
   waiting: "Waiting for your PC",
 } as const;
@@ -52,12 +52,12 @@ export const JOB360_BROWSER_LABEL = "Job360's browser";
 /** The pace line on a job card. */
 export function paceText(perDay?: number | null): string {
   const cap = perDay != null && Number.isInteger(perDay) && perDay > 0 ? `at most ${perDay} LinkedIn sends a day` : "a daily limit on LinkedIn sends (set in Settings)";
-  return `LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, ${cap}.`;
+  return `LinkedIn sends go out from your assistant browser only, when your PC is on. 2–3 minutes between sends, ${cap}.`;
 }
 /** The pace line when the user's limit is not known. */
 export const PACE_TEXT = paceText();
 
-export const RUN_OWN_BROWSER_TASKS = "Run my own-browser tasks now";
+export const RUN_OWN_BROWSER_TASKS = "Run my assistant-browser tasks now";
 export const RUN_NOW_DONE = "Open for the next 60 minutes. Your assistant on your PC takes them one at a time.";
 
 /** The server's route reason codes (`routing.ROUTE_REASONS`) in plain words. "default" and the
@@ -69,8 +69,8 @@ export const REASON_WORDS: Record<string, string> = {
   password: "It asks for your password. Only you type passwords.",
   mfa: "It asks for a one-time code. Only you can enter it.",
   only_you: "This step is yours: no browser does it for you.",
-  link_unclear: "The apply link has no clear web address, so your own browser checks it.",
-  learned_bot_check: "Job360's browser was blocked twice on this site, so your own browser runs it.",
+  link_unclear: "The apply link has no clear web address, so your assistant browser checks it.",
+  learned_bot_check: "Job360's browser was blocked twice on this site, so your assistant browser runs it.",
 };
 
 /** The words for a route reason: the plain line for a known code, "" for an unknown code

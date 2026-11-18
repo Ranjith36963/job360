@@ -503,7 +503,7 @@ describe("NeedsYou", () => {
       render(<NeedsYou />);
       await screen.findByTestId("job-row-5");
       expect(screen.queryByTestId("own-browser-queue")).toBeNull();
-      expect(screen.queryByText("Run my own-browser tasks now")).toBeNull();
+      expect(screen.queryByText("Run my assistant-browser tasks now")).toBeNull();
       expect(requestJson).not.toHaveBeenCalledWith("/api/own-browser/queue", "GET");
       expect(screen.getByText("For you")).toHaveClass("sr-only");
     });
