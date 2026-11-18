@@ -587,7 +587,7 @@ REACH_SCAN_LIMIT = 200
 async def _reach_ids(
     db: JobDatabase, user_id: str, now: datetime, line: Optional[int] = None, stamp: str = "reach:"
 ) -> list[int]:
-    """Open applications for the people hunt this run (see the module docstring), newest first.
+    """Open applications for the people hunt this run (see the module docstring), in ``_reach_order``.
     ``line`` is the user's score line; applications scored below it are left out. ``stamp`` names whose tries
     count: the scheduled run's (``reach:``) or the user's own browser's (``own_browser:reach:``)."""
     from src.services.applications.test_marker import TEST_APP_SQL  # noqa: PLC0415
@@ -597,7 +597,8 @@ async def _reach_ids(
     retry_after = (now - timedelta(hours=settings.REACH_RETRY_HOURS)).astimezone(timezone.utc).isoformat()
     test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
-        "SELECT a.id, a.fit_score FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "  # noqa: S608
+        "SELECT a.id, a.fit_score, a.created_at FROM applications a "  # noqa: S608
+        "WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "
         "AND (a.created_at >= ? OR EXISTS (SELECT 1 FROM application_events e WHERE e.application_id = a.id "
         "     AND e.user_id = a.user_id AND e.event_type = 'applied' AND e.occurred_at >= ?)) "
         "AND (SELECT COUNT(*) FROM application_contacts c WHERE c.application_id = a.id "
@@ -608,15 +609,54 @@ async def _reach_ids(
         (user_id, since, since, settings.REACH_TARGET_PEOPLE, stamp, retry_after, settings.REACH_MAX_ATTEMPTS,
          *test_params, REACH_SCAN_LIMIT),
     )
-    candidates = [
-        int(row["id"]) for row in map(dict, await cur.fetchall())
-        if rules.line_side(row["fit_score"], line) != "below"
-    ]
+    rows = [row for row in map(dict, await cur.fetchall()) if rules.line_side(row["fit_score"], line) != "below"]
+    candidates = await _reach_order(db, user_id, rows, now, stamp)
     pending_only = await _pending_only(db, user_id, candidates)
     duplicates = await _duplicates(db, user_id, candidates)
     if duplicates:
         log.info("reach_duplicates_skipped user=%s ids=%s", user_id, ",".join(str(a) for a in sorted(duplicates)))
     return [a for a in candidates if a not in pending_only and a not in duplicates][: settings.REACH_MAX_PER_RUN]
+
+
+def _when(raw: Any) -> datetime:
+    try:
+        at = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+async def _reach_order(
+    db: JobDatabase, user_id: str, rows: list[dict[str, Any]], now: datetime, stamp: str
+) -> list[int]:
+    """2026-11-18 coverage audit: reach took the 5 NEWEST each run, so when more than 5 applications arrived
+    between runs (25 a day, two runs a day), the older ones waited behind every newer one and could age out of
+    REACH_WINDOW_DAYS never searched. Order now: never worked and brought over REACH_FIRST_TRY_HOURS ago (oldest
+    first: each gets its first search within a day); then never worked (newest first); then worked before
+    (longest ago first)."""
+    if not rows:
+        return []
+    ids = [int(r["id"]) for r in rows]
+    marks = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        f"SELECT duty, done_at FROM assistant_duty_runs WHERE user_id = ? AND duty IN ({marks})",  # noqa: S608
+        (user_id, *(stamp + str(i) for i in ids)),
+    )
+    worked = {str(dict(r)["duty"])[len(stamp):]: _when(dict(r)["done_at"]) for r in await cur.fetchall()}
+    overdue_at = now - timedelta(hours=settings.REACH_FIRST_TRY_HOURS)
+    overdue, fresh, again = [], [], []
+    for r in rows:
+        made = _when(r["created_at"])
+        if str(r["id"]) in worked:
+            again.append((worked[str(r["id"])], r["id"]))
+        elif made <= overdue_at:
+            overdue.append((made, r["id"]))
+        else:
+            fresh.append((made, r["id"]))
+    if overdue:
+        log.info("reach_overdue user=%s ids=%s", user_id, ",".join(str(i) for _, i in sorted(overdue)[:20]))
+    return ([int(i) for _, i in sorted(overdue)] + [int(i) for _, i in sorted(fresh, reverse=True)]
+            + [int(i) for _, i in sorted(again)])
 
 
 async def _duplicates(db: JobDatabase, user_id: str, app_ids: list[int]) -> set[int]:

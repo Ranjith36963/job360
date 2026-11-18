@@ -1099,7 +1099,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         # B3: one rows pass feeds both `memory_check` and `common_questions_open` (no second profile load).
         # The live assistant edits are the overlay the kit judges each answer by (relayed / inferred).
         overlay_rows = [r.model_dump() for r in resp.agent_edits]
-        cq_rows = common_questions.common_questions(profile, overlay_rows)
+        # Owner 2026-11-18: the Answer once card also asks for each queued job's country (GET
+        # /profile/questionnaire); the list the assistant drafts from must hold the same places.
+        from src.services.applications import spine  # noqa: PLC0415
+
+        async with _request_db() as db:
+            queued = await spine.queued_countries(db, user_id)
+        cq_rows = common_questions.common_questions(profile, overlay_rows, queued)
         from src.services.profile import country_pages  # noqa: PLC0415
 
         rtw_users, ans_users = country_pages.path_confirmed(overlay_rows), country_pages.answers_by_user(overlay_rows)
