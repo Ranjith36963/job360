@@ -24,3 +24,17 @@ open application. Scores come from the run's transcript (reads only).
 - Coverage: the search is date-only, so it lists all mail; search.application_ids = every open application
   (audit 18 Nov, PR #1670). ATS senders now include Breezy, Keka, HiBob, Darwinbox, Oracle, SuccessFactors,
   Pinpoint, Phenom, Umantis (#1670, merged 19:17).
+
+## 23:26 run  (score 95%)
+- Achieved: the first run on #1680 (merged 23:00). Claimed with duties; one date search, both pages read (51
+  threads); 15 mails opened, 14 judged job mail; every job mail matched or parked; DoiT's Greenhouse mail had
+  Brunswick Group (1047) as the only candidate and was correctly NOT recorded on it (the body names DoiT, which
+  has no application); 4 parked, all already parked earlier (no duplicates); job alerts read and left, not
+  parked; cursor moved for all 1013 open applications in ONE call; mark_done done after the cursor; exact
+  3-line summary, one action per parked mail; nothing sent, no setting changed.
+- Missed: the Halimah S. recruiter question again has "reply" as its action but no Gmail draft (2nd run in a
+  row). Counted as a small miss: the answer is the owner's decision, so a draft could only be a placeholder.
+- Biggest cause: none blocks the target.
+- Fix: none. Two runs in a row at 90%+ (92, 95): per the orders I stop fixing and keep scoring until 06:00.
+- Decision taken without the owner: no recipe change for the missing draft; if Kits wants recruiter questions
+  always drafted, the recipe line "A reply that needs an answer: a Gmail DRAFT only" can say "always".
