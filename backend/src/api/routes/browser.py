@@ -341,8 +341,9 @@ async def _url_owner(user: CurrentUser, application_id: int, url: str) -> Option
         return None
     reason = "other_application" if other_id is not None else "other_host"
     get_audit_logger().info(URL_MISMATCH, extra={
-        "event": URL_MISMATCH, "user_id": safe_log_value(user.id), "application_id": application_id,
-        "other_application_id": other_id, "reason": reason,
+        "event": URL_MISMATCH, "user_id": safe_log_value(user.id),
+        "application_id": safe_log_value(application_id), "other_application_id": safe_log_value(other_id),
+        "reason": reason,
     })
     return {"reason": reason, "own_url": own[0], "other_id": other_id}
 

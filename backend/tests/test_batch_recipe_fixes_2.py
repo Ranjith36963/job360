@@ -216,7 +216,7 @@ async def test_opening_another_applications_link_is_refused(authenticated_async_
         assert str(other) in out["detail"] and "https://northwind.example/careers/127" in out["detail"]
         assert opened == []  # nothing was opened
         logged = [r for r in caplog.records if getattr(r, "event", "") == "browser_url_mismatch"]
-        assert logged and logged[0].application_id == mine and logged[0].other_application_id == other
+        assert logged and logged[0].application_id == str(mine) and logged[0].other_application_id == str(other)
         own = (await client.post("/api/browser", json={
             "action": "open", "url": "https://northwind.example/careers/127", "application_id": mine})).json()
         assert own["status"] == "ok" and "url_warning" not in own
@@ -234,7 +234,7 @@ async def test_opening_a_link_on_another_host_is_warned_and_logged(authenticated
     assert out["status"] == "ok" and opened == ["https://boards.example.org/apply/9"]  # an ATS may live elsewhere
     assert "url_warning" in out and str(mine) in out["url_warning"]
     logged = [r for r in caplog.records if getattr(r, "event", "") == "browser_url_mismatch"]
-    assert logged and logged[0].reason == "other_host" and logged[0].application_id == mine
+    assert logged and logged[0].reason == "other_host" and logged[0].application_id == str(mine)
 
 
 # ── Recipe: the PC list is pasted, and batch runs no CV reviewer of any kind ─────────────────────────────
