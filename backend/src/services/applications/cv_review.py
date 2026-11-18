@@ -357,6 +357,39 @@ def list_line_holds(line: str, book: SkillBook) -> bool:
     return True
 
 
+def skill_entries(profile: Any) -> frozenset[str]:
+    """The saved ``skills`` and ``linkedin_skills`` entries, each whole (``_norm``): what a skills quote may list."""
+    cv = getattr(profile, "cv_data", None)
+    return frozenset(e for n in ("skills", "linkedin_skills")
+                     for s in cv_checks.field_strings(n, getattr(cv, n, None)) if (e := _norm(s)))
+
+
+def _entry_items(text: str) -> list[str]:
+    """``text`` cut at "," and ";" (a character scan), each item ``_norm``'d with outer spaces and dots trimmed."""
+    return [_norm(p).strip(" .") for p in text.replace(";", ",").split(",")]
+
+
+def skills_quote(quote: str, entries: frozenset[str]) -> bool:
+    """A quote of 2+ comma / semicolon items, EACH one whole saved skill entry (:func:`skill_entries`), case and
+    spacing aside (production 2026-11-18, apps 1056 1057 1019): the profile keeps one entry per value, so "AWS,
+    Bedrock, SageMaker" is in no ONE field yet says only what it saved. Never a substring: "Postgres" is no
+    "PostgreSQL", and an item no entry holds whole ("Kubernetes") fails the whole quote."""
+    items = _entry_items(quote)
+    return _SEGMENT not in quote and len(items) >= 2 and all(i and i in entries for i in items)
+
+
+def lent_label_words(line: str, book: SkillBook, entries: frozenset[str]) -> frozenset[str]:
+    """Generic label words a skills line may use without a quote (2026-11-18, "Cloud:" over the profile's "Cloud &
+    Ops"): the line's items are ALL saved entries, and the word names a profile group one of those items comes from.
+    A group lends nothing to items wholly foreign to it ("Agents: Python, SQL" still needs its label quoted)."""
+    parts = list_parts(line)
+    if parts is None or not all(_norm(i) in entries for i in parts[1]):
+        return frozenset()
+    got = {_norm(i) for i in parts[1]}
+    return frozenset(w for w in _label_words(parts[0]) if w in GENERIC_LABEL_WORDS and any(
+        w in k and got & v for k, v in book.groups))
+
+
 HEADER_MAX_CHARS = 300
 HEADER_MAX_PIECES = 12
 RAW_RECORD_MAX_CHARS = 200  # a CV text line longer than this is a paragraph, never one record

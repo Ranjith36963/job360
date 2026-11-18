@@ -4,9 +4,10 @@ the reviewer is the semantic judge, this code checks only what needs no understa
 A row ``{n, verdict, evidence}`` names line ``n`` of ``review.lines`` (1-based), the reviewer's verdict and 0-3
 verbatim profile quotes. The wording need not share its quotes' words; its facts must be in them. Codes, per line:
 ``line_uncovered`` (no row), ``line_unsupported`` (the reviewer said no), ``no_evidence`` (none for a line the profile
-does not hold itself), ``quote_not_in_profile`` (not inside ONE field / line), ``quote_too_thin`` (< 3 words),
-``evidence_wrong_record`` (outside the job / project the line sits under, ``cv_records``), ``claim_not_in_quote`` (a
-number, all-caps, ``+``/``#`` or mid-sentence capitalised word, a :data:`NUMBER_WORDS` word, a :data:`ROLE_FAMILIES`
+does not hold itself), ``quote_not_in_profile`` (not inside ONE field / line, nor a list of whole saved skills),
+``quote_too_thin`` (< 3 words), ``evidence_wrong_record`` (outside the job / project the line sits under,
+``cv_records``), ``claim_not_in_quote`` (a number, all-caps, ``+``/``#`` or mid-sentence capitalised word, a
+:data:`NUMBER_WORDS` word, a :data:`ROLE_FAMILIES`
 word (parts of "team-lead", "manager's" too), a word listed with a name, a list label word that is no generic skills
 word, a profile name opening the line, a capitalised name opening a later sentence, or a word mixing non-ASCII and
 ASCII letters, missing from its quotes; text is read NFKC with format characters dropped), ``evidence_reused`` (one
@@ -24,6 +25,7 @@ from typing import Any, Optional
 
 from src.core import settings
 from src.services.applications import cv_checks, cv_records, cv_review, evidence
+from src.utils.logger import safe_log_value
 
 # Closed: words that claim a role or ownership. Wherever one stands in a line (opening it or mid-sentence), a word of
 # its family must be in the row's quotes: "led the migration" needs a quote that says it led. Every other word is free.
@@ -237,6 +239,16 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
             _at(where, "line_uncovered", n)
     source, source_words = cv_review.quote_sources(profile)
     names, free_labels, known = profile_terms(profile)
+    entries, book = cv_review.skill_entries(profile), cv_review.skill_book(profile)
+
+    def in_profile(q: str, n: int) -> bool:  # one field or line, or a list of whole saved skills (2026-11-18)
+        if cv_review.quote_in_profile(q, source, source_words):
+            return True
+        listed = cv_review.skills_quote(q, entries)
+        logger.info("cv_review quote_check line=%s reason=%s", safe_log_value(n),
+                    "skills_entries" if listed else "quote_not_in_profile")
+        return listed
+
     texts = cv_records.record_texts(profile)
     own: dict[frozenset[str], tuple[str, str]] = {}
     alone: dict[str, list[int]] = {}  # a quote -> the lines it is the ONLY evidence of
@@ -256,7 +268,7 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
         quotes: list[str] = row["evidence"]
         if n in top:  # rules 7: no quote asked; a quote given is still the profile's, every fact is somewhere in it
             held += 1
-            if any(not cv_review.quote_in_profile(q, source, source_words) for q in quotes):
+            if any(not in_profile(q, n) for q in quotes):
                 _at(where, "quote_not_in_profile", n)
             if not cv_review.is_heading(body) and hard_facts(  # a top heading is "PROFESSIONAL SUMMARY": no fact
                     body, [whole, *([title] if n == headline and title else [])], names, free_labels, known):
@@ -271,13 +283,13 @@ def judge(text: str, rows: list[dict[str, Any]], profile: Any,
             _at(where, "no_evidence", n)
             continue
         for q in quotes:
-            if not cv_review.quote_in_profile(q, source, source_words):
+            if not in_profile(q, n):
                 _at(where, "quote_not_in_profile", n)
             if len(set(evidence._words(q))) < 3:
                 _at(where, "quote_too_thin", n)
             if line_recs is not None and not cv_review.quote_in_profile(q, *own[line_recs]):
                 _at(where, "evidence_wrong_record", n)
-        if hard_facts(body, quotes, names, free_labels, known):
+        if hard_facts(body, quotes, names, free_labels | cv_review.lent_label_words(body, book, entries), known):
             _at(where, "claim_not_in_quote", n)
         if len(quotes) == 1:
             alone.setdefault(cv_review._norm(quotes[0]), []).append(n)
