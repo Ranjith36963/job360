@@ -1,0 +1,11 @@
+-- 0094_duty_run_state: the LinkedIn safety state of the user's PC runs, kept in Job360 (PC run pc-0911, 2026-11-18).
+--
+-- The own_browser recipe kept the alert cursor, the LinkedIn page counts, the 150-a-UK-day cap and
+-- LINKEDIN_PAUSED_UNTIL in ~/li_state.json on the user's machine. pc-0911 ran in a container whose home
+-- is wiped every run, so the cursor and the daily cap were lost. The state now lives in ONE slot per user,
+-- `assistant_duty_runs` duty 'own_browser:li_state' (own_browser_queue actions state / save_state), as a
+-- JSON object of at most 8 KB in this column. Every other slot reads '' and never uses it.
+-- Erasure and export already cover the table (database.py _PER_USER_TABLES / _EXPORT_TABLES).
+--
+-- DDL ONLY. IF NOT EXISTS so a re-run is harmless.
+ALTER TABLE assistant_duty_runs ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT '';
