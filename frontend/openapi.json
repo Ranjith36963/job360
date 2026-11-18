@@ -15094,6 +15094,17 @@
             ],
             "title": "Follow Up On"
           },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
           "occurred_at": {
             "title": "Occurred At",
             "type": "string"

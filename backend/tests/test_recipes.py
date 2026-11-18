@@ -552,6 +552,23 @@ def test_the_own_browser_recipe_takes_again_after_the_hunt_duty_and_keeps_sweepi
     assert "never stopping after one alert while time is left" in sweep
 
 
+def test_the_own_browser_run_takes_again_after_every_closed_task_and_ends_only_when_empty_or_at_40_minutes():
+    """PC run pc-1905 (2026-11-18): after one duty and one application it let go (check_submit stop, below the
+    line) it went to the summary at 185 seconds with ~45 tasks waiting. Closing ONE task never ends the run."""
+    from src.api.routes.recipes import load_recipe
+
+    lines = [flat(line) for line in load_recipe("own_browser").text.splitlines()]
+    queue = next(line for line in lines if line.startswith("**a. queue"))
+    assert "a stop, ask or block closes only that task, never the run: take again" in queue
+    form = next(line for line in lines if line.startswith("**every form:**"))
+    assert '`stop` = never submit, `hold_released` {reason: "stopped"}, then take again' in form
+    end = next(i for i, line in enumerate(lines) if line.startswith("**end of the run.**"))
+    assert "after b, while time is left, go back to a and take again" in lines[end]
+    assert "the summary comes only when take answers `empty` or `closed` after b, or at 40 minutes" in lines[end]
+    close = next(i for i, line in enumerate(lines) if line.startswith("**close the run's tabs**"))
+    assert end < close  # the end conditions come before the tab close and the summary
+
+
 def test_the_own_browser_run_closes_its_tab_group_before_the_summary():
     """Owner 2026-11-18: every hourly PC run left its Chrome tab group open (4 "Job360 PC browser" groups piled up)."""
     from src.api.routes.recipes import load_recipe
