@@ -1218,6 +1218,9 @@ PROOF_UPLOAD_READ_SECONDS = float(os.getenv("PROOF_UPLOAD_READ_SECONDS", "30"))
 PROOF_LINK_TTL_MINUTES = int(os.getenv("PROOF_LINK_TTL_MINUTES", "5"))
 # An applied job with no proof after this many days becomes a "Needs you" ask.
 PROOF_NO_PROOF_AFTER_DAYS = int(os.getenv("PROOF_NO_PROOF_AFTER_DAYS", "7"))
+# 2026-11-17 hunt: whats_due hands an assistant a signed read-only link to the user's known jobs
+# (services/applications/known_list.py); it lives this long.
+KNOWN_LIST_TTL_MINUTES = int(os.getenv("KNOWN_LIST_TTL_MINUTES", "15"))
 # Upload links one user may mint per hour.
 PROOF_LINKS_MAX_PER_HOUR = int(os.getenv("PROOF_LINKS_MAX_PER_HOUR", "30"))
 # report_missing_tool (feature 7): reports ONE user's assistants may store per

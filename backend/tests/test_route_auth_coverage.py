@@ -72,6 +72,7 @@ ROUTE_MODULES = [
     "calendar",
     "oauth",
     "hunt_kit",
+    "known_list",
     "own_browser",
     "browser",
     "asks",
@@ -128,6 +129,11 @@ PUBLIC_ROUTES: dict[str, str] = {
         "private calendar feed (routes/calendar.py, migration 0058): a calendar app polls it with no cookie; the "
         "unguessable URL IS the credential (32 random bytes, only its SHA-256 stored, revocable). Bad tokens "
         "404 behind a per-IP lockout and the owner is rate-limited, like /api/files/{token}"
+    ),
+    "/api/known-list/{token}": (
+        "hunt known list (routes/known_list.py, 2026-11-17): an assistant's curl carries no Job360 credential; "
+        "the signed token IS the credential (HMAC over one user id, minted by whats_due for that user, read-only, "
+        "dead after 15 minutes). Bad tokens 404 behind a per-IP lockout, like /api/files/{token}"
     ),
     "/api/hunt-kit": (
         "hunt kit index (routes/hunt_kit.py): fixed static files, no user data, no DB; an assistant's "

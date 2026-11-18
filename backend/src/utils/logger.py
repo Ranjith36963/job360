@@ -336,7 +336,7 @@ def mask_email(email: Optional[str]) -> str:
     return f"{local[0]}***@{domain}"
 
 
-_SECRET_PATH_PREFIXES: tuple[str, ...] = ("/api/files/", "/api/proof/", "/api/calendar/")
+_SECRET_PATH_PREFIXES: tuple[str, ...] = ("/api/files/", "/api/proof/", "/api/calendar/", "/api/known-list/")
 
 
 def redact_path(path: str) -> str:

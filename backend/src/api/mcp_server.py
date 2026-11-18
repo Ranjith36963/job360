@@ -1218,9 +1218,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         listed_people: Optional[list[dict[str, Any]]] = None,
         client_key: Optional[str] = None,
         test: bool = False,
+        employer_search: Optional[Literal["not_found"]] = None,
     ) -> dict[str, Any]:
-        """Bring a job ad the user found (paste the full ad text as `description`).
-        Job360 stores it, starts an application and returns the job id and
+        """Bring a job ad the user found (the full ad text as `description`); returns the job id and
         application id. It never judges fit: record your verdict with `save_fit`. A job you already
         have returns existing=true, application_id, matched_on, differs (field names), next: read next.
         A different link/location/country is a 409 with the same fields. Never use this to search.
@@ -1238,14 +1238,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Ad dates (YYYY-MM-DD, when the ad shows them): `posted_at` = the listing's date,
         `employer_published_at` = the employer's own posting date. `test`=true: a practice job, kept off lists.
 
-        The reply carries `checks`: plain facts about this ad (full ad or only a
-        title/teaser, the apply link's site, ad age, repost, pay or sponsorship
-        mentioned). Read them: if the text is title_only or partial, fetch the
-        full ad first; if the host is unknown, tell the user.
+        `checks`: facts about this ad (text, apply site, age, repost, pay, sponsorship): title_only or
+        partial text = fetch the full ad first; an unknown host = tell the user.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
         `origin`: "ai_hunt" (you found it), "your_mail" (a job-alert email), "user_link" or
-        "user_paste"; `queue`=true puts it in the batch.
+        "user_paste"; `queue`=true puts it in the batch. A job-board apply link with origin ai_hunt or
+        your_mail: search the employer's careers page first; none there = `employer_search` "not_found".
         `listed_people` (max 10): people the ad names, each {"name", "role",
         "linkedin_url"}; saved as this job's contacts (found_via "job_ad").
         `known_people`: see rules. `client_key`: retry = first reply.
@@ -1259,7 +1258,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 country=country, remote=remote, found_on=found_on,
                 posted_at=posted_at, employer_published_at=employer_published_at,
                 origin=origin, queue=queue, test=test, listed_people=listed_people,  # type: ignore[arg-type]  # the model validates the closed set and item shape
-                client_key=client_key,
+                client_key=client_key, employer_search=employer_search,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1648,7 +1647,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     @mcp.tool()
     async def mark_done(
         duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done",
-        reason: MarkDoneReason = None, note: MarkDoneNote = "",
+        reason: MarkDoneReason = None, note: MarkDoneNote = "", report: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
         takes `application_ids`, the ones you worked; batch is refused 409 unless whats_due(duties=["batch"])
@@ -1656,13 +1655,16 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
         network_blocked | rate_limited | needs_user | error (a closed set: free text is refused; put prose in
         `note`, at most 300 characters, accepted but not stored yet). A failed duty waits 2h, 4h, 8h... (at
-        most 24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox."""
+        most 24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox.
+        hunt (done/partial) needs `report` {sources: {mail, kit, connectors, web, browser}: each {calls, ads,
+        brought} or {skipped: "<exact reason or error>"}, kit: {results, new, prefilter_passed, read_in_full,
+        unread_reason}}; a short one is refused 422 with what is missing."""
         if len(note) > 300:
             raise _tool_error(HTTPException(422, "note: at most 300 characters"))
         try:
             body = schedule_route.MarkDoneIn.model_validate({
                 "duty": duty, "application_ids": application_ids, "outcome": outcome, "reason": reason or None,
-                "note": note,
+                "note": note, "report": report,
             })
         except ValidationError as exc:
             raise _validation_error(exc) from None
