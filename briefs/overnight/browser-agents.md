@@ -23,5 +23,25 @@ Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, 
   the CV review task's area; I note it for Kits.
 - Decision taken without the owner: none.
 
+## 23:05 run  (score 5%)
+- Session cse_01KTmoHBCb9gShZDbwadSnyh, run pc-2306: 65 turns, 189 s, then the summary. First run with #1677.
+- Achieved: alert duty swept 2 alerts and brought 1 job (application 1087, Whitespace, fit 70); the tab group was
+  closed (tabs_close_mcp: "Group is now empty"). The run read the recipe with #1677's "End of the run" line.
+- Missed: no application taken (about 40 waiting); Easy Apply 0; LinkedIn sends 0 (7 held to 22 Nov by the weekly
+  limit, correct). The linkedin_check_pending duty failed: contacts 67, 130, 131 not matched to the names on the
+  Sent page, released `other` (failures_in_row 2).
+- Biggest cause: the assistant ignores the keep-going signal. Both releases answered
+  `"next": "Keep going: 50 tasks still wait; call take again."`, and the recipe it read says the summary comes only
+  when take answers empty/closed or at 40 minutes. It wrote the summary 3 minutes in. The server and recipe already
+  say the right thing; the model chooses to stop at a decision point.
+- Fix: building one now. `release` (and `hold_released` for an application) in a PC run takes the next task for the
+  same session and returns it in the same reply, so the assistant always holds a task instead of a choice.
+  PR armed only after 00:15 so it cannot merge inside the 00:05 run window.
+- Decision taken without the owner: the structural fix above (it removes a decision point; it changes no safety
+  rule, and take's own gates — pace, weekly limit, backoff, pause — still decide what is handed out).
+
 ## Needs the owner
-- (none yet)
+- Scheduled task prompt (trig_0199qXCRxqD3Dy2eH6pCb6U5) could also say it plainly. Proposed exact prompt:
+  `Job360 PC browser assistant run, in my own Chrome (Claude in Chrome). / Call get_recipe("own_browser") and follow it exactly. / Keep calling own_browser_queue take until it answers empty or closed, or 40 minutes pass; never write the summary before that. / Obey every Job360 reply and warning.`
+- linkedin_check_pending: 3 contacts (67, 130, 131) could not be matched by name on LinkedIn's Sent page. Their
+  stored names may differ from their LinkedIn names; worth a look in the morning.
