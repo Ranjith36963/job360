@@ -184,11 +184,17 @@ async def test_no_assistant_can_read_change_or_fire_the_trigger(authenticated_as
 
 
 def test_no_mcp_tool_reaches_the_trigger():
+    """Owner 2026-11-18: the MCP server may import these routes for ONE function, start_duty (whats_due(start=...)):
+    never the Send link's read, save, delete or press."""
+    import re
     from pathlib import Path
 
     from src.api import mcp_server
 
-    assert "assistant_trigger" not in Path(mcp_server.__file__).read_text(encoding="utf-8")
+    text = Path(mcp_server.__file__).read_text(encoding="utf-8")
+    assert re.findall(r"routes import assistant_trigger as (\w+)", text) == ["start_route"]
+    assert text.count("assistant_trigger") == 1
+    assert set(re.findall(r"start_route\.(\w+)", text)) == {"start_duty"}
 
 
 @pytest.mark.real_sleep

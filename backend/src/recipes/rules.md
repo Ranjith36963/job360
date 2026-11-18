@@ -404,6 +404,7 @@ its `application_ids`); `nothing_due` = end at once without
 writing anything. A duty under `running` is another run's right now: leave it. `reason` run_now = the user pressed Run now: run it now. `hunt_hold` queue_full =
 the queue is full, so no hunt until it drains. `batch_hold` waiting_on_you = every queued job waits on the user.
 `pc_idle` = own-browser tasks wait and no PC session worked them for hours: tell the user its `text` once (never work them).
+START ANOTHER DUTY: `whats_due(start=<duty>)` starts the user's routine for one duty now (e.g. `cv` after a hunt you ran in chat, which Job360's own chain never saw). At most once per duty per run, never in a loop, never to retry a start that did not happen (`reason` cooldown, not_set, hourly_cap, paused: stop).
 A tool a run needed was missing, asks for a sign-in or is not on the plan: `report_capabilities` (status, `needed`). Say how each ended: `mark_done(duty, outcome, reason)`, outcome done | partial | failed;
 a failed run always names its reason (tool_unavailable, sign_in_needed, paid_plan_needed, network_blocked,
 rate_limited, needs_user, error) - never mark a failed run done. A failed duty waits 2h, 4h, 8h (at most

@@ -1250,6 +1250,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assistant-duty-triggers/{duty}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Duty
+         * @description The user's assistant (or the website) starts ONE duty's routine now (owner 2026-11-18: "job360 and the
+         *     assistant can trigger"). Fire only: the link and token stay session-only above. Same cool-down and hourly
+         *     cap as every other start; refused while the user has paused the assistant. MCP: ``whats_due(start=...)``.
+         */
+        post: operations["start_duty_api_assistant_duty_triggers__duty__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assistant-settings": {
         parameters: {
             query?: never;
@@ -14216,6 +14238,43 @@ export interface operations {
                 "application/json": components["schemas"]["DutyRunIn"] | null;
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_duty_api_assistant_duty_triggers__duty__start_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
