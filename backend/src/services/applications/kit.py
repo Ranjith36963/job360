@@ -1382,19 +1382,31 @@ async def _open_ask_kinds(db: JobDatabase, user_id: str, application_id: int) ->
     """Kinds of this application's open asks (one query; mirrors ``asks._job_has_open_ask``). Left out: the
     doctor's "keep this lesson?" ask (a question row keyed ``doctor_repeat_*``) and the proof ask
     (context ``proof_missing:*``): neither is about the form. Outreach files no ask."""
+    return (await open_ask_kinds_for_apps(db, user_id, [application_id])).get(application_id, ())
+
+
+async def open_ask_kinds_for_apps(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, tuple[str, ...]]:
+    """``{application_id: kinds}`` of the open asks the submit gate counts, for many rows in one query; rows with
+    none are absent. The ONE truth for "this row waits on the owner": ``check_submit`` (``open_ask_decision``) and
+    the queue's ``waiting_on_owner`` / batch stop (``queue_preflight``) both read it (2026-11-18, batch run
+    20:55: the queue called rows with an open ask "needs nothing" while the gate said ``question_open``)."""
     from src.services.applications import asks as asks_service  # noqa: PLC0415 - keep the import graph flat
 
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
     cur = await db._db.execute(
-        "SELECT kind, context, questions FROM application_asks WHERE user_id = ? AND application_id = ? "
-        "AND answered_at IS NULL AND withdrawn_at IS NULL",
-        (user_id, application_id),
+        "SELECT application_id, kind, context, questions FROM application_asks "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND application_id IN ({marks}) AND answered_at IS NULL AND withdrawn_at IS NULL "
+        "ORDER BY id",
+        [user_id, *ids],
     )
-    kinds: list[str] = []
-    for kind, context, questions in await cur.fetchall():
+    kinds: dict[int, list[str]] = {}
+    for app_id, kind, context, questions in await cur.fetchall():
         if str(context or "").startswith("proof_missing:") or asks_service.is_doctor_only(questions):
             continue
-        kinds.append(str(kind or "") or "question")
-    return tuple(kinds)
+        kinds.setdefault(int(app_id), []).append(str(kind or "") or "question")
+    return {app_id: tuple(k) for app_id, k in kinds.items()}
 
 
 async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:

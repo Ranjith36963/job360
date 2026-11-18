@@ -157,31 +157,12 @@ async def _stale_fills(db: JobDatabase, user_id: str, ids: list[int]) -> dict[in
     }
 
 
-async def _owner_waiting_apps(db: JobDatabase, user_id: str, ids: list[int], stale: dict[int, str]) -> set[int]:
-    """Rows with an open ask the user still has to answer. 2026-11-18: an ask of a fill a newer CV made stale is
-    the redone form's, not the user's (``blockers.py``: "an old fill's asks belong to a form that is being
-    redone"), so only asks older than that fill count - the same rule ``waiting_on`` follows."""
-    if not ids:
-        return set()
-    cur = await db._db.execute(
-        f"SELECT application_id, asked_at FROM application_asks "  # noqa: S608 - placeholders only
-        f"WHERE user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL AND application_id IN ({_marks(ids)})",
-        [user_id, *ids],
-    )
-    out: set[int] = set()
-    for app_id, asked_at in await cur.fetchall():
-        fill_at = stale.get(int(app_id))
-        if fill_at is None or _at(str(asked_at)) < _at(fill_at):
-            out.add(int(app_id))
-    return out
-
-
-def _at(text: str) -> datetime:
-    try:
-        when = datetime.fromisoformat(text)
-    except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
-    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+async def _owner_waiting_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
+    """Rows with an open ask the user still has to answer: exactly the asks ``check_submit`` counts
+    (``kit.open_ask_kinds_for_apps``). 2026-11-18 (batch run 20:55, apps 125 / 136 / 122): #1660 dropped an ask
+    raised after a stale fill, so the queue said "needs nothing" while the gate said ``question_open`` and the
+    batch stop 409'd every hour. A refill row with an open ask is the owner's first; refill it after they answer."""
+    return set(await kit.open_ask_kinds_for_apps(db, user_id, ids))
 
 
 async def _filled_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
@@ -215,7 +196,7 @@ async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tupl
     with an OPEN ask to the owner last; first in first out inside each group (a stable sort of ``fifo_ids``).
     Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
     stale = await _stale_fills(db, user_id, fifo_ids)
-    waiting = await _owner_waiting_apps(db, user_id, fifo_ids, stale)
+    waiting = await _owner_waiting_apps(db, user_id, fifo_ids)
     filled = await _filled_apps(db, user_id, fifo_ids) - set(stale)
     sent = await _sent_apps(db, user_id, fifo_ids)
     return sorted(fifo_ids, key=lambda i: (i not in sent, i in waiting, i in filled)), waiting
@@ -256,7 +237,8 @@ async def fillable_rows(
     browser runs them, no live hold, no open ask, no open block and no ``form_filled`` yet. ``queued_by``
     (a batch run's claim) leaves out rows queued after it. ``with_cv`` (the batch run's stop, 2026-11-18)
     keeps only rows that already have a CV: a CV-less row is the CV run's (``cv_rows``), never the batch's.
-    Scoped by ``user_id``; read-only. ``[{"id", "company"}]``."""
+    Scoped by ``user_id``; read-only. ``[{"id", "company", "step"}]``; ``step`` is "refill" (a newer CV than
+    its fill) or "fill", so the batch stop's 409 says what each row needs."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
     open_ids = await schedule._open_queue_ids(db, user_id)
@@ -265,10 +247,11 @@ async def fillable_rows(
     queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
     later = queued_after(queued_at, queued_by)
     ids = sorted((i for i in open_ids if i not in later), key=lambda i: (str(queued_at.get(i) or ""), i))
-    # 2026-11-18: a "refill the form" row (fill older than the newest CV) is still work: neither its fill nor
-    # that fill's own ask makes it the owner's (the 12:41 run stopped with ~46 of them left).
+    # 2026-11-18: a "refill the form" row (fill older than the newest CV) is still work: its old fill does not
+    # make it done (the 12:41 run stopped with ~46 of them left). An open ask does make it the owner's, as at
+    # check_submit (the 20:55 run, apps 125 / 136).
     stale = await _stale_fills(db, user_id, ids)
-    skip = await _owner_waiting_apps(db, user_id, ids, stale) | (await _filled_apps(db, user_id, ids) - set(stale))
+    skip = await _owner_waiting_apps(db, user_id, ids) | (await _filled_apps(db, user_id, ids) - set(stale))
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
     blocks = await blocked_service.open_blocks(db, user_id, ids)
     skip |= set(blocks) - await closed_recheck_ids(db, user_id, blocks)
@@ -285,7 +268,7 @@ async def fillable_rows(
         [user_id, *todo],
     )
     names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
-    return [{"id": i, "company": names.get(i, "")} for i in todo]
+    return [{"id": i, "company": names.get(i, ""), "step": "refill" if i in stale else "fill"} for i in todo]
 
 
 async def country_missing_ids(db: JobDatabase, user_id: str, *, queued_by: Optional[datetime] = None) -> list[int]:
@@ -453,7 +436,7 @@ async def preflight_rows(
     lap("q_cv_kinds")
     cleared = await _cleared(db, user_id, ids)
     lap("q_cleared")
-    waiting = await _owner_waiting_apps(db, user_id, ids, await _stale_fills(db, user_id, ids))
+    waiting = await _owner_waiting_apps(db, user_id, ids)
     lap("q_open_asks")
     reviews = await cv_review.states_for_apps(db, user_id, ids)
     lap("q_cv_reviews")
