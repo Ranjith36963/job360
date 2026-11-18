@@ -7,15 +7,18 @@ Verifying writes through the existing ``PATCH /api/profile`` (a structured Memor
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
 from src.services.profile import common_questions
+
+logger = logging.getLogger("job360.api.common_questions")
 
 router = APIRouter(tags=["profile"])
 
@@ -112,8 +115,20 @@ class RememberItem(BaseModel):
 class RememberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    country: str = Field(min_length=2, max_length=2)
+    # The questionnaire's own block: an ISO country, a region (NORTH_AMERICA, EUROPE...) or ANY - the same
+    # places a country page takes. Owner bug 2026-11-18: a 2-letter cap refused every region block (422).
+    country: str = Field(min_length=2, max_length=40)
     items: list[RememberItem] = Field(min_length=1, max_length=10)
+
+    @field_validator("country")
+    @classmethod
+    def _a_place(cls, value: str) -> str:
+        from src.services.profile.country_pages import place_code  # noqa: PLC0415
+
+        code = place_code(value)
+        if code is None:
+            raise ValueError("country must be an ISO alpha-2 country, a region (e.g. NORTH_AMERICA) or ANY")
+        return code
 
 
 class RememberOut(BaseModel):
@@ -138,9 +153,13 @@ async def remember_questionnaire(
     from src.services.profile.edits import ProfileEditError  # noqa: PLC0415
 
     try:
-        out = ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country.upper())
+        out = ask_once.remember(user.id, [i.model_dump() for i in body.items], body.country)
     except ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    # Owner bug 2026-11-18: refused rows were silent. Topics and counts only, never the answers.
+    logger.info("questionnaire_remember place=%s saved=%d memory=%d not_saved=%s conflicts=%s", body.country,
+                len(out.get("saved") or []), len(out.get("memory") or {}), sorted(out.get("not_saved") or {}),
+                sorted(out.get("conflicts") or {}))
     if out.get("memory"):  # Answer once: open asks the new Memory facts answer close
         from src.api.routes.profile import _close_asks_memory_answers  # noqa: PLC0415
 
