@@ -13,9 +13,9 @@ Read the user's Gmail and record what it says; nothing else. Never apply, submit
    - Paging: fetch the next page only with the result's `nextPageToken`. No token = that was the last page, even with exactly 50 threads (`resultCountEstimate` is a guess). Over 200 threads: stop, skip step 6, `mark_done` partial "too many threads".
 3. **Pick** the job mail yourself: the sender's domain is in `search.email_senders`, a `search.companies` name is in the sender or subject, or it is plainly an employer, ATS or recruiter writing about a job. Skip every message id in `search.skip_message_ids` and mail not addressed to the user.
 4. **Read** each one whole (`get_message`; `get_thread` only for a short thread). Never decide from the subject or preview.
-5. **Record.** `match_email(sender, thread_id, subject)` for each mail, then:
-   - One clear match: record it exactly as `get_recipe("daily")` step 3 says (replied, interview, rejection, offer; a confirmation or closed-posting email only as allowed there), with `source` {message_id, thread_id, sender, subject, received_at}.
-   - Several or none: ALL of them in ONE `record_events` call under `unmatched` (message_id, thread_id, sender, subject, received_at; no `kind`). Never guess a job.
+5. **Record.** `match_email(sender, thread_id, subject)` for each mail. Its candidates are hints (a shared ATS sender lists every job on that ATS; a generic subject lists none): the email body decides. A candidate the body does not name is no match.
+   - The body names ONE application (its company, and its role when you have several there): record it exactly as `get_recipe("daily")` step 3 says (replied, interview, rejection, offer; a confirmation or closed-posting email only as allowed there), with `source` {message_id, thread_id, sender, subject, received_at, quote: the exact line of the body that names it}. Not among the candidates: `match_email(subject="<the company the body names>")` finds its id.
+   - No application, or you cannot tell which: ALL of them in ONE `record_events` call under `unmatched` (message_id, thread_id, sender, subject, received_at; no `kind`). Never guess a job.
    - A reply says `already_existed` / `already_recorded`: that mail is done; never try another event type for it.
    - Interview with a date and time: `interview_scheduled` with `scheduled_at`, plus a calendar event "Interview: <company> <role>" if you have a calendar tool. No fixed time: `interview_requested`, nothing in the calendar.
    - A reply that needs an answer: a Gmail DRAFT only, never sent.
