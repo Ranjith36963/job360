@@ -63,6 +63,7 @@ from src.services.applications import (
     duplicates,
     hiding,
     interview_payloads,
+    job_checks,
     memory_closes,
     outcome_suggestions,
     plain_words,
@@ -4407,6 +4408,15 @@ async def _record_event(
                     "stored_browser": browser or which_browser.UNKNOWN,
                 })
                 recorded = {**recorded, "warnings": [*recorded.get("warnings", []), which_browser.BLOCKED_NO_BROWSER]}
+            host = str(stored.get("page_host") or "")
+            on_board = job_checks.classify_host(host) == "job_board"
+            if body.event_type == "blocked" and actor_for(user) != "web" and on_board:
+                get_audit_logger().info("blocked_on_job_board", extra={
+                    "event": "blocked_on_job_board", "user_id": safe_log_value(user.id),
+                    "application_id": application_id, "page_host": safe_log_value(host),
+                    "reason": safe_log_value(str(stored.get("reason") or "")),
+                })
+                recorded = {**recorded, "warnings": [*recorded.get("warnings", []), which_browser.BLOCKED_ON_JOB_BOARD]}
             return recorded
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
