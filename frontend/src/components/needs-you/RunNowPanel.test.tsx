@@ -185,3 +185,37 @@ describe("RunNowPanel duties", () => {
     expect(await screen.findByTestId("own-browser-run-now-done")).toBeInTheDocument();
   });
 });
+
+describe("RunNowPanel: CV review and the own browser (owner 2026-11-18)", () => {
+  it("CV review gets its own Run now; the own browser's link is pressed with the own-browser button only", async () => {
+    getOwnBrowserQueue.mockResolvedValue(queue({ count: 0 }));
+    getDutyTriggers.mockResolvedValue({
+      duties: [duty("hunt", "Hunt"), duty("batch", "Apply"), duty("cv", "CV review"),
+        duty("own_browser", "Assistant browser (your Chrome)")],
+    });
+    runDuty.mockResolvedValue({ fired: true, duty: "cv" });
+    render(<RunNowPanel />);
+    await screen.findByTestId("run-now-cv");
+    const ids = Array.from(screen.getByTestId("run-now-panel").querySelectorAll("li")).map((li) => li.getAttribute("data-testid"));
+    expect(ids).toEqual(["run-now-hunt", "run-now-cv", "run-now-batch"]);
+    expect(screen.getByTestId("run-now-cv-btn")).toHaveTextContent("Review CVs now");
+    fireEvent.click(screen.getByTestId("run-now-cv-btn"));
+    await waitFor(() => expect(runDuty).toHaveBeenCalledWith("cv"));
+    // a saved own-browser link shows the own-browser button even with nothing waiting
+    expect(screen.getByTestId("own-browser-run-now")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-now-own_browser")).toBeNull();
+    expect(screen.getByTestId("run-now-panel").textContent).not.toMatch(BAD);
+  });
+
+  it("an own browser with no start link says so like the other rows, in neutral words", async () => {
+    getDutyTriggers.mockResolvedValue({
+      duties: [duty("inbox", "Gmail check"), duty("cv", "CV review", false),
+        duty("own_browser", "Assistant browser (your Chrome)", false)],
+    });
+    render(<RunNowPanel />);
+    const note = await screen.findByTestId("run-now-unlinked");
+    expect(note).toHaveTextContent("CV review, Assistant browser: no start link yet.");
+    expect(screen.getByTestId("run-now-panel").textContent).not.toMatch(BAD);
+    expect(screen.queryByTestId("own-browser-run-now")).toBeNull();
+  });
+});

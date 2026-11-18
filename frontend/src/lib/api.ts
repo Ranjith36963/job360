@@ -1611,7 +1611,7 @@ export async function getScheduleStatus(): Promise<{ duties: DutyStatus[]; last_
 }
 
 // ---- Ignition (owner 2026-10-24): one start link per duty; website only, never a token ----
-export type Duty = "hunt" | "batch" | "inbox" | "reach";
+export type Duty = "hunt" | "batch" | "inbox" | "reach" | "cv" | "own_browser";
 export type DutyTrigger = { duty: Duty; label: string; retry_until?: string | null } & AssistantTrigger;
 export type DutyFire = { fired: boolean; duty?: Duty; reason?: string; detail?: string; session_url?: string | null };
 

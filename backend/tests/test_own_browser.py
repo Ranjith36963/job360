@@ -312,7 +312,8 @@ async def test_run_now_is_not_a_scheduled_duty(authenticated_async_context):
         assert "own_browser" not in str(answer["next_due_at"]) + str(answer["last_done_at"]) + str(answer["running"])
         status = (await client.get("/api/schedule/status")).json()
         assert [d["duty"] for d in status["duties"]] == ["hunt", "inbox", "reach", "network", "batch"]
-    assert "own_browser" not in settings.SCHEDULE_DUTIES and "own_browser" not in duty_trigger.DUTIES
+    # Owner 2026-11-18: its routine has a start link (Ignition), but it is still no whats_due duty
+    assert "own_browser" not in settings.SCHEDULE_DUTIES and duty_trigger.RECIPES["own_browser"] == "own_browser"
 
 
 # ── pace ─────────────────────────────────────────────────────────────────────
