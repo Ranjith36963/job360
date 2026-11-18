@@ -10,7 +10,7 @@ uses). Both take the user from the session / token / OAuth subject, never from i
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -54,6 +54,9 @@ class DueItemOut(BaseModel):
     max_people: Optional[int] = None
     # Only on `inbox`: what one Gmail search needs (2026-10-31), see services/applications/inbox.search_plan.
     search: Optional[InboxSearchOut] = None
+    # Only on `hunt` (2026-11-18): profile paths the hunt needs and the user has not filled (closed:
+    # preferences.target_job_titles). Stop and ask the user; never invent them.
+    needs: Optional[list[Literal["preferences.target_job_titles"]]] = None
 
 
 class KnownListOut(BaseModel):
@@ -97,14 +100,23 @@ class WhatsDueOut(BaseModel):
     known_list: Optional[KnownListOut] = None
 
 
+class HuntSkipIn(BaseModel):
+    """Why a hunt source was not used: a closed ``code`` (HUNT_SKIP_CODES) and its ``detail`` (the exact error)."""
+
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(max_length=40)
+    detail: Optional[str] = Field(default=None, max_length=300)
+
+
 class HuntSourceIn(BaseModel):
-    """One hunt source: what it did, or why it was not used (the exact reason or error)."""
+    """One hunt source: what it did, or why it was not used ({code, detail}; free text alone is refused)."""
 
     model_config = ConfigDict(extra="forbid")
     calls: Optional[int] = Field(default=None, ge=0)
     ads: Optional[int] = Field(default=None, ge=0)
     brought: Optional[int] = Field(default=None, ge=0)
-    skipped: Optional[str] = Field(default=None, max_length=300)
+    # A str is accepted by the model only so the refusal can name the source (2026-11-18: excuses passed).
+    skipped: Optional[Union[HuntSkipIn, str]] = Field(default=None)
 
 
 class HuntKitIn(BaseModel):
@@ -115,6 +127,11 @@ class HuntKitIn(BaseModel):
     new: int = Field(ge=0)
     prefilter_passed: int = Field(ge=0)
     read_in_full: int = Field(ge=0)
+    # 2026-11-18: every ad that passed counts once in read_in_full, unreadable (no page opened after Job360's
+    # browser, TinyFish and Apify) or snippet_only (judged on a snippet). Required: missing = refused 422.
+    unreadable: Optional[int] = Field(default=None, ge=0)
+    snippet_only: Optional[int] = Field(default=None, ge=0)
+    # Prose about the unread ads (never logged); it never replaces the two counts.
     unread_reason: Optional[str] = Field(default=None, max_length=300)
 
 
@@ -255,7 +272,9 @@ async def whats_due(
             answer["known_list"] = None
         if answer["known_list"]:
             _log("known_list_minted", user, total=str(answer["known_list"]["total"]))
-    _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
+    hunt_needs = ",".join(n for d in answer["due"] if d["duty"] == "hunt" for n in d.get("needs") or [])
+    _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none",
+         hunt_needs=hunt_needs or "none")
     return WhatsDueOut(**answer)
 
 
@@ -412,19 +431,69 @@ async def _refuse_undrafted_people(
 # nothing about them, and read 52 of its 370 new kit ads in full. Only Job360's reply is obeyed, so an
 # assistant's hunt ends with a report that names every source and the kit funnel.
 HUNT_SOURCES = ("mail", "kit", "connectors", "web", "browser")
+# 2026-11-18 hunt run: `skipped` said "not run: WebSearch/TinyFish/Apify not called this run" and was accepted.
+# A source is skipped only for one of these (closed set); `detail` is the exact error (never logged).
+HUNT_SKIP_CODES = ("tool_missing", "tool_error", "no_results", "paid_needs_yes", "login_wall")
 HUNT_REPORT_SHAPE = (
     'report: {"sources": {"mail": S, "kit": S, "connectors": S, "web": S, "browser": S}, "kit": {"results": N, '
-    '"new": N, "prefilter_passed": N, "read_in_full": N}}, each S = {calls, ads, brought} or '
-    '{skipped: "<exact reason or error>"}'
+    '"new": N, "prefilter_passed": N, "read_in_full": N, "unreadable": N, "snippet_only": N}}, each S = '
+    '{calls, ads, brought} or {skipped: {code, detail}} with code one of ' + " | ".join(HUNT_SKIP_CODES)
+    + " and detail the exact error"
 )
+# Word runs that mean "I did not try it": an excuse, not a reason (matched on words, never a regex).
+_SKIP_EXCUSES = (
+    ("not", "run"), ("not", "called"), ("not", "used"), ("not", "tried"), ("not", "needed"), ("not", "attempted"),
+    ("no", "time"), ("out", "of", "time"), ("did", "not", "run"), ("did", "not", "call"),
+    ("did", "not", "use"), ("didn", "t", "run"), ("didn", "t", "call"), ("didn", "t", "use"),
+    ("wasn", "t", "run"), ("wasn", "t", "called"), ("wasn", "t", "used"),
+)
+
+
+def _words(text: str) -> list[str]:
+    """Lower-case letter/digit runs of ``text`` (a character scan; no regex on caller text)."""
+    return "".join(ch if ch.isalnum() else " " for ch in text.casefold()).split()
+
+
+def _is_excuse(text: str) -> bool:
+    words = _words(text)
+    for run in _SKIP_EXCUSES:
+        n = len(run)
+        if any(tuple(words[i:i + n]) == run for i in range(len(words) - n + 1)):
+            return True
+    return False
+
+
+def _skip_problem(skipped: Union[HuntSkipIn, str, None]) -> Optional[str]:
+    """The refusal code for a source's ``skipped`` (None = an honest skip, or no skip)."""
+    if skipped is None:
+        return None
+    if isinstance(skipped, str):
+        return "skip_free_text"
+    if skipped.code not in HUNT_SKIP_CODES:
+        return "skip_code"
+    if not (skipped.detail or "").strip():
+        return "skip_detail"
+    if _is_excuse(skipped.detail or ""):
+        return "skip_excuse"
+    return None
+
+
+_SKIP_FIX = {
+    "skip_free_text": "send skipped as {code, detail}, never free text alone",
+    "skip_code": "skipped.code must be one of " + ", ".join(HUNT_SKIP_CODES),
+    "skip_detail": "skipped.detail must be the exact error or what the tool said",
+    "skip_excuse": "\"not run\", \"not called\" or \"no time\" is not a reason: run that source now (start it "
+                   "while the kit runs), then report its counts",
+}
 
 
 def _source_state(src: HuntSourceIn) -> Optional[str]:
     counted = None not in (src.calls, src.ads, src.brought)
-    said = bool((src.skipped or "").strip())
     if counted and src.skipped is None:
         return "ran"
-    if said and src.calls is None and src.ads is None and src.brought is None:
+    if src.skipped is not None and src.calls is None and src.ads is None and src.brought is None:
+        if isinstance(src.skipped, str) and not src.skipped.strip():
+            return None
         return "skipped"
     return None
 
@@ -442,7 +511,7 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
     if missing:
         codes.append("source_missing")
         problems.append(f"sources {', '.join(missing)} are missing: use each one, or send it as "
-                        '{skipped: "<exact reason or error>"}')
+                        "{skipped: {code, detail}}")
     unknown = sorted(k for k in report.sources if k not in HUNT_SOURCES)
     if unknown:
         codes.append("source_unknown")
@@ -452,29 +521,55 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
     unclear = [k for k in HUNT_SOURCES if k in states and states[k] is None]
     if unclear:
         codes.append("source_unclear")
-        problems.append(f"sources {', '.join(unclear)} need all of calls, ads, brought, or only a non-empty skipped")
+        problems.append(f"sources {', '.join(unclear)} need all of calls, ads, brought, or only skipped")
+    # One code per kind of bad skip, each naming its sources (closed names only; never the caller's text).
+    bad_skips: dict[str, list[str]] = {}
+    for k in HUNT_SOURCES:
+        if states.get(k) == "skipped":
+            why = _skip_problem(report.sources[k].skipped)
+            if why:
+                bad_skips.setdefault(why, []).append(k)
+    for why, names in bad_skips.items():
+        codes.append(why)
+        problems.append(f"sources {', '.join(names)}: {_SKIP_FIX[why]}")
     kit = report.kit
     if kit is None and states.get("kit") == "ran":
         codes.append("kit_missing")
-        problems.append("kit: {results, new, prefilter_passed, read_in_full} is missing")
-    if kit is not None and not (kit.read_in_full <= kit.prefilter_passed <= kit.new <= kit.results):
+        problems.append("kit: {results, new, prefilter_passed, read_in_full, unreadable, snippet_only} is missing")
+    if kit is not None and (kit.unreadable is None or kit.snippet_only is None):
+        codes.append("kit_unaccounted")
+        problems.append("kit.unreadable and kit.snippet_only are required (0 when none): unreadable = ads no page "
+                        "would open after Job360's browser, TinyFish and Apify; snippet_only = ads judged on a "
+                        "snippet, not the full ad")
+    elif kit is not None and not (kit.read_in_full <= kit.prefilter_passed <= kit.new <= kit.results):
         codes.append("kit_counts")
         problems.append("kit counts must keep read_in_full <= prefilter_passed <= new <= results")
-    elif kit is not None and kit.read_in_full < kit.prefilter_passed and not (kit.unread_reason or "").strip():
-        codes.append("kit_unread")
-        problems.append(f"you read {kit.read_in_full} of {kit.prefilter_passed} kit ads that passed the pre-filter: "
-                        "read every one in full (batches of at most 40, up to 8 helpers), or say why in "
-                        "kit.unread_reason")
+    elif kit is not None and kit.unreadable is not None and kit.snippet_only is not None:
+        total = kit.read_in_full + kit.unreadable + kit.snippet_only
+        if total != kit.prefilter_passed:
+            codes.append("kit_unread")
+            problems.append(
+                f"you read {kit.read_in_full} of {kit.prefilter_passed} kit ads that passed the pre-filter in full: "
+                f"read_in_full + unreadable + snippet_only = {kit.read_in_full} + {kit.unreadable} + "
+                f"{kit.snippet_only} = {total}, but prefilter_passed is {kit.prefilter_passed}. Count every ad once "
+                "(read the rest in full: batches of at most 40, up to 8 helpers; a 403 page is tried with Job360's "
+                "browser, TinyFish, then Apify first); kit.unread_reason never replaces a count"
+            )
     if codes:
         _log("hunt_report_refused", user, codes=",".join(codes), missing=",".join(missing))
         raise HTTPException(
             status_code=422, detail=f"Hunt report refused: {'; '.join(problems)}. The full shape: {HUNT_REPORT_SHAPE}. "
                                     "Nothing was recorded; fix it, then mark_done again.",
         )
+    skips = ",".join(
+        f"{k}:{report.sources[k].skipped.code}" for k in HUNT_SOURCES  # type: ignore[union-attr]
+        if states.get(k) == "skipped"
+    )
     get_audit_logger().info("hunt_report_ok", extra={
         "event": "hunt_report_ok", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
-        "sources": ",".join(f"{k}:{states[k]}" for k in HUNT_SOURCES), "result": "ok",
-        **({f"kit_{k}": getattr(kit, k) for k in ("results", "new", "prefilter_passed", "read_in_full")}
+        "sources": ",".join(f"{k}:{states[k]}" for k in HUNT_SOURCES), "skips": skips or "none", "result": "ok",
+        **({f"kit_{k}": getattr(kit, k) for k in ("results", "new", "prefilter_passed", "read_in_full",
+                                                  "unreadable", "snippet_only")}
            if kit else {}),
     })
 
