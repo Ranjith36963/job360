@@ -161,3 +161,16 @@ async def test_job360_counts_the_people_never_the_run(authenticated_async_contex
             ok = await agent.post("/api/schedule/done", json={
                 "duty": "reach", "application_ids": [full], "reviewed": True})
             assert ok.json()["outcome"] == "done" and ok.json()["score"]["per_job"] == {str(full): 3}, ok.text
+
+
+@pytest.mark.asyncio
+async def test_a_short_unreviewed_run_hears_both(authenticated_async_context):
+    """2026-11-18 12:05 run: 2 of 5 jobs under 3 and no separate reviewer; the reply named only below_target."""
+    async with authenticated_async_context() as client:
+        app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
+        async with await _agent(client) as agent:
+            await _noted(agent, app_id, ["Lee Park"])
+            resp = await agent.post("/api/schedule/done", json={"duty": "reach", "application_ids": [app_id]})
+            assert resp.status_code == 200, resp.text
+            note = resp.json()["note"]
+            assert "below_target" in note and "no_review" in note and "reviewed=true" in note, note

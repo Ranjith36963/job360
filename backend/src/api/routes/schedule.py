@@ -646,6 +646,8 @@ async def mark_done(
             outcome, reason = "partial", "below_target"
             said = (f"Recorded as partial (below_target): {'; '.join(short)}. "
                     f"Minimum {score.minimum}, target {score.target}.")
+            if not body.reviewed:  # 2026-11-18 12:05 run: below_target hid that it also skipped the review
+                said += " Also no_review: " + NO_REVIEW_NOTE.split(": ", 1)[1]
     if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "done" and not body.reviewed:
         # 2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer.
         outcome, reason = "partial", "no_review"
