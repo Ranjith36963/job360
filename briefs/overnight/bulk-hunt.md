@@ -43,3 +43,13 @@ Session: Bulk Hunt test (owner's task trig_01QSkCh1, starts :11). Check-ins at :
   ```
 - Decision without the owner: I will not add new refusals for the level filter; the recipe tells Claude
   to judge level from the ad (audit rule: patterns hint, Claude judges).
+
+## 23:30 note
+- The task prompt was changed at 22:36 (now: read the search plan, `--every-title`, no word list, bring 10).
+  The "Needs the owner" prompt item above is done.
+- 23:11 run ended after 19 s (the 22:11 run finished at 23:07; scored at 23:36).
+- #1665 merged main (kept #1675's `--every-title` and this PR's kit.done / known-ct / employer_searched),
+  plus audit finding 6: a "(Backend)"/"(Frontend)" qualifier is another job; only an identical key
+  refuses or drops, a near match is a `possible_duplicate` hint. CI green; marked ready 23:30 (no run live).
+- Decision without the owner: at the SAME company with the same title, a different city is still refused
+  (main's existing test 328 Glasgow vs 126 Austin is a real prod duplicate); not loosened overnight.
