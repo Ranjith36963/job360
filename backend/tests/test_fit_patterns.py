@@ -325,7 +325,11 @@ async def test_a_repost_under_another_link_is_flagged(authenticated_async_contex
             "label": "among jobs you brought", "first_seen": seen, "days_since": 30,
             "application_id": first_id, "window_days": 90,
         }
-        # the same facts through the MCP tool
+        # the same facts through the MCP tool. Both earlier applications are closed first: an agent bring of an
+        # OPEN application's company + role is that application (duplicate_of, #1665), and the repost lookup
+        # reads every job the user brought, closed ones too.
+        _sql("UPDATE applications SET status = 'withdrawn' WHERE id IN (?, ?)",
+             (first_id, int(second["application_id"])))
         ctx = _as_user(mcp_server, fixture_user_id)
         try:
             out = await tools.get_tool("bring_job").fn(
