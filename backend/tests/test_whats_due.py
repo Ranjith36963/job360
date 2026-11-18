@@ -156,7 +156,7 @@ async def _due(client: AsyncClient) -> dict[str, Any]:
     return resp.json()
 
 
-_SKIP = {"skipped": "not used in this test run"}
+_SKIP = {"skipped": {"code": "tool_missing", "detail": "no such tool in this test"}}
 _HUNT_REPORT = {"sources": {"mail": _SKIP, "kit": _SKIP, "connectors": _SKIP, "web": _SKIP, "browser": _SKIP}}
 
 

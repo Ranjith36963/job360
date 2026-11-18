@@ -384,8 +384,8 @@ class BringJobResponse(BaseModel):
     next: Optional[str] = None
     # Hunt recipe v24 (owner 2026-11-17), agent brings only: things to fix that do not block the bring,
     # each {"code", "reason", "next"} plus its facts. Closed codes BRING_WARNING_CODES:
-    # ``possible_duplicate`` (+ ``application_ids``: OPEN applications with the same role words under
-    # another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
+    # ``possible_duplicate`` (+ ``application_ids``: at most 5 OPEN applications with the same role words and
+    # place under another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -416,16 +416,16 @@ async def _bring_warnings(
         if same:
             out.append({
                 "code": "possible_duplicate", "application_ids": same,
-                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role under "
-                          "another company label: possibly the same job (an agency and its client, or a renamed "
-                          "employer).",
+                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role in the "
+                          "same place under another company label: possibly the same job (an agency and its "
+                          "client, or a renamed employer).",
                 "next": _DUPLICATE_NEXT,
             })
             get_audit_logger().info(
                 "job_bring_possible_duplicate",
                 extra={
                     "event": "job_bring_possible_duplicate", "user_id": user_id, "application_id": application_id,
-                    "matched_ids": same, "reason": "same_role_words", "status": "warned",
+                    "matched_ids": same, "reason": "same_role_and_place", "status": "warned",
                 },
             )
     host = apply_host(body.apply_url)

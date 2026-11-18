@@ -6757,6 +6757,8 @@ export interface components {
             duty: "hunt" | "inbox" | "batch" | "reach" | "network";
             /** Max People */
             max_people?: number | null;
+            /** Needs */
+            needs?: "preferences.target_job_titles"[] | null;
             /**
              * Reason
              * @enum {string}
@@ -7404,8 +7406,12 @@ export interface components {
             read_in_full: number;
             /** Results */
             results: number;
+            /** Snippet Only */
+            snippet_only?: number | null;
             /** Unread Reason */
             unread_reason?: string | null;
+            /** Unreadable */
+            unreadable?: number | null;
         };
         /** HuntReportIn */
         HuntReportIn: {
@@ -7416,8 +7422,18 @@ export interface components {
             };
         };
         /**
+         * HuntSkipIn
+         * @description Why a hunt source was not used: a closed ``code`` (HUNT_SKIP_CODES) and its ``detail`` (the exact error).
+         */
+        HuntSkipIn: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
          * HuntSourceIn
-         * @description One hunt source: what it did, or why it was not used (the exact reason or error).
+         * @description One hunt source: what it did, or why it was not used ({code, detail}; free text alone is refused).
          */
         HuntSourceIn: {
             /** Ads */
@@ -7427,7 +7443,7 @@ export interface components {
             /** Calls */
             calls?: number | null;
             /** Skipped */
-            skipped?: string | null;
+            skipped?: components["schemas"]["HuntSkipIn"] | string | null;
         };
         /**
          * InboxCheckedIn

@@ -15,10 +15,14 @@ from ``common_questions`` rows that are guessed (to verify) or not known, most-g
 """
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Any, Iterable, Optional
 
 from src.services.profile import common_questions
+from src.utils.logger import safe_log_value
+
+logger = logging.getLogger(__name__)
 
 PER_COUNTRY = 10
 # Rows asked again on every job (how you heard, a referral, consent, the CV check, an essay) or
@@ -247,7 +251,9 @@ def memory_note(topic: str, question: str, country: Optional[str]) -> Optional[s
         return None
     where = common_questions.save_path({"kit_key": template}) if template else "Memory"
     per_country = template is None or "{cc}" in template
-    page = f"your {country} page" if per_country and country else "your Memory page"
+    from src.services.profile.regions import place_name  # noqa: PLC0415
+
+    page = f"your {place_name(country)} page" if per_country and country else "your Memory page"
     return (f"a Memory fact ({where}), never kept as a saved answer: the user sets it on {page} "
             "in Job360 (Memory)")
 
@@ -343,13 +349,20 @@ def questionnaire(
     # extra_countries: the queued jobs' countries (2026-11-13), so a US / NL / SE job has a slot here.
     rows = [r for r in common_questions.common_questions(profile, overlay, extra_countries) if not r["per_job"]]
     saved = getattr(getattr(profile, "user_info", None), "answers", None) or []
+    from src.services.profile.regions import is_region, place_name  # noqa: PLC0415
+
+    places = common_questions._countries(profile, extra_countries)
+    has_country = any(not is_region(p) for p in places)
     out: list[dict[str, Any]] = []
-    for cc in common_questions._countries(profile, extra_countries):
+    for cc in places:
         index = build_index(saved, country=cc)  # the saved answers read once for this country, not once per row
+        # A region's group holds only its own questions (salary, relocation, travel): the general ones are
+        # asked in the country groups, and a region is never asked work rights (``asked_for``).
+        own_only = is_region(cc) and has_country
         todo = [
-            {**r, "topic": _key(r), "question": r["question"].replace("{country}", cc)}
+            {**r, "topic": _key(r), "question": common_questions.place_text(r["question"], cc)}
             for r in rows
-            if r["country"] in (cc, None) and not r["verified"]
+            if (r["country"] == cc or (r["country"] is None and not own_only)) and not r["verified"]
             and find_answer(saved, topic=_key(r), country=cc, index=index) is None
         ]
         todo.sort(key=lambda r: (r["label"] != "guessed", -int(r["seen"])))
@@ -360,6 +373,12 @@ def questionnaire(
                 row = _conflict_row(c, cc)
                 todo.insert(0, row)
             row["conflict"] = c["values"]
+        if is_region(cc) and not todo:
+            logger.info("questionnaire region=%s dropped: nothing a region is asked is still open", safe_log_value(cc))
+            continue
+        if is_region(cc):
+            logger.info("questionnaire region=%s shown as %s with %d questions", safe_log_value(cc),
+                        safe_log_value(place_name(cc)), len(todo))
         out.append({"country": cc, "questions": todo[:PER_COUNTRY]})
     return out
 
