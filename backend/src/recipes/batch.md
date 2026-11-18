@@ -13,14 +13,14 @@ the exact text typed (whole essays) in `form_filled` and `form_swept` answers. B
 **Asks:** a missing Memory fact is never an `ask_user` (Job360 refuses a job-less one): list it under Needs you as "set on your Answer once page", by country, with row ids. Other `kit_missing` keys from every row go in ONE
 `ask_user` with no `application_id`; a question about one job goes in that job's own ask, ONE per job (read its open asks first; a repeat merges into it). 429 (Needs you full): never retry it this run; still fill the form
 (guesses marked guessed), keep working, list the question in the summary.
-**Job facts are not user facts:** a row missing its job country (or remote) is never an ask: from its ad (`get_application`) `update_job(application_id, country="<ISO alpha-2>")` (or remote), EVERY such row; not in the ad: Not
-submitted.
+**Job facts are not user facts:** a row missing its job country (or remote) is never an ask: from its ad (`get_application`) `update_job(application_id, country="<ISO alpha-2>")` (or remote), EVERY such row, skipped rows too; not in the ad: Not
+submitted. `mark_done` lists any left in `country_missing`: set them, then call it again.
 **Tool shapes** (else refused): events, `blocked` reasons and `mark_done` values as rules "Events" and SCHEDULE say; `check_form(application_id, questions, form_url)` takes no `session`; `browser` fill fields = [{ref, text}];
 `ask_user` keys lowercase a-z 0-9 _ . (at most 60, salary.in), at most 6 plain choices, naming only this job's company, never an internal code or tool; `save_artifact(kind="cv", text, application_id)`; `form_checked` needs
 questions_count, answered, missing; `mark_done` batch: no `detail` or application_ids, `note` at most 300 characters. Every `blocked` has `browser` (job360 / own_browser / manual). Never `get_tailored_documents` (use
 `get_application`).
 **What a row waits on** (the summary's words): "needs nothing from the user" = no `waiting_on` entry ending ":you", `preflight.blocked_count` 0, `preflight.waiting_on_owner` false (no open ask) and `has_cv` true; only
-these rows are yours to open. `waiting_on_owner` true, an earlier block or a ":you" entry waits on the user: skip it before anything is opened (never read a kit to look for asks), list it under Needs you with its
+these rows are yours to open. A "refill the form" row (a newer CV than its fill) is yours: refill it, then `check_submit`; its old fill's ask is not the user's. `waiting_on_owner` true, an earlier block or a ":you" entry waits on the user: skip it before anything is opened (never read a kit to look for asks), list it under Needs you with its
 blocker. "approve_cv:you" waits on the CV run (`get_recipe("cv")`) or the user's "CV OK" in chat or Approve CV on Needs you (their `where`, never yours): count it as "CV review".
 1. **Read.** `get_profile` `settings`: `paused` is true = STOP. Note `daily_cap`, `company_cap` (`effective`; null = none), `use_email_codes`. The user may name a run size ("run 360 batch 5"): N; stop after N submits or when
    `daily_left` hits 0. One `session` label, `apply-` + UTC time, on every `get_application_kit`, `browser`, `check_submit`.

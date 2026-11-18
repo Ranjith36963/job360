@@ -126,6 +126,64 @@ async def _open_ask_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[i
     return {int(r[0]) for r in await cur.fetchall()}
 
 
+async def _stale_fills(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, str]:
+    """2026-11-18 (12:41 batch run): ``{application_id: recorded_at}`` of each row whose newest ``form_filled``
+    is older than its newest saved CV and has no send decision after it - the blockers' "refill the form"
+    (``blockers.py`` ``fill_stale``; the gate's ``kit._filled_with_latest_cv``). The form is the assistant's to
+    redo. Read-only; scoped by ``user_id``."""
+    if not ids:
+        return {}
+    cur = await db._db.execute(
+        "SELECT id, application_id, event_type, payload, recorded_at FROM application_events "  # noqa: S608
+        f"WHERE user_id = ? AND application_id IN ({_marks(ids)}) "
+        "AND event_type IN ('form_filled', 'artifact_saved', 'submit_approved', 'submit_declined') ORDER BY id",
+        [user_id, *ids],
+    )
+    fill: dict[int, tuple[int, str]] = {}
+    cv: dict[int, int] = {}
+    decided: dict[int, int] = {}
+    for r in await cur.fetchall():
+        d = dict(r)
+        app_id, ev_id, kind = int(d["application_id"]), int(d["id"]), str(d["event_type"])
+        if kind == "form_filled":
+            fill[app_id] = (ev_id, str(d["recorded_at"]))
+        elif kind == "artifact_saved" and kit._json(d.get("payload")).get("kind") == "cv":
+            cv[app_id] = ev_id
+        elif kind in ("submit_approved", "submit_declined"):
+            decided[app_id] = ev_id
+    return {
+        app_id: at for app_id, (fill_id, at) in fill.items()
+        if cv.get(app_id, 0) > fill_id and decided.get(app_id, 0) < fill_id
+    }
+
+
+async def _owner_waiting_apps(db: JobDatabase, user_id: str, ids: list[int], stale: dict[int, str]) -> set[int]:
+    """Rows with an open ask the user still has to answer. 2026-11-18: an ask of a fill a newer CV made stale is
+    the redone form's, not the user's (``blockers.py``: "an old fill's asks belong to a form that is being
+    redone"), so only asks older than that fill count - the same rule ``waiting_on`` follows."""
+    if not ids:
+        return set()
+    cur = await db._db.execute(
+        f"SELECT application_id, asked_at FROM application_asks "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL AND application_id IN ({_marks(ids)})",
+        [user_id, *ids],
+    )
+    out: set[int] = set()
+    for app_id, asked_at in await cur.fetchall():
+        fill_at = stale.get(int(app_id))
+        if fill_at is None or _at(str(asked_at)) < _at(fill_at):
+            out.add(int(app_id))
+    return out
+
+
+def _at(text: str) -> datetime:
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
 async def _filled_apps(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
     if not ids:
         return set()
@@ -156,8 +214,9 @@ async def work_order(db: JobDatabase, user_id: str, fifo_ids: list[int]) -> tupl
     their yes is ready to submit), then rows not waiting on the owner, unfilled before already-filled, then rows
     with an OPEN ask to the owner last; first in first out inside each group (a stable sort of ``fifo_ids``).
     Returns ``(ordered_ids, waiting_ids)``. Never ranks by fit (rule 4)."""
-    waiting = await _open_ask_apps(db, user_id, fifo_ids)
-    filled = await _filled_apps(db, user_id, fifo_ids)
+    stale = await _stale_fills(db, user_id, fifo_ids)
+    waiting = await _owner_waiting_apps(db, user_id, fifo_ids, stale)
+    filled = await _filled_apps(db, user_id, fifo_ids) - set(stale)
     sent = await _sent_apps(db, user_id, fifo_ids)
     return sorted(fifo_ids, key=lambda i: (i not in sent, i in waiting, i in filled)), waiting
 
@@ -206,7 +265,10 @@ async def fillable_rows(
     queued_at = await spine.queued_at_by_app(db, user_id, open_ids)
     later = queued_after(queued_at, queued_by)
     ids = sorted((i for i in open_ids if i not in later), key=lambda i: (str(queued_at.get(i) or ""), i))
-    skip = await _open_ask_apps(db, user_id, ids) | await _filled_apps(db, user_id, ids)
+    # 2026-11-18: a "refill the form" row (fill older than the newest CV) is still work: neither its fill nor
+    # that fill's own ask makes it the owner's (the 12:41 run stopped with ~46 of them left).
+    stale = await _stale_fills(db, user_id, ids)
+    skip = await _owner_waiting_apps(db, user_id, ids, stale) | (await _filled_apps(db, user_id, ids) - set(stale))
     skip |= set(await kit.holds_for_apps(db, user_id, ids, datetime.now(timezone.utc)))
     blocks = await blocked_service.open_blocks(db, user_id, ids)
     skip |= set(blocks) - await closed_recheck_ids(db, user_id, blocks)
@@ -224,6 +286,27 @@ async def fillable_rows(
     )
     names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
     return [{"id": i, "company": names.get(i, "")} for i in todo]
+
+
+async def country_missing_ids(db: JobDatabase, user_id: str, *, queued_by: Optional[datetime] = None) -> list[int]:
+    """2026-11-18 (12:41 run, application 361): open queued rows (queued at or before ``queued_by``, a batch
+    run's claim) whose job country is empty - the job's fact the run sets from the ad (``update_job``), never
+    an ask. Sorted; read-only; scoped by ``user_id``."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    open_ids = await schedule._open_queue_ids(db, user_id)
+    if not open_ids:
+        return []
+    later = queued_after(await spine.queued_at_by_app(db, user_id, open_ids), queued_by)
+    ids = [i for i in open_ids if i not in later]
+    if not ids:
+        return []
+    cur = await db._db.execute(
+        f"SELECT id FROM applications WHERE user_id = ? AND id IN ({_marks(ids)}) "  # noqa: S608
+        "AND COALESCE(TRIM(job_country), '') = ''",
+        [user_id, *ids],
+    )
+    return sorted(int(r[0]) for r in await cur.fetchall())
 
 
 async def submit_now_ids(db: JobDatabase, user_id: str) -> list[int]:
@@ -370,7 +453,7 @@ async def preflight_rows(
     lap("q_cv_kinds")
     cleared = await _cleared(db, user_id, ids)
     lap("q_cleared")
-    waiting = await _open_ask_apps(db, user_id, ids)
+    waiting = await _owner_waiting_apps(db, user_id, ids, await _stale_fills(db, user_id, ids))
     lap("q_open_asks")
     reviews = await cv_review.states_for_apps(db, user_id, ids)
     lap("q_cv_reviews")

@@ -8331,6 +8331,8 @@ export interface components {
         };
         /** MarkDoneOut */
         MarkDoneOut: {
+            /** Country Missing */
+            country_missing?: number[];
             /** Done At */
             done_at: string;
             /**

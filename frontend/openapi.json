@@ -10974,6 +10974,13 @@
       },
       "MarkDoneOut": {
         "properties": {
+          "country_missing": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Country Missing",
+            "type": "array"
+          },
           "done_at": {
             "title": "Done At",
             "type": "string"

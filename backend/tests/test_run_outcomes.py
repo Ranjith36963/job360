@@ -179,6 +179,14 @@ async def test_needs_user_is_refused_while_a_queued_job_needs_no_owner_input(
         assert ask.status_code in (200, 201), ask.text
         await _save_cv(client, first)
         await _save_cv(client, second)
+        # 2026-11-18 (12:41 run): a newer CV than the first row's fill makes it "refill the form": still work
+        stale = await _stop_batch(client)
+        assert stale.status_code == 409 and f"next: application {first} (Northwind 1)" in stale.json()["detail"]
+        assert "1 queued jobs" in stale.json()["detail"]
+        refilled = await client.post(f"/api/applications/{first}/events", json={
+            "event_type": "form_filled", "payload": {"form_url": "https://northwind.example/careers/1/apply",
+                                                     "fields_count": 3}})
+        assert refilled.status_code == 201, refilled.text
         ok = await _stop_batch(client)
         assert ok.status_code == 200, ok.text
         assert ok.json()["outcome"] == "partial"
