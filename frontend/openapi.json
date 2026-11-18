@@ -15404,6 +15404,17 @@
             ],
             "title": "Failures In Row"
           },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
           "outcome": {
             "anyOf": [
               {

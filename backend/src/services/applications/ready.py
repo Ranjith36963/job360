@@ -219,11 +219,7 @@ async def newest_fill_id(db: JobDatabase, user_id: str, application_id: int) -> 
 
 # -- The card (S5d) -----------------------------------------------------------
 
-_BLOCK_PATH = {
-    "contact": "user_info.contact", "right_to_work": "user_info.right_to_work",
-    "logistics": "user_info.logistics", "languages": "user_info.languages",
-    "equality": "user_info.equality", "salary": "preferences.salary_by_country",
-}
+_BLOCK_PATH = kit.MEMORY_BLOCK_PATH  # one map: check_form reads the same blocks
 _MISSING_WORDS = {"work_authorization": "Right to work", "needs_sponsorship": "Sponsorship need"}
 _DASH = "—"
 
@@ -533,9 +529,8 @@ def _user_check(
     path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
     by, at = saved.get(path, (None, None)) if a["source"] == "memory" and path and key in have else (None, None)
     # Country pages: a drafted country row is a guess, whoever saved the block last; an unmarked row in a
-    # block that carries draft marks is the user's own (country_pages.key_is_users).
-    owned = country_pages.key_is_users(profile.user_info.right_to_work, key) if by else None
-    if owned is False or (owned is None and (not by or is_assistant_actor(str(by)))):
+    # block that carries draft marks is the user's own. check_form reads the SAME helper (owner 2026-11-17).
+    if not kit.memory_key_is_users(profile.user_info.right_to_work, by, key):
         return False, None, None
     text = _memory_text(profile, key)
     if text is not None and not _typed_is(a, text):
