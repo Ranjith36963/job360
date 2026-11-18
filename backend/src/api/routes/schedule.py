@@ -278,37 +278,27 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
     on the owner or is blocked. While a queued row still needs no owner input (own browser, no hold, ask,
     block or filled form) the run is refused with 409 and told which row to work next. 2026-11-17: only rows
     queued at or before this run's claim (``claimed_at``; None = the website, every row) count; the rest wait
-    for the next batch and are returned."""
+    for the next batch and are returned. 2026-11-18: only rows that already have their CV count; a row with
+    no CV is the CV run's (``queue_preflight.cv_rows`` / ``cv_work``), and the batch skips it as ``no_cv``."""
     from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
 
     later = await queue_preflight.queued_after_claim(db, user.id, claimed_at)
     note = (" " + _next_batch_note(later)) if later else ""
-    rows = await queue_preflight.fillable_rows(db, user.id, queued_by=claimed_at)
+    rows = await queue_preflight.fillable_rows(db, user.id, queued_by=claimed_at, with_cv=True)
     if not rows:
-        # 2026-11-01 (31 Oct runs): every run asked one question, then stopped while 22 queued jobs had no
-        # CV. A missing CV needs no owner input, whatever else the row waits on.
-        cvs = await queue_preflight.cv_rows(db, user.id, queued_by=claimed_at)
-        if not cvs:
-            return later
-        _log("batch_stop_refused", user, reason="cv_missing", rows=str(len(cvs)), later=str(len(later)))
-        first = cvs[0]
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"{len(cvs)} queued jobs still have no CV; next: application {first['id']} "
-                f"({first['company'] or 'unknown company'}). Keep working: write its tailored CV and save it "
-                "with save_artifact kind cv. An open question, a site block or the user's own browser does not "
-                "stop CV writing; questions to the user are not a reason to stop. "
-                f"Ids: {', '.join(str(r['id']) for r in cvs[:5])}.{note}"
-            ),
-        )
+        # 2026-11-18 (application 1033): a 409 for a CV-less row made the batch run write that CV itself.
+        # Those rows wait for the CV run; logged so a stop that left them is visible.
+        no_cv = await queue_preflight.cv_rows(db, user.id, queued_by=claimed_at)
+        if no_cv:
+            _log("batch_stop_no_cv_left", user, rows=str(len(no_cv)), ids=",".join(str(r["id"]) for r in no_cv[:20]))
+        return later
     _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)))
     first = rows[0]
     raise HTTPException(
         status_code=409,
         detail=(
             f"{len(rows)} queued jobs still need no owner input; next: application {first['id']} "
-            f"({first['company'] or 'unknown company'}). Keep working: write its CV and fill its form. "
+            f"({first['company'] or 'unknown company'}). Keep working: fill its form (its CV is saved). "
             "A partial run ends only when every queued job is waiting on the owner or blocked. Large tool "
             "outputs and outputs saved to a file are normal; they are not a reason to stop. "
             f"Ids: {', '.join(str(r['id']) for r in rows[:5])}.{note}"
