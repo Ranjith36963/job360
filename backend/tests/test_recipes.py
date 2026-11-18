@@ -169,7 +169,10 @@ def test_rules_recipe_holds_every_moved_rule():
                   # restored by the S4 review (they were dropped from the old texts):
                   "if the cv is edited afterwards that yes no longer counts",
                   "still record `form_filled` when the user says the form is filled",
-                  'an empty preference (salary, locations, workplace, experience level) means "don\'t care"',
+                  # Owner 2026-11-18: salary left this line; every Answer-once question, salary included, is drafted.
+                  'an empty preference (locations, workplace, experience level) means "don\'t care"',
+                  "draft every one, salary included", "never skip one, never leave one blank",
+                  "never send approved: true for a memory question",
                   "empty means the user has none", "never a reason to apply to a job the user did not bring"):
         assert words in rules, words
     # Setup keeps owner rule #29 (empty shelves stay silent); every acting recipe

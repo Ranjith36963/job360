@@ -838,10 +838,15 @@ def is_list_path(path: str) -> bool:
 
 def _refuse_memory_answer(path: str, value: dict[str, Any]) -> None:
     """Memory first (owner 2026-11-05, plan S2): a NEW saved answer (append / upsert) in Memory's families
-    is refused, naming the page the user sets it on in Job360. Stored records are not touched."""
+    is refused, naming the page the user sets it on in Job360. Stored records are not touched.
+    Owner 2026-11-18: the assistant drafts EVERY Answer-once question, salary included, so an unconfirmed
+    guess (``approved: false``) is kept: it fills the box as "your assistant's guess" and counts only when
+    the user edits or confirms it, which writes Memory (``ask_once.remember``) and drops the draft."""
     from src.services.profile.ask_once import memory_note  # noqa: PLC0415
     from src.services.profile.memory_cleanup import record_country  # noqa: PLC0415
 
+    if value.get("approved") is False:
+        return  # a guess for the user to check, never an answer
     topic, question = str(value.get("topic") or ""), str(value.get("question") or "")
     note = memory_note(topic, question, record_country(value))
     if note:
