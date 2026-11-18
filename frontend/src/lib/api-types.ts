@@ -2873,6 +2873,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/own-browser/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get State
+         * @description The user's saved LinkedIn safety state for their PC runs (``{}`` when never saved).
+         */
+        get: operations["get_state_api_own_browser_state_get"];
+        /**
+         * Save State
+         * @description Replace the user's LinkedIn safety state (a JSON object, at most 8 KB: 422 over it). Bookkeeping: allowed
+         *     while paused, like release.
+         */
+        put: operations["save_state_api_own_browser_state_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/own-browser/take": {
         parameters: {
             query?: never;
@@ -6767,7 +6792,7 @@ export interface components {
             /** Last Outcome */
             last_outcome?: ("done" | "partial" | "failed") | null;
             /** Last Reason */
-            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review") | null;
+            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review" | "below_target") | null;
             /** Last Run At */
             last_run_at?: string | null;
             /** Next Due At */
@@ -7324,6 +7349,22 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * HeldBackOut
+         * @description Owner-clicked LinkedIn sends a gate kept from this take while it handed out a duty or answered ``empty``
+         *     (PC run pc-0911: a hunt duty with 7 clicked sends waiting, and nothing said why).
+         */
+        HeldBackOut: {
+            /** People */
+            people: number;
+            /** Until */
+            until?: string | null;
+            /**
+             * Why
+             * @enum {string}
+             */
+            why: "weekly_limit" | "release_backoff" | "pace_gap" | "daily_max" | "claimed_elsewhere";
         };
         /** HiddenOut */
         HiddenOut: {
@@ -8056,6 +8097,22 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** LiStateIn */
+        LiStateIn: {
+            /** State */
+            state: {
+                [key: string]: unknown;
+            };
+        };
+        /** LiStateOut */
+        LiStateOut: {
+            /** Saved At */
+            saved_at?: string | null;
+            /** State */
+            state: {
+                [key: string]: unknown;
+            };
+        };
         /** LinkedInResponse */
         LinkedInResponse: {
             /** Merged */
@@ -8242,7 +8299,7 @@ export interface components {
              */
             outcome: "done" | "partial" | "failed";
             /** Reason */
-            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review") | null;
+            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review" | "below_target") | null;
             report?: components["schemas"]["HuntReportIn"] | null;
             /**
              * Reviewed
@@ -8279,6 +8336,7 @@ export interface components {
              * @enum {string}
              */
             outcome: "done" | "partial" | "failed";
+            score?: components["schemas"]["PeopleScoreOut"] | null;
         };
         /** MarkDuplicateRequest */
         MarkDuplicateRequest: {
@@ -8807,6 +8865,23 @@ export interface components {
             text: string;
             /** Waiting */
             waiting: number;
+        };
+        /**
+         * PeopleScoreOut
+         * @description 2026-11-18: Job360's own count for a people run, never the run's claim: people saved at each job, and new
+         *     network people this run, against the target and the minimum.
+         */
+        PeopleScoreOut: {
+            /** Minimum */
+            minimum: number;
+            /** Network */
+            network?: number | null;
+            /** Per Job */
+            per_job?: {
+                [key: string]: number;
+            };
+            /** Target */
+            target: number;
         };
         /**
          * PersonFullOut
@@ -10207,7 +10282,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review";
+            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review" | "below_target";
             /** Title */
             title: string;
             /** What To Do */
@@ -11476,6 +11551,7 @@ export interface components {
         };
         /** TakeOut */
         TakeOut: {
+            held_back?: components["schemas"]["HeldBackOut"] | null;
             /**
              * Next
              * @default
@@ -16754,6 +16830,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunNowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_state_api_own_browser_state_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiStateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_state_api_own_browser_state_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiStateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiStateOut"];
                 };
             };
             /** @description Validation Error */

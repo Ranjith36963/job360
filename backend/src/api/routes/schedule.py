@@ -31,7 +31,7 @@ Duty = Literal["hunt", "inbox", "batch", "reach", "network"]
 Outcome = Literal["done", "partial", "failed"]
 RunReason = Literal[
     "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
-    "needs_user", "error", "no_review",
+    "needs_user", "error", "no_review", "below_target",
 ]
 
 
@@ -158,6 +158,16 @@ class MarkDoneIn(BaseModel):
     reviewed: bool = False
 
 
+class PeopleScoreOut(BaseModel):
+    """2026-11-18: Job360's own count for a people run, never the run's claim: people saved at each job, and new
+    network people this run, against the target and the minimum."""
+
+    per_job: dict[str, int] = Field(default_factory=dict)
+    network: Optional[int] = None
+    target: int
+    minimum: int
+
+
 class MarkDoneOut(BaseModel):
     duty: Duty
     done_at: str
@@ -167,6 +177,7 @@ class MarkDoneOut(BaseModel):
     # 2026-11-17: a batch stop - queued rows queued after this run's claim; they wait for the next batch.
     next_batch: list[int] = Field(default_factory=list)
     note: str = ""
+    score: Optional[PeopleScoreOut] = None
 
 
 class RunProblemOut(BaseModel):
@@ -286,37 +297,27 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
     on the owner or is blocked. While a queued row still needs no owner input (own browser, no hold, ask,
     block or filled form) the run is refused with 409 and told which row to work next. 2026-11-17: only rows
     queued at or before this run's claim (``claimed_at``; None = the website, every row) count; the rest wait
-    for the next batch and are returned."""
+    for the next batch and are returned. 2026-11-18: only rows that already have their CV count; a row with
+    no CV is the CV run's (``queue_preflight.cv_rows`` / ``cv_work``), and the batch skips it as ``no_cv``."""
     from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
 
     later = await queue_preflight.queued_after_claim(db, user.id, claimed_at)
     note = (" " + _next_batch_note(later)) if later else ""
-    rows = await queue_preflight.fillable_rows(db, user.id, queued_by=claimed_at)
+    rows = await queue_preflight.fillable_rows(db, user.id, queued_by=claimed_at, with_cv=True)
     if not rows:
-        # 2026-11-01 (31 Oct runs): every run asked one question, then stopped while 22 queued jobs had no
-        # CV. A missing CV needs no owner input, whatever else the row waits on.
-        cvs = await queue_preflight.cv_rows(db, user.id, queued_by=claimed_at)
-        if not cvs:
-            return later
-        _log("batch_stop_refused", user, reason="cv_missing", rows=str(len(cvs)), later=str(len(later)))
-        first = cvs[0]
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"{len(cvs)} queued jobs still have no CV; next: application {first['id']} "
-                f"({first['company'] or 'unknown company'}). Keep working: write its tailored CV and save it "
-                "with save_artifact kind cv. An open question, a site block or the user's own browser does not "
-                "stop CV writing; questions to the user are not a reason to stop. "
-                f"Ids: {', '.join(str(r['id']) for r in cvs[:5])}.{note}"
-            ),
-        )
+        # 2026-11-18 (application 1033): a 409 for a CV-less row made the batch run write that CV itself.
+        # Those rows wait for the CV run; logged so a stop that left them is visible.
+        no_cv = await queue_preflight.cv_rows(db, user.id, queued_by=claimed_at)
+        if no_cv:
+            _log("batch_stop_no_cv_left", user, rows=str(len(no_cv)), ids=",".join(str(r["id"]) for r in no_cv[:20]))
+        return later
     _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)))
     first = rows[0]
     raise HTTPException(
         status_code=409,
         detail=(
             f"{len(rows)} queued jobs still need no owner input; next: application {first['id']} "
-            f"({first['company'] or 'unknown company'}). Keep working: write its CV and fill its form. "
+            f"({first['company'] or 'unknown company'}). Keep working: fill its form (its CV is saved). "
             "A partial run ends only when every queued job is waiting on the owner or blocked. Large tool "
             "outputs and outputs saved to a file are normal; they are not a reason to stop. "
             f"Ids: {', '.join(str(r['id']) for r in rows[:5])}.{note}"
@@ -331,11 +332,57 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
 # Clay and Vibe never loaded, then failed/no_work. A people run that was given work never has "no work", never
 # asks the user, and does not stop short without saying what each free lookup returned.
 _ONE_TOOL_DOWN = frozenset({"tool_unavailable", "paid_plan_needed", "sign_in_needed", "no_work", "needs_user"})
-_FREE_LOOKUPS = ("sprouts", "clay", "vibe")
+# 2026-11-18: Vibe Prospecting, Crustdata and Apollo people search need credits or a paid plan; the owner pays nothing.
+_FREE_LOOKUPS = ("sprouts", "clay")
 NO_REVIEW_NOTE = (
     "Recorded as partial (no_review): a people run is done only after the Doctor check (get_recipe(\"doctor\")) and "
     "a separate reviewer checked every person and note. Next run: do both, then mark_done with reviewed=true."
 )
+
+
+def _run_since(stamps: dict[str, datetime], duty: str, now: datetime) -> datetime:
+    """When this people run started: its live claim, else ``DUTY_CLAIM_MINUTES`` ago."""
+    window = timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
+    since = stamps.get(schedule.RUNNING + duty)
+    return now - window if since is None or now - since >= window else since
+
+
+async def _people_score(db: JobDatabase, user: CurrentUser, duty: str, ids: list[int], now: datetime) -> PeopleScoreOut:
+    """Job360's count (rule #12: scoped by user). reach: everyone saved at each listed job, whoever saved them and
+    when. network: new people with no job this assistant saved since the run took the duty."""
+    target = settings.NETWORK_MAX_PER_RUN if duty == "network" else settings.REACH_TARGET_PER_JOB
+    score = PeopleScoreOut(target=target, minimum=target if duty == "network" else settings.REACH_MIN_PER_JOB)
+    if duty == "reach":
+        cur = await db._db.execute(
+            "SELECT application_id, COUNT(*) AS n FROM application_contacts "  # noqa: S608 - placeholders only
+            f"WHERE user_id = ? AND application_id IN ({', '.join('?' for _ in ids)}) GROUP BY application_id",
+            (user.id, *ids),
+        )
+        got = {int(dict(r)["application_id"]): int(dict(r)["n"]) for r in await cur.fetchall()}
+        score.per_job = {str(i): got.get(i, 0) for i in ids}
+        return score
+    since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
+    cur = await db._db.execute(
+        "SELECT created_at FROM application_contacts WHERE user_id = ? AND application_id IS NULL "
+        "AND added_by <> 'web'",
+        (user.id,),
+    )
+    n = 0
+    for row in await cur.fetchall():
+        try:
+            at = datetime.fromisoformat(str(dict(row)["created_at"]))
+        except ValueError:
+            continue
+        n += (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) >= since
+    score.network = n
+    return score
+
+
+def _below_target(score: PeopleScoreOut) -> list[str]:
+    """Each job under the minimum ("<id>: n of 5"), or the network run under its target."""
+    if score.network is not None:
+        return [f"network: {score.network} of {score.target}"] if score.network < score.minimum else []
+    return [f"{i}: {n} of {score.target}" for i, n in score.per_job.items() if n < score.minimum]
 
 
 async def _refuse_undrafted_people(
@@ -344,11 +391,7 @@ async def _refuse_undrafted_people(
     """A people run (reach or network) ends only when every person it saved has an outreach draft. The people
     this assistant saved since the run took the duty (or in the last ``DUTY_CLAIM_MINUTES``) with no
     ``message`` row are listed in a 409 that says what to do next (rule #12: scoped by user)."""
-    stamps = await schedule.load_stamps(db, user.id)
-    window = timedelta(minutes=settings.DUTY_CLAIM_MINUTES)
-    since = stamps.get(schedule.RUNNING + duty)
-    if since is None or now - since >= window:
-        since = now - window
+    since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
     scope, args = ("ac.application_id IS NULL", ()) if duty == "network" else (
         f"ac.application_id IN ({', '.join('?' for _ in ids)})", tuple(ids)
     )
@@ -592,6 +635,17 @@ async def mark_done(
     if body.reviewed and body.duty not in ("reach", "network"):
         raise HTTPException(status_code=422, detail="reviewed is only for duty reach or network")
     outcome, reason, said = body.outcome, body.reason, ""
+    score: Optional[PeopleScoreOut] = None
+    if body.duty in ("reach", "network") and actor_for(user) != "web":
+        # Owner 2026-11-18: Job360 judges the count, never the run's own claim; the call is never refused for it.
+        score = await _people_score(db, user, body.duty, ids, now)
+        short = _below_target(score)
+        _log("people_run_score", user, duty=body.duty, jobs=",".join(f"{i}={n}" for i, n in score.per_job.items()),
+             network=str(score.network if score.network is not None else ""), below=str(len(short)))
+        if short and outcome != "failed":
+            outcome, reason = "partial", "below_target"
+            said = (f"Recorded as partial (below_target): {'; '.join(short)}. "
+                    f"Minimum {score.minimum}, target {score.target}.")
     if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "done" and not body.reviewed:
         # 2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer.
         outcome, reason = "partial", "no_review"
@@ -608,7 +662,7 @@ async def mark_done(
     stamp = now.isoformat(timespec="seconds")
     return MarkDoneOut(
         duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=outcome, failures_in_row=failures,
-        next_batch=later, note=said or _next_batch_note(later),
+        next_batch=later, note=said or _next_batch_note(later), score=score,
     )
 
 

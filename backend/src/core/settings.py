@@ -1127,6 +1127,10 @@ REACH_MAX_ATTEMPTS = 3
 # Owner 2026-11-02: 5 new people an hour (about 100 a day), was 10 once a day.
 NETWORK_EVERY_HOURS = 1
 NETWORK_MAX_PER_RUN = 5
+# Owner 2026-11-18: a reach run brings each job to 5 people (at least 3). Job360 counts who is saved at each job
+# when the run marks done; a job below the minimum (or network below NETWORK_MAX_PER_RUN) is recorded partial.
+REACH_TARGET_PER_JOB = 5
+REACH_MIN_PER_JOB = 3
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and

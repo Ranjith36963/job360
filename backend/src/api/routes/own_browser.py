@@ -1,11 +1,11 @@
 """The own-browser queue (owner decisions 2026-10-25): what waits for the user's OWN browser.
 
 ``GET /api/own-browser/queue`` lists it; ``POST /own-browser/take`` / ``release`` hand a task to one
-assistant session and give it back (the MCP tool ``own_browser_queue`` calls these functions: same route
-the web uses, gates re-applied there). ``POST /own-browser/run-now`` and ``POST
-/contacts/{id}/own-browser-send`` are the USER's own clicks: web session only (``require_session_user``), no
-MCP twin. Every route takes the user from the session / token / OAuth subject, never from input (rules
-#12/#25). Rules and storage: ``services/applications/own_browser.py``.
+assistant session and give it back; ``GET`` / ``PUT /own-browser/state`` keep the PC run's LinkedIn safety
+state (the MCP tool ``own_browser_queue`` calls these functions: same route the web uses, gates re-applied there).
+``POST /own-browser/run-now`` and ``POST /contacts/{id}/own-browser-send`` are the USER's own clicks: web session
+only (``require_session_user``), no MCP twin. Every route takes the user from the session / token / OAuth subject,
+never from input (rules #12/#25). Rules and storage: ``services/applications/own_browser.py``.
 """
 from __future__ import annotations
 
@@ -95,6 +95,14 @@ class TakeIn(BaseModel):
     contact_id: Optional[int] = Field(default=None, ge=1)
 
 
+class HeldBackOut(BaseModel):
+    """Owner-clicked LinkedIn sends a gate kept from this take while it handed out a duty or answered ``empty``
+    (PC run pc-0911: a hunt duty with 7 clicked sends waiting, and nothing said why)."""
+    people: int
+    why: Literal["weekly_limit", "release_backoff", "pace_gap", "daily_max", "claimed_elsewhere"]
+    until: Optional[str] = None  # when that gate lifts, if known
+
+
 class TakeOut(BaseModel):
     status: Literal["task", "already_yours", "empty", "closed", "paused", "busy", "wait", "daily_limit"]
     why: str = ""
@@ -102,6 +110,18 @@ class TakeOut(BaseModel):
     next: str = ""
     wait_seconds: Optional[int] = None
     opens_at: Optional[str] = None
+    held_back: Optional[HeldBackOut] = None
+
+
+class LiStateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # The PC run's LinkedIn safety state (alert cursor, page counts, UK-day cap, LINKEDIN_PAUSED_UNTIL); at most 8 KB.
+    state: dict[str, Any]
+
+
+class LiStateOut(BaseModel):
+    state: dict[str, Any]
+    saved_at: Optional[str] = None
 
 
 class ReleaseIn(BaseModel):
@@ -201,6 +221,31 @@ async def release(
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
     return ReleaseOut(**got)
+
+
+@router.get("/own-browser/state", response_model=LiStateOut, dependencies=AUTH_FIRST)
+async def get_state(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> LiStateOut:
+    """The user's saved LinkedIn safety state for their PC runs (``{}`` when never saved)."""
+    return LiStateOut(**await own_browser.load_li_state(db, user.id))
+
+
+@router.put("/own-browser/state", response_model=LiStateOut, dependencies=AUTH_FIRST)
+async def save_state(
+    body: LiStateIn,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> LiStateOut:
+    """Replace the user's LinkedIn safety state (a JSON object, at most 8 KB: 422 over it). Bookkeeping: allowed
+    while paused, like release."""
+    try:
+        got = await own_browser.save_li_state(db, user.id, body.state, datetime.now(timezone.utc))
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+    return LiStateOut(**got)
 
 
 @router.post("/own-browser/run-now", response_model=RunNowOut, dependencies=AUTH_FIRST)

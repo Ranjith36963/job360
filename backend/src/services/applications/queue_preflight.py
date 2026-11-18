@@ -191,12 +191,13 @@ async def queued_after_claim(db: JobDatabase, user_id: str, cutoff: Optional[dat
 
 
 async def fillable_rows(
-    db: JobDatabase, user_id: str, *, queued_by: Optional[datetime] = None
+    db: JobDatabase, user_id: str, *, queued_by: Optional[datetime] = None, with_cv: bool = False
 ) -> list[dict[str, Any]]:
     """Queued rows a run can still work with NO owner input (2026-10-30), oldest queued first: Job360's own
     browser runs them, no live hold, no open ask, no open block and no ``form_filled`` yet. ``queued_by``
-    (a batch run's claim) leaves out rows queued after it. Scoped by ``user_id``; read-only.
-    ``[{"id", "company"}]``."""
+    (a batch run's claim) leaves out rows queued after it. ``with_cv`` (the batch run's stop, 2026-11-18)
+    keeps only rows that already have a CV: a CV-less row is the CV run's (``cv_rows``), never the batch's.
+    Scoped by ``user_id``; read-only. ``[{"id", "company"}]``."""
     from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
 
     open_ids = await schedule._open_queue_ids(db, user_id)
@@ -212,6 +213,9 @@ async def fillable_rows(
     todo = [i for i in ids if i not in skip]
     browsers = await queue_browsers(db, user_id, todo)
     todo = [i for i in todo if browsers.get(i, {}).get("kind") == "job360"]
+    if with_cv and todo:
+        has_cv = await _with_kind(db, user_id, todo, "cv")
+        todo = [i for i in todo if i in has_cv]
     if not todo:
         return []
     cur = await db._db.execute(
@@ -220,6 +224,45 @@ async def fillable_rows(
     )
     names = {int(dict(r)["id"]): str(dict(r)["job_company"] or "") for r in await cur.fetchall()}
     return [{"id": i, "company": names.get(i, "")} for i in todo]
+
+
+async def submit_now_ids(db: JobDatabase, user_id: str) -> list[int]:
+    """2026-11-18 (two batch runs paged all ~971 applications to find these): every open application the user
+    pressed Send on whose yes still holds - the rows whose ``next_step`` reads ``submit_now`` - on the queue or
+    not. Candidates come from one query (status considering, no receipt, newest send decision a yes, newer than
+    the newest fill); each candidate's yes is then checked as ``next_step`` checks it. Sorted; read-only; scoped
+    by ``user_id``."""
+    from src.services.applications.next_step import kit_flags  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT a.* FROM applications a WHERE a.user_id = ? AND a.status = 'considering' "
+        "AND NOT EXISTS (SELECT 1 FROM application_receipts r WHERE r.application_id = a.id) "
+        "AND (SELECT e.event_type FROM application_events e WHERE e.user_id = a.user_id "
+        "AND e.application_id = a.id AND e.event_type IN ('submit_approved', 'submit_declined') "
+        "ORDER BY e.id DESC LIMIT 1) = 'submit_approved' ORDER BY a.id",
+        [user_id],
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    if not rows:
+        return []
+    ids = [int(r["id"]) for r in rows]
+    cur = await db._db.execute(
+        f"SELECT e.id, e.application_id, e.event_type FROM application_events e WHERE e.user_id = ? "  # noqa: S608
+        f"AND e.application_id IN ({_marks(ids)}) "
+        "AND e.event_type IN ('form_filled', 'submit_approved', 'submit_declined') "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        [user_id, *ids],
+    )
+    events: dict[int, list[tuple[int, str]]] = {}
+    for ev_id, app_id, ev_type in await cur.fetchall():
+        events.setdefault(int(app_id), []).append((int(ev_id), str(ev_type)))
+    out: list[int] = []
+    for r in rows:
+        evs = events.get(int(r["id"]), [])
+        filled, approved = kit_flags(evs)
+        if filled and approved and await spine._approval_holds(db, user_id, r, evs):
+            out.append(int(r["id"]))
+    return out
 
 
 # A run's look at the page: after one of these, an unproven closed block has had its one re-check.
@@ -468,7 +511,8 @@ async def queue_summary(
     ``removed_today`` = ``unqueued`` events today by closed reason (M1); ``by_browser`` = the whole queue
     counted by which browser runs it (``job360`` / ``own_browser`` / ``human``; ``browsers`` is the
     :func:`queue_browsers` map, read here when not given), approved LinkedIn sends included; ``outreach`` = how
-    many of those sends wait (``own_browser.queued_outreach``, read here when not given). ``queued`` stays the
+    many of those sends wait (``own_browser.queued_outreach``, read here when not given); ``submit_now`` =
+    :func:`submit_now_ids`. ``queued`` stays the
     applications alone (the daily cap and the batch recipe count those)."""
     from src.services.applications import own_browser  # noqa: PLC0415 - own_browser imports spine
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
@@ -499,6 +543,10 @@ async def queue_summary(
         "daily_left": settings_rules.daily_left(cfg, counts),
         "removed_today": await _removed_today(db, user_id, now),
         "by_browser": by_browser,
+        # 2026-11-18: the rows the user pressed Send on, on the queue or not, so a batch run never pages the
+        # whole application list to find them. Built here, not by a caller, so every reader of this block
+        # (list_applications(queued=true), stats(view="today")) gets the same answer.
+        "submit_now": await submit_now_ids(db, user_id),
     }
 
 

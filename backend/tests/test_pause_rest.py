@@ -55,6 +55,7 @@ PAUSE_OPEN_ROUTES = {
     ("POST", "asks.withdraw_ask"): "answer_ask withdraw: winding down (ask_withdrawn)",
     ("POST", "asks.confirm_ask"): "web session only inside the route (403 for any assistant)",
     ("POST", "own_browser.release"): "own_browser_queue release: gives a claimed task back",
+    ("PUT", "own_browser.save_state"): "own_browser_queue save_state: the PC run's LinkedIn safety bookkeeping",
     ("POST", "schedule.mark_done"): "mark_done: closing a run",
     ("POST", "doctor.report_missing_tool"): "report_missing_tool: a read-side report",
     ("POST", "connectors.report_capabilities"): "report_capabilities: a read-side report",

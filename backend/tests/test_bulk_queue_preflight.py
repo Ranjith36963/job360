@@ -25,7 +25,7 @@ PREFLIGHT_KEYS = {
 }
 SUMMARY_KEYS = {
     "queued", "ready_to_send", "asked", "blocked", "submitted_today", "daily_cap", "daily_left", "removed_today",
-    "by_browser", "outreach",
+    "by_browser", "outreach", "submit_now",  # 2026-11-18: the Sent rows, so a batch run never pages every application
 }
 
 
@@ -334,6 +334,7 @@ async def test_queue_summary_counts_the_whole_open_queue(authenticated_async_con
         assert s["ready_to_send"] == 1 and s["asked"] == 1 and s["blocked"] == 1
         assert s["submitted_today"] == 1 and s["daily_cap"] == 10 and s["daily_left"] == 9
         assert s["removed_today"] == {"duplicate": 1}
+        assert s["submit_now"] == []  # filled but not Sent: never a submit_now row
         # a page of 1 still summarises the whole queue
         page = (await client.get("/api/applications", params={"queued": True, "limit": 1})).json()
         assert len(page["applications"]) == 1 and page["queue_summary"]["queued"] == 4
