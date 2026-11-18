@@ -452,8 +452,9 @@ and a closed application never appear. `list_applications(agenda="today" |
 
 EMAIL CODES (one-time codes): a job site that emails a code while you apply is
 `otp_needed`, unless `settings.use_email_codes.effective` is true (only the user turns it on). Then, in your
-own Gmail connector, find the newest email that is ALL of: to the user's own email; from the form's own site
-or its applicant system (the sender's domain is the form host or its registrable domain, never a look-alike);
+own Gmail connector, find the newest email that is ALL of: to the user's own email; from the form's own site,
+its applicant system or the employer's own domain (the sender's domain is the form host or its registrable
+domain, or the registrable domain of the job's own link when that is the employer's site; never a look-alike);
 received after the form asked for the code and within 15 minutes; a code for applying or verifying the email
 on THAT site. Never: a code from Google, Microsoft, Apple, LinkedIn, a bank or payment service, any account
 security alert, any password reset. Before typing it, record_event `email_code_used` {to, sender, subject,
