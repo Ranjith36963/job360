@@ -42,3 +42,14 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
   second sentence with no "I") fails on main and passes with the fix. The word list is removed. Auto-merge is
   armed for 00:07 (after the :51-:06 window).
 - Also open: PR #1683 (audit 3B: a company page whose host lacks the company name is a logged hint, not a 422).
+
+## 23:50 merges and next fix
+- #1683 merged 23:24 (company page on a host without the company name: logged hint, not 422).
+- #1688 merged 23:50:01. I paused its auto-merge at 23:48 for the :51-:06 window; the repo's sweep re-armed it at
+  23:49:58 and CI was already green. Its deploy lands about 23:54, inside the window; harmless tonight because
+  reach and network are backed off until 00:57 (the 23:56 run has nothing due). Note for Kits: the sweep re-arms
+  a PR a session paused, so pausing alone does not hold the window.
+- PR #1689 (next cause: the run works one company and stops): mark_done(reach) needs `searched`
+  {id: {sprouts: n, clay: n, <source>: n}} for each job left under 3, else 409 naming the jobs. Job360 checks the
+  record is there and logs its counts (people_run_searched); it never judges effort. Failing test first; CI ends
+  about 00:13, after the window.
