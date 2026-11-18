@@ -35,3 +35,14 @@ score is about handling, not submits.
 - Decision taken without the owner: I keep #1676's rule (a refill row with an open ask is the owner's, as at
   check_submit) over my own #1660 rule. It makes check_submit the single source, which is the fix I had
   proposed for row 319.
+
+## 22:41 run  (score: not scored, 0 workable rows)
+- Achieved: claimed and closed: `mark_done` accepted at 23:07:17, batch failures_in_row 0. No row was
+  opened (no kit_read, fill or block after 22:38), and the stop was not refused, so Job360 found no queued
+  Job360-browser row with a CV that needed nothing from the owner. 225 rows wait on the owner (whats_due).
+- Missed: nothing to score. The new rows from the 22:11 hunt (1087 at 23:08) arrived after the claim.
+- Not counted toward "two runs at 90%": a run with no workable row tests nothing.
+- Biggest cause carried from 21:41: the two needless asks (1066 optional photo, 1079 unjudged fit).
+- Fix: PR #1687 (batch.md: never ask about an optional field; judge a missing fit with save_fit, never ask
+  apply-or-skip). Auto-merge on; a guard at 23:33 pauses it if CI has not finished before the 23:36-23:51 window.
+- Decision taken without the owner: none new.
