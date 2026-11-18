@@ -287,12 +287,31 @@ _CAPTCHA_TEXT = re.compile(
 )
 
 
+# The quote around a text hit: a few page words either side, for Claude to judge (owner rule 2026-11-18).
+QUOTE_WORDS_BEFORE = 3
+QUOTE_WORDS_AFTER = 6
+QUOTE_MAX_CHARS = 200
+
+
+def captcha_text_quote(text: str) -> str:
+    """The page's own words around the first ``_CAPTCHA_TEXT`` phrase, or "" when none. Whitespace tokens
+    either side of the one match, no regex beyond the existing phrase list."""
+    m = _CAPTCHA_TEXT.search(text or "")
+    if m is None:
+        return ""
+    before = text[:m.start()].split()[-QUOTE_WORDS_BEFORE:]
+    after = text[m.end():].split()[:QUOTE_WORDS_AFTER]
+    return " ".join([*before, *m.group(0).split(), *after])[:QUOTE_MAX_CHARS]
+
+
 @dataclass(frozen=True)
 class Blocker:
     reason: str  # captcha | login_required
     detail: str
-    # The stop came from the page's own text alone (``_CAPTCHA_TEXT``), not a vendor frame: it still stops the
-    # page, but it is page-derived, so its outcome is never a bot block (outcome.TEXT_STOP, C3).
+    # The hit came from the page's own text alone (``_CAPTCHA_TEXT``), not a vendor frame. It stops the page
+    # only when a challenge element is shown too (agent._challenge_shown); else look reports it as the hint
+    # ``captcha_text`` (owner rule 2026-11-18, audit 6.2). A text stop is page-derived, so its outcome is never
+    # a bot block (outcome.TEXT_STOP, C3).
     from_text: bool = False
 
 
