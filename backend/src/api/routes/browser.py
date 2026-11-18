@@ -289,7 +289,8 @@ def _log_signals(user: CurrentUser, application_id: Optional[int], result: dict[
     for sig in result.get("signals") or []:
         get_audit_logger().info("browser_signal", extra={
             "event": "browser_signal", "user_id": safe_log_value(user.id),
-            "application_id": application_id, "signal": safe_log_value(str(sig.get("signal", ""))),
+            "application_id": int(application_id) if application_id is not None else None,
+            "signal": safe_log_value(str(sig.get("signal", "")), max_len=40),
         })
 
 
