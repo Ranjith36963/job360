@@ -20,6 +20,7 @@ from functools import lru_cache
 from typing import Any, Iterable, Optional
 
 from src.services.profile import common_questions
+from src.utils.logger import safe_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -373,10 +374,11 @@ def questionnaire(
                 todo.insert(0, row)
             row["conflict"] = c["values"]
         if is_region(cc) and not todo:
-            logger.info("questionnaire region=%s dropped: nothing a region is asked is still open", cc)
+            logger.info("questionnaire region=%s dropped: nothing a region is asked is still open", safe_log_value(cc))
             continue
         if is_region(cc):
-            logger.info("questionnaire region=%s shown as %r with %d questions", cc, place_name(cc), len(todo))
+            logger.info("questionnaire region=%s shown as %s with %d questions", safe_log_value(cc),
+                        safe_log_value(place_name(cc)), len(todo))
         out.append({"country": cc, "questions": todo[:PER_COUNTRY]})
     return out
 

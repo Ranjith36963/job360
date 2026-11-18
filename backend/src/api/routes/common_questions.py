@@ -17,6 +17,7 @@ from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, req
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
 from src.services.profile import common_questions
+from src.utils.logger import safe_log_value
 
 logger = logging.getLogger("job360.api.common_questions")
 
@@ -157,9 +158,9 @@ async def remember_questionnaire(
     except ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     # Owner bug 2026-11-18: refused rows were silent. Topics and counts only, never the answers.
-    logger.info("questionnaire_remember place=%s saved=%d memory=%d not_saved=%s conflicts=%s", body.country,
-                len(out.get("saved") or []), len(out.get("memory") or {}), sorted(out.get("not_saved") or {}),
-                sorted(out.get("conflicts") or {}))
+    logger.info("questionnaire_remember place=%s saved=%d memory=%d not_saved=%s conflicts=%s",
+                safe_log_value(body.country), len(out.get("saved") or []), len(out.get("memory") or {}),
+                safe_log_value(sorted(out.get("not_saved") or {})), safe_log_value(sorted(out.get("conflicts") or {})))
     if out.get("memory"):  # Answer once: open asks the new Memory facts answer close
         from src.api.routes.profile import _close_asks_memory_answers  # noqa: PLC0415
 
