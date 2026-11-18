@@ -113,4 +113,6 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   closed value set or a payload key.
 - From a detached worktree push `HEAD:<branch>` and compare `git ls-remote` with `git rev-parse HEAD`; "Everything up-to-date" is not proof (2026-10-22).
 - Sibling hunt-kit PRs conflict in the shared registries after each merge: merge main in, keep both sides, re-gate, re-read `mergeable_state`.
+- Before a recipe or stop rule acts on a summary flag (`waiting_on_owner`), check on live data that it agrees with the
+  row's own state (`waiting_on`, `next`) and test that they agree (2026-11-18: #1646 skipped ~46 refill rows; #1660).
 
