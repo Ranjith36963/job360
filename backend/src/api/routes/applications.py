@@ -970,6 +970,7 @@ class CvWorkOut(BaseModel):
     items: list[CvWorkItemOut]
     total_needing_work: int
     next_after: Optional[int] = None
+    next: Optional[str] = None  # plain "keep going" instruction while items remain
     profile: Optional[dict[str, Any]] = None
 
 

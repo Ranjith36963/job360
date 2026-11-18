@@ -6269,6 +6269,17 @@
             "title": "Items",
             "type": "array"
           },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
           "next_after": {
             "anyOf": [
               {

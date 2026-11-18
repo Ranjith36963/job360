@@ -37,3 +37,11 @@ def test_cv_recipe_holds_the_closed_tokens_and_routing_words():
                   "never add a qualifier", '"in evaluations"', '"3.2s → 0.8s"', "get_recipe(\"rules\")", "get_recipe(\"doctor\")",
                   "never review an unreviewed CV as it is", "written N; strong N; weak N"):
         assert token in text, token
+
+
+def test_cv_recipe_confidence_never_claims_weak_for_an_unnamed_must():
+    """2026-11-17: the reviewer was stricter than Job360 (952, 958, 1016, 1027 claimed weak with no Job360 code)."""
+    text = _text()
+    assert "Never claim weak only because a must is unnamed" in text
+    assert "(n: [] when none does)" in text
+    assert "and every must the profile has is named in a line; else weak" not in text
