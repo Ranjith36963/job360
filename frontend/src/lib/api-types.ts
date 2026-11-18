@@ -2568,6 +2568,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/known-list/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Serve Known List
+         * @description ``form=ct``: ``company ||| title ||| id`` per application; else one job link per line.
+         */
+        get: operations["serve_known_list_api_known_list__token__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/livez": {
         parameters: {
             query?: never;
@@ -5321,6 +5341,8 @@ export interface components {
             description: string;
             /** Employer Published At */
             employer_published_at?: string | null;
+            /** Employer Search */
+            employer_search?: "not_found" | null;
             /** Found On */
             found_on?: string | null;
             /** Listed People */
@@ -7307,6 +7329,44 @@ export interface components {
             event_id: number;
         };
         /**
+         * HuntKitIn
+         * @description The hunt kit's funnel: results, new after the known drop, passing the title/place pre-filter, read in full.
+         */
+        HuntKitIn: {
+            /** New */
+            new: number;
+            /** Prefilter Passed */
+            prefilter_passed: number;
+            /** Read In Full */
+            read_in_full: number;
+            /** Results */
+            results: number;
+            /** Unread Reason */
+            unread_reason?: string | null;
+        };
+        /** HuntReportIn */
+        HuntReportIn: {
+            kit?: components["schemas"]["HuntKitIn"] | null;
+            /** Sources */
+            sources?: {
+                [key: string]: components["schemas"]["HuntSourceIn"];
+            };
+        };
+        /**
+         * HuntSourceIn
+         * @description One hunt source: what it did, or why it was not used (the exact reason or error).
+         */
+        HuntSourceIn: {
+            /** Ads */
+            ads?: number | null;
+            /** Brought */
+            brought?: number | null;
+            /** Calls */
+            calls?: number | null;
+            /** Skipped */
+            skipped?: string | null;
+        };
+        /**
          * InboxCheckedIn
          * @description The assistant read Gmail for these applications up to ``checked_at`` (now when empty).
          */
@@ -7875,6 +7935,24 @@ export interface components {
             where: string;
         };
         /**
+         * KnownListOut
+         * @description 2026-11-17 hunt: the user's known jobs as two plain-text downloads (curl them; no copying by hand).
+         *     ``urls_url``: one job link per line (``urls`` lines, the kit's ``--known``); ``ct_url``:
+         *     ``company ||| title ||| id`` per application (``total`` lines). Signed, read-only, this user only.
+         */
+        KnownListOut: {
+            /** Ct Url */
+            ct_url: string;
+            /** Expires At */
+            expires_at: string;
+            /** Total */
+            total: number;
+            /** Urls */
+            urls: number;
+            /** Urls Url */
+            urls_url: string;
+        };
+        /**
          * KnownPeopleOut
          * @description known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist.
          */
@@ -8149,6 +8227,7 @@ export interface components {
             outcome: "done" | "partial" | "failed";
             /** Reason */
             reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error") | null;
+            report?: components["schemas"]["HuntReportIn"] | null;
         };
         /** MarkDoneOut */
         MarkDoneOut: {
@@ -11710,6 +11789,7 @@ export interface components {
             held_by_running?: ("hunt" | "inbox" | "batch" | "reach" | "network")[];
             /** Hunt Hold */
             hunt_hold?: "queue_full" | null;
+            known_list?: components["schemas"]["KnownListOut"] | null;
             /** Last Done At */
             last_done_at: {
                 [key: string]: string | null;
@@ -16168,6 +16248,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FetchUrlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    serve_known_list_api_known_list__token__get: {
+        parameters: {
+            query?: {
+                form?: string | null;
+            };
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

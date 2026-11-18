@@ -3483,6 +3483,18 @@
             ],
             "title": "Employer Published At"
           },
+          "employer_search": {
+            "anyOf": [
+              {
+                "const": "not_found",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Search"
+          },
           "found_on": {
             "anyOf": [
               {
@@ -8443,6 +8455,132 @@
         "title": "HiddenOut",
         "type": "object"
       },
+      "HuntKitIn": {
+        "additionalProperties": false,
+        "description": "The hunt kit's funnel: results, new after the known drop, passing the title/place pre-filter, read in full.",
+        "properties": {
+          "new": {
+            "minimum": 0.0,
+            "title": "New",
+            "type": "integer"
+          },
+          "prefilter_passed": {
+            "minimum": 0.0,
+            "title": "Prefilter Passed",
+            "type": "integer"
+          },
+          "read_in_full": {
+            "minimum": 0.0,
+            "title": "Read In Full",
+            "type": "integer"
+          },
+          "results": {
+            "minimum": 0.0,
+            "title": "Results",
+            "type": "integer"
+          },
+          "unread_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unread Reason"
+          }
+        },
+        "required": [
+          "results",
+          "new",
+          "prefilter_passed",
+          "read_in_full"
+        ],
+        "title": "HuntKitIn",
+        "type": "object"
+      },
+      "HuntReportIn": {
+        "additionalProperties": false,
+        "properties": {
+          "kit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HuntKitIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HuntSourceIn"
+            },
+            "title": "Sources",
+            "type": "object"
+          }
+        },
+        "title": "HuntReportIn",
+        "type": "object"
+      },
+      "HuntSourceIn": {
+        "additionalProperties": false,
+        "description": "One hunt source: what it did, or why it was not used (the exact reason or error).",
+        "properties": {
+          "ads": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ads"
+          },
+          "brought": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brought"
+          },
+          "calls": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped"
+          }
+        },
+        "title": "HuntSourceIn",
+        "type": "object"
+      },
       "InboxCheckedIn": {
         "description": "The assistant read Gmail for these applications up to ``checked_at`` (now when empty).",
         "properties": {
@@ -9975,6 +10113,40 @@
         "title": "KitSeenOut",
         "type": "object"
       },
+      "KnownListOut": {
+        "description": "2026-11-17 hunt: the user's known jobs as two plain-text downloads (curl them; no copying by hand).\n``urls_url``: one job link per line (``urls`` lines, the kit's ``--known``); ``ct_url``:\n``company ||| title ||| id`` per application (``total`` lines). Signed, read-only, this user only.",
+        "properties": {
+          "ct_url": {
+            "title": "Ct Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "urls": {
+            "title": "Urls",
+            "type": "integer"
+          },
+          "urls_url": {
+            "title": "Urls Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "urls_url",
+          "ct_url",
+          "total",
+          "urls",
+          "expires_at"
+        ],
+        "title": "KnownListOut",
+        "type": "object"
+      },
       "KnownPeopleOut": {
         "description": "known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist.",
         "properties": {
@@ -10627,6 +10799,16 @@
               }
             ],
             "title": "Reason"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HuntReportIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -20347,6 +20529,16 @@
             ],
             "title": "Hunt Hold"
           },
+          "known_list": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KnownListOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_done_at": {
             "additionalProperties": {
               "anyOf": [
@@ -29813,6 +30005,64 @@
         "summary": "Fetch Url Route",
         "tags": [
           "bring"
+        ]
+      }
+    },
+    "/api/known-list/{token}": {
+      "get": {
+        "description": "``form=ct``: ``company ||| title ||| id`` per application; else one job link per line.",
+        "operationId": "serve_known_list_api_known_list__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "form",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 8,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Form"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serve Known List",
+        "tags": [
+          "hunt-kit"
         ]
       }
     },
