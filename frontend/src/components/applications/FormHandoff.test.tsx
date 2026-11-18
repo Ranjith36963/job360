@@ -20,7 +20,7 @@ describe("FormHandoff", () => {
     const finish = screen.getByTestId("finish-here");
     const link = screen.getByTestId("ask-open-empty-form");
     expect(finish).toHaveTextContent("Finish it here");
-    expect(link).toHaveTextContent("Open the empty form in a new tab instead");
+    expect(link).toHaveTextContent("Open the empty form in my own browser instead");
     expect(link).toHaveAttribute("href", URL_);
     expect(finish.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId("ask-form-closed")).toBeNull();

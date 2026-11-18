@@ -97,7 +97,7 @@ export function FormHandoff({
             data-testid="ask-open-empty-form"
             className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
-            Open the empty form in a new tab instead
+            Open the empty form in my own browser instead
           </a>
         )}
       </div>
