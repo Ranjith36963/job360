@@ -546,7 +546,7 @@ async def before_append(
     try:
         ask = await asks_service.create_ask(
             db, user.id, application_id, ask_question(stored), "", stored["assistant"],
-            kind=ASK_KIND_FOR_REASON.get(stored["reason"], ""),
+            kind=ASK_KIND_FOR_REASON.get(stored["reason"], ""), own_words=True,
         )
     except SpineError as exc:
         if exc.status_code != 429:
