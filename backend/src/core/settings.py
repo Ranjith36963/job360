@@ -1120,6 +1120,8 @@ REACH_MAX_PER_RUN = 5
 REACH_TARGET_PEOPLE = 5
 REACH_RETRY_HOURS = 24
 REACH_MAX_ATTEMPTS = 3
+# 2026-11-18 coverage audit: an application never searched this long after it was brought goes first.
+REACH_FIRST_TRY_HOURS = 24
 # Owner 2026-10-31 - the NETWORK hunt (duty `network`): while `people_hunt` is on, once every
 # NETWORK_EVERY_HOURS the assistant finds up to NETWORK_MAX_PER_RUN new people who fit the user's PROFILE
 # (not one job) and stores them as cold contacts. Job360 only says it is due and how many; the assistant
