@@ -385,24 +385,25 @@ def _below_target(score: PeopleScoreOut) -> list[str]:
     return [f"{i}: {n} of {score.target}" for i, n in score.per_job.items() if n < score.minimum]
 
 
-async def _refuse_undrafted_people(
+async def _refuse_unfinished_people(
     db: JobDatabase, user: CurrentUser, duty: str, ids: list[int], now: datetime
-) -> None:
-    """A people run (reach or network) ends only when every person it saved has an outreach draft. The people
-    this assistant saved since the run took the duty (or in the last ``DUTY_CLAIM_MINUTES``) with no
-    ``message`` row are listed in a 409 that says what to do next (rule #12: scoped by user)."""
+) -> int:
+    """A people run (reach or network) ends only when every person it saved has an outreach draft AND a stored
+    ``outreach_reviewed`` (the Doctor, a fresh reviewer: 2026-11-18, three runs said "self-review only"). The people
+    this assistant saved since the run took the duty (or in the last ``DUTY_CLAIM_MINUTES``) that miss either are
+    listed in a 409 that says what to do next (rule #12: scoped by user). Returns how many people it checked."""
     since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
     scope, args = ("ac.application_id IS NULL", ()) if duty == "network" else (
         f"ac.application_id IN ({', '.join('?' for _ in ids)})", tuple(ids)
     )
     cur = await db._db.execute(
-        "SELECT ac.id, ac.name, ac.created_at FROM application_contacts ac "  # noqa: S608 - placeholders only
-        f"WHERE ac.user_id = ? AND ac.added_by <> 'web' AND {scope} "
-        "AND NOT EXISTS (SELECT 1 FROM contact_outreach o WHERE o.contact_id = ac.id "
-        "AND o.entry = 'message') ORDER BY ac.id",
+        "SELECT ac.id, ac.name, ac.created_at, "  # noqa: S608 - placeholders only
+        "EXISTS (SELECT 1 FROM contact_outreach o WHERE o.contact_id = ac.id AND o.entry = 'message') AS drafted, "
+        "EXISTS (SELECT 1 FROM contact_outreach o WHERE o.contact_id = ac.id AND o.entry = 'reviewed') AS reviewed "
+        f"FROM application_contacts ac WHERE ac.user_id = ? AND ac.added_by <> 'web' AND {scope} ORDER BY ac.id",
         (user.id, *args),
     )
-    missing = []
+    saved = []
     for row in await cur.fetchall():
         r = dict(row)
         try:
@@ -410,19 +411,68 @@ async def _refuse_undrafted_people(
         except ValueError:
             continue
         if (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) >= since:
-            missing.append(r)
-    if not missing:
+            saved.append(r)
+    undrafted = [r for r in saved if not r["drafted"]]
+    unreviewed = [r for r in saved if r["drafted"] and not r["reviewed"]]
+    if undrafted:
+        _log("people_run_refused", user, duty=duty, reason="no_draft", contacts=str(len(undrafted)))
+        first = undrafted[0]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(undrafted)} people saved this run have no outreach note; next: contact {first['id']} "
+                f"({first['name']}). Write one note per person (get_recipe(\"write\"); a LinkedIn connection note "
+                "of 200 characters or fewer), save it with save_artifact (kind outreach, contact_id, channel "
+                "linkedin), have the Doctor review it, call check_outreach, then mark_done again. "
+                f"Contact ids: {', '.join(str(r['id']) for r in undrafted[:10])}."
+            ),
+        )
+    if unreviewed:
+        _log("people_run_refused", user, duty=duty, reason="no_review", contacts=str(len(unreviewed)))
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(unreviewed)} notes saved this run have no Doctor review. get_recipe(\"doctor\"), row Outreach "
+                "review: hand ALL of them to ONE fresh helper agent (the Agent tool, read only; never yourself), then "
+                "record_event outreach_reviewed for each (contact_id, review.message_id, review.sha256, confidence, "
+                "lines, reviewer), then mark_done again. "
+                f"Contact ids: {', '.join(str(r['id']) for r in unreviewed[:10])}."
+            ),
+        )
+    return len(saved)
+
+
+async def _refuse_left_out_jobs(db: JobDatabase, user: CurrentUser, ids: list[int], now: datetime) -> None:
+    """2026-11-18 13:56 run: whats_due listed 5 applications, the run worked one and marked only that one, so
+    Job360 judged one job. Every application still due for reach that was brought before this run took the duty
+    must be in ``application_ids``: worked, or listed as tried (its count then shows below_target)."""
+    since = _run_since(await schedule.load_stamps(db, user.id), "reach", now)
+    due = (await schedule.load_facts(db, user.id, now)).reach_ids
+    left = [a for a in due if a not in ids]
+    if not left:
         return
-    _log("people_run_refused", user, duty=duty, reason="no_draft", contacts=str(len(missing)))
-    first = missing[0]
+    cur = await db._db.execute(
+        f"SELECT id, created_at FROM applications WHERE user_id = ? AND id IN ({', '.join('?' for _ in left)})",  # noqa: S608
+        (user.id, *left),
+    )
+    older = []
+    for row in await cur.fetchall():
+        r = dict(row)
+        try:
+            at = datetime.fromisoformat(str(r["created_at"]))
+        except ValueError:
+            continue
+        if (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) < since:
+            older.append(int(r["id"]))
+    if not older:
+        return
+    _log("people_run_refused", user, duty="reach", reason="jobs_left_out", jobs=",".join(str(i) for i in older))
     raise HTTPException(
         status_code=409,
         detail=(
-            f"{len(missing)} people saved this run have no outreach note; next: contact {first['id']} "
-            f"({first['name']}). Write one note per person (get_recipe(\"write\"); a LinkedIn connection note of "
-            "200 characters or fewer), have the Doctor check it (get_recipe(\"doctor\")), save it with save_artifact "
-            "(kind outreach, contact_id, channel linkedin), call check_outreach, then mark_done again. "
-            f"Contact ids: {', '.join(str(r['id']) for r in missing[:10])}."
+            f"{len(older)} applications this run was given are not in application_ids: {', '.join(map(str, older))}. "
+            "Work each one next, in turn (step 1 for its company, until 5 or every source is tried), then mark_done "
+            "with all of them; a job that truly found nobody is still listed (Job360 counts it)."
         ),
     )
 
@@ -608,6 +658,7 @@ async def mark_done(
         if actor_for(user) != "web":
             claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
         later = await _refuse_early_batch_stop(db, user, claimed_at)
+    reviewed = body.reviewed
     if body.duty in ("reach", "network") and actor_for(user) != "web":
         if body.outcome == "failed" and body.reason in _ONE_TOOL_DOWN:
             _log("people_run_refused", user, duty=body.duty, reason=body.reason)
@@ -631,7 +682,11 @@ async def mark_done(
                     "each once per company with the company's domain, save who they prove, then mark_done again."
                 ),
             )
-        await _refuse_undrafted_people(db, user, body.duty, ids, now)
+        if body.duty == "reach":
+            await _refuse_left_out_jobs(db, user, ids, now)
+        # Every person it saved has a stored Doctor review (else 409 above): that, not the flag, is the evidence.
+        checked = await _refuse_unfinished_people(db, user, body.duty, ids, now)  # always: the flag proves nothing
+        reviewed = reviewed or checked > 0
     if body.reviewed and body.duty not in ("reach", "network"):
         raise HTTPException(status_code=422, detail="reviewed is only for duty reach or network")
     outcome, reason, said = body.outcome, body.reason, ""
@@ -646,9 +701,9 @@ async def mark_done(
             outcome, reason = "partial", "below_target"
             said = (f"Recorded as partial (below_target): {'; '.join(short)}. "
                     f"Minimum {score.minimum}, target {score.target}.")
-            if not body.reviewed:  # 2026-11-18 12:05 run: below_target hid that it also skipped the review
+            if not reviewed:  # 2026-11-18 12:05 run: below_target hid that it also skipped the review
                 said += " Also no_review: " + NO_REVIEW_NOTE.split(": ", 1)[1]
-    if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "done" and not body.reviewed:
+    if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "done" and not reviewed:
         # 2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer.
         outcome, reason = "partial", "no_review"
         said = NO_REVIEW_NOTE
