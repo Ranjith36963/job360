@@ -522,8 +522,8 @@ async def before_append(
         if stored["resolution"] == OWN_BROWSER and not job360_wrote(events[0]["payload"]):
             _log(user, application_id, event_type, stored, "refused")
             raise SpineError(
-                422, "unblocked own_browser clears only a block Job360's browser recorded (the user's own browser "
-                "then loaded the page clean); this block was not Job360's browser's: the user resolves it "
+                422, "unblocked own_browser clears only a block Job360's browser recorded (the user's assistant "
+                "browser then loaded the page clean); this block was not Job360's browser's: the user resolves it "
                 "(user_did_it) or it is skipped",
             )
         return stored

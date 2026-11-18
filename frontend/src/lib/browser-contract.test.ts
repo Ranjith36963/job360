@@ -73,7 +73,7 @@ describe("calls", () => {
 
 describe("effectiveAskBrowser", () => {
   const plain = { question: "q" } as unknown as import("@/lib/api").Ask;
-  const labelled = { browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "r" } } as unknown as import("@/lib/api").Ask;
+  const labelled = { browser: { kind: "own_browser", label: "Needs your assistant browser: turn your PC on", reason: "r" } } as unknown as import("@/lib/api").Ask;
 
   it.each(["captcha", "login", "upload", "safety"])("defaults an unlabelled %s to You (human)", (kind) => {
     expect(effectiveAskBrowser(plain, kind)).toEqual({ kind: "human", label: "You", reason: "" });

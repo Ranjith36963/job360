@@ -47,6 +47,6 @@ describe("assistant-neutral strings (owner 2026-10-25)", () => {
     render(<SendStartsAssistantCard />);
     const details = (await screen.findByText(/No cloud\?/)).closest("details");
     expect(details?.textContent).not.toMatch(BAD);
-    expect(details?.textContent).toContain("your own browser");
+    expect(details?.textContent).toContain("your assistant browser");
   });
 });

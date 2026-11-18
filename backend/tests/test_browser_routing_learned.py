@@ -18,7 +18,7 @@ from src.services.applications import queue_preflight
 from src.services.browser_agent import learned, route_book, routing
 
 HOST = "jobs.acme-careers.com"
-REASON = "Job360's browser was blocked twice on jobs.acme-careers.com: your own browser runs it"
+REASON = "Job360's browser was blocked twice on jobs.acme-careers.com: your assistant browser runs it"
 
 
 def _ad(slug: str, url: str) -> dict[str, Any]:

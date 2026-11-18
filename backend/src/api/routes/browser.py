@@ -74,7 +74,7 @@ class BrowserActionRequest(BaseModel):
 OFF = {
     "status": "off",
     "reason": "not_enabled",
-    "detail": "Job360's browser is not turned on. Use your own browser, or record_event blocked so the job "
+    "detail": "Job360's browser is not turned on. Use your assistant browser, or record_event blocked so the job "
     "waits on Needs you.",
 }
 
@@ -407,10 +407,10 @@ async def _book_attempt(
 
 
 BOT_CHECK_DETAIL = (
-    "This site blocked Job360's cloud browser (a bot wall, not your login). Open it in your own browser instead."
+    "This site blocked Job360's cloud browser (a bot wall, not your login). Open it in your assistant browser instead."
 )
 HAND_OFF_DETAIL = (
-    "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
+    "Job360's cloud browser stopped here. It is waiting for your assistant browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."
 )
 # The site said the user already applied: no browser can help, only the user's answer (blocked.py).
@@ -420,7 +420,7 @@ ALREADY_APPLIED_DETAIL = (
 # A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
 CAPTCHA_DETAIL = (
     "The site asked for a human check. Your filled form is kept open for 30 minutes: press Finish it here, "
-    "solve the check yourself, then press Done. After that, finish it in your own browser."
+    "solve the check yourself, then press Done. After that, finish it in your assistant browser."
 )
 
 

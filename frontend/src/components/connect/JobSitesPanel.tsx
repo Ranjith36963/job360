@@ -148,7 +148,7 @@ export function JobSitesPanel() {
         <CardContent className="space-y-4">
           {data && !data.enabled && (
             <p className="text-sm text-muted-foreground" data-testid="browser-off">
-              Job360&apos;s browser is not turned on yet. Until it is, your assistant uses its own browser.
+              Job360&apos;s browser is not turned on yet. Until it is, your assistant uses the assistant browser.
             </p>
           )}
           {data?.enabled && !shot && (

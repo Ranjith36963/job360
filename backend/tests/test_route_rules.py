@@ -114,7 +114,7 @@ def test_an_unnameable_link_is_unnamed_and_link_unclear_not_linkedin(url):
     assert route.reason in routing.ROUTE_REASONS
     assert routing.label(route) == {
         "kind": "own_browser", "reason": "link_unclear",
-        "label": "This link looks broken or disguised: your own browser checks it",
+        "label": "This link looks broken or disguised: your assistant browser checks it",
     }
     assert routing.is_linkedin(url) is True  # the safety test still fails closed
     assert routing.names_linkedin(url) is False
@@ -142,7 +142,7 @@ def test_label_formats_from_closed_values_only():
     got = routing.label(
         Route("own_browser", "learned_blocked"), site="indeed", date=date(2026, 11, 3), until="2026-11-06",
     )
-    assert got["label"] == "Job360's browser was blocked on Indeed on 3 Nov: your own browser until 6 Nov"
+    assert got["label"] == "Job360's browser was blocked on Indeed on 3 Nov: your assistant browser until 6 Nov"
     assert routing.label(Route("own_browser", "at_cap"), n=10, cap=10)["label"].endswith("(10 of 10): waits until tomorrow")
     assert routing.label(Route("job360", "probe"), site="host:jobs.acme.com")["label"] == (
         "Trying Job360's browser on jobs.acme.com again"

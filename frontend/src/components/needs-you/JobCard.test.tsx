@@ -376,15 +376,15 @@ describe("JobCard", () => {
 
   it("groups own-Chrome asks under their own heading, with the amber chip", () => {
     const a = ask("Solve the CAPTCHA and press Submit");
-    const b = { ...ask("Please sign in on the job site"), browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360 could not sign in" } } as unknown as Ask;
+    const b = { ...ask("Please sign in on the job site"), browser: { kind: "own_browser", label: "Needs your assistant browser: turn your PC on", reason: "Job360 could not sign in" } } as unknown as Ask;
     render(<JobCard card={card([a, b])} onChanged={onChanged} />);
     const group = screen.getByTestId("own-chrome-7");
-    expect(within(group).getByText("Needs your own browser: turn your PC on", { selector: "h4" })).toBeInTheDocument();
+    expect(within(group).getByText("Needs your assistant browser: turn your PC on", { selector: "h4" })).toBeInTheDocument();
     expect(within(group).getByTestId(`blocker-${b.id}`)).toBeInTheDocument();
     expect(within(group).queryByTestId(`blocker-${a.id}`)).toBeNull();
-    expect(screen.getByTestId(`browser-chip-${b.id}`)).toHaveTextContent("Needs your own browser: turn your PC on");
+    expect(screen.getByTestId(`browser-chip-${b.id}`)).toHaveTextContent("Needs your assistant browser: turn your PC on");
     expect(screen.getByTestId(`browser-chip-${a.id}`)).toHaveTextContent("You");
-    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your own browser: turn your PC on");
+    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your assistant browser: turn your PC on");
   });
 
   const reach = (id: number, extra: Record<string, unknown> = {}) =>
@@ -428,14 +428,14 @@ describe("JobCard", () => {
   });
 
   it("shows the label and its reason on the row and the card for own_browser and human", () => {
-    const own = { ...ask("Please sign in on the job site"), browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Sign-in needs your PC" } } as unknown as Ask;
+    const own = { ...ask("Please sign in on the job site"), browser: { kind: "own_browser", label: "Needs your assistant browser: turn your PC on", reason: "Sign-in needs your PC" } } as unknown as Ask;
     const human = { ...ask("Solve the CAPTCHA and press Submit"), browser: { kind: "human", label: "Only you", reason: "A person must click" } } as unknown as Ask;
     render(<JobCard card={card([own, human])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`browser-chip-${own.id}`)).toHaveTextContent("Needs your own browser: turn your PC on");
+    expect(screen.getByTestId(`browser-chip-${own.id}`)).toHaveTextContent("Needs your assistant browser: turn your PC on");
     expect(screen.getByTestId(`browser-reason-${own.id}`)).toHaveTextContent("Sign-in needs your PC");
     expect(screen.getByTestId(`browser-chip-${human.id}`)).toHaveTextContent("Only you");
     expect(screen.getByTestId(`browser-reason-${human.id}`)).toHaveTextContent("A person must click");
-    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your own browser: turn your PC on");
+    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your assistant browser: turn your PC on");
     expect(screen.getByTestId("browser-reason-card-7")).toHaveTextContent("Sign-in needs your PC");
   });
 
@@ -480,7 +480,7 @@ describe("JobCard", () => {
     render(<JobCard card={c} onChanged={onChanged} linkedinPerDay={35} />);
     const pace = screen.getByTestId("outreach-pace-7");
     // The number is the user's own linkedin_sends_per_day, not a fixed 10.
-    expect(pace).toHaveTextContent("LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 35 LinkedIn sends a day.");
+    expect(pace).toHaveTextContent("LinkedIn sends go out from your assistant browser only, when your PC is on. 2–3 minutes between sends, at most 35 LinkedIn sends a day.");
     expect(within(screen.getByTestId("section-outreach-7")).getByTestId("outreach-pace-7")).toBe(pace);
   });
 
