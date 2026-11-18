@@ -922,6 +922,22 @@ async def _recently_released(db: JobDatabase, user_id: str, app_ids: list[int], 
     return {int(dict(r)["application_id"]) for r in await cur.fetchall()}
 
 
+async def _keep_going(
+    db: JobDatabase, user: CurrentUser, label: str, kind: str, reason: str, now: datetime, released_id: str
+) -> dict[str, Any]:
+    """The release reply's ``next``: while open tasks remain that this session could take (no claim, or its own),
+    a plain sentence telling it to take again (PC run pc-0911 stopped after one duty with 49 tasks waiting);
+    else ``None``. Logs the session, kind, reason and remaining count (ids and codes only)."""
+    tasks = await queue_tasks(db, user, now, label)
+    # The task just given back is left out: it sits in its release backoff, so take would only answer "wait".
+    left = sum(
+        1 for t in tasks if t["task_id"] != released_id and (t["claim"] is None or t["claim"]["session"] == label)
+    )
+    _log("own_browser_release_next", user.id, "keep_going" if left else "none", session=label, kind=kind,
+         reason=reason, remaining=left)
+    return {"next": f"Keep going: {left} tasks still wait; call take again." if left else None}
+
+
 async def release(
     db: JobDatabase, user: CurrentUser, session: str, task_id: str, reason: str, now: datetime
 ) -> dict[str, Any]:
@@ -937,7 +953,8 @@ async def release(
     if kind + ":" == pc_duties.TASK_PREFIX:
         closed = await pc_duties.close(db, user, label, raw, reason, now)
         _log("own_browser_release", user.id, closed["outcome"], kind=raw, reason=reason)
-        return {"released": True, "task_id": task_id, "reason": reason, **closed}
+        return {"released": True, "task_id": task_id, "reason": reason, **closed,
+                **await _keep_going(db, user, label, raw, reason, now, task_id)}
     if reason == "done":
         raise SpineError(422, "a person is finished with record_event outreach_sent; release them with another reason")
     if kind != "contact" or not raw.isdigit():
@@ -974,4 +991,5 @@ async def release(
             )
         await _insert(db, user, contact_id, RELEASED, reason, now)
     _log("own_browser_release", user.id, "ok", contact_id=contact_id, reason=reason)
-    return {"released": True, "task_id": task_id, "reason": reason}
+    return {"released": True, "task_id": task_id, "reason": reason,
+            **await _keep_going(db, user, label, "linkedin_outreach", reason, now, task_id)}

@@ -10083,6 +10083,8 @@ export interface components {
             count?: number | null;
             /** Failures In Row */
             failures_in_row?: number | null;
+            /** Next */
+            next?: string | null;
             /** Outcome */
             outcome?: ("done" | "failed") | null;
             /** Reason */

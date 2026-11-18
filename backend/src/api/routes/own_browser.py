@@ -120,6 +120,8 @@ class ReleaseOut(BaseModel):
     count: Optional[int] = None
     summary: Optional[str] = None
     failures_in_row: Optional[int] = None
+    # While open tasks remain that this session could take: "Keep going: N tasks still wait; call take again."
+    next: Optional[str] = None
 
 
 class RunNowOut(BaseModel):

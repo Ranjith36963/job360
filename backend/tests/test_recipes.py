@@ -537,6 +537,18 @@ def test_the_write_recipe_sets_each_kind_its_length_and_who_sends_it():
         assert 'get_recipe("write")' in load_recipe(recipe).text, recipe
 
 
+def test_the_own_browser_recipe_takes_again_after_the_hunt_duty_and_keeps_sweeping():
+    """PC run pc-0911 ended after one alert and one release with 49 tasks waiting."""
+    from src.api.routes.recipes import load_recipe
+
+    lines = [flat(line) for line in load_recipe("own_browser").text.splitlines()]
+    duty = next(line for line in lines if line.startswith("**linkedin_search**"))
+    assert 'reason "done", and take again (back to a)' in duty
+    sweep = next(line for line in lines if line.startswith("**b. linkedin job alerts**"))
+    assert "sweep every alert from the cursor until none are left or 15 minutes pass" in sweep
+    assert "never stopping after one alert while time is left" in sweep
+
+
 def test_the_own_browser_recipe_is_the_whole_pc_run_with_its_closed_tokens():
     """The PC task is three stable lines (get_recipe("own_browser"), obey Job360); every rule of the run lives here:
     start, LinkedIn safety, the queue kinds, the CV file step, the job-alert sweep, the summary and the hard lines."""
