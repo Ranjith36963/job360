@@ -46,3 +46,13 @@ score is about handling, not submits.
 - Fix: PR #1687 (batch.md: never ask about an optional field; judge a missing fit with save_fit, never ask
   apply-or-skip). Auto-merge on; a guard at 23:33 pauses it if CI has not finished before the 23:36-23:51 window.
 - Decision taken without the owner: none new.
+
+### 23:36 note: a merge landed inside the no-merge window (my mistake)
+- PR #1687 merged at 23:36:01, and its backend deploy finished at 23:43:35, about 2 minutes into the 23:41 run
+  (a restart under a live run is what the window exists to prevent).
+- What happened: at 23:33 I disabled auto-merge to hold it until 23:52. The repo's merge cage
+  (`auto-merge.yml`, "the cage's arm") re-armed it at 23:35:56, on the status event when CI went green,
+  and it merged 5 seconds later. Disabling auto-merge is not a hold here.
+- Rule for the rest of the night: push a PR only when its CI can finish before :33 (CI took 13 to 24
+  minutes tonight), i.e. push by about :05 past the hour, else hold the branch unpushed (or as a draft) until :52.
+- Effect on the 23:41 run: checked at 00:06 (did any call fail around 23:41-23:44?).
