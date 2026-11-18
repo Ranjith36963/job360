@@ -159,6 +159,8 @@ async def test_needs_user_is_refused_while_a_queued_job_needs_no_owner_input(
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         first, second = await _queued_job(client, 1), await _queued_job(client, 2)
+        await _save_cv(client, first)  # 2026-11-18: only a row with its CV is the batch's (a CV-less one is the CV run's)
+        await _save_cv(client, second)
         refused = await _stop_batch(client)
         assert refused.status_code == 409, refused.text
         detail = refused.json()["detail"]
@@ -201,6 +203,7 @@ async def test_partial_or_failed_without_a_blocker_is_the_same_early_stop(authen
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id = await _queued_job(client, 5)
+        await _save_cv(client, app_id)
         for outcome, reason in (("partial", "error"), ("partial", "no_work"), ("partial", None),
                                 ("failed", "needs_user"), ("failed", "error"), ("failed", "no_work")):
             resp = await _stop_batch(client, outcome=outcome, reason=reason)
@@ -213,7 +216,7 @@ async def test_partial_or_failed_without_a_blocker_is_the_same_early_stop(authen
 async def test_only_batch_partial_without_a_blocker_is_ever_refused(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
-        await _queued_job(client, 4)
+        await _save_cv(client, await _queued_job(client, 4))
         assert (await _stop_batch(client)).status_code == 409
         for body in (
             {"duty": "batch", "outcome": "done"},
@@ -228,36 +231,35 @@ async def test_only_batch_partial_without_a_blocker_is_ever_refused(authenticate
             assert resp.json()["duty"] == body["duty"] and resp.json()["outcome"] == body["outcome"]
 
 
-# ── Owner 2026-11-01: a queued job with no CV keeps the batch run going, whatever else it waits on ─────────
+# ── Owner 2026-11-01 -> 2026-11-18: a queued job with no CV is the CV run's work, never the batch's ──────────
+# (2026-11-01 made a CV-less row refuse the batch's stop; on 2026-11-18 that 409 for application 1033 made the
+# batch run write the CV itself. CVs belong to the CV run, which still lists the row: queue_preflight.cv_rows.)
 
 
 @pytest.mark.asyncio
-async def test_a_job_without_a_cv_refuses_the_stop_even_with_an_open_ask(authenticated_async_context, fixture_user_id):
-    # 31 Oct runs: each asked one question, then stopped with 22 queued jobs still missing their CV.
+async def test_a_job_without_a_cv_never_refuses_the_stop_even_with_an_open_ask(
+    authenticated_async_context, fixture_user_id
+):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id = await _queued_job(client, 6)
         ask = await client.post("/api/asks", json={"question": "Notice period?", "application_id": app_id})
         assert ask.status_code in (200, 201), ask.text
-        refused = await _stop_batch(client)
-        assert refused.status_code == 409, refused.text
-        detail = refused.json()["detail"]
-        assert "1 queued jobs still have no CV" in detail
-        assert f"next: application {app_id} (Northwind 6)" in detail and "save_artifact kind cv" in detail
-        await _save_cv(client, app_id)
-        assert (await _stop_batch(client)).status_code == 200
+        done = await _stop_batch(client)
+        assert done.status_code == 200, done.text
+        assert done.json()["outcome"] == "partial"
 
 
 @pytest.mark.asyncio
-async def test_a_blocked_job_without_a_cv_still_needs_its_cv(authenticated_async_context, fixture_user_id):
+async def test_a_blocked_job_without_a_cv_waits_for_the_cv_run(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id = await _queued_job(client, 7)
         stuck = await client.post(f"/api/applications/{app_id}/events", json={
             "event_type": "blocked", "payload": {"reason": "captcha", "page_host": "jobs.northwind.example"}})
         assert stuck.status_code == 201, stuck.text
-        refused = await _stop_batch(client)
-        assert refused.status_code == 409 and "still have no CV" in refused.json()["detail"], refused.text
+        done = await _stop_batch(client)
+        assert done.status_code == 200, done.text
 
 
 @pytest.mark.asyncio

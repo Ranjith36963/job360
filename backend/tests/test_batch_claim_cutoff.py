@@ -41,6 +41,11 @@ async def _queued_job(client: AsyncClient, n: int) -> int:
     return int(resp.json()["application_id"])
 
 
+async def _has_cv(client: AsyncClient, app_id: int) -> None:
+    saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, engineer."})
+    assert saved.status_code in (200, 201), saved.text
+
+
 async def _waits_on_owner(client: AsyncClient, app_id: int) -> None:
     saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, engineer."})
     assert saved.status_code in (200, 201), saved.text
@@ -81,6 +86,7 @@ async def test_a_row_queued_before_the_claim_still_refuses_and_names_the_later_o
     async with authenticated_async_context() as client:
         async with await _agent(client, fixture_user_id) as agent:
             before = await _queued_job(client, 3)
+            await _has_cv(client, before)  # 2026-11-18: a CV-less row is the CV run's, never refuses the stop
             await _claim(agent)
             later = await _queued_job(client, 4)
             refused = await _stop(agent)
@@ -99,6 +105,7 @@ async def test_the_website_stop_keeps_counting_every_queued_row(authenticated_as
     async with authenticated_async_context() as client:
         await _agent(client, fixture_user_id)
         app_id = await _queued_job(client, 5)
+        await _has_cv(client, app_id)
         refused = await client.post("/api/schedule/done", json={
             "duty": "batch", "outcome": "partial", "reason": "needs_user"})
         assert refused.status_code == 409 and f"next: application {app_id}" in refused.json()["detail"]

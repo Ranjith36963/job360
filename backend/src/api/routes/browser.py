@@ -227,6 +227,19 @@ async def browser_action(
             result = await linkedin_guest.read_job(db, user.id, body.url)
         _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
         return result
+    url_warning = ""
+    if body.action == "open" and body.application_id is not None and body.url:
+        owner = await _url_owner(user, body.application_id, body.url)
+        if owner is not None and owner["reason"] == "other_application":
+            _audit(user, body.action, "refused", URL_MISMATCH)
+            return {
+                "status": "refused", "reason": URL_MISMATCH,
+                "detail": (f"That link is application {owner['other_id']}'s, not application {body.application_id}'s. "
+                           f"Open this application's own link: {owner['own_url']}. Nothing was opened."),
+            }
+        if owner is not None:
+            url_warning = (f"This link's site is not application {body.application_id}'s ({owner['own_url']}). "
+                           "Go on only if it is this same job's apply page; else open its own link.")
     gate: Optional[browser_agent.Gate] = None
     files: Optional[browser_agent.FileFn] = None
     if body.application_id is not None:
@@ -263,8 +276,75 @@ async def browser_action(
         result["detail"] = BOT_CHECK_DETAIL
     elif body.action in _FILL_ACTIONS and body.application_id is not None and result.get("status") == "ok":
         result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
+    if url_warning:
+        result["url_warning"] = url_warning
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
+
+
+URL_MISMATCH = "browser_url_mismatch"
+
+
+def _url_key(url: str) -> str:
+    """A link compared as a link: no fragment, no trailing slash, host lower-cased."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    try:
+        p = urlsplit(url.strip())
+    except ValueError:
+        return url.strip()
+    path = p.path.rstrip("/")
+    return f"{p.scheme.lower()}://{(p.hostname or '').lower()}{path}" + (f"?{p.query}" if p.query else "")
+
+
+def _host(url: str) -> str:
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    try:
+        host = (urlsplit(url.strip()).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+async def _url_owner(user: CurrentUser, application_id: int, url: str) -> Optional[dict[str, Any]]:
+    """2026-11-18 (a batch run working application 127 opened application 130's link): does ``url`` belong to
+    ``application_id``? ``None`` = yes (its own link, the job's catalog link, or the same host). Else
+    ``{reason, own_url, other_id}``: ``other_application`` = exactly another of the caller's applications' link
+    (the route refuses it); ``other_host`` = a site neither link is on (an ATS can live elsewhere: warned only).
+    Logs ``browser_url_mismatch`` with ids and the reason only. Scoped by ``user.id``; read-only. An unknown
+    application is left to the gate (404)."""
+    async with _db() as db:
+        cur = await db._db.execute(
+            "SELECT a.job_url, j.apply_url FROM applications a LEFT JOIN jobs j ON j.id = a.job_id "
+            "WHERE a.user_id = ? AND a.id = ?",
+            (user.id, application_id),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        own = [str(v) for v in tuple(row) if v]
+        want = _url_key(url)
+        if not own or want in {_url_key(u) for u in own}:
+            return None
+        other_id: Optional[int] = None
+        bare = url.strip().split("#", 1)[0].rstrip("/")
+        cur = await db._db.execute(
+            "SELECT id, job_url FROM applications WHERE user_id = ? AND id <> ? AND job_url IN (?, ?) ORDER BY id",
+            (user.id, application_id, bare, bare + "/"),
+        )
+        for other in await cur.fetchall():
+            if _url_key(str(tuple(other)[1] or "")) == want:
+                other_id = int(tuple(other)[0])
+                break
+    if other_id is None and _host(url) in {_host(u) for u in own}:
+        return None
+    reason = "other_application" if other_id is not None else "other_host"
+    get_audit_logger().info(URL_MISMATCH, extra={
+        "event": URL_MISMATCH, "user_id": safe_log_value(user.id), "application_id": application_id,
+        "other_application_id": other_id, "reason": reason,
+    })
+    return {"reason": reason, "own_url": own[0], "other_id": other_id}
 
 
 def _guest_read(body: BrowserActionRequest) -> bool:

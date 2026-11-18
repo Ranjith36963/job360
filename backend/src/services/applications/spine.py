@@ -3157,6 +3157,9 @@ async def list_applications(
         lap("q_outreach")
         merged = own_browser.merged_order({i: queued_at[i] for i in queue_order}, outreach)
         summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg, browsers, outreach)
+        # 2026-11-18: the rows the user pressed Send on, on the queue or not, so a batch run never pages the
+        # whole application list to find them.
+        summary["submit_now"] = await queue_preflight.submit_now_ids(db, user_id)
         lap("q_summary")
     event_counts = await _event_counts_by_app(db, app_ids)
     lap("l_event_counts")
