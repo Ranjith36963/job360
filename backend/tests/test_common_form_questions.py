@@ -93,7 +93,9 @@ async def test_only_memory_or_guessed_and_the_assistant_is_told_what_to_draft(au
         assert {r["label"] for r in rows.values()} <= {"memory", "guessed", "not_known"}
     profile = UserProfile(user_info=UserInfo(contact={"email": "a@b.c"}))
     open_ids = {o["id"]: o for o in cq.open_questions(profile)}
-    assert "email" not in open_ids and open_ids["phone"]["save_to"] == "user_info.contact"
+    # Owner 2026-11-18: every open row is drafted the same way (a guess under its topic), Memory rows too.
+    assert "email" not in open_ids and open_ids["phone"] == {
+        "id": "phone", "question": "Phone number", "save_to": "user_info.answers", "topic": "contact.phone"}
     assert "how_heard" not in open_ids  # B1: asked per job on Needs you, never drafted from Memory
     assert open_ids["over_18"] == {"id": "over_18", "question": "Are you 18 or older?",
                                    "save_to": "user_info.answers", "topic": "form.over_18"}
