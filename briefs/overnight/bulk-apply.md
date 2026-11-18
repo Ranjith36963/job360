@@ -28,7 +28,7 @@ score is about handling, not submits.
   (salary in lakhs, notice, AI-agent yes/no questions).
 - Biggest cause: board links blocked at the board's sign-in page. The recipe line is there; the plain
   instruction failed on 5 rows in one run.
-- Fix: one small PR (in progress): `record_event(blocked)` on a job-board host (job_checks.classify_host,
+- Fix: PR #1681 (auto-merge on, opened 22:45; CI lands it after the 22:41 run window): `record_event(blocked)` on a job-board host (job_checks.classify_host,
   the existing list) returns a reply hint: find the employer's own page first, update_job(apply_url), work
   that page; block on the board only if there is none, and say so. A hint, never a refusal (pattern-audit
   owner rule). Log line `blocked_on_job_board`.
