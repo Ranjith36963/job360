@@ -426,3 +426,41 @@ async def test_a_one_line_note_backed_by_two_quotes_is_strong(authenticated_asyn
     [stored] = _reviews(cid)
     assert (stored["confidence"], stored["downgraded"]) == ("strong", []), stored
     assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+
+
+@pytest.mark.asyncio
+async def test_facts_about_the_recipient_are_not_judged_against_the_users_profile(
+    authenticated_async_context, fixture_user_id
+):
+    """Kits audit 2026-11-18, section 3A (22:07 run: "Harmonic's MCP Gateway..." from harmonic.security stored weak):
+    only sentences about the user (I, my, me ...) need a profile quote. A line only about the recipient needs none,
+    and a row for it may cite the page it came from; a claim about the user no quote carries is still weak."""
+    about_them = "Congrats on leading the PyCon launch in March."
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{about_them}\n{LINE_1}\nBest regards,\nAda Lovelace")
+        block = await _review_block(client, cid)
+        assert block["lines"] == [about_them, LINE_1], block
+        page_row = {"msg_line": about_them, "profile_quote": "Rita led the PyCon launch in March",
+                    "field_path": "page:pycon.example/about"}
+        resp = await _record(client, app_id, cid, _payload(mid, block["sha256"], [page_row, *_rows((LINE_1, QUOTE_1))]))
+        assert resp.status_code == 201, resp.text
+        verdict = await _check(client, cid, mid)
+    [stored] = _reviews(cid)
+    assert (stored["confidence"], stored["downgraded"]) == ("strong", []), stored
+    assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+
+
+@pytest.mark.asyncio
+async def test_a_page_row_never_excuses_a_claim_about_the_user(authenticated_async_context, fixture_user_id):
+    """A row citing a page backs only a line about the recipient: a line with I / my / me is still judged."""
+    mine = "I led the PyCon launch in March."
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{mine}\n{LINE_1}\nBest regards,\nAda Lovelace")
+        sha = (await _review_block(client, cid))["sha256"]
+        page_row = {"msg_line": mine, "profile_quote": "the PyCon launch in March", "field_path": "page:pycon.example"}
+        resp = await _record(client, app_id, cid, _payload(mid, sha, [page_row, *_rows((LINE_1, QUOTE_1))]))
+        assert resp.status_code == 201, resp.text
+    [stored] = _reviews(cid)
+    assert stored["confidence"] == "weak", stored
