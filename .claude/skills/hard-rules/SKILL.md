@@ -42,7 +42,7 @@ An index of the 14 hard rules, one line each. Where a test guards a rule, the te
 
 ### Extraction must be data-driven
 28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Owner rule, non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV. **ESCO is inert scaffolding, never built or shipped** — never cite it as running. Its two gates are `core.settings.ESCO_SKILL_NORMALISATION_ENABLED` (the live flag — read the comment above the constant, which records why `SEMANTIC_ENABLED` is the dead old name and is deliberately not read as a fallback) and `services.profile.skill_normalizer.is_available()`.
-29. **"Filled shelves work harder; empty shelves stay SILENT."** An empty preference means "don't care" — never a penalty, never a guess, never a default we invent. Survives the pivot for the profile the agent reads: an unset field is absent, not zero. (The dim-scorer half of this rule went with the scorer in slice 5.)
+29. **"Filled shelves work harder; empty shelves stay SILENT."** An empty preference means "don't care" — never a penalty, never a guess, never a default we invent. Survives the pivot for the profile the agent reads: an unset field is absent, not zero. (The dim-scorer half of this rule went with the scorer in slice 5.) **Answer once (owner, 2026-11-18):** the assistant drafts a guess for EVERY Answer-once question, salary included, as an unconfirmed draft (`approved: false`); it counts only when the user edits or confirms it, which writes Memory. The assistant never sets a Memory fact itself.
 
 ### Process + verification
 4. **Always mock HTTP in tests** with `aioresponses`. Never live HTTP.
