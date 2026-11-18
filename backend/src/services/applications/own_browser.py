@@ -28,6 +28,7 @@ handed out; nobody gets a second request.
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -63,6 +64,14 @@ RELEASE_REASONS = (
 RELEASE_BACKOFF_MINUTES = 60
 RUN_NOW_SLOT = "own_browser:run_now"
 TAKE_SLOT = "own_browser:take"  # the newest take by any own-browser session (last_pc_activity_at)
+# The PC run's LinkedIn safety state (alert cursor, page counts, the UK-day cap, LINKEDIN_PAUSED_UNTIL): one slot per
+# user, its JSON in ``assistant_duty_runs.state`` (migration 0094). PC run pc-0911 (2026-11-18) kept it in
+# ``~/li_state.json`` inside a container wiped each run, so the daily cap could not hold. Bookkeeping only: never a
+# PC activity sign (``last_pc_activity_at``), never a scheduled duty.
+LI_STATE_SLOT = "own_browser:li_state"
+LI_STATE_MAX_BYTES = 8192
+# Why take held owner-clicked people back while it handed out a duty or answered empty (``held_back.why``).
+HELD_BACK_WHY = ("weekly_limit", "release_backoff", "pace_gap", "daily_max", "claimed_elsewhere")
 # An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
 # returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
@@ -420,6 +429,44 @@ async def stamp_take(db: JobDatabase, user_id: str, now: datetime) -> None:
         (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat()),
     )
     await db._db.commit()
+
+
+async def load_li_state(db: JobDatabase, user_id: str) -> dict[str, Any]:
+    """``{state, saved_at}``: the user's saved LinkedIn safety state (``{}`` and ``None`` when never saved). Scoped by
+    ``user_id`` (rule #12)."""
+    cur = await db._db.execute(
+        "SELECT done_at, state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, LI_STATE_SLOT)
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return {"state": {}, "saved_at": None}
+    got = dict(row)
+    try:
+        state = json.loads(got["state"] or "{}")
+    except ValueError:
+        state = {}
+    return {"state": state if isinstance(state, dict) else {}, "saved_at": got["done_at"]}
+
+
+async def save_li_state(db: JobDatabase, user_id: str, state: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Replace the user's LinkedIn safety state (a JSON object, at most :data:`LI_STATE_MAX_BYTES`; 422 otherwise).
+    A slot, not history: the newest save wins. Logs the size only, never the content."""
+    if not isinstance(state, dict):
+        raise SpineError(422, "state must be a JSON object")
+    raw = json.dumps(state, separators=(",", ":"), ensure_ascii=False)
+    size = len(raw.encode("utf-8"))
+    if size > LI_STATE_MAX_BYTES:
+        _log("own_browser_li_state", user_id, "too_big", size=size)
+        raise SpineError(422, f"state is {size} bytes; at most {LI_STATE_MAX_BYTES}")
+    stamp = now.astimezone(timezone.utc).isoformat()
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at, state) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, state = EXCLUDED.state",
+        (user_id, LI_STATE_SLOT, stamp, raw),
+    )
+    await db._db.commit()
+    _log("own_browser_li_state", user_id, "saved", size=size)
+    return {"state": json.loads(raw), "saved_at": stamp}
 
 
 def idle_fact(last: Optional[datetime], waiting: int, now: datetime) -> Optional[dict[str, Any]]:
@@ -838,15 +885,27 @@ async def take(
             return _answer("already_yours", task=held, next=_next_step(held))
         busy = any(t["claim"] is not None for t in contacts_)  # another session holds a person
         free = [t for t in contacts_ if t["claim"] is None]
+        # The owner-clicked people this take may hold back: when it then hands out a duty or answers empty, the
+        # answer says how many and which gate held them (``held_back``; pc-0911 got a hunt duty with 7 waiting).
+        clicked = [t for t in contacts_ if t["owner_yes"] and (contact_id is None or t["contact_id"] == contact_id)]
+        gate: Optional[tuple[str, Optional[datetime]]] = None
+        if busy:
+            ends = [d for d in (_when(t["claim"]["until"]) for t in contacts_ if t["claim"]) if d is not None]
+            gate = ("claimed_elsewhere", min(ends) if ends else None)
         if contact_id is not None:
             free = [t for t in free if t["contact_id"] == contact_id]
             tasks = [t for t in contacts_ if t["contact_id"] == contact_id]
-        if free and (await weekly_limit_until(db, user.id, now) is not None or await invites_since(
-            db, user.id, now - timedelta(days=7)
-        ) >= settings.LINKEDIN_INVITES_PER_WEEK_MAX):
-            # LinkedIn's invitation limit is live: an invite would fail again, so only people already
-            # connected (a plain message, no invite) are handed out until it is over.
-            free = [t for t in free if t.get("linkedin_state") == "connected"]
+        if free:
+            weekly = await weekly_limit_until(db, user.id, now)
+            if weekly is not None or await invites_since(
+                db, user.id, now - timedelta(days=7)
+            ) >= settings.LINKEDIN_INVITES_PER_WEEK_MAX:
+                # LinkedIn's invitation limit is live: an invite would fail again, so only people already
+                # connected (a plain message, no invite) are handed out until it is over.
+                kept = [t for t in free if t.get("linkedin_state") == "connected"]
+                if len(kept) < len(free) and gate is None:
+                    gate = ("weekly_limit", weekly)
+                free = kept
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
         backed: list[datetime] = []
@@ -854,6 +913,8 @@ async def take(
             pace = await _pace(db, user.id, now)
             if pace is not None:
                 refusal = _answer(pace[0], pace[0], wait_seconds=pace[1])
+                gate = (("pace_gap", now + timedelta(seconds=pace[1])) if pace[0] == "wait"
+                        else ("daily_max", await _next_user_midnight(db, user.id, now)))
             else:
                 for candidate in free:  # the first that is still queued once its row is locked
                     await db._db.execute(
@@ -878,6 +939,7 @@ async def take(
             if chosen is None and refusal is None and backed:
                 left = int(math.ceil((min(backed) - now).total_seconds()))
                 refusal = _answer("wait", "released_recently", wait_seconds=left)
+                gate = ("release_backoff", min(backed))
         elif busy:
             refusal = _answer("busy", "another session is sending")
         duty = next((t for t in duties if t["claim"] is None), None)
@@ -885,9 +947,10 @@ async def take(
             await pc_duties.claim(db, user.id, duty["kind"], {"session": label, "actor": actor}, now)
             until = (now + timedelta(minutes=settings.DUTY_CLAIM_MINUTES)).isoformat()
             chosen = {**duty, "claim": {"session": label, "until": until, "actor": actor}}
+    held_back = _held_back(user.id, label, len(clicked), gate)
     if chosen is not None and chosen["kind"] in pc_duties.KINDS:
         _log("own_browser_take", user.id, "task", kind=chosen["kind"])
-        return _answer("task", task=chosen, next=_next_step(chosen))
+        return _answer("task", task=chosen, next=_next_step(chosen), **held_back)
     if chosen is not None:
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
@@ -907,7 +970,27 @@ async def take(
         _log("own_browser_take", user.id, refusal["status"])
         return refusal
     _log("own_browser_take", user.id, "empty")
-    return _answer("empty", "nothing is waiting for your own browser")
+    return _answer("empty", "nothing is waiting for your own browser", **held_back)
+
+
+def _held_back(
+    user_id: str, session: str, people: int, held: Optional[tuple[str, Optional[datetime]]]
+) -> dict[str, Any]:
+    """``{"held_back": {people, why, until}}`` when owner-clicked people wait but a gate kept them from this take
+    (only added to a duty or an ``empty`` answer); else ``{}``. Logs the user, session, count and code."""
+    if people <= 0 or held is None:
+        return {}
+    why, until = held
+    _log("own_browser_take_held_back", user_id, why, session=session, people=people, why=why)
+    return {"held_back": {"people": people, "why": why, "until": until.isoformat() if until is not None else None}}
+
+
+async def _next_user_midnight(db: JobDatabase, user_id: str, now: datetime) -> datetime:
+    """When the user's own day (``spine.user_zone``, the day the LinkedIn daily max counts on) ends."""
+    from src.services.applications import spine  # noqa: PLC0415
+
+    local = now.astimezone(await spine.user_zone(db, user_id))
+    return (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
 
 async def _recently_released(db: JobDatabase, user_id: str, app_ids: list[int], now: datetime) -> set[int]:

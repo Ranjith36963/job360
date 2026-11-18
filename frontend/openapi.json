@@ -8443,6 +8443,43 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HeldBackOut": {
+        "description": "Owner-clicked LinkedIn sends a gate kept from this take while it handed out a duty or answered ``empty``\n(PC run pc-0911: a hunt duty with 7 clicked sends waiting, and nothing said why).",
+        "properties": {
+          "people": {
+            "title": "People",
+            "type": "integer"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "why": {
+            "enum": [
+              "weekly_limit",
+              "release_backoff",
+              "pace_gap",
+              "daily_max",
+              "claimed_elsewhere"
+            ],
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "people",
+          "why"
+        ],
+        "title": "HeldBackOut",
+        "type": "object"
+      },
       "HiddenOut": {
         "properties": {
           "event_id": {
@@ -10339,6 +10376,46 @@
           "total"
         ],
         "title": "LessonsResponse",
+        "type": "object"
+      },
+      "LiStateIn": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "additionalProperties": true,
+            "title": "State",
+            "type": "object"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "LiStateIn",
+        "type": "object"
+      },
+      "LiStateOut": {
+        "properties": {
+          "saved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved At"
+          },
+          "state": {
+            "additionalProperties": true,
+            "title": "State",
+            "type": "object"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "LiStateOut",
         "type": "object"
       },
       "LinkedInResponse": {
@@ -19602,6 +19679,16 @@
       },
       "TakeOut": {
         "properties": {
+          "held_back": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeldBackOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "next": {
             "default": "",
             "title": "Next",
@@ -30912,6 +30999,146 @@
           }
         },
         "summary": "Run Now",
+        "tags": [
+          "own-browser"
+        ]
+      }
+    },
+    "/api/own-browser/state": {
+      "get": {
+        "description": "The user's saved LinkedIn safety state for their PC runs (``{}`` when never saved).",
+        "operationId": "get_state_api_own_browser_state_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get State",
+        "tags": [
+          "own-browser"
+        ]
+      },
+      "put": {
+        "description": "Replace the user's LinkedIn safety state (a JSON object, at most 8 KB: 422 over it). Bookkeeping: allowed\nwhile paused, like release.",
+        "operationId": "save_state_api_own_browser_state_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiStateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save State",
         "tags": [
           "own-browser"
         ]

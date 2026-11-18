@@ -2873,6 +2873,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/own-browser/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get State
+         * @description The user's saved LinkedIn safety state for their PC runs (``{}`` when never saved).
+         */
+        get: operations["get_state_api_own_browser_state_get"];
+        /**
+         * Save State
+         * @description Replace the user's LinkedIn safety state (a JSON object, at most 8 KB: 422 over it). Bookkeeping: allowed
+         *     while paused, like release.
+         */
+        put: operations["save_state_api_own_browser_state_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/own-browser/take": {
         parameters: {
             query?: never;
@@ -7323,6 +7348,22 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * HeldBackOut
+         * @description Owner-clicked LinkedIn sends a gate kept from this take while it handed out a duty or answered ``empty``
+         *     (PC run pc-0911: a hunt duty with 7 clicked sends waiting, and nothing said why).
+         */
+        HeldBackOut: {
+            /** People */
+            people: number;
+            /** Until */
+            until?: string | null;
+            /**
+             * Why
+             * @enum {string}
+             */
+            why: "weekly_limit" | "release_backoff" | "pace_gap" | "daily_max" | "claimed_elsewhere";
+        };
         /** HiddenOut */
         HiddenOut: {
             /** Event Id */
@@ -8039,6 +8080,22 @@ export interface components {
             lessons: components["schemas"]["LessonOut"][];
             /** Total */
             total: number;
+        };
+        /** LiStateIn */
+        LiStateIn: {
+            /** State */
+            state: {
+                [key: string]: unknown;
+            };
+        };
+        /** LiStateOut */
+        LiStateOut: {
+            /** Saved At */
+            saved_at?: string | null;
+            /** State */
+            state: {
+                [key: string]: unknown;
+            };
         };
         /** LinkedInResponse */
         LinkedInResponse: {
@@ -11460,6 +11517,7 @@ export interface components {
         };
         /** TakeOut */
         TakeOut: {
+            held_back?: components["schemas"]["HeldBackOut"] | null;
             /**
              * Next
              * @default
@@ -16738,6 +16796,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunNowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_state_api_own_browser_state_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiStateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_state_api_own_browser_state_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiStateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiStateOut"];
                 };
             };
             /** @description Validation Error */

@@ -559,7 +559,9 @@ def test_the_own_browser_recipe_is_the_whole_pc_run_with_its_closed_tokens():
     assert len(text.splitlines()) <= 70
     for token in (
         "weekly_limit", "invited", "after_connect", "upload_failed", "hold_released", "check_submit",
-        "check_outreach", "LINKEDIN_PAUSED_UNTIL", "apply_min_score", "job360_cv", "~/li_state.json",
+        # pc-0911 (2026-11-18): the LinkedIn state lives in Job360, never in a home-directory file a container wipes
+        "check_outreach", "LINKEDIN_PAUSED_UNTIL", "apply_min_score", "job360_cv",
+        'own_browser_queue(action="state")', 'own_browser_queue(action="save_state"',
     ):
         assert token in text, token
     for words in (
