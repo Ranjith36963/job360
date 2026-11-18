@@ -153,7 +153,7 @@ async def test_job360_counts_the_people_never_the_run(authenticated_async_contex
     and its own words said done. Job360 counts, records partial below_target, never refuses, and returns `score`."""
     async with authenticated_async_context() as client:
         full = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
-        thin = int((await client.post("/api/jobs/bring", json={**_AD, "title": "Platform Engineer", "apply_url": "https://northwind.example/c/8"})
+        thin = int((await client.post("/api/jobs/bring", json={**_AD, "title": "Platform Engineer", "company": "Southwind", "apply_url": "https://southwind.example/c/8"})
                     ).json()["application_id"])
         async with await _agent(client) as agent:
             await _reviewed(agent, full, ["Priya Shah", "Tom Reed", "Ana Silva"])

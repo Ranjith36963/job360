@@ -100,3 +100,39 @@ async def test_a_reach_mark_that_leaves_out_a_given_job_is_refused(authenticated
             assert both.status_code == 200, both.text
             assert both.json()["score"]["per_job"] == {str(one): 0, str(two): 0}
             assert both.json()["outcome"] == "partial"
+
+
+async def _reviewed_person(agent: AsyncClient, app_id: int, name: str) -> None:
+    from tests._outreach_review import seed_strong_review
+
+    made = await agent.post(f"/api/applications/{app_id}/contacts", json={
+        "name": name, "role": "Recruiter", "linkedin_url": f"https://www.linkedin.com/in/{name.lower().replace(' ', '-')}"})
+    assert made.status_code == 201, made.text
+    cid = int(made.json()["contact_id"])
+    note = {"entry": "message", "channel": "linkedin", "text": f"Hi {name.split()[0]}, I build data pipelines."}
+    assert (await agent.post(f"/api/contacts/{cid}/outreach", json=note)).status_code in (200, 201)
+    seed_strong_review(cid)
+
+
+@pytest.mark.asyncio
+async def test_people_at_the_same_company_count_for_every_job_there(authenticated_async_context, fixture_user_id):
+    """2026-11-18 run (Kits round 5): people saved against Robert Walters 954 were not counted for 955, so reach
+    scored 13/30 although the company had more. Each person counts once per company, on any of its jobs."""
+    async with authenticated_async_context() as client:
+        def ad(title: str, n: int) -> dict[str, str]:
+            return {"title": title, "company": "Robert Walters", "location": "London",
+                    "apply_url": f"https://robertwalters.example/jobs/{n}", "description": "AI engineer for a PE firm."}
+
+        first = int((await client.post("/api/jobs/bring", json=ad("AI Engineer", 1))).json()["application_id"])
+        second = int((await client.post("/api/jobs/bring", json=ad("ML Engineer", 2))).json()["application_id"])
+        assert first != second
+        async with await _agent(client) as agent:
+            for name in ("Ana Silva", "Tom Reed", "Lee Park"):
+                await _reviewed_person(agent, first, name)
+            for name in ("Priya Shah", "Sam Cole"):
+                await _reviewed_person(agent, second, name)
+            resp = await agent.post("/api/schedule/done", json={
+                "duty": "reach", "application_ids": [first, second], "outcome": "done"})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["score"]["per_job"] == {str(first): 5, str(second): 5}, resp.json()
+            assert resp.json()["outcome"] == "done", resp.json()

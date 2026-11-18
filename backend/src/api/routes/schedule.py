@@ -352,18 +352,47 @@ def _run_since(stamps: dict[str, datetime], duty: str, now: datetime) -> datetim
 
 
 async def _people_score(db: JobDatabase, user: CurrentUser, duty: str, ids: list[int], now: datetime) -> PeopleScoreOut:
-    """Job360's count (rule #12: scoped by user). reach: everyone saved at each listed job, whoever saved them and
-    when. network: new people with no job this assistant saved since the run took the duty."""
+    """Job360's count (rule #12: scoped by user). reach: everyone saved at each listed job's COMPANY (on that job,
+    another job there, or no job), whoever saved them and when, each person once (2026-11-18: Robert Walters 954/955
+    and an existing YAL contact were not counted). network: new people with no job this assistant saved since the
+    run took the duty."""
     target = settings.NETWORK_MAX_PER_RUN if duty == "network" else settings.REACH_TARGET_PER_JOB
     score = PeopleScoreOut(target=target, minimum=target if duty == "network" else settings.REACH_MIN_PER_JOB)
     if duty == "reach":
+        from src.services.applications import contacts  # noqa: PLC0415 - profile <-> spine cycle
+
         cur = await db._db.execute(
-            "SELECT application_id, COUNT(*) AS n FROM application_contacts "  # noqa: S608 - placeholders only
-            f"WHERE user_id = ? AND application_id IN ({', '.join('?' for _ in ids)}) GROUP BY application_id",
+            "SELECT id, job_company FROM applications "  # noqa: S608 - placeholders only
+            f"WHERE user_id = ? AND id IN ({', '.join('?' for _ in ids)})",
             (user.id, *ids),
         )
-        got = {int(dict(r)["application_id"]): int(dict(r)["n"]) for r in await cur.fetchall()}
-        score.per_job = {str(i): got.get(i, 0) for i in ids}
+        job_key = {
+            int(r["id"]): contacts.company_key(str(r["job_company"] or "")) for r in map(dict, await cur.fetchall())
+        }
+        cur = await db._db.execute(
+            "SELECT ac.application_id, ac.name, ac.linkedin_url, ac.company, a.job_company "
+            "FROM application_contacts ac "
+            "LEFT JOIN applications a ON a.id = ac.application_id WHERE ac.user_id = ?",
+            (user.id,),
+        )
+        people: dict[str, set[str]] = {}
+        for row in map(dict, await cur.fetchall()):
+            key = contacts.contact_company_key(row)
+            if key:
+                who = (contacts.linkedin_identity_key(str(row["linkedin_url"] or ""))
+                       or contacts.name_identity_key(str(row["name"] or "")))
+                people.setdefault(key, set()).add(who)
+        per_job = {}
+        for i in ids:
+            key = job_key.get(i, "")
+            if key:
+                per_job[str(i)] = len(people.get(key, set()))
+            else:  # no company to match on: the people on this job only
+                cur = await db._db.execute(
+                    "SELECT COUNT(*) FROM application_contacts WHERE user_id = ? AND application_id = ?", (user.id, i))
+                got = await cur.fetchone()
+                per_job[str(i)] = int(got[0]) if got else 0
+        score.per_job = per_job
         return score
     since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
     cur = await db._db.execute(
