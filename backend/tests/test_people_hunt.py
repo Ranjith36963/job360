@@ -223,7 +223,8 @@ async def test_the_mcp_mark_done_stamps_reach(authenticated_async_context, fixtu
             app_id = await _bring(client, _ad(1))
             due = await tools.get_tool("whats_due").fn()
             assert [d for d in due["due"] if d["duty"] == "reach"][0]["application_ids"] == [app_id]
-            await tools.get_tool("mark_done").fn(duty="reach", application_ids=[app_id])
+            await tools.get_tool("mark_done").fn(duty="reach", application_ids=[app_id],
+                                                  searched={str(app_id): {"sprouts": 0, "clay": 0}})
             assert await _reach(client) == []
             with pytest.raises(Exception):  # noqa: B017 - reach without ids is refused
                 await tools.get_tool("mark_done").fn(duty="reach")

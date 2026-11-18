@@ -44,7 +44,7 @@ async def test_reach_is_refused_until_every_new_person_has_a_note(authenticated_
         async with await _agent(client) as agent:
             first = await _person(agent, app_id, "Priya Shah")
             second = await _person(agent, app_id, "Tom Reed")
-            done = {"duty": "reach", "application_ids": [app_id], "outcome": "done"}
+            done = {"duty": "reach", "application_ids": [app_id], "outcome": "done", "searched": {str(app_id): {"sprouts": 0, "clay": 0}}}
             refused = await agent.post("/api/schedule/done", json=done)
             assert refused.status_code == 409, refused.text
             detail = refused.json()["detail"]
@@ -86,7 +86,8 @@ async def test_stopping_short_names_what_each_free_lookup_returned(authenticated
         app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
         async with await _agent(client) as agent:
             body = {"duty": "reach", "application_ids": [app_id], "outcome": "partial",
-                    "note": "Apollo people search not on plan; about pages 403; web search gave no proven names."}
+                    "note": "Apollo people search not on plan; about pages 403; web search gave no proven names.",
+                    "searched": {str(app_id): {"sprouts": 0, "clay": 0}}}
             refused = await agent.post("/api/schedule/done", json=body)
             assert refused.status_code == 409, refused.text
             assert "missing: sprouts, clay." in refused.json()["detail"]  # Vibe needs credits (2026-11-18)
@@ -159,7 +160,8 @@ async def test_job360_counts_the_people_never_the_run(authenticated_async_contex
             await _reviewed(agent, full, ["Priya Shah", "Tom Reed", "Ana Silva"])
             await _reviewed(agent, thin, ["Lee Park"])
             resp = await agent.post("/api/schedule/done", json={
-                "duty": "reach", "application_ids": [full, thin], "outcome": "done", "reviewed": True})
+                "duty": "reach", "application_ids": [full, thin], "outcome": "done", "reviewed": True,
+                "searched": {str(thin): {"sprouts": 0, "clay": 0}}})
             assert resp.status_code == 200, resp.text
             body = resp.json()
             assert full != thin, (full, thin)
@@ -185,7 +187,8 @@ async def test_a_short_unreviewed_run_hears_both(authenticated_async_context):
         added = await client.post(f"/api/applications/{app_id}/contacts", json={"name": "Lee Park"})
         assert added.status_code == 201, added.text  # saved on the website: nothing for this run to review
         async with await _agent(client) as agent:
-            resp = await agent.post("/api/schedule/done", json={"duty": "reach", "application_ids": [app_id]})
+            resp = await agent.post("/api/schedule/done", json={
+                "duty": "reach", "application_ids": [app_id], "searched": {str(app_id): {"sprouts": 0, "clay": 0}}})
             assert resp.status_code == 200, resp.text
             note = resp.json()["note"]
             assert "below_target" in note and "no_review" in note and "reviewed=true" in note, note

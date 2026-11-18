@@ -92,7 +92,8 @@ async def test_a_reach_mark_that_leaves_out_a_given_job_is_refused(authenticated
             due = (await agent.get("/api/schedule/due", params={"duties": ["reach"]})).json()
             assert set(_reach(due)) == {one, two}
             partial = {"duty": "reach", "application_ids": [one], "outcome": "partial",
-                       "note": "Sprouts: none. Clay: none."}
+                       "note": "Sprouts: none. Clay: none.",
+                       "searched": {str(one): {"sprouts": 0, "clay": 0}, str(two): {"sprouts": 0, "clay": 0}}}
             refused = await agent.post("/api/schedule/done", json=partial)
             assert refused.status_code == 409, refused.text
             assert f"not in application_ids: {two}" in refused.json()["detail"]
