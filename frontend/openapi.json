@@ -24265,7 +24265,7 @@
     },
     "/api/applications/{application_id}/kit": {
       "get": {
-        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /\n``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest\n``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant\nsession's own short label (``kit.clean_session``; 422 otherwise): it is stored on\nthe ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.\n``Cache-Control: no-store``.",
+        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /\n``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest\n``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant\nsession's own short label (``kit.clean_session``; 422 otherwise): it is stored on\nthe ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.\n``compact=true`` (PC runs) is the same kit, read and hold with the long text swapped for sizes\nand pointers (``kit.compact_kit``). ``Cache-Control: no-store``.",
         "operationId": "get_application_kit_api_applications__application_id__kit_get",
         "parameters": [
           {
@@ -24295,6 +24295,16 @@
               "default": "",
               "title": "Session",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "compact",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Compact",
+              "type": "boolean"
             }
           },
           {

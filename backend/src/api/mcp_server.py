@@ -2831,28 +2831,30 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp.model_dump()
 
     @mcp.tool()
-    async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:
+    async def get_application_kit(
+        application_id: int, include_text: bool = True, session: str = "", compact: bool = False,
+    ) -> dict[str, Any]:
         """The APPLICATION KIT - call before you fill ANY application form.
         Pass `session`: one short label per conversation (letters, digits,
         space . _ : -, max 60), reused in check_submit; none = no hold.
         It holds, for THIS job: the CV and cover letter (`text` up to 8000
-        chars, `text_truncated` + `text_more` fetch the rest; `include_text=false`
+        chars, `text_more` fetches the rest; `include_text=false`
         sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link,
-        3 downloads), every stored answer grouped as contact / right_to_work /
+        3 downloads; `compact=true` (PC runs): no text, approved_text or last_fill,
+        `instructions` says where), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality /
         approved_text, each with its `source` (memory, profile, approved_text),
         `saved_at` and `state` (confirmed / relayed / inferred / sensitive; `answers_summary` counts
         them; a 'sensitive' answer (equality, sanctions, visa / right-to-work) is shown
-        to the user and confirmed on THIS form first, never filled; a confirmed
-        one may carry `confirmed_at`), and `missing` (facts Job360 lacks for THIS job; the
+        to the user and confirmed on THIS form first, never filled), and `missing` (facts Job360 lacks for THIS job; the
         form's own questions: check_form). Use only kit answers; ask ONCE for all of `missing`; never guess.
         Also: `duplicate` (warn the user first), `hold` (another session is on it: `held_by`,
         `session`, `until`; tell the user, stop unless they say continue; `unsure` = maybe
         your own), `account_site` (account needed: stop; the user signs
-        up and in, never a password), `autofill` (deny = do not type;
+        in, never a password), `autofill` (deny = do not type;
         give the user the answers to paste) and `settings`
-        (with `submit_preview`: what check_submit would say). Each call
-        mints fresh links and records `kit_read`; expired link: call again. After filling the form, record_event
+        (`submit_preview` = check_submit's answer). Each call
+        mints fresh links (records `kit_read`); expired: call again. After filling the form, record_event
         form_filled {form_url, fields_count}, re-read every field and record form_swept
         {fields_checked, fixed}; check_submit says stop until you do. On finish
         or hand over, record_event hold_released {reason: done|stopped}. `warnings`,
@@ -2863,14 +2865,14 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             async with _request_db() as db:
                 resp = await applications_route.get_application_kit(
                     application_id=application_id, response=Response(), include_text=include_text,
-                    session=session, db=db, user=_user(),
+                    session=session, compact=compact, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("get_application_kit", "error", application_id=application_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit(
             "get_application_kit", "ok", application_id=application_id,
-            kit_event_id=resp["kit"]["id"], missing_count=len(resp["missing"]),
+            kit_event_id=resp["kit"]["id"], missing_count=len(resp["missing"]), compact=compact,
         )
         _Fence().checks((resp.get("job") or {}).get("checks"))
         return resp

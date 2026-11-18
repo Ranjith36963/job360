@@ -825,7 +825,7 @@ def _next_step(task: dict[str, Any]) -> str:
                 f'then own_browser_queue release (session, task_id="{task["task_id"]}", reason="done"), or reason '
                 "captcha | login_wall | other when you could not finish it")
     if task["kind"] == "application":
-        return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
+        return f'get_application_kit(application_id={task["application_id"]}, session="<your session>", compact=true)'
     done = ("Connect, Send without a note, then own_browser_queue release reason invited" if task.get("no_note")
             else "Connect, Add a note, paste the draft exactly, send, then record_event outreach_sent"
             if task.get("linkedin_state") == "not_connected" and not task.get("owner_yes", True)
