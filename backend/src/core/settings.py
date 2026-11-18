@@ -612,7 +612,7 @@ JOB_BOARD_FAMILIES = ("indeed", "adzuna", "glassdoor")
 # An agent bring whose role words equal an OPEN application's (another company label) gets a
 # `possible_duplicate` reply warning; titles shorter than this many words are too generic to compare.
 POSSIBLE_DUPLICATE_MIN_WORDS = 3
-POSSIBLE_DUPLICATE_MAX_IDS = 10
+POSSIBLE_DUPLICATE_MAX_IDS = 5  # 2026-11-18: 10 ids on one warning were read past
 JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
 JOB_CHECK_FULL_MIN_WORDS = 150     # at or above this the ad is treated as complete
 JOB_CHECK_REPOST_GAP_DAYS = 3      # listing date vs employer date further apart than this = reposted

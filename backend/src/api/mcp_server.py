@@ -1658,8 +1658,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         prose in `note`, at most 300 characters, accepted but not stored yet). A failed duty waits 2h, 4h, 8h... (at
         most 24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox.
         hunt (done/partial) needs `report` {sources: {mail, kit, connectors, web, browser}: each {calls, ads,
-        brought} or {skipped: "<exact reason or error>"}, kit: {results, new, prefilter_passed, read_in_full,
-        unread_reason}}; a short one is refused 422 with what is missing. reach/network: `reviewed`=true only when
+        brought} or {skipped: {code, detail}} (code = tool_missing | tool_error | no_results | paid_needs_yes |
+        login_wall; detail = the exact error), kit: {results, new, prefilter_passed, read_in_full, unreadable,
+        snippet_only}} with read_in_full + unreadable + snippet_only = prefilter_passed; a short one is refused 422
+        with what is missing. reach/network: `reviewed`=true only when
         the Doctor and a separate reviewer checked every person and note; else done is recorded partial."""
         if len(note) > 300:
             raise _tool_error(HTTPException(422, "note: at most 300 characters"))

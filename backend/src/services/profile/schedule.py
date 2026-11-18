@@ -107,6 +107,9 @@ BATCH_HOLDS: tuple[str, ...] = (
 )
 
 
+HUNT_TITLES_PATH = "preferences.target_job_titles"
+
+
 @dataclass(frozen=True)
 class DueFacts:
     """Everything :func:`due_now` reads, already loaded. Pure input."""
@@ -135,6 +138,8 @@ class DueFacts:
     running: dict[str, datetime] = field(default_factory=dict)
     # Duties the user pressed Run now for: {duty: pressed_at} (RUN_NOW slots).
     forced: dict[str, datetime] = field(default_factory=dict)
+    # 2026-11-18 hunt: the user saved no target titles and the run invented 23. A due hunt then says `needs`.
+    titles_missing: bool = False
 
 
 def inbox_every_hours(mode: str, check_every: str) -> Optional[int]:
@@ -216,6 +221,10 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         if nxt - DUE_GRACE <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
+    if f.titles_missing:  # the hunt searches the user's own titles only: ask for them, never invent them
+        for item in due:
+            if item["duty"] == "hunt":
+                item["needs"] = [HUNT_TITLES_PATH]
     if f.people_hunt and f.reach_ids and is_forced("reach"):
         forced_due.add("reach")
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
@@ -599,5 +608,6 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         forced={k[len(RUN_NOW):]: v for k, v in stamps.items() if k.startswith(RUN_NOW)},
         failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
         people_hunt=cfg.people_hunt,
+        titles_missing=not [t for t in (profile.preferences.target_job_titles or []) if str(t).strip()],
         reach_ids=await _reach_ids(db, user_id, now, cfg.apply_min_score) if cfg.people_hunt else [],
     )
