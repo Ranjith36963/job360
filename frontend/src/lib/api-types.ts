@@ -6790,7 +6790,7 @@ export interface components {
             /** Last Outcome */
             last_outcome?: ("done" | "partial" | "failed") | null;
             /** Last Reason */
-            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review") | null;
+            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review" | "below_target") | null;
             /** Last Run At */
             last_run_at?: string | null;
             /** Next Due At */
@@ -8283,7 +8283,7 @@ export interface components {
              */
             outcome: "done" | "partial" | "failed";
             /** Reason */
-            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review") | null;
+            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review" | "below_target") | null;
             report?: components["schemas"]["HuntReportIn"] | null;
             /**
              * Reviewed
@@ -8320,6 +8320,7 @@ export interface components {
              * @enum {string}
              */
             outcome: "done" | "partial" | "failed";
+            score?: components["schemas"]["PeopleScoreOut"] | null;
         };
         /** MarkDuplicateRequest */
         MarkDuplicateRequest: {
@@ -8848,6 +8849,23 @@ export interface components {
             text: string;
             /** Waiting */
             waiting: number;
+        };
+        /**
+         * PeopleScoreOut
+         * @description 2026-11-18: Job360's own count for a people run, never the run's claim: people saved at each job, and new
+         *     network people this run, against the target and the minimum.
+         */
+        PeopleScoreOut: {
+            /** Minimum */
+            minimum: number;
+            /** Network */
+            network?: number | null;
+            /** Per Job */
+            per_job?: {
+                [key: string]: number;
+            };
+            /** Target */
+            target: number;
         };
         /**
          * PersonFullOut
@@ -10248,7 +10266,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review";
+            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review" | "below_target";
             /** Title */
             title: string;
             /** What To Do */

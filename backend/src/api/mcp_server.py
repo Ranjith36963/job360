@@ -617,7 +617,7 @@ UNKNOWN_ARGS_HINT = (
 MarkDoneReason = Annotated[
     Optional[Literal[
         "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
-        "needs_user", "error", "no_review",
+        "needs_user", "error", "no_review", "below_target",
     ]],
     Field(description="Why the run ended (needed when outcome=failed). Closed set; free text is refused."),
 ]
@@ -1654,13 +1654,14 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         takes `application_ids`, the ones you worked; batch is refused 409 unless whats_due(duties=["batch"])
         claimed it). `outcome` = done | partial | failed; `reason`
         (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
-        network_blocked | rate_limited | needs_user | error | no_review (a closed set: free text is refused; put
-        prose in `note`, at most 300 characters, accepted but not stored yet). A failed duty waits 2h, 4h, 8h... (at
-        most 24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox.
+        network_blocked | rate_limited | needs_user | error | no_review | below_target (a closed set: free text is
+        refused; put prose in `note`, at most 300 characters, accepted but not stored yet). A failed duty waits 2h,
+        4h, 8h... (at most 24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox.
         hunt (done/partial) needs `report` {sources: {mail, kit, connectors, web, browser}: each {calls, ads,
         brought} or {skipped: "<exact reason or error>"}, kit: {results, new, prefilter_passed, read_in_full,
         unread_reason}}; a short one is refused 422 with what is missing. reach/network: `reviewed`=true only when
-        the Doctor and a separate reviewer checked every person and note; else done is recorded partial."""
+        the Doctor and a separate reviewer checked every person and note; else done is recorded partial. Job360
+        counts the people itself: a job under 3 (network under 5) is recorded partial; the reply has `score`."""
         if len(note) > 300:
             raise _tool_error(HTTPException(422, "note: at most 300 characters"))
         try:

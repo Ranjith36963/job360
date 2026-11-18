@@ -7066,7 +7066,8 @@
                   "rate_limited",
                   "needs_user",
                   "error",
-                  "no_review"
+                  "no_review",
+                  "below_target"
                 ],
                 "type": "string"
               },
@@ -10869,7 +10870,8 @@
                   "rate_limited",
                   "needs_user",
                   "error",
-                  "no_review"
+                  "no_review",
+                  "below_target"
                 ],
                 "type": "string"
               },
@@ -10948,6 +10950,16 @@
             ],
             "title": "Outcome",
             "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PeopleScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12164,6 +12176,43 @@
           "text"
         ],
         "title": "PcIdleOut",
+        "type": "object"
+      },
+      "PeopleScoreOut": {
+        "description": "2026-11-18: Job360's own count for a people run, never the run's claim: people saved at each job, and new\nnetwork people this run, against the target and the minimum.",
+        "properties": {
+          "minimum": {
+            "title": "Minimum",
+            "type": "integer"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network"
+          },
+          "per_job": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Per Job",
+            "type": "object"
+          },
+          "target": {
+            "title": "Target",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "minimum"
+        ],
+        "title": "PeopleScoreOut",
         "type": "object"
       },
       "PersonFullOut": {
@@ -15809,7 +15858,8 @@
               "rate_limited",
               "needs_user",
               "error",
-              "no_review"
+              "no_review",
+              "below_target"
             ],
             "title": "Reason",
             "type": "string"

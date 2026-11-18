@@ -84,7 +84,7 @@ async def test_stopping_short_names_what_each_free_lookup_returned(authenticated
                     "note": "Apollo people search not on plan; about pages 403; web search gave no proven names."}
             refused = await agent.post("/api/schedule/done", json=body)
             assert refused.status_code == 409, refused.text
-            assert "missing: sprouts, clay, vibe" in refused.json()["detail"]
+            assert "missing: sprouts, clay." in refused.json()["detail"]  # Vibe needs credits (2026-11-18)
             body["note"] = "Sprouts: no one at the domain. Clay: none. Vibe: company matched, no names."
             assert (await agent.post("/api/schedule/done", json=body)).status_code == 200
             done = await agent.post("/api/schedule/done", json={"duty": "network"})
@@ -104,20 +104,60 @@ async def test_the_website_marks_as_before(authenticated_async_context):
         assert failed.status_code == 200, failed.text
 
 
+async def _noted(agent: AsyncClient, app_id: int, names: list[str]) -> None:
+    for name in names:
+        cid = await _person(agent, app_id, name)
+        note = {"entry": "message", "channel": "linkedin", "text": f"Hi {name.split()[0]}, I build data pipelines."}
+        assert (await agent.post(f"/api/contacts/{cid}/outreach", json=note)).status_code in (200, 201)
+
+
 @pytest.mark.asyncio
 async def test_done_without_a_review_is_recorded_partial_no_review(authenticated_async_context):
     """2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer."""
     async with authenticated_async_context() as client:
+        app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
         async with await _agent(client) as agent:
-            plain = await agent.post("/api/schedule/done", json={"duty": "network"})
+            await _noted(agent, app_id, ["Priya Shah", "Tom Reed", "Ana Silva"])
+            done = {"duty": "reach", "application_ids": [app_id]}
+            plain = await agent.post("/api/schedule/done", json=done)
             assert plain.status_code == 200, plain.text
             assert plain.json()["outcome"] == "partial" and "no_review" in plain.json()["note"]
             runs = (await client.get("/api/schedule/status")).json()["duties"]
-            net = next(r for r in runs if r["duty"] == "network")
-            assert (net["last_outcome"], net["last_reason"]) == ("partial", "no_review"), net
-            checked = await agent.post("/api/schedule/done", json={"duty": "network", "reviewed": True})
+            row = next(r for r in runs if r["duty"] == "reach")
+            assert (row["last_outcome"], row["last_reason"]) == ("partial", "no_review"), row
+            checked = await agent.post("/api/schedule/done", json={**done, "reviewed": True})
             assert checked.status_code == 200 and checked.json()["outcome"] == "done", checked.text
             wrong = await agent.post("/api/schedule/done", json={"duty": "inbox", "reviewed": True})
             assert wrong.status_code == 422, wrong.text
         web = await client.post("/api/schedule/done", json={"duty": "network"})
         assert web.status_code == 200 and web.json()["outcome"] == "done", web.text
+
+
+@pytest.mark.asyncio
+async def test_job360_counts_the_people_never_the_run(authenticated_async_context):
+    """Owner 2026-11-18: 5 people per job (at least 3) and 5 network people; the 09:13 run found 4 of 25 and 0 of 5
+    and its own words said done. Job360 counts, records partial below_target, never refuses, and returns `score`."""
+    async with authenticated_async_context() as client:
+        full = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
+        thin = int((await client.post("/api/jobs/bring", json={**_AD, "title": "Platform Engineer", "apply_url": "https://northwind.example/c/8"})
+                    ).json()["application_id"])
+        async with await _agent(client) as agent:
+            await _noted(agent, full, ["Priya Shah", "Tom Reed", "Ana Silva"])
+            await _noted(agent, thin, ["Lee Park"])
+            resp = await agent.post("/api/schedule/done", json={
+                "duty": "reach", "application_ids": [full, thin], "outcome": "done", "reviewed": True})
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert full != thin, (full, thin)
+            assert body["outcome"] == "partial", body["score"]
+            assert body["score"] == {"per_job": {str(full): 3, str(thin): 1}, "network": None, "target": 5, "minimum": 3}
+            assert f"{thin}: 1 of 5" in body["note"] and f"{full}:" not in body["note"]
+            runs = (await client.get("/api/schedule/status")).json()["duties"]
+            row = next(r for r in runs if r["duty"] == "reach")
+            assert (row["last_outcome"], row["last_reason"]) == ("partial", "below_target"), row
+            net = await agent.post("/api/schedule/done", json={"duty": "network", "reviewed": True})
+            assert net.status_code == 200 and net.json()["outcome"] == "partial", net.text
+            assert net.json()["score"]["network"] == 0 and "network: 0 of 5" in net.json()["note"]
+            ok = await agent.post("/api/schedule/done", json={
+                "duty": "reach", "application_ids": [full], "reviewed": True})
+            assert ok.json()["outcome"] == "done" and ok.json()["score"]["per_job"] == {str(full): 3}, ok.text
