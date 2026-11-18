@@ -210,7 +210,7 @@ async def start_duty(
     else:
         result = await duty_service.fire(db, user.id, duty, cause="assistant_asked", resolve=DEFAULT_RESOLVE)
     get_audit_logger().info("assistant_duty_start", extra={
-        "event": "assistant_duty_start", "user_id": safe_log_value(user.id), "duty": duty,
+        "event": "assistant_duty_start", "user_id": safe_log_value(user.id), "duty": safe_log_value(duty),
         "actor": safe_log_value(actor_for(user)),
-        "result": "started" if result.get("fired") else str(result.get("reason"))})
+        "result": safe_log_value("started" if result.get("fired") else str(result.get("reason")))})
     return result
