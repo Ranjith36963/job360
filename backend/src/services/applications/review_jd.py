@@ -32,9 +32,13 @@ re-review of the application must list every earlier must-term again as a must, 
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src.core import settings
+from src.utils.logger import safe_log_value
+
+logger = logging.getLogger(__name__)
 
 JD_KEYS = frozenset({"term", "must", "have", "evidence", "n"})
 CODES = ("jd_not_judged", "jd_no_must", "jd_too_few", "jd_term_not_in_ad", "jd_evidence_not_in_profile",
@@ -173,6 +177,7 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, s
         where["jd_too_few"] = [f"{len(items)} items, at least {need} (save_fit's jd_requirements)"]
     ad, cv = Tokens(ad_text), Tokens(cv_text)
     source, source_words = cv_review.quote_sources(profile)
+    entries = cv_review.skill_entries(profile)  # a quote listing whole saved skills is the profile's (2026-11-18)
     must = covered = 0
     gaps: list[str] = []
     terms: list[dict[str, Any]] = []
@@ -191,9 +196,12 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, s
                 gaps.append(ad_words)
             continue
         quotes = item["evidence"]
-        shown = bool(quotes) and all(cv_review.quote_in_profile(q, source, source_words) for q in quotes)
+        shown = bool(quotes) and all(cv_review.quote_in_profile(q, source, source_words)
+                                     or cv_review.skills_quote(q, entries) for q in quotes)
         if not shown:
             where.setdefault("jd_evidence_not_in_profile", []).append(i)
+            logger.info("cv_review jd_item=%s reason=jd_evidence_not_in_profile quotes=%s", safe_log_value(i),
+                        len(quotes))
         named = [n for n in item["n"] if n <= len(lines) and _says(skills, Tokens(lines[n - 1]).match)]
         if item["n"] and not named:
             where.setdefault("jd_term_not_in_cv", []).append(i)

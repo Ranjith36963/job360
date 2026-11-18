@@ -45,3 +45,16 @@ def test_cv_recipe_confidence_never_claims_weak_for_an_unnamed_must():
     assert "Never claim weak only because a must is unnamed" in text
     assert "(n: [] when none does)" in text
     assert "and every must the profile has is named in a line; else weak" not in text
+
+
+def test_cv_recipe_loops_pages_until_ten_new_cvs_are_reviewed():
+    """Production 2026-11-18 15:34: the run stopped after its first batch of 5 with 206 items queued and page 2
+    fetched but never worked. The server ends the run at cv_run.TARGET new REVIEWED CVs; the recipe says the loop."""
+    from src.services.applications import cv_run
+
+    text = _text()
+    assert cv_run.TARGET == 10
+    for token in ("LOOP: after each batch is recorded", "after=<the last application_id you got>",
+                  "until 10 NEW CVs are reviewed or `cv_work` has no items left", "a fetched page is always worked",
+                  "10 new CVs are written and reviewed this run", "each a whole profile skill"):
+        assert token in text, token
