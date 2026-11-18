@@ -511,7 +511,8 @@ async def queue_summary(
     ``removed_today`` = ``unqueued`` events today by closed reason (M1); ``by_browser`` = the whole queue
     counted by which browser runs it (``job360`` / ``own_browser`` / ``human``; ``browsers`` is the
     :func:`queue_browsers` map, read here when not given), approved LinkedIn sends included; ``outreach`` = how
-    many of those sends wait (``own_browser.queued_outreach``, read here when not given). ``queued`` stays the
+    many of those sends wait (``own_browser.queued_outreach``, read here when not given); ``submit_now`` =
+    :func:`submit_now_ids`. ``queued`` stays the
     applications alone (the daily cap and the batch recipe count those)."""
     from src.services.applications import own_browser  # noqa: PLC0415 - own_browser imports spine
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
@@ -542,6 +543,10 @@ async def queue_summary(
         "daily_left": settings_rules.daily_left(cfg, counts),
         "removed_today": await _removed_today(db, user_id, now),
         "by_browser": by_browser,
+        # 2026-11-18: the rows the user pressed Send on, on the queue or not, so a batch run never pages the
+        # whole application list to find them. Built here, not by a caller, so every reader of this block
+        # (list_applications(queued=true), stats(view="today")) gets the same answer.
+        "submit_now": await submit_now_ids(db, user_id),
     }
 
 
