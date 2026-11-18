@@ -157,6 +157,22 @@ async def test_the_company_name_in_the_subject_alone_is_no_tie(authenticated_asy
 
 
 @pytest.mark.asyncio
+async def test_the_job_sites_own_domain_alone_is_no_tie(authenticated_async_context):
+    """2026-11-18: match_email now lists mail from the job's own careers domain (sender_domain_is_job_site).
+    That site also sends alerts and "finish your application" nudges, so it never marks applied on its own."""
+    async with authenticated_async_context() as web:
+        uid = authenticated_async_context.fixture_user_id
+        app_id = await _bring(web, 13, ats=False)  # careers.example: the sender below shares its domain
+        async with await _agent(web) as agent:
+            await _start(agent, app_id)
+            await clear(uid, app_id)
+            resp = await _confirmation(agent, app_id, sender="Talent <talent@jobs.careers.example>")
+        assert resp.status_code == 201 and resp.json()["status"] == "considering", resp.text
+        assert _events(await _detail(web, app_id), "applied") == []
+        assert await _confirm_sent_ids(web) == [app_id]
+
+
+@pytest.mark.asyncio
 async def test_an_email_matching_two_applications_changes_nothing(authenticated_async_context):
     async with authenticated_async_context() as web:
         uid = authenticated_async_context.fixture_user_id

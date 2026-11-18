@@ -26,5 +26,5 @@ Read the user's Gmail and record what it says; nothing else. Never apply, submit
 8. **Summary**, exactly 3 lines (read = the mails you OPENED, not the threads listed):
    "Mails read: N (job mail: N, listed: N, pages: N)"
    "Events recorded: N; unmatched parked: N (new: N)"
-   "For you: ..." (or "For you: nothing"). No push notification unless the user must act (a deadline or an interview).
+   "For you: ..." (or "For you: nothing"): each mail parked this run on its own line with ONE action for the user: keep (it is about a job of theirs: pick it on Needs you), reply (a person asks them something) or dismiss. No push notification unless the user must act (a deadline or an interview).
 **Done when** every listed page is read, every job mail is recorded or parked, the cursor moved, `mark_done` is called and the 3 lines are given.

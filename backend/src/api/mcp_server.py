@@ -1731,6 +1731,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Returns `candidates`: each application with `reasons` - same_thread (an event already
         recorded with this source.thread_id), contact_email (the sender is a saved contact on it),
         sender_domain_in_email_senders (the sender's domain is one of its `email_senders`),
+        sender_domain_is_job_site (the sender shares the job's own careers-site domain),
         company_in_subject (its company is named in the subject). Facts, not a verdict: read the
         email and choose. One clear match: record_event with `source` (pass `thread_id`). Several
         or none: ONE ask_user, record nothing. Job360 reads no email; nothing is written."""
