@@ -56,7 +56,8 @@ async def test_each_duty_has_its_own_link_and_apply_is_the_send_link(authenticat
         duties = (await client.get("/api/assistant-duty-triggers")).json()["duties"]
         assert [(d["duty"], d["label"], d["set"]) for d in duties] == [
             ("hunt", "Hunt", False), ("batch", "Apply", False), ("inbox", "Gmail check", False),
-            ("reach", "People hunt", False),
+            ("reach", "People hunt", False), ("cv", "CV review", False),
+            ("own_browser", "Assistant browser (your Chrome)", False),
         ]
         saved = await client.put("/api/assistant-duty-triggers/hunt", json={"url": HUNT, "token": TOKEN})
         assert saved.status_code == 200, saved.text
@@ -65,7 +66,7 @@ async def test_each_duty_has_its_own_link_and_apply_is_the_send_link(authenticat
         await client.put("/api/assistant-duty-triggers/batch", json={"url": SEND})
         assert (await client.get("/api/assistant-trigger")).json()["set"] is True  # the Send link
         listed = (await client.get("/api/assistant-duty-triggers")).json()["duties"]
-        assert [d["set"] for d in listed] == [True, True, False, False]
+        assert [d["set"] for d in listed] == [True, True, False, False, False, False]
         assert TOKEN not in str(listed)
         for bad in ("http://x.example/fire", "https://user@x.example/", "nope"):
             assert (await client.put("/api/assistant-duty-triggers/hunt", json={"url": bad})).status_code == 422
@@ -189,8 +190,10 @@ def test_the_start_text_is_fixed_words_and_ids_only():
     text = duty_trigger.message("reach", "job_queued", [12, 7])
     assert "Applications: 12, 7." in text and "a new job was queued" in text
     for cause in duty_trigger.CAUSES:
-        for duty in duty_trigger.DUTIES:
-            assert "whats_due" in duty_trigger.message(duty, cause)
+        for duty in duty_trigger.DUTIES:  # cv and own_browser are no whats_due duties: their own recipe
+            text = duty_trigger.message(duty, cause)
+            recipe = duty_trigger.RECIPES.get(duty)
+            assert (f'get_recipe("{recipe}")' in text and "whats_due" not in text) if recipe else "whats_due" in text
     with pytest.raises(duty_trigger.DutyError):
         duty_trigger.check_duty("apply")
 

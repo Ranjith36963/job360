@@ -2734,13 +2734,19 @@ async def cv_work(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     """The lean read for the scheduled CV write-and-review task: only the queued rows that need CV work."""
+    from src.services.applications import cv_run  # noqa: PLC0415
     from src.services.applications import cv_work as cv_work_service  # noqa: PLC0415
 
     try:
-        return await cv_work_service.cv_work(
+        out = await cv_work_service.cv_work(
             db, user.id, limit=limit, after=after, include_profile=include_profile)
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    if include_profile and after is None:  # the CV run's first read (cv.md step 2): the run begins
+        await cv_run.begin(db, user.id)
+    if not out["total_needing_work"]:  # no items left: the run is over, so the batch starts (once)
+        await cv_run.end_if_reached(db, user.id, no_items_left=True)
+    return out
 
 
 @router.get(
@@ -4482,6 +4488,10 @@ async def _record_event(
         warnings = [*result.get("warnings", []), *missing, *([hold_warning] if hold_warning else [])]
         if body.event_type == cv_review_service.EVENT_TYPE and review_warning:
             warnings.append(review_warning)
+        if stored_type == cv_review_service.EVENT_TYPE:  # the run's TARGET-th new CV reviewed: the batch starts
+            from src.services.applications import cv_run  # noqa: PLC0415
+
+            await cv_run.end_if_reached(db, user.id, no_items_left=False)
         if body.event_type == "note" and source and not result.get("already_existed"):
             from src.services.applications import auto_applied  # noqa: PLC0415
 

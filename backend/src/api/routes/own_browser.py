@@ -255,6 +255,7 @@ async def run_now(
 ) -> RunNowOut:
     """The user's own "Run my own-browser tasks now": opens the queue for the next hour. Session only."""
     until = await own_browser.run_now(db, user.id, datetime.now(timezone.utc))
+    await _ignite(db, user, "own_browser_run_now")
     return RunNowOut(run_now_until=until.isoformat(), minutes=own_browser.RUN_NOW_MINUTES)
 
 
@@ -274,4 +275,14 @@ async def own_browser_send(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
+    if body.decision == "approve":
+        await _ignite(db, user, "owner_send")
     return SendDecisionOut(**got)
+
+
+async def _ignite(db: JobDatabase, user: CurrentUser, cause: str) -> None:
+    """Ignition (owner 2026-11-18): the user's own click starts their own-browser routine at once, when they
+    saved its start link (fixed words only; the cool-down and hourly cap apply). Never raises."""
+    from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+    await duty_trigger.ignite(user.id, ("own_browser",), cause, db=db)

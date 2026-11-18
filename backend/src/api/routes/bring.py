@@ -384,8 +384,8 @@ class BringJobResponse(BaseModel):
     next: Optional[str] = None
     # Hunt recipe v24 (owner 2026-11-17), agent brings only: things to fix that do not block the bring,
     # each {"code", "reason", "next"} plus its facts. Closed codes BRING_WARNING_CODES:
-    # ``possible_duplicate`` (+ ``application_ids``: OPEN applications with the same role words under
-    # another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
+    # ``possible_duplicate`` (+ ``application_ids``: at most 5 OPEN applications with the same role words and
+    # place under another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -416,16 +416,16 @@ async def _bring_warnings(
         if same:
             out.append({
                 "code": "possible_duplicate", "application_ids": same,
-                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role under "
-                          "another company label: possibly the same job (an agency and its client, or a renamed "
-                          "employer).",
+                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role in the "
+                          "same place under another company label: possibly the same job (an agency and its "
+                          "client, or a renamed employer).",
                 "next": _DUPLICATE_NEXT,
             })
             get_audit_logger().info(
                 "job_bring_possible_duplicate",
                 extra={
                     "event": "job_bring_possible_duplicate", "user_id": user_id, "application_id": application_id,
-                    "matched_ids": same, "reason": "same_role_words", "status": "warned",
+                    "matched_ids": same, "reason": "same_role_and_place", "status": "warned",
                 },
             )
     host = apply_host(body.apply_url)
@@ -866,12 +866,13 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         queued, queue_note = await applications_spine.queue_if_open(
             db, user.id, birth["application_id"], recorded_by=actor_for(user)
         )
-        # Ignition: a job the assistant found (hunt or the user's mail), once queued, starts reach and the batch
+        # Ignition: a job the assistant found (hunt or the user's mail), once queued, starts CV review and reach
+        # (no CV review link, or its start failed: the batch, as before)
         if queued and body.origin in ("ai_hunt", "your_mail"):
             from src.services.browser_agent import duty_trigger  # noqa: PLC0415
 
             await duty_trigger.ignite(
-                user.id, ("reach", "batch"), "job_queued", [int(birth["application_id"])], db=db
+                user.id, ("cv", "reach"), "job_queued", [int(birth["application_id"])], db=db
             )
     warnings = (
         await _bring_warnings(db, user.id, body, birth["application_id"], new_application=not birth["existing"])

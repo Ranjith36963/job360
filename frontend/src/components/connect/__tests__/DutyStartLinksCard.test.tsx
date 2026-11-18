@@ -114,3 +114,23 @@ describe("Start each job at once", () => {
     await waitFor(() => expect(deleteDutyTrigger).toHaveBeenCalledWith("hunt"));
   });
 });
+
+describe("CV review and the own browser (owner 2026-11-18)", () => {
+  it("each gets a row naming its recipe, and saves its own link", async () => {
+    getDutyTriggers.mockResolvedValue({
+      duties: [HUNT_SET, unset("cv", "CV review"), unset("own_browser", "Assistant browser (your Chrome)")],
+    });
+    render(<DutyStartLinksCard />);
+    const cv = await screen.findByTestId("duty-cv");
+    expect(cv).toHaveTextContent("CV review");
+    expect(cv).toHaveTextContent('get_recipe("cv")');
+    expect(cv).toHaveTextContent("Apply starts when it finishes");
+    const own = screen.getByTestId("duty-own_browser");
+    expect(own).toHaveTextContent("Assistant browser (your Chrome)");
+    expect(own).toHaveTextContent('get_recipe("own_browser")');
+    expect(screen.queryByTestId("duty-cv-schedule")).toBeNull();
+    fireEvent.change(within(cv).getByLabelText("CV review start link"), { target: { value: "https://x.example/cv" } });
+    fireEvent.click(within(cv).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(saveDutyTrigger).toHaveBeenCalledWith("cv", "https://x.example/cv", ""));
+  });
+});

@@ -10,15 +10,24 @@ import { RUN_NOW_DONE, RUN_OWN_BROWSER_TASKS } from "@/lib/browser-labels";
 import { onChanges } from "@/lib/live-changes";
 import { toast } from "@/lib/toast";
 
-/** Gmail first (owner 2026-10-27: "a button to trigger Gmail here"), then the other scheduled duties. */
-const ORDER: Duty[] = ["inbox", "hunt", "reach", "batch"];
+/** Gmail first (owner 2026-10-27: "a button to trigger Gmail here"), then the other duties; the own browser last. */
+const ORDER: Duty[] = ["inbox", "hunt", "cv", "reach", "batch", "own_browser"];
 const WHAT: Record<Duty, string> = {
   inbox: "Check my Gmail for replies",
   hunt: "Look for new jobs",
+  cv: "Write and review the CVs for my queued jobs",
   reach: "Find people for my new applications",
   batch: "Apply to the jobs I said yes to",
+  own_browser: "Do the tasks that wait for my assistant browser",
 };
-const BUTTON: Record<Duty, string> = { inbox: "Check Gmail now", hunt: "Hunt now", reach: "Find people now", batch: "Apply now" };
+const BUTTON: Record<Duty, string> = {
+  inbox: "Check Gmail now", hunt: "Hunt now", cv: "Review CVs now", reach: "Find people now", batch: "Apply now",
+  own_browser: "Start assistant-browser tasks now",
+};
+/** The own browser's start link is pressed with the own-browser button above, never a second button. */
+const OWN: Duty = "own_browser";
+/** Needs you names no browser brand (owner 2026-10-25), so the own browser keeps a neutral name here. */
+const nameOf = (row: DutyTrigger) => (row.duty === OWN ? "Assistant browser" : row.label);
 /** Why a start did not happen, in plain words (the closed reasons of POST /assistant-duty-triggers/{duty}/run). */
 export const NOT_STARTED: Record<string, string> = {
   not_set: "Save a start link first.",
@@ -93,6 +102,8 @@ export function RunNowPanel() {
   const ownNote = ran ? RUN_NOW_DONE : until > 0 ? `Open for the next ${until} minute${until === 1 ? "" : "s"}.` : "";
   const rows = ORDER.map((d) => duties?.find((r) => r.duty === d)).filter((r): r is DutyTrigger => !!r);
   const unlinked = rows.filter((r) => !r.set);
+  const runRows = rows.filter((r) => r.set && r.duty !== OWN);
+  const ownLinked = rows.some((r) => r.duty === OWN && r.set);
 
   return (
     <section
@@ -104,7 +115,7 @@ export function RunNowPanel() {
         Run now
       </h2>
       <p className="text-xs text-muted-foreground">These run on your schedule anyway. Press one to start it early.</p>
-      {(waitN > 0 || ran) && (
+      {(waitN > 0 || ran || ownLinked) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2" data-testid="own-browser-queue">
           <h3 className="sr-only">Assistant browser</h3>
           <p className="text-sm font-medium" data-testid="own-browser-count">
@@ -121,9 +132,9 @@ export function RunNowPanel() {
           )}
         </div>
       )}
-      {rows.some((r) => r.set) && (
+      {runRows.length > 0 && (
         <ul className="flex flex-wrap gap-2 border-t border-border pt-2">
-          {rows.filter((r) => r.set).map((r) => (
+          {runRows.map((r) => (
             <li key={r.duty} data-testid={`run-now-${r.duty}`}>
               <button
                 type="button"
@@ -142,7 +153,7 @@ export function RunNowPanel() {
       )}
       {unlinked.length > 0 && (
         <p className="text-xs text-muted-foreground" data-testid="run-now-unlinked">
-          {unlinked.map((r) => r.label).join(", ")}: no start link yet.{" "}
+          {unlinked.map(nameOf).join(", ")}: no start link yet.{" "}
           <Link href="/connect" className="font-medium text-foreground underline-offset-2 hover:underline">
             Add one in Connect your assistant
           </Link>

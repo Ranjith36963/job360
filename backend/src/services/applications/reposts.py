@@ -68,18 +68,49 @@ def role_words(title: str, location: str = "") -> str:
     return " ".join("".join(ch if ch.isalnum() else " " for ch in core).split())
 
 
+# Words that name no place: a work arrangement or filler ("Remote (UK)" is the place "uk").
+_PLACE_NOISE = frozenset({
+    "remote", "hybrid", "onsite", "on", "site", "office", "based", "in", "the", "and", "or", "of", "from", "home",
+    "wfh", "anywhere", "worldwide", "global", "flexible", "work", "only", "fully", "partly", "partially", "area",
+})
+
+
+def _place_key(location: str) -> tuple[str, ...]:
+    """The first segment of ``location`` (split on , ; | / and brackets) that names a place: its words,
+    case-folded, without ``_PLACE_NOISE``. "Pune, Maharashtra, India" -> ("pune",); "Remote" -> (). A
+    character scan, no regex on caller text. A comparison key only."""
+    spaced = "".join("," if ch in ",;|/()[]" else ch for ch in (location or "").casefold())
+    for segment in spaced.split(","):
+        words = tuple(w for w in "".join(ch if ch.isalnum() else " " for ch in segment).split()
+                      if w not in _PLACE_NOISE)
+        if words:
+            return words
+    return ()
+
+
+def same_place(a: str, b: str) -> bool:
+    """True when two job locations name the same place: the same first place segment (usually the city),
+    or, when neither names a place, the same words ("Remote" and "Remote"; two blanks). A shared country
+    alone ("Pune, India" vs "Bengaluru, India") is not the same place (prod 2026-11-18, application 1034)."""
+    ka, kb = _place_key(a), _place_key(b)
+    if ka or kb:
+        return ka == kb
+    return " ".join((a or "").casefold().split()) == " ".join((b or "").casefold().split())
+
+
 async def open_same_role(
     db: JobDatabase, user_id: str, *, title: str, location: str = "", exclude_application_id: int
 ) -> list[int]:
     """Ids of THIS user's OPEN applications (not ``exclude_application_id``) whose ``role_words`` equal
-    this title's, whatever company label they carry, when the role has at least
-    ``POSSIBLE_DUPLICATE_MIN_WORDS`` words (a short title like "AI Engineer" says nothing). At most
-    ``POSSIBLE_DUPLICATE_MAX_IDS``, oldest first. Scoped by user (rules 12/25). Never raises: a failure
-    is logged and returns []; a bring must never fail on it.
+    this title's AND whose location is :func:`same_place`, whatever company label they carry, when the
+    role has at least ``POSSIBLE_DUPLICATE_MIN_WORDS`` words (a short title like "AI Engineer" says
+    nothing). At most ``POSSIBLE_DUPLICATE_MAX_IDS``, oldest first. Scoped by user (rules 12/25). Never
+    raises: a failure is logged and returns []; a bring must never fail on it.
 
     Why: open_duplicate_of matches the whole company key, and an agent that writes the agency's client
     into the label ("Robert Walters (PE firm client)") slips past it - prod 2026-11-17, the same role
-    brought four times."""
+    brought four times. The place (2026-11-18): a generic title ("AI/ML Engineer", application 1034 in
+    Pune) named 10 open jobs in other cities, so the warning was noise and the run read past it."""
     try:
         want = role_words(title, location)
         if len(want.split()) < settings.POSSIBLE_DUPLICATE_MIN_WORDS:
@@ -92,7 +123,8 @@ async def open_same_role(
         for r in await cur.fetchall():
             if str(r["status"]) in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
                 continue
-            if role_words(str(r["job_title"] or ""), str(r["job_location"] or "")) == want:
+            have_loc = str(r["job_location"] or "")
+            if role_words(str(r["job_title"] or ""), have_loc) == want and same_place(have_loc, location):
                 found.append(int(r["id"]))
                 if len(found) >= settings.POSSIBLE_DUPLICATE_MAX_IDS:
                     break

@@ -66,7 +66,7 @@ async def test_a_second_run_does_not_get_the_same_duty(authenticated_async_conte
             second = await _due(agent)
             assert second["due"] == [] and second["nothing_due"] is True and set(second["running"]) == {"hunt"}
             # 2026-11-17: an assistant's hunt mark carries its report (tests/test_hunt_enforce.py).
-            skip = {"skipped": "not used in this test run"}
+            skip = {"skipped": {"code": "tool_missing", "detail": "no such tool in this test"}}
             report = {"sources": {k: skip for k in ("mail", "kit", "connectors", "web", "browser")}}
             done = await agent.post("/api/schedule/done", json={"duty": "hunt", "report": report})
             assert done.status_code == 200, done.text

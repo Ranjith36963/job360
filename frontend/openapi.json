@@ -6909,6 +6909,21 @@
             ],
             "title": "Max People"
           },
+          "needs": {
+            "anyOf": [
+              {
+                "items": {
+                  "const": "preferences.target_job_titles",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs"
+          },
           "reason": {
             "enum": [
               "never_done",
@@ -8518,6 +8533,18 @@
             "title": "Results",
             "type": "integer"
           },
+          "snippet_only": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet Only"
+          },
           "unread_reason": {
             "anyOf": [
               {
@@ -8529,6 +8556,18 @@
               }
             ],
             "title": "Unread Reason"
+          },
+          "unreadable": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unreadable"
           }
         },
         "required": [
@@ -8564,9 +8603,37 @@
         "title": "HuntReportIn",
         "type": "object"
       },
+      "HuntSkipIn": {
+        "additionalProperties": false,
+        "description": "Why a hunt source was not used: a closed ``code`` (HUNT_SKIP_CODES) and its ``detail`` (the exact error).",
+        "properties": {
+          "code": {
+            "maxLength": 40,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "HuntSkipIn",
+        "type": "object"
+      },
       "HuntSourceIn": {
         "additionalProperties": false,
-        "description": "One hunt source: what it did, or why it was not used (the exact reason or error).",
+        "description": "One hunt source: what it did, or why it was not used ({code, detail}; free text alone is refused).",
         "properties": {
           "ads": {
             "anyOf": [
@@ -8607,7 +8674,9 @@
           "skipped": {
             "anyOf": [
               {
-                "maxLength": 300,
+                "$ref": "#/components/schemas/HuntSkipIn"
+              },
+              {
                 "type": "string"
               },
               {
@@ -15683,7 +15752,7 @@
         "additionalProperties": false,
         "properties": {
           "country": {
-            "maxLength": 2,
+            "maxLength": 40,
             "minLength": 2,
             "title": "Country",
             "type": "string"

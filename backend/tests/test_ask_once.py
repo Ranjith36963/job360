@@ -283,3 +283,68 @@ async def test_the_answer_once_card_counts_once_and_the_newer_press_wins(
         assert find_answer(answers, topic=site, country="GB")["answer"] == "ada.dev"
         gb = [q["topic"] for q in (await client.get("/api/profile/questionnaire")).json()["countries"][0]["questions"]]
         assert site not in gb
+
+
+async def _region_profile(client: AsyncClient) -> list[dict[str, Any]]:
+    saved = await client.patch("/api/profile", json={"edits": [{"path": "user_info.right_to_work", "value": {
+        "countries": [{"country": "GB", "work_authorization": "citizen"}, {"country": "NORTH_AMERICA"}]}}]})
+    assert saved.status_code == 200, saved.text
+    return (await client.get("/api/profile/questionnaire")).json()["countries"]
+
+
+@pytest.mark.asyncio
+async def test_a_region_group_shows_its_name_and_never_asks_work_rights(authenticated_async_context, fixture_user_id):
+    """Owner bug 2026-11-18 (Kits brief answer-once-regions): the NORTH_AMERICA group showed its code and
+    asked "Are you legally allowed to work in NORTH_AMERICA?". Work rights are per country; a region is asked
+    only what makes sense for a region, in its name, and never repeats the general questions."""
+    async with authenticated_async_context() as client:
+        out = await _region_profile(client)
+    na = next(c["questions"] for c in out if c["country"] == "NORTH_AMERICA")
+    topics = [q["topic"] for q in na]
+    # Salary alone: work rights are per country, and Memory keeps relocation and travel per country only.
+    assert topics == ["salary.NORTH_AMERICA"], topics
+    assert all("NORTH_AMERICA" not in q["question"] for q in na), [q["question"] for q in na]
+    assert any(q["question"] == "Expected salary in North America" for q in na)
+    gb = next(c["questions"] for c in out if c["country"] == "GB")
+    assert "right_to_work.GB.needs_sponsorship" in [q["topic"] for q in gb], "a country still asks them"
+
+
+def test_a_region_with_nothing_left_to_ask_has_no_group():
+    from src.services.profile import ask_once
+    from src.services.profile.models import UserProfile
+
+    profile = UserProfile()
+    profile.user_info.right_to_work = {"countries": [{"country": "GB", "work_authorization": "citizen"},
+                                                     {"country": "EUROPE"}]}
+    profile.preferences.salary_by_country = [
+        {"country": "EUROPE", "min": 50000, "max": 60000, "currency": "EUR", "period": "year"}]
+    groups = {g["country"]: g["questions"] for g in ask_once.questionnaire(profile, [])}
+    assert "EUROPE" not in groups, groups.get("EUROPE")
+
+
+@pytest.mark.asyncio
+async def test_a_region_block_remembers_like_a_country(authenticated_async_context, fixture_user_id):
+    """Owner bug 2026-11-18: the questionnaire lists region blocks (NORTH_AMERICA), but remember capped the
+    place at 2 letters, so every press there was a 422 and nothing saved. A region is a place like a country."""
+    async with authenticated_async_context() as client:
+        out = await _region_profile(client)
+        na = next(c["questions"] for c in out if c["country"] == "NORTH_AMERICA")
+        key = "salary.NORTH_AMERICA"
+        question = next(q["question"] for q in na if q["topic"] == key)
+        unclear = await client.post("/api/profile/questionnaire/remember", json={"country": "NORTH_AMERICA", "items": [
+            {"topic": key, "question": question, "answer": "70k to 120k"}]})
+        assert unclear.status_code == 200 and unclear.json()["saved"] == [], unclear.text
+        assert "your North America page" in unclear.json()["not_saved"][key], "no currency: said, never guessed"
+        resp = await client.post("/api/profile/questionnaire/remember", json={"country": "north_america", "items": [
+            {"topic": key, "question": question, "answer": "70000-120000 USD a year"}]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["memory"] == {key: {"path": "preferences.salary_by_country", "key": key}}
+        from src.services.profile.storage import load_profile
+
+        assert load_profile(fixture_user_id).preferences.salary_by_country == [
+            {"country": "NORTH_AMERICA", "min": 70000, "max": 120000, "currency": "USD", "period": "year"}]
+        after = [c["country"] for c in (await client.get("/api/profile/questionnaire")).json()["countries"]]
+        assert "NORTH_AMERICA" not in after, "nothing left to ask a region: no group"
+        bad = await client.post("/api/profile/questionnaire/remember", json={"country": "Atlantis", "items": [
+            {"topic": key, "question": question, "answer": "70000-120000 USD a year"}]})
+        assert bad.status_code == 422, "an unreadable place is still refused"

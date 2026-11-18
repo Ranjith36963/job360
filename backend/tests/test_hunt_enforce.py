@@ -27,13 +27,15 @@ def _ok_source(calls: int = 3, ads: int = 40, brought: int = 1) -> dict[str, int
 
 GOOD_REPORT: dict[str, Any] = {
     "sources": {"mail": _ok_source(), "kit": _ok_source(1, 496, 3), "connectors": _ok_source(),
-                "web": _ok_source(), "browser": {"skipped": "no browser tool in this scheduled cloud run"}},
-    "kit": {"results": 496, "new": 370, "prefilter_passed": 370, "read_in_full": 370},
+                "web": _ok_source(), "browser": {"skipped": {"code": "tool_missing",
+                                                         "detail": "no browser tool in this scheduled cloud run"}}},
+    "kit": {"results": 496, "new": 370, "prefilter_passed": 370, "read_in_full": 370, "unreadable": 0,
+            "snippet_only": 0},
 }
 # The 2026-11-17 run as it reported itself: mail and kit only, 52 of 370 new kit ads read in full.
 REPLAY_1117: dict[str, Any] = {
     "sources": {"mail": _ok_source(1, 12, 1), "kit": _ok_source(1, 496, 3)},
-    "kit": {"results": 496, "new": 370, "prefilter_passed": 370, "read_in_full": 52},
+    "kit": {"results": 496, "new": 370, "prefilter_passed": 370, "read_in_full": 52, "unreadable": 0, "snippet_only": 0},
 }
 
 
@@ -94,7 +96,7 @@ async def test_a_hunt_report_with_a_bad_source_or_kit_count_is_refused(authentic
 @pytest.mark.asyncio
 async def test_a_full_hunt_report_is_accepted_and_logged_as_counts(authenticated_async_context, caplog):
     caplog.set_level(logging.INFO)
-    short_with_reason = {**GOOD_REPORT, "kit": {**GOOD_REPORT["kit"], "read_in_full": 300,
+    short_with_reason = {**GOOD_REPORT, "kit": {**GOOD_REPORT["kit"], "read_in_full": 300, "unreadable": 70,
                                                 "unread_reason": "70 ads had no text and no page would open"}}
     async with authenticated_async_context() as client, await _agent(client) as agent:
         full = await _done(agent, report=GOOD_REPORT)

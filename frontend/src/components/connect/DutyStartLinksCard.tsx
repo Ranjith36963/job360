@@ -38,6 +38,9 @@ const WHAT: Record<Duty, string> = {
   batch: "applies to the jobs you said yes to (the same link Send uses)",
   inbox: "reads your Gmail for replies",
   reach: "finds people to reach for your new applications",
+  cv: 'writes and reviews the CV for each queued job (its routine: call get_recipe("cv") and follow it). A hunt starts it; Apply starts when it finishes',
+  own_browser:
+    'does the tasks that wait for your own Chrome, like LinkedIn sends (its routine: call get_recipe("own_browser") and follow it)',
 };
 
 const RESULT_WORDS: Record<string, string> = {
