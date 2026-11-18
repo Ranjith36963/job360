@@ -139,29 +139,19 @@ def review_state(rows: list[dict[str, Any]], message_id: Optional[int], sha: str
 
 
 RECIPIENT_PATHS = ("page:", "page/", "recipient:", "recipient/")
-_FIRST_PERSON = frozenset({"i", "i'm", "i've", "i'd", "i'll", "im", "ive", "my", "me", "mine", "myself"})
 
 
-def user_claims(line: str) -> str:
-    """The sentences of a draft line that speak about the USER (a first-person word: I, my, me ...), joined. Only
-    these are judged against the profile (Kits audit 2026-11-18, section 3A: "Congrats on leading the PyCon launch
-    in March" failed on facts about the RECIPIENT, so every LinkedIn note stored weak and retry_limit then blocked
-    auto-send to that person for good). What the note says about the recipient is the writer's to source from a
-    page; it is never a claim about the user. Scanned character by character: no regex on caller text."""
-    sentences, cur = [], []
+def sentences(line: str) -> list[str]:
+    """A draft line's sentences (split after . ! ?), stripped; scanned character by character, no regex."""
+    out, cur = [], []
     for ch in str(line or ""):
         cur.append(ch)
         if ch in ".!?":
-            sentences.append("".join(cur))
+            out.append("".join(cur).strip())
             cur = []
     if "".join(cur).strip():
-        sentences.append("".join(cur))
-    keep = []
-    for sentence in sentences:
-        words = {w.strip("\"'(),;:-.!?").lower().replace("\u2019", "'") for w in sentence.split()}
-        if words & _FIRST_PERSON:
-            keep.append(sentence.strip())
-    return " ".join(keep)
+        out.append("".join(cur).strip())
+    return [x for x in out if x]
 
 
 async def _person(db: JobDatabase, user_id: str, contact: dict[str, Any]) -> tuple[str, str]:
@@ -223,45 +213,47 @@ async def check(
     name, context = await _person(db, user.id, contact)
     content = content_lines(text, profile, name)
     down: set[str] = set()
+    # Kits audit 3A (orders 23:10): every sentence is judged against the profile EXCEPT one the fresh reviewer marks
+    # as about the recipient, with a row whose field_path names its page ("page:<url>") and the quote from it (3+
+    # words). Such a row may name a whole line or one sentence of it. The reviewer decides; Job360 never guesses.
+    page_rows = [e for e in entries if str(e.get("field_path") or "").lower().startswith(RECIPIENT_PATHS)]
+    page_keys = {cv_review.line_key(e[LINE_FIELD]) for e in page_rows}
+    profile_rows = [e for e in entries if e not in page_rows]
     keys = {cv_review.line_key(e[LINE_FIELD]) for e in entries}
-    covered = sum(1 for ln in content if cv_review.line_key(ln) in keys)
+
+    def _covered(line: str) -> bool:
+        return cv_review.line_key(line) in keys or all(cv_review.line_key(x) in page_keys for x in sentences(line))
+
+    covered = sum(1 for ln in content if _covered(ln))
     down |= {"no_content"} if not content else {"line_uncovered"} if covered < len(content) else set()
-    if keys - {cv_review.line_key(ln) for ln in text.splitlines()}:
+    known = {cv_review.line_key(ln) for ln in text.splitlines()} | {
+        cv_review.line_key(x) for ln in text.splitlines() for x in sentences(ln)}
+    if keys - known:
         down.add("line_not_in_message")
     source, source_words = cv_review.quote_sources(profile)  # a quote lies inside ONE profile field or line
     own = " ".join(sorted(cv_review._name_words(profile)))
     terms = review_rows.profile_terms(profile)
-    actual: dict[str, list[str]] = {}
-    for ln in text.splitlines():  # the draft's own text decides case, never the entry's copy
-        actual.setdefault(cv_review.line_key(ln), []).append(ln.strip().lstrip(cv_review._BULLETS + " \t"))
+    for e in page_rows:  # a recipient sentence still needs its page quote: a made-up compliment is weak too
+        if len(evidence._words(e["profile_quote"])) < 3:
+            down.add("quote_too_thin")
     quotes: dict[str, list[str]] = {}
-    # Audit 3A: a row whose field_path names a page (page: / recipient:) backs a line ONLY about the recipient (no
-    # I / my / me in it); its source is that page, never the profile, so it is not judged against the profile.
-    about_them = {
-        cv_review.line_key(e[LINE_FIELD]) for e in entries
-        if str(e.get("field_path") or "").lower().startswith(RECIPIENT_PATHS) and not user_claims(e[LINE_FIELD])
-    }
-    for e in entries:
+    for e in profile_rows:
         quote = e["profile_quote"]
-        if cv_review.line_key(e[LINE_FIELD]) in about_them:
-            continue
         if not cv_review.quote_in_profile(quote, source, source_words):
             down.add("quote_not_in_profile")
         if len(evidence._words(quote)) < 3:
             down.add("quote_too_thin")
         quotes.setdefault(cv_review.line_key(e[LINE_FIELD]), []).append(quote)
     # 2026-11-18: a LinkedIn note is ONE line naming facts from several profile fields, and each quote must sit in
-    # ONE field, so a line judged against each quote alone was always weak. A line's facts are judged against all
-    # the quotes given for that line (each still inside one field).
-    for key, given in quotes.items():
-        lines = actual.get(key) or [e[LINE_FIELD] for e in entries if cv_review.line_key(e[LINE_FIELD]) == key][:1]
-        if key in about_them:
+    # ONE field: a line's facts are judged against all the quotes given for that line (each still inside one field).
+    for ln in text.splitlines():
+        key = cv_review.line_key(ln)
+        if key not in quotes or key in page_keys:  # an uncovered line is line_uncovered, as before
             continue
-        for body in lines:
-            # Only the sentences about the user are judged when the line has any (audit 3A); else the whole line.
-            claims = user_claims(body) or body
-            if review_rows.hard_facts(claims, [*given, context, own], *terms):  # the CV rules, every sentence
-                down.add("claim_not_in_quote")
+        body = ln.strip().lstrip(cv_review._BULLETS + " \t")  # the draft's own text decides case
+        judged = " ".join(x for x in sentences(body) if cv_review.line_key(x) not in page_keys)
+        if judged and review_rows.hard_facts(judged, [*quotes.get(key, []), context, own], *terms):
+            down.add("claim_not_in_quote")
     weak_ids = {
         p.get(ID_KEY) for p in (_parse(r.get("text")) for r in rows if r["entry"] == ENTRY)
         if p.get("confidence") != STRONG and p.get("sha256")
