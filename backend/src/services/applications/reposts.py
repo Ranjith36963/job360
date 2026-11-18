@@ -97,10 +97,21 @@ def company_stem(company: str) -> str:
     return " ".join(words)
 
 
-def company_title_key(company: str, title: str) -> str:
-    """``company_stem | role words`` (location noise and one trailing "(...)" off the title): the key the hunt
-    kit's ``--known-ct`` and bring_job's duplicate guard share, so a run and Job360 call the same pair known."""
-    return company_stem(company) + "|" + " ".join(_alnum_words(role_core(title)))
+def company_title_key(company: str, title: str, location: str = "") -> str:
+    """``company_stem | role words | place words`` (location noise and one trailing "(...)" off the title; the
+    place is :func:`_place_key`, "" when the location names none): the key the hunt kit's ``--known-ct`` and
+    bring_job's duplicate guard share, so a run and Job360 call the same job known. Compare with
+    :func:`known_keys_match`, never ``==``: "Citi | AI Engineer" in London and in Pune are two jobs."""
+    role = " ".join(_alnum_words(role_core(title)))
+    return company_stem(company) + "|" + role + "|" + " ".join(_place_key(location))
+
+
+def known_keys_match(a: str, b: str) -> bool:
+    """Two :func:`company_title_key` values name the same job: the same company and role, and the same place
+    when both name one (a side with no place, e.g. "Remote" or an old known-list row, matches on the rest)."""
+    head_a, _, place_a = a.rpartition("|")
+    head_b, _, place_b = b.rpartition("|")
+    return head_a == head_b and (not place_a or not place_b or place_a == place_b)
 
 
 # Words that name no place: a work arrangement or filler ("Remote (UK)" is the place "uk").
@@ -183,7 +194,7 @@ async def open_duplicate_of(
     want_company, want_core = normalized_company_key(company or ""), role_core(title, location)
     if not want_company or not want_core:
         return None
-    want_key = company_title_key(company, title)
+    want_key = company_title_key(company, title, location)
     cur = await db._db.execute(
         "SELECT id, status, job_company, job_title, job_location FROM applications WHERE user_id = ? ORDER BY id",
         (user_id,),
@@ -197,7 +208,7 @@ async def open_duplicate_of(
             continue
         if same_company and role_core(have_title, str(r["job_location"] or "")) == want_core:
             return int(r["id"])
-        if company_title_key(have_company, have_title) == want_key:
+        if known_keys_match(company_title_key(have_company, have_title, str(r["job_location"] or "")), want_key):
             return int(r["id"])
     return None
 

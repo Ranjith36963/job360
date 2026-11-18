@@ -95,19 +95,58 @@ def test_company_title_key_matches_the_three_1613_pairs_and_keeps_others_apart()
                                                                 "Junior Generative AI Engineer")
     assert key("Capital One", "AI Engineer") != key("Capital Group", "AI Engineer")
     assert key("Lloyds Bank", "AI Engineer") != key("Lloyds Bank", "ML Engineer")
-    assert key("Bank", "AI Engineer") == "bank|ai engineer", "a name that is all suffix keeps its one word"
+    assert key("Bank", "AI Engineer") == "bank|ai engineer|", "a name that is all suffix keeps its one word"
 
 
 @pytest.mark.parametrize("pair", [
-    ("Lloyds Banking Group", "Machine Learning & AI Engineer"), ("Lloyds Bank", "Machine Learning & AI Engineer"),
-    ("STRATOS Technologies", "Forward Deployed Engineer"), ("Stratos", "Forward Deployed Engineer (Graduate)"),
-    ("Evnek Technologies", "Junior Generative AI Engineer"), ("Opus Recruitment Solutions Ltd", "AI Engineer"),
-    ("The Hut Group", "AI Engineer - Manchester, UK"), ("Café Labs GmbH", "KI-Ingenieur | Berlin"), ("", ""),
+    ("Lloyds Banking Group", "Machine Learning & AI Engineer", "London (hybrid)"),
+    ("Lloyds Bank", "Machine Learning & AI Engineer", "London, United Kingdom (hybrid)"),
+    ("STRATOS Technologies", "Forward Deployed Engineer", "London (Farringdon), United Kingdom (Hybrid)"),
+    ("Stratos", "Forward Deployed Engineer (Graduate)", "London"),
+    ("Evnek Technologies", "Junior Generative AI Engineer", "Bengaluru, Karnataka, India"),
+    ("Opus Recruitment Solutions Ltd", "AI Engineer", "Remote"),
+    ("The Hut Group", "AI Engineer - Manchester, UK", "Manchester; UK"), ("Café Labs GmbH", "KI-Ingenieur | Berlin", ""),
+    ("", "", ""),
 ])
-def test_the_kit_and_bring_job_share_one_key(pair: tuple[str, str]) -> None:
+def test_the_kit_and_bring_job_share_one_key(pair: tuple[str, str, str]) -> None:
     from src.services.applications.reposts import company_title_key
 
     assert hk.company_title_key(*pair) == company_title_key(*pair)
+    assert hk.company_title_key(*pair[:2]) == company_title_key(*pair[:2])
+
+
+def test_the_place_tells_two_known_jobs_apart_only_when_both_name_one() -> None:
+    from src.services.applications.reposts import company_title_key as key
+    from src.services.applications.reposts import known_keys_match as match
+
+    london = key("Citi", "AI Engineer", "London, United Kingdom")
+    assert not match(key("Citi", "AI Engineer", "Pune, India"), london), "same company and title, another city"
+    assert match(key("Citigroup Bank", "AI Engineer", "London (hybrid)"), key("Citigroup", "AI Engineer", "London"))
+    assert match(key("Citi", "AI Engineer", ""), london) and match(london, key("Citi", "AI Engineer", "Remote")), (
+        "a side that names no place matches on company and role")
+    assert not match(key("Citi", "ML Engineer", "London"), london)
+
+
+CITI_LONDON = {"title": "AI Engineer", "company": "Citi", "location": "London, United Kingdom",
+               "apply_url": "https://citi.wd5.myworkdayjobs.com/2/job/London/AI-Engineer_1",
+               "description": "Agentic AI in the controls team. " * 8, "origin": "ai_hunt"}
+
+
+@pytest.mark.asyncio
+async def test_bring_job_keeps_the_same_role_in_another_city_and_refuses_it_in_the_same_city(
+    authenticated_async_context,
+):
+    async with authenticated_async_context() as client, await _agent(client) as agent:
+        first = (await agent.post("/api/jobs/bring", json=CITI_LONDON)).json()
+        pune = await agent.post("/api/jobs/bring", json={
+            **CITI_LONDON, "company": "Citi Bank", "location": "Pune, Maharashtra, India",
+            "apply_url": "https://citi.wd5.myworkdayjobs.com/2/job/Pune/AI-Engineer_2"})
+        london = await agent.post("/api/jobs/bring", json={
+            **CITI_LONDON, "company": "Citi Bank", "location": "London (hybrid)",
+            "apply_url": "https://citi.wd5.myworkdayjobs.com/2/job/London/AI-Engineer_3"})
+        apps = await _count_apps()
+    assert pune.status_code == 200 and pune.json()["existing"] is False, pune.text
+    assert london.json()["duplicate_of"] == first["application_id"] and apps == 2
 
 
 @pytest.mark.asyncio
@@ -161,6 +200,7 @@ async def test_a_stated_difference_overrides_the_guard_and_logs_codes_only(authe
 def test_the_kit_drops_known_company_and_title_and_writes_its_done_file(tmp_path, monkeypatch) -> None:
     long_text = "<p>" + "Build agents in Python with RAG and evaluation. " * 30 + "</p>"
     texts = {"acme": long_text, "beta": "<p>Build agents.</p>", "gamma": long_text}
+    # gamma is known in Pune only: the London ad is another job and stays (2026-11-18 review of #1665).
 
     def _get(url: str, params: Any = None, retries: int = 0, data: Any = None) -> tuple[int, Any]:
         token = url.split("/boards/")[1].split("/")[0]
@@ -172,7 +212,8 @@ def test_the_kit_drops_known_company_and_title_and_writes_its_done_file(tmp_path
         {"name": t.upper(), "ats": "greenhouse", "token": t, "source": "user"} for t in texts])
     monkeypatch.setattr(hk, "http_get_json", _get)
     known_ct = tmp_path / "known_ct.txt"
-    known_ct.write_text("Acme Technologies Ltd ||| AI Engineer ||| 7\n", encoding="utf-8")
+    known_ct.write_text("Acme Technologies Ltd ||| AI Engineer ||| 7 ||| London (hybrid)\n"
+                        "Gamma Labs ||| AI Engineer ||| 8 ||| Pune, India\n", encoding="utf-8")
     out = tmp_path / "found.jsonl"
     argv = ["--sources", "greenhouse", "--no-universe", "--work-countries", "GB", "--titles", "ai engineer",
             "--history", "none", "--workers", "1", "--out", str(out), "--known-ct", str(known_ct)]
@@ -182,6 +223,16 @@ def test_the_kit_drops_known_company_and_title_and_writes_its_done_file(tmp_path
     done = json.loads(Path(str(out) + ".done.json").read_text(encoding="utf-8"))
     assert done == {"results": 2, "full": 1, "snippet": 1, "empty": 0, "known_skipped": 0,
                     "known_ct_skipped": 1, "complete": True, "stop_reason": None}
+
+
+def test_the_kit_reads_old_three_column_rows_and_place_rows(tmp_path) -> None:
+    rows = tmp_path / "known_ct.txt"
+    rows.write_text("Citi ||| AI Engineer ||| 1\nLloyds Banking Group ||| Machine Learning & AI Engineer ||| 1036 "
+                    "||| London (hybrid)\n", encoding="utf-8")
+    known = hk.load_known_ct(str(rows))
+    assert hk.known_ct_hit(known, "Citi", "AI Engineer", "Pune, India"), "an old row has no place: company + role"
+    assert hk.known_ct_hit(known, "Lloyds Bank", "Machine Learning & AI Engineer", "London, United Kingdom")
+    assert not hk.known_ct_hit(known, "Lloyds Bank", "Machine Learning & AI Engineer", "Leeds, United Kingdom")
 
 
 def test_the_kit_text_class_reads_snippets_and_cuts() -> None:
@@ -243,8 +294,8 @@ async def test_the_mcp_bring_job_takes_the_new_fields(authenticated_async_contex
             fn = tools.get_tool("bring_job").fn
             first = await fn(**{k: v for k, v in LLOYDS_1036.items()})
             dup = await fn(**{k: v for k, v in LLOYDS_1059.items()})
-            other = await fn(**LLOYDS_1059, not_duplicate_of=first["application_id"],
-                             not_duplicate_reason="different_location")
+            other = await fn(**{**LLOYDS_1059, "location": "Edinburgh, United Kingdom",
+                                "apply_url": "https://lbg.wd3.myworkdayjobs.com/LBG_Careers/job/Edinburgh/MLAI_9"})
             sko = await fn(**SKO_1060, employer_searched=["https://jobs.lever.co/skosystems"])
     finally:
         m._current_user.reset(token)

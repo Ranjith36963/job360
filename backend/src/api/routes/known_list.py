@@ -39,7 +39,7 @@ async def serve_known_list(
     token: str, request: Request, form: Optional[str] = Query(None, max_length=8),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
 ) -> Response:
-    """``form=ct``: ``company ||| title ||| id`` per application; else one job link per line."""
+    """``form=ct``: ``company ||| title ||| id ||| location`` per application; else one job link per line."""
     bad_key = f"known_list_bad:{_ip_hash(request, throttle=True)}"
     try:
         user_id = known_list.resolve(token)

@@ -62,7 +62,7 @@ class DueItemOut(BaseModel):
 class KnownListOut(BaseModel):
     """2026-11-17 hunt: the user's known jobs as two plain-text downloads (curl them; no copying by hand).
     ``urls_url``: one job link per line (``urls`` lines, the kit's ``--known``); ``ct_url``:
-    ``company ||| title ||| id`` per application (``total`` lines). Signed, read-only, this user only."""
+    ``company ||| title ||| id ||| location`` per application (``total`` lines). Signed, read-only, this user only."""
 
     urls_url: str
     ct_url: str

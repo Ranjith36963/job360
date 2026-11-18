@@ -1668,27 +1668,53 @@ def _role_core(title: str) -> str:
     return " ".join(core.casefold().split())
 
 
-def company_title_key(company: str, title: str) -> str:
-    """``company stem | role words``: the key Job360's bring_job duplicate guard uses."""
+# Words that name no place (Job360's reposts._PLACE_NOISE): "Remote (UK)" is the place "uk".
+_PLACE_NOISE = frozenset({
+    "remote", "hybrid", "onsite", "on", "site", "office", "based", "in", "the", "and", "or", "of", "from", "home",
+    "wfh", "anywhere", "worldwide", "global", "flexible", "work", "only", "fully", "partly", "partially", "area",
+})
+
+
+def _place_words(location: str) -> str:
+    """The first segment of ``location`` (split on , ; | / and brackets) that names a place, noise words out."""
+    spaced = "".join("," if ch in ",;|/()[]" else ch for ch in (location or "").casefold())
+    for segment in spaced.split(","):
+        words = [w for w in "".join(ch if ch.isalnum() else " " for ch in segment).split() if w not in _PLACE_NOISE]
+        if words:
+            return " ".join(words)
+    return ""
+
+
+def company_title_key(company: str, title: str, location: str = "") -> str:
+    """``company stem | role words | place words``: the key Job360's bring_job duplicate guard uses."""
     words = _alnum_words(company)
     if len(words) > 1 and words[0] == "the":
         words = words[1:]
     while len(words) > 1 and words[-1] in COMPANY_STEM_DROP:
         words.pop()
-    return " ".join(words) + "|" + " ".join(_alnum_words(_role_core(title)))
+    return " ".join(words) + "|" + " ".join(_alnum_words(_role_core(title))) + "|" + _place_words(location)
 
 
-def load_known_ct(path: str) -> set[str]:
-    """Read a --known-ct file (``company ||| title ||| id`` per line) into a set of company_title_key values."""
+def load_known_ct(path: str) -> dict[str, set[str]]:
+    """Read a --known-ct file (``company ||| title ||| id [||| location]`` per line): company|role -> places
+    ("" = a row with no place, which matches the company and role anywhere)."""
     if not path:
-        return set()
-    out: set[str] = set()
+        return {}
+    out: dict[str, set[str]] = {}
     with open(path, encoding="utf-8") as f:
         for line in f:
-            cols = line.split(" ||| ")
+            cols = line.rstrip("\n").split(" ||| ")
             if len(cols) >= 2 and cols[0].strip():
-                out.add(company_title_key(cols[0], cols[1]))
+                head, _, place = company_title_key(cols[0], cols[1], cols[3] if len(cols) > 3 else "").rpartition("|")
+                out.setdefault(head, set()).add(place)
     return out
+
+
+def known_ct_hit(known: dict[str, set[str]], company: str, title: str, location: str) -> bool:
+    """The same job as a known row: the same company and role, and the same place when both name one."""
+    head, _, place = company_title_key(company, title, location).rpartition("|")
+    places = known.get(head)
+    return places is not None and (not place or "" in places or place in places)
 
 
 SNIPPET_MAX_CHARS = 500  # freehire cuts its text at exactly 500 characters (2026-11-18 14:11 run: 21 ads)
@@ -1730,7 +1756,7 @@ class Collector:
         self.skipped_seen = 0  # jobs dropped at output because history already has them
         self.known: set[str] = load_known(getattr(args, "known", "") or "")  # --known: URLs already in Job360
         self.known_skipped = 0
-        self.known_ct: set[str] = load_known_ct(getattr(args, "known_ct", "") or "")  # --known-ct
+        self.known_ct: dict[str, set[str]] = load_known_ct(getattr(args, "known_ct", "") or "")  # --known-ct
         self.known_ct_skipped = 0
         self.boards_listed: dict[str, int] = {}  # per ATS, after dedup and dead-board skip, before rotation
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
@@ -1839,7 +1865,7 @@ class Collector:
             with self.lock:
                 self.known_skipped += 1
             return  # already in Job360: dropped before any detail fetch, output or stream
-        if self.known_ct and company_title_key(raw.get("company") or "", title) in self.known_ct:
+        if self.known_ct and known_ct_hit(self.known_ct, raw.get("company") or "", title, raw.get("loc") or ""):
             with self.lock:
                 self.known_ct_skipped += 1
             return  # the same company and role is already in Job360 under another link or label

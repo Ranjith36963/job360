@@ -2599,7 +2599,7 @@ export interface paths {
         };
         /**
          * Serve Known List
-         * @description ``form=ct``: ``company ||| title ||| id`` per application; else one job link per line.
+         * @description ``form=ct``: ``company ||| title ||| id ||| location`` per application; else one job link per line.
          */
         get: operations["serve_known_list_api_known_list__token__get"];
         put?: never;
@@ -8041,7 +8041,7 @@ export interface components {
          * KnownListOut
          * @description 2026-11-17 hunt: the user's known jobs as two plain-text downloads (curl them; no copying by hand).
          *     ``urls_url``: one job link per line (``urls`` lines, the kit's ``--known``); ``ct_url``:
-         *     ``company ||| title ||| id`` per application (``total`` lines). Signed, read-only, this user only.
+         *     ``company ||| title ||| id ||| location`` per application (``total`` lines). Signed, read-only, this user only.
          */
         KnownListOut: {
             /** Ct Url */
