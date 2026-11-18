@@ -10,7 +10,7 @@ uses). Both take the user from the session / token / OAuth subject, never from i
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -289,6 +289,14 @@ _NOT_A_BLOCKER = frozenset({None, "needs_user", "error", "no_work"})
 BATCH_NOT_CLAIMED = 'You did not claim the batch: call whats_due(duties=["batch"]) first. Nothing was recorded.'
 
 
+_STEP_WORDS = {"refill": "refill the form", "fill": "fill the form"}
+
+
+def _row_steps(rows: list[dict[str, Any]]) -> str:
+    """``125 (refill the form); 133 (fill the form)``: what each row the batch stop names still needs."""
+    return "; ".join(f"{r['id']} ({_STEP_WORDS.get(str(r.get('step')), 'fill the form')})" for r in rows)
+
+
 def _next_batch_note(later: list[int]) -> str:
     if not later:
         return ""
@@ -315,16 +323,19 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
         if no_cv:
             _log("batch_stop_no_cv_left", user, rows=str(len(no_cv)), ids=",".join(str(r["id"]) for r in no_cv[:20]))
         return later
-    _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)))
+    # 2026-11-18 (20:55 run): the log named no rows, so the queue/gate disagreement on 125 and 136 was invisible.
+    _log("batch_stop_refused", user, reason="needs_no_owner_input", rows=str(len(rows)), later=str(len(later)),
+         ids=safe_log_value(",".join(f"{r['id']}:{r['step']}" for r in rows[:20])))
     first = rows[0]
     raise HTTPException(
         status_code=409,
         detail=(
-            f"{len(rows)} queued jobs still need no owner input; next: application {first['id']} "
-            f"({first['company'] or 'unknown company'}). Keep working: fill its form (its CV is saved). "
-            "A partial run ends only when every queued job is waiting on the owner or blocked. Large tool "
-            "outputs and outputs saved to a file are normal; they are not a reason to stop. "
-            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}.{note}"
+            f"{len(rows)} queued jobs still need no owner input (no open ask, no block); next: application "
+            f"{first['id']} ({first['company'] or 'unknown company'}). Keep working: {first['step']} its form (its CV "
+            "is saved), then check_submit. A partial run ends only when every queued job is waiting on the owner or "
+            "blocked. Large tool outputs and outputs saved to a file are normal; they are not a reason to stop. "
+            f"Ids: {', '.join(str(r['id']) for r in rows[:5])}. "
+            f"Each: {_row_steps(rows[:5])}.{note}"
         ),
     )
 
