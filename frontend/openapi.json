@@ -15752,7 +15752,7 @@
         "additionalProperties": false,
         "properties": {
           "country": {
-            "maxLength": 2,
+            "maxLength": 40,
             "minLength": 2,
             "title": "Country",
             "type": "string"

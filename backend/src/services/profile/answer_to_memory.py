@@ -149,7 +149,8 @@ def exact(field: str, template: str, question: str, country: Optional[str]) -> b
     said = normalise_question(question, country)
     if said in EXACT_PHRASINGS[field]:
         return True
-    own = [q["question"].replace("{country}", country or "") for q in common_questions.catalog()
+    # The card shows a region by its name (common_questions.place_text): match the same text.
+    own = [common_questions.place_text(q["question"], country) for q in common_questions.catalog()
            if q.get("kit_key") == template]
     return any(said == normalise_question(text, country) for text in own)
 

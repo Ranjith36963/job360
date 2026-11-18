@@ -63,6 +63,24 @@ def _countries(profile: Any, extra: Iterable[str] = ()) -> list[str]:
     return out
 
 
+def asked_for(kit_key: Optional[str], place: Optional[str]) -> bool:
+    """Is a per-place question asked for ``place``? Owner bug 2026-11-18: "Are you legally allowed to work in
+    NORTH_AMERICA?". Work rights and sponsorship are per COUNTRY (owner rule), and Memory keeps relocation
+    and travel per country only (``user_info.logistics`` refuses a region), so a region (NORTH_AMERICA,
+    EUROPE...) is asked its salary range alone: the one per-place fact Memory stores for a region and a job
+    in one of its countries reads (``kit.compute_answers`` falls back to the region's salary)."""
+    from src.services.profile.regions import is_region  # noqa: PLC0415
+
+    return not is_region(place) or kit_key == "salary.{cc}"
+
+
+def place_text(text: str, place: Optional[str]) -> str:
+    """A question template with ``{country}`` filled: a region by its name ("North America"), never its code."""
+    from src.services.profile.regions import place_name  # noqa: PLC0415
+
+    return text.replace("{country}", place_name(place) if place else "")
+
+
 def _shown(value: Any) -> str:
     """One readable line for a kit value (a salary dict, a yes/no, a list)."""
     if isinstance(value, bool):
@@ -106,7 +124,7 @@ def _row(q: dict[str, Any], item: Optional[dict[str, Any]], country: Optional[st
     shown as a guess, never verified."""
     if item is None and derived is not None:
         item = {"value": derived[0], "source": "derived", "state": "guessed"}
-    text = q["question"].replace("{country}", country or "")
+    text = place_text(q["question"], country)
     sensitive = _is_sensitive(q)
     state = str(item.get("state") or "") if item is not None else ""
     # Verified = the kit reads this very answer confirmed (an assistant's user_said write reads relayed,
@@ -191,6 +209,8 @@ def common_questions(
         key = q.get("kit_key")
         if key and "{cc}" in key:
             for cc in countries:
+                if not asked_for(key, cc):
+                    continue  # work rights for a whole region: no form asks it
                 item = items(by_country[cc]).get(key.replace("{cc}", cc))
                 rows.append(_row(q, item, cc, relayed, _guess(q, item, profile, cc)))
         else:
