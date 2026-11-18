@@ -11,5 +11,9 @@ Coverage: every queued job without a strong CV is done this run or listed as lef
 - Biggest cause: the run ended its turn while its reviewer sub-agents were still running, so five reviews were never
   recorded and nothing was rewritten. Second: weak codes `claim_not_in_quote` / `quote_too_thin` on bullet lines
   (561 lines 4, 11, 12; 570 line 9), `jd_term_not_in_ad` (561 jd item 16) were read as "reviewer quote problems", not fixed by rewriting.
-- Fix: in progress. Reading the cv recipe and review code next.
-- Decision taken without the owner: none yet.
+- Fix: PR #1679 (recipe only: step 4 runs every writer and reviewer agent in the foreground and never ends the turn while one runs;
+  step 6 sends the quote-coverage line codes to a free re-review, then a line rewrite on the same code). Failing test first
+  (`test_the_cv_run_waits_for_its_agents_and_treats_quote_codes_as_a_fixable_review`), recipe tests, ruff and mypy ratchet clean. Auto-merge on.
+- Decision taken without the owner: read Kits' section "the 20:33 run hit the target" as true for that run only; this 22:33 run missed it,
+  so I fixed the recipe before starting audit section 2. No new refusals added.
+- Needs the owner: none yet.
