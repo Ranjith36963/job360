@@ -298,8 +298,12 @@ def remember(user_id: str, rows: list[dict[str, str]], country: Optional[str]) -
         else:
             not_saved[r["topic"]] = note
     edits: list[tuple[str, Any]] = list(working.items())
-    if keep:
-        records = [dict(r) for r in profile.user_info.answers or [] if isinstance(r, dict)]
+    records = [dict(r) for r in profile.user_info.answers or [] if isinstance(r, dict)]
+    # The assistant's draft of an answer Memory now holds is done with (owner 2026-11-18).
+    done = {t for t, m in memory.items() if m.get("path")}
+    stale = [r for r in records if r.get("approved") is False and str(r.get("topic") or "") in done]
+    if keep or stale:
+        records = [r for r in records if r not in stale]
         for r in keep:
             new = {"question": r["question"], "answer": r["answer"].strip(), "approved": True, "topic": r["topic"]}
             records = user_info.upsert_answer(records, new)

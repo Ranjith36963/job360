@@ -211,10 +211,11 @@ def common_questions(
             for cc in countries:
                 if not asked_for(key, cc):
                     continue  # work rights for a whole region: no form asks it
-                item = items(by_country[cc]).get(key.replace("{cc}", cc))
+                # Memory's own value, else the assistant's draft for this place (owner 2026-11-18).
+                item = items(by_country[cc]).get(key.replace("{cc}", cc)) or drafts.get(key.replace("{cc}", cc))
                 rows.append(_row(q, item, cc, relayed, _guess(q, item, profile, cc)))
         else:
-            item = items(plain).get(key) if key else by_topic(plain).get(q["topic"])
+            item = (items(plain).get(key) or drafts.get(key)) if key else by_topic(plain).get(q["topic"])
             rows.append(_row(q, item, None, relayed, _guess(q, item, profile, None)))
     return rows
 
@@ -234,10 +235,13 @@ def summary(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def open_questions(profile: Any, rows: Optional[list[dict[str, Any]]] = None) -> list[dict[str, str]]:
     """The rows with no answer at all - what the assistant drafts next, as Guessed, from the profile.
-    Reads the base profile only (no overlay needed to know whether an answer exists)."""
+    Reads the base profile only (no overlay needed to know whether an answer exists).
+    Owner 2026-11-18: EVERY row is drafted, so each is saved the same way: a ``user_info.answers`` draft
+    (approved: false) under its ``topic`` (a Memory row's kit key, e.g. ``salary.GB``) and ``country``. The
+    user's edit or confirm on Answer once is what writes Memory."""
     return [
-        {"id": r["id"], "question": r["question"], "save_to": save_path(r),
-         **({"topic": r["topic"]} if r.get("topic") else {"kit_key": r["kit_key"]})}
+        {"id": r["id"], "question": r["question"], "save_to": "user_info.answers",
+         "topic": r.get("topic") or r["kit_key"], **({"country": r["country"]} if r.get("country") else {})}
         for r in (common_questions(profile, []) if rows is None else rows)
         if r["answer"] is None and not r["per_job"]
     ]

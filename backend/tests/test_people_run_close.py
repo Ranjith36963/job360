@@ -9,6 +9,8 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from tests._outreach_review import seed_strong_review
+
 _AD = {
     "title": "Data Engineer",
     "company": "Northwind",
@@ -54,6 +56,9 @@ async def test_reach_is_refused_until_every_new_person_has_a_note(authenticated_
             assert still.status_code == 409 and f"contact {second}" in still.json()["detail"]
             note["text"] = "Hi Tom, I build data pipelines in Python."
             assert (await agent.post(f"/api/contacts/{second}/outreach", json=note)).status_code in (200, 201)
+            unreviewed = await agent.post("/api/schedule/done", json=done)
+            assert unreviewed.status_code == 409 and "no Doctor review" in unreviewed.json()["detail"], unreviewed.text
+            seed_strong_review(first), seed_strong_review(second)
             ok = await agent.post("/api/schedule/done", json=done)
             assert ok.status_code == 200, ok.text
 
@@ -111,22 +116,31 @@ async def _noted(agent: AsyncClient, app_id: int, names: list[str]) -> None:
         assert (await agent.post(f"/api/contacts/{cid}/outreach", json=note)).status_code in (200, 201)
 
 
+async def _reviewed(agent: AsyncClient, app_id: int, names: list[str]) -> None:
+    await _noted(agent, app_id, names)
+    people = (await agent.get("/api/people")).json()["people"]
+    for cid in (c for p in people if p["name"] in names for c in p["contact_ids"]):
+        seed_strong_review(cid)
+
+
 @pytest.mark.asyncio
-async def test_done_without_a_review_is_recorded_partial_no_review(authenticated_async_context):
-    """2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer."""
+async def test_notes_without_a_doctor_review_are_refused(authenticated_async_context):
+    """2026-11-18 (09:13, 12:05 and 13:56 runs): every run said "self-review only"; reviewed=true was only a flag.
+    Job360 now asks for the stored outreach_reviewed of each note this run saved, and the flag alone proves nothing."""
     async with authenticated_async_context() as client:
         app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
         async with await _agent(client) as agent:
             await _noted(agent, app_id, ["Priya Shah", "Tom Reed", "Ana Silva"])
-            done = {"duty": "reach", "application_ids": [app_id]}
-            plain = await agent.post("/api/schedule/done", json=done)
-            assert plain.status_code == 200, plain.text
-            assert plain.json()["outcome"] == "partial" and "no_review" in plain.json()["note"]
-            runs = (await client.get("/api/schedule/status")).json()["duties"]
-            row = next(r for r in runs if r["duty"] == "reach")
-            assert (row["last_outcome"], row["last_reason"]) == ("partial", "no_review"), row
-            checked = await agent.post("/api/schedule/done", json={**done, "reviewed": True})
-            assert checked.status_code == 200 and checked.json()["outcome"] == "done", checked.text
+            done = {"duty": "reach", "application_ids": [app_id], "reviewed": True}
+            refused = await agent.post("/api/schedule/done", json=done)
+            assert refused.status_code == 409, refused.text
+            detail = refused.json()["detail"]
+            assert "3 notes saved this run have no Doctor review" in detail and "fresh helper agent" in detail
+            people = (await client.get("/api/people")).json()["people"]
+            for cid in sorted(c for p in people for c in p["contact_ids"]):
+                seed_strong_review(cid)
+            ok = await agent.post("/api/schedule/done", json={"duty": "reach", "application_ids": [app_id]})
+            assert ok.status_code == 200 and ok.json()["outcome"] == "done", ok.text  # the reviews are the evidence
             wrong = await agent.post("/api/schedule/done", json={"duty": "inbox", "reviewed": True})
             assert wrong.status_code == 422, wrong.text
         web = await client.post("/api/schedule/done", json={"duty": "network"})
@@ -142,8 +156,8 @@ async def test_job360_counts_the_people_never_the_run(authenticated_async_contex
         thin = int((await client.post("/api/jobs/bring", json={**_AD, "title": "Platform Engineer", "apply_url": "https://northwind.example/c/8"})
                     ).json()["application_id"])
         async with await _agent(client) as agent:
-            await _noted(agent, full, ["Priya Shah", "Tom Reed", "Ana Silva"])
-            await _noted(agent, thin, ["Lee Park"])
+            await _reviewed(agent, full, ["Priya Shah", "Tom Reed", "Ana Silva"])
+            await _reviewed(agent, thin, ["Lee Park"])
             resp = await agent.post("/api/schedule/done", json={
                 "duty": "reach", "application_ids": [full, thin], "outcome": "done", "reviewed": True})
             assert resp.status_code == 200, resp.text
@@ -168,8 +182,9 @@ async def test_a_short_unreviewed_run_hears_both(authenticated_async_context):
     """2026-11-18 12:05 run: 2 of 5 jobs under 3 and no separate reviewer; the reply named only below_target."""
     async with authenticated_async_context() as client:
         app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
+        added = await client.post(f"/api/applications/{app_id}/contacts", json={"name": "Lee Park"})
+        assert added.status_code == 201, added.text  # saved on the website: nothing for this run to review
         async with await _agent(client) as agent:
-            await _noted(agent, app_id, ["Lee Park"])
             resp = await agent.post("/api/schedule/done", json={"duty": "reach", "application_ids": [app_id]})
             assert resp.status_code == 200, resp.text
             note = resp.json()["note"]

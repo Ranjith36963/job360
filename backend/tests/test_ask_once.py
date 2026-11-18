@@ -348,3 +348,50 @@ async def test_a_region_block_remembers_like_a_country(authenticated_async_conte
         bad = await client.post("/api/profile/questionnaire/remember", json={"country": "Atlantis", "items": [
             {"topic": key, "question": question, "answer": "70000-120000 USD a year"}]})
         assert bad.status_code == 422, "an unreadable place is still refused"
+
+
+@pytest.mark.asyncio
+async def test_the_assistant_drafts_every_memory_question_and_the_users_edit_is_what_counts(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner 2026-11-18: "every assistant should draft for every question", salary included. A draft
+    (approved: false) fills the Answer-once box as a guess; only the user's own edit or confirm writes Memory,
+    and the draft goes. A confirmed (approved: true) Memory answer from the assistant is still refused."""
+    from src.api.main import app
+
+    async with authenticated_async_context() as client:
+        saved = await client.patch("/api/profile", json={"edits": [{"path": "user_info.right_to_work", "value": {
+            "countries": [{"country": "GB"}]}}]})
+        assert saved.status_code == 200, saved.text
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           headers={"Authorization": f"Bearer {token}"}) as agent:
+        for topic, question, answer in (("salary.GB", "Expected salary in GB", "55000-70000 GBP a year"),
+                                        ("right_to_work.GB.work_authorization", "Are you legally allowed to work in GB?",
+                                         "citizen")):
+            draft = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "op": "upsert",
+                "value": {"question": question, "answer": answer, "approved": False, "topic": topic, "country": "GB"}}]})
+            assert draft.status_code == 200, draft.text
+        refused = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "op": "upsert",
+            "value": {"question": "Expected salary in GB", "answer": "1 GBP", "approved": True, "topic": "salary.GB",
+                      "country": "GB"}}]})
+        assert refused.status_code == 422, "an assistant never sets a Memory fact itself"
+    async with authenticated_async_context() as client:
+        gb = {q["topic"]: q for c in (await client.get("/api/profile/questionnaire")).json()["countries"]
+              if c["country"] == "GB" for q in c["questions"]}
+        assert (gb["salary.GB"]["label"], gb["salary.GB"]["answer"]) == ("guessed", "55000-70000 GBP a year")
+        assert gb["right_to_work.GB.work_authorization"]["answer"] == "citizen"
+        assert (await client.get("/api/profile/memory-covered-answers")).json()["answers"] == [], "a guess is no old answer"
+        resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [
+            {"topic": "salary.GB", "question": gb["salary.GB"]["question"], "answer": "60000-75000 GBP a year"}]})
+        assert resp.status_code == 200 and "salary.GB" in resp.json()["memory"], resp.text
+        from src.services.profile.storage import load_profile
+
+        profile = load_profile(fixture_user_id)
+        assert profile.preferences.salary_by_country == [
+            {"country": "GB", "min": 60000, "max": 75000, "currency": "GBP", "period": "year"}], "the user's edit"
+        assert [r["topic"] for r in profile.user_info.answers] == ["right_to_work.GB.work_authorization"], \
+            "the salary draft is gone; the other guess waits"
+        after = [q["topic"] for c in (await client.get("/api/profile/questionnaire")).json()["countries"]
+                 if c["country"] == "GB" for q in c["questions"]]
+        assert "salary.GB" not in after and "right_to_work.GB.work_authorization" in after
