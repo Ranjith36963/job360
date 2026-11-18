@@ -15,8 +15,9 @@ item (number ``i`` from 1, stored in ``where``), with :class:`cv_coverage.Tokens
 
 Coverage = covered must-haves / had must-haves; below ``settings.CV_REVIEW_JD_BAR`` (0.8) = ``jd_coverage_low``.
 Checker 2026-11-12: one item per requirement (a duplicate term, :func:`cv_coverage.same_term`, is a 422, so copies of
-a covered term cannot dilute a miss); no must-have item = ``jd_no_must``; fewer than min(3, save_fit's
-``jd_requirements``) items = ``jd_too_few``; terms compare with :meth:`Tokens.match` (a plural / split term folds).
+a covered term cannot dilute a miss); no must-have item = ``jd_no_must`` (not when a saved fit lists no
+requirement: app 1031); fewer than min(3, save_fit's ``jd_requirements``) items = ``jd_too_few``; terms compare
+with :meth:`Tokens.match` (a plural / split term folds).
 Skill words (production 2026-11-12, owner: "Python coding and Python language are the same capability"): reviewers
 copied whole ad lines ("Python – Strong knowledge"), so a CV saying "Python" covered nothing. The ad check stays on the
 FULL term; the CV checks (named line, gap claimed), duplicates and the stored gap use :func:`core`, the term cut at a
@@ -143,10 +144,12 @@ def shape_problems(jd: Any, max_line: int) -> list[str]:
 
 
 def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, saved: int = 0,
-          earlier: Any = None) -> tuple[dict[str, list[Any]], dict[str, Any]]:
+          earlier: Any = None, *, no_requirements: bool = False) -> tuple[dict[str, list[Any]], dict[str, Any]]:
     """``(where, stored)``: the codes with their jd item numbers, and the event's ``jd`` block (state, counts, gaps,
     terms; never CV or profile text, only the ad's own words). ``saved`` = how many requirements save_fit holds;
-    ``earlier`` = the ``terms`` of this application's earlier reviews (each must-term must come back as a must)."""
+    ``earlier`` = the ``terms`` of this application's earlier reviews (each must-term must come back as a must).
+    ``no_requirements``: a fit is saved and its ``jd_requirements`` is empty (the ad names none, app 1031,
+    2026-11-18): no must item is then no fault (``stored["no_must_exempt"]``); strong rests on the other rules."""
     from src.services.applications import cv_review  # noqa: PLC0415 - cv_review imports this module lazily
     from src.services.applications.cv_coverage import Tokens, same_term  # noqa: PLC0415
 
@@ -159,8 +162,12 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, s
     for i, item in enumerate(jd, 1):  # each distinct term counts once (shape_problems refuses a duplicate)
         if not any(same_term(core(seen["term"]), core(item["term"])) for _, seen in items):
             items.append((i, item))
+    exempt = False
     if not any(item["must"] for _, item in items):  # checker D2: the reviewer names the ad's must-haves
-        where["jd_no_must"] = []
+        if no_requirements:  # app 1031: the ad names no must-have, so a reviewer cannot list one
+            exempt = True
+        else:
+            where["jd_no_must"] = []
     need = min(MIN_ITEMS, max(saved, 0))
     if len(items) < need:
         where["jd_too_few"] = [f"{len(items)} items, at least {need} (save_fit's jd_requirements)"]
@@ -202,4 +209,5 @@ def judge(jd: Any, ad_text: str, lines: list[str], cv_text: str, profile: Any, s
         dropped = where.get("jd_terms_dropped") or []
         if isinstance(name, str) and not any(same_term(name, t) for t in [*musts, *dropped]):
             where.setdefault("jd_terms_dropped", []).append(name)
-    return where, {"state": "judged", "must": must, "covered": covered, "bar": bar, "gaps": gaps, "terms": terms}
+    stored = {"state": "judged", "must": must, "covered": covered, "bar": bar, "gaps": gaps, "terms": terms}
+    return where, {**stored, "no_must_exempt": True} if exempt else stored

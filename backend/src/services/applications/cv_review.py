@@ -27,6 +27,7 @@ it. ``strong`` is stored only when all of these hold, else ``weak`` with closed 
 After weak reviews of :data:`MAX_WEAK` other CV versions judged under the current :data:`RULES`, a review of a
 new one is weak (``retry_limit``): two rewrites, each re-reviewed (three reviews in all); never a fourth try. A
 weak review judged under older rules never counts (its rows were not stored, so it cannot be judged again).
+A claimed weak none of (a)-(f) explains still stores a code (apps 1048, 1049): ``line_too_dense`` or ``reviewer_weak``.
 
 The event stores codes, counts and LINE NUMBERS (``where``: code -> review line numbers), never CV or profile text;
 the reply names the same (:func:`weak_warning`), so one review says what to fix. ``may_submit`` reads
@@ -59,7 +60,13 @@ DOWNGRADES = (
     "ats_format", "jd_not_judged", "jd_no_must", "jd_too_few", "jd_term_not_in_ad", "jd_evidence_not_in_profile",
     "jd_term_not_in_cv",
     "jd_gap_claimed", "jd_coverage_low", "jd_terms_dropped", "retry_limit", "skills_label_unknown",
+    "line_too_dense", "reviewer_weak",
 )
+# A CLAIMED weak that no check above explains (apps 1048, 1049, 2026-11-18: stored weak with no code, so the fix round
+# had nothing to act on). Every weak store names a code: ``line_too_dense`` = the rows whose evidence is at the
+# EVIDENCE_MAX cap (the reviewer could not show the line's facts in its quotes: split or shorten it), else
+# ``reviewer_weak`` (Job360 found nothing: re-review the same CV). Never on a claimed strong; never beside a code.
+LINE_TOO_DENSE, REVIEWER_WEAK = "line_too_dense", "reviewer_weak"
 MAX_WEAK = 3  # owner 2026-11-09: two rewrites, each re-reviewed
 # The version of the rules a stored review was judged under (stored as ``rules``; none = 1). Bump it with every
 # change to what is stored strong: retry_limit counts only weak reviews judged under the current rules.
@@ -912,12 +919,17 @@ async def ats_and_jd(
     try:  # a fit that cannot be read must not block a review
         from src.services.applications.fit_record import fit_view  # noqa: PLC0415 - fit_record imports spine
 
-        saved = len((fit_view(app_row) or {}).get("jd_requirements") or [])
+        fit = fit_view(app_row)
+        saved = len((fit or {}).get("jd_requirements") or [])
+        no_requirements = fit is not None and saved == 0  # app 1031: a saved fit read no requirement in the ad
     except Exception:  # noqa: BLE001
-        saved = 0
+        saved, no_requirements = 0, False
     jd_where, stored = review_jd.judge(jd, str(app_row.get("job_description_snapshot") or ""), lines, cv_text, profile,
-                                       saved, earlier)
+                                       saved, earlier, no_requirements=no_requirements)
     where.update(jd_where)
+    if stored.get("no_must_exempt"):  # the line that shows the exemption (app 1031), never ad or CV text
+        logger.info("cv_reviewed jd_no_must_exempt application=%s reason=no_jd_requirements",
+                    safe_log_value(application_id))
     logger.info("cv_reviewed ats_jd application=%s ats=%s jd=%s must=%s covered=%s codes=%s",
                 safe_log_value(application_id), len(fmt), stored["state"], stored.get("must"), stored.get("covered"),
                 ",".join(jd_where))
@@ -1000,9 +1012,13 @@ async def verify(
         logger.info("cv_reviewed downgraded application=%s codes=%s checks=%s content=%s covered=%s",
                     safe_log_value(application_id), ",".join(down),
                     ",".join(where.get("cv_checks_found") or []), len(content), covered)
-    if claimed == WEAK and not down:   # apps 874, 886 (2026-11-15): a reviewer-only weak
-        logger.info("cv_reviewed weak_without_codes application=%s content=%s covered=%s",
-                    safe_log_value(application_id), len(content), covered)
+    if claimed == WEAK and not down:   # apps 874, 886 (2026-11-15), 1048, 1049 (2026-11-18): a reviewer-only weak
+        dense = sorted({int(r["n"]) for r in rows
+                        if r["n"] <= numbered and len(r["evidence"]) >= EVIDENCE_MAX})
+        code = LINE_TOO_DENSE if dense else REVIEWER_WEAK
+        where[code], down = dense, [code]
+        logger.info("cv_reviewed weak_without_codes application=%s code=%s lines=%s content=%s covered=%s",
+                    safe_log_value(application_id), code, ",".join(map(str, dense)) or "-", len(content), covered)
     stored = {
         "artifact_id": payload["artifact_id"], "sha256": payload["sha256"], "claimed": claimed,
         "confidence": STRONG if claimed == STRONG and not down else WEAK, "downgraded": down,
@@ -1034,10 +1050,17 @@ NO_CODES_HINT = (
 
 
 def no_codes_warning(stored: dict[str, Any]) -> Optional[str]:
-    """A reviewer claimed weak but Job360's own checks found nothing (no downgrade codes): a hint, never an override;
-    the stored confidence stays what the reviewer claimed."""
-    if stored.get("claimed") != WEAK or stored.get("downgraded"):
+    """A reviewer claimed weak but Job360's own checks found nothing (only :data:`REVIEWER_WEAK`, or a legacy
+    ``[]``): a hint, never an override; the stored confidence stays what the reviewer claimed. Only
+    :data:`LINE_TOO_DENSE`: which lines to split or shorten."""
+    down = stored.get("downgraded") or []
+    if stored.get("claimed") != WEAK or down not in ([], [REVIEWER_WEAK], [LINE_TOO_DENSE]):
         return None
+    if down == [LINE_TOO_DENSE]:
+        at = ", ".join(str(n) for n in ((stored.get("where") or {}).get(LINE_TOO_DENSE) or [])[:_WHERE_LISTED])
+        return (f"{LINE_TOO_DENSE}: lines {at}: the reviewer could not show all of a line's facts in "
+                f"{EVIDENCE_MAX} quotes; split that line in two or cut facts from it (the profile's own words only), "
+                "save, one new review.")
     return NO_CODES_HINT
 
 

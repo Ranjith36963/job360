@@ -360,13 +360,13 @@ async def test_after_three_weak_reviews_a_fourth_is_weak(authenticated_async_con
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client)
-        assert (await _stored(client, app_id, _review(cv_id, confidence="weak")))["downgraded"] == []
+        assert (await _stored(client, app_id, _review(cv_id, confidence="weak")))["downgraded"] == ["reviewer_weak"]
         v2 = CV.replace("- Data engineer", "* Data engineer")
         v2_id = await _save_cv(client, app_id, v2)
         assert (await _stored(client, app_id, _review(v2_id, v2, confidence="weak")))["confidence"] == "weak"
         v3 = CV.replace("- Built", "* Built")
         v3_id = await _save_cv(client, app_id, v3)
-        assert (await _stored(client, app_id, _review(v3_id, v3, confidence="weak")))["downgraded"] == []
+        assert (await _stored(client, app_id, _review(v3_id, v3, confidence="weak")))["downgraded"] == ["reviewer_weak"]
         v4 = CV.replace("- Built", "• Built")
         v4_id = await _save_cv(client, app_id, v4)
         fourth = await _stored(client, app_id, _review(v4_id, v4))
@@ -380,10 +380,10 @@ async def test_the_second_rewrite_is_judged_on_its_merits(authenticated_async_co
     async with authenticated_async_context() as client:
         _seed(fixture_user_id)
         app_id, cv_id = await _setup(client)
-        assert (await _stored(client, app_id, _review(cv_id, confidence="weak")))["downgraded"] == []
+        assert (await _stored(client, app_id, _review(cv_id, confidence="weak")))["downgraded"] == ["reviewer_weak"]
         v2 = CV.replace("- Data engineer", "* Data engineer")
         v2_id = await _save_cv(client, app_id, v2)
-        assert (await _stored(client, app_id, _review(v2_id, v2, confidence="weak")))["downgraded"] == []
+        assert (await _stored(client, app_id, _review(v2_id, v2, confidence="weak")))["downgraded"] == ["reviewer_weak"]
         v3 = CV.replace("- Built", "* Built")
         v3_id = await _save_cv(client, app_id, v3)
         third = await _stored(client, app_id, _review(v3_id, v3))
