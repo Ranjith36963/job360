@@ -37,6 +37,8 @@ may do; a scheduled prompt is never an approval to submit.
 """
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -44,6 +46,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.profile import assistant_settings as rules
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -556,7 +560,37 @@ async def _reach_ids(
         if rules.line_side(row["fit_score"], line) != "below"
     ]
     pending_only = await _pending_only(db, user_id, candidates)
-    return [a for a in candidates if a not in pending_only][: settings.REACH_MAX_PER_RUN]
+    duplicates = await _duplicates(db, user_id, candidates)
+    if duplicates:
+        log.info("reach_duplicates_skipped user=%s ids=%s", user_id, ",".join(str(a) for a in sorted(duplicates)))
+    return [a for a in candidates if a not in pending_only and a not in duplicates][: settings.REACH_MAX_PER_RUN]
+
+
+async def _duplicates(db: JobDatabase, user_id: str, app_ids: list[int]) -> set[int]:
+    """2026-11-18 13:56 run: reach listed 1050 and 1012, which a batch run had taken off the queue as duplicates of
+    other applications (newest surviving queue event ``unqueued`` {reason: duplicate}); the run skipped them and
+    the jobs that were real waited. A duplicate's people belong to the application it duplicates."""
+    if not app_ids:
+        return set()
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        "SELECT e.application_id, e.event_type, e.payload FROM application_events e "  # noqa: S608 - placeholders only
+        f"WHERE e.user_id = ? AND e.application_id IN ({marks}) AND e.event_type IN ('queued', 'unqueued') "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        (user_id, *app_ids),
+    )
+    newest: dict[int, tuple[str, Any]] = {}
+    for row in map(dict, await cur.fetchall()):
+        newest[int(row["application_id"])] = (str(row["event_type"]), row["payload"])
+    out: set[int] = set()
+    for app_id, (kind, raw) in newest.items():
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        if kind == "unqueued" and isinstance(payload, dict) and payload.get("reason") == "duplicate":
+            out.add(app_id)
+    return out
 
 
 async def _pending_only(db: JobDatabase, user_id: str, app_ids: list[int]) -> set[int]:

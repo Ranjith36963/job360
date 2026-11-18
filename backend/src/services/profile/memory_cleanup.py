@@ -64,8 +64,8 @@ def covered(profile: Any) -> list[dict[str, Any]]:
     kits: dict[Optional[str], dict[str, dict[str, Any]]] = {}
     out: list[dict[str, Any]] = []
     for index, rec in enumerate(profile.user_info.answers or []):
-        if not isinstance(rec, dict):
-            continue
+        if not isinstance(rec, dict) or rec.get("approved") is False:
+            continue  # an assistant's guess for Answer once is not a saved answer to clean up
         topic, question = str(rec.get("topic") or ""), str(rec.get("question") or "")
         answer = str(rec.get("answer") or "")
         family, template = memory_question(topic, question)
