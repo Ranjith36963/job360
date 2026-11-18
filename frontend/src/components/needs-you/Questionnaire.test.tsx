@@ -66,6 +66,34 @@ describe("Questionnaire (answer once; autosave, owner 2026-11-18)", () => {
     expect(rememberQuestionnaire).toHaveBeenCalledTimes(1); // the blur's save, not a second one
   });
 
+  it("an edit after a save is saved too when the box is left at once (review of #1651), and the row never shows an old Saved", async () => {
+    render(<Questionnaire />);
+    const box = await screen.findByTestId("qn-input-GB-contact.phone");
+    fireEvent.change(box, { target: { value: "+44 1" } });
+    await afterTyping();
+    expect(await screen.findByTestId("qn-from-GB-contact.phone")).toHaveTextContent("Saved ✓");
+    fireEvent.change(box, { target: { value: "+44 2" } });
+    expect(screen.getByTestId("qn-from-GB-contact.phone")).not.toHaveTextContent("Saved"); // not saved yet
+    fireEvent.blur(box);
+    await waitFor(() => expect(rememberQuestionnaire).toHaveBeenLastCalledWith("GB", [
+      { topic: "contact.phone", question: "Phone number", answer: "+44 2" },
+    ]));
+    expect(rememberQuestionnaire).toHaveBeenCalledTimes(2);
+    expect(await screen.findByTestId("qn-from-GB-contact.phone")).toHaveTextContent("Saved ✓");
+  });
+
+  it("a slow earlier save never marks newer text as saved", async () => {
+    let finishFirst: (v: unknown) => void = () => {};
+    rememberQuestionnaire.mockImplementationOnce(() => new Promise((r) => { finishFirst = r; }));
+    render(<Questionnaire />);
+    const box = await screen.findByTestId("qn-input-GB-contact.phone");
+    fireEvent.change(box, { target: { value: "+44 1" } });
+    fireEvent.blur(box); // first save in flight
+    fireEvent.change(box, { target: { value: "+44 2" } }); // owner types again
+    await act(async () => finishFirst({ saved: ["contact.phone"], not_saved: {} }));
+    expect(screen.getByTestId("qn-from-GB-contact.phone")).not.toHaveTextContent("Saved");
+  });
+
   it("an answer the server cannot keep says why and how, in plain words, never silently (owner bug 2026-11-18)", async () => {
     getQuestionnaire.mockResolvedValue({ countries: [{ country: "NORTH_AMERICA", questions: [
       row("salary.NORTH_AMERICA", "Expected salary in North America", null, "not_known", "", "NORTH_AMERICA")] }] });

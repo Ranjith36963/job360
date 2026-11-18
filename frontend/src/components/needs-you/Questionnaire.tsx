@@ -71,7 +71,8 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
   const [data, setData] = useState<Data | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Record<string, Status>>({});
-  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({}); // a row's pending (unsaved) text
+  const latest = useRef<Record<string, number>>({}); // each row's newest save: an older reply never paints over it
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +97,15 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
       .map(({ q, answer }) => ({ q, item: { topic: q.topic ?? q.id, question: q.question, answer: answer.trim() } }))
       .filter(({ item }) => item.answer);
     if (items.length === 0) return;
-    const mark = (next: Record<string, Status>) => setStatus((prev) => ({ ...prev, ...next }));
+    const sent = Object.fromEntries(items.map(({ q }) => {
+      const key = rowKey(cc, q);
+      latest.current[key] = (latest.current[key] ?? 0) + 1;
+      return [key, latest.current[key]];
+    }));
+    // Only rows whose newest save is this one take its result (the owner may have typed again meanwhile).
+    const mark = (next: Record<string, Status>) => setStatus((prev) => ({
+      ...prev, ...Object.fromEntries(Object.entries(next).filter(([key]) => latest.current[key] === sent[key])),
+    }));
     mark(Object.fromEntries(items.map(({ q }) => [rowKey(cc, q), { state: "saving" as const }])));
     try {
       const out = await rememberQuestionnaire(cc, items.map((i) => i.item));
@@ -118,21 +127,29 @@ export function Questionnaire({ onChanged }: { onChanged?: () => void } = {}) {
   function typed(cc: string, q: QuestionnaireRow, text: string, now = false) {
     const key = rowKey(cc, q);
     setValues((prev) => ({ ...prev, [key]: text }));
+    // New text is not saved yet: the old "Saved" goes (review of #1651: an edit after a save was lost).
+    latest.current[key] = (latest.current[key] ?? 0) + 1;
+    setStatus((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)));
     clearTimeout(timers.current[key]);
+    delete timers.current[key];
     if (!text.trim()) return;
     if (now) {
       void save(cc, [{ q, answer: text }]);
       return;
     }
-    timers.current[key] = setTimeout(() => void save(cc, [{ q, answer: text }]), SAVE_AFTER_MS);
+    timers.current[key] = setTimeout(() => {
+      delete timers.current[key];
+      void save(cc, [{ q, answer: text }]);
+    }, SAVE_AFTER_MS);
   }
 
+  /** Leaving the box saves its pending text at once; nothing pending, nothing sent. */
   function left(cc: string, q: QuestionnaireRow) {
     const key = rowKey(cc, q);
-    if (!(key in timers.current) || !(key in values)) return;
+    if (!(key in timers.current)) return;
     clearTimeout(timers.current[key]);
     delete timers.current[key];
-    if (status[key]?.state !== "saved" && status[key]?.state !== "saving") void save(cc, [{ q, answer: values[key] }]);
+    void save(cc, [{ q, answer: values[key] ?? "" }]);
   }
 
   return (
