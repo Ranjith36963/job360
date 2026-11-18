@@ -10037,6 +10037,8 @@ export interface components {
             event_type: string;
             /** Follow Up On */
             follow_up_on: string | null;
+            /** Next */
+            next?: string | null;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */

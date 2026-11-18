@@ -75,6 +75,8 @@ HELD_BACK_WHY = ("weekly_limit", "release_backoff", "pace_gap", "daily_max", "cl
 # An application a session just let go (hold_released) is not handed straight back: pc-1523, 2026-11-03, take
 # returned Coinbase again right after the run stopped on it. It comes back after this many minutes.
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
+# How long after its newest take a session still counts as the live PC run (the recipe's 40-minute cap + margin).
+PC_RUN_MINUTES = 45
 DECISIONS = ("approve", "decline")
 WHY_WORDS = {
     "job360_login_required": "Job360's browser hit a sign-in page.",
@@ -420,15 +422,60 @@ async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetim
     return max(seen) if seen else None
 
 
-async def stamp_take(db: JobDatabase, user_id: str, now: datetime) -> None:
+async def stamp_take(db: JobDatabase, user_id: str, now: datetime, session: str = "") -> None:
     """One slot per user: the newest own-browser take, whatever it answered (owner #12: a PC session that is up
-    but finds nothing to do, or is told to wait, is alive). Not a scheduled duty: ``whats_due`` never reads it."""
+    but finds nothing to do, or is told to wait, is alive), and that take's ``session`` label (``state``; read by
+    :func:`next_after_hold_release`). Not a scheduled duty: ``whats_due`` never reads it."""
     await db._db.execute(
-        "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
-        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
-        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat()),
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at, state) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, state = EXCLUDED.state",
+        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat(), json.dumps({"session": session})),
     )
     await db._db.commit()
+
+
+async def next_after_hold_release(
+    db: JobDatabase, user: CurrentUser, application_id: int, now: datetime
+) -> Optional[str]:
+    """The ``next`` of an assistant's ``hold_released`` reply: the release reply's "Keep going" sentence
+    (:func:`_keep_going`) when the session that held this application (its newest labelled kit read by this actor)
+    is the one that last took from the PC queue inside :data:`PC_RUN_MINUTES`; else ``None`` (a cloud apply run
+    never takes PC tasks). PC run pc-1905 (2026-11-18): an application is closed with ``hold_released``, not
+    ``release``, and that reply said nothing, so the run went to its summary with ~45 tasks waiting."""
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? AND event_type = 'kit_read' "
+        "AND recorded_by = ? ORDER BY id DESC LIMIT 1",
+        (user.id, application_id, actor_for(user)),
+    )
+    row = await cur.fetchone()
+    held_by = ""
+    if row is not None:
+        raw = dict(row)["payload"]
+        payload = raw if isinstance(raw, dict) else json.loads(raw or "{}")
+        held_by = str(payload.get("session") or "")
+    cur = await db._db.execute(
+        "SELECT done_at, state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user.id, TAKE_SLOT)
+    )
+    slot = await cur.fetchone()
+    took = ""
+    if slot is not None:
+        got = dict(slot)
+        try:
+            state = json.loads(got["state"] or "{}")
+        except ValueError:
+            state = {}
+        fresh = _when(got["done_at"])
+        if isinstance(state, dict) and fresh is not None and now - fresh <= timedelta(minutes=PC_RUN_MINUTES):
+            took = str(state.get("session") or "")
+    if not held_by or held_by != took:
+        _log("own_browser_hold_release_next", user.id, "not_pc_run", application_id=application_id,
+             pc_session=bool(took))
+        return None
+    nxt = await _keep_going(db, user, held_by, "application", "hold_released", now, f"application:{application_id}")
+    got_next = nxt["next"]
+    return str(got_next) if got_next is not None else None
 
 
 async def load_li_state(db: JobDatabase, user_id: str) -> dict[str, Any]:
@@ -868,7 +915,7 @@ async def take(
     if not label:
         raise SpineError(422, "session is needed: a short label that tells your sessions apart")
     actor = actor_for(user)
-    await stamp_take(db, user.id, now)
+    await stamp_take(db, user.id, now, label)
     win = await window(db, user.id, now)
     if win["why"] == "paused":
         _log("own_browser_take", user.id, "paused")
