@@ -138,6 +138,32 @@ def review_state(rows: list[dict[str, Any]], message_id: Optional[int], sha: str
     return NONE
 
 
+RECIPIENT_PATHS = ("page:", "page/", "recipient:", "recipient/")
+_FIRST_PERSON = frozenset({"i", "i'm", "i've", "i'd", "i'll", "im", "ive", "my", "me", "mine", "myself"})
+
+
+def user_claims(line: str) -> str:
+    """The sentences of a draft line that speak about the USER (a first-person word: I, my, me ...), joined. Only
+    these are judged against the profile (Kits audit 2026-11-18, section 3A: "Congrats on leading the PyCon launch
+    in March" failed on facts about the RECIPIENT, so every LinkedIn note stored weak and retry_limit then blocked
+    auto-send to that person for good). What the note says about the recipient is the writer's to source from a
+    page; it is never a claim about the user. Scanned character by character: no regex on caller text."""
+    sentences, cur = [], []
+    for ch in str(line or ""):
+        cur.append(ch)
+        if ch in ".!?":
+            sentences.append("".join(cur))
+            cur = []
+    if "".join(cur).strip():
+        sentences.append("".join(cur))
+    keep = []
+    for sentence in sentences:
+        words = {w.strip("\"'(),;:-.!?").lower().replace("\u2019", "'") for w in sentence.split()}
+        if words & _FIRST_PERSON:
+            keep.append(sentence.strip())
+    return " ".join(keep)
+
+
 async def _person(db: JobDatabase, user_id: str, contact: dict[str, Any]) -> tuple[str, str]:
     """The person's CURRENT name, and the words that vouch for a name in a draft (theirs, their company, the
     job's company and title): the same context ``check_outreach`` gives its name check."""
@@ -209,8 +235,16 @@ async def check(
     for ln in text.splitlines():  # the draft's own text decides case, never the entry's copy
         actual.setdefault(cv_review.line_key(ln), []).append(ln.strip().lstrip(cv_review._BULLETS + " \t"))
     quotes: dict[str, list[str]] = {}
+    # Audit 3A: a row whose field_path names a page (page: / recipient:) backs a line ONLY about the recipient (no
+    # I / my / me in it); its source is that page, never the profile, so it is not judged against the profile.
+    about_them = {
+        cv_review.line_key(e[LINE_FIELD]) for e in entries
+        if str(e.get("field_path") or "").lower().startswith(RECIPIENT_PATHS) and not user_claims(e[LINE_FIELD])
+    }
     for e in entries:
         quote = e["profile_quote"]
+        if cv_review.line_key(e[LINE_FIELD]) in about_them:
+            continue
         if not cv_review.quote_in_profile(quote, source, source_words):
             down.add("quote_not_in_profile")
         if len(evidence._words(quote)) < 3:
@@ -221,8 +255,12 @@ async def check(
     # the quotes given for that line (each still inside one field).
     for key, given in quotes.items():
         lines = actual.get(key) or [e[LINE_FIELD] for e in entries if cv_review.line_key(e[LINE_FIELD]) == key][:1]
+        if key in about_them:
+            continue
         for body in lines:
-            if review_rows.hard_facts(body, [*given, context, own], *terms):  # the CV rules, every sentence
+            # Only the sentences about the user are judged when the line has any (audit 3A); else the whole line.
+            claims = user_claims(body) or body
+            if review_rows.hard_facts(claims, [*given, context, own], *terms):  # the CV rules, every sentence
                 down.add("claim_not_in_quote")
     weak_ids = {
         p.get(ID_KEY) for p in (_parse(r.get("text")) for r in rows if r["entry"] == ENTRY)
