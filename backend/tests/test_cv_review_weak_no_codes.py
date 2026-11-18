@@ -27,7 +27,8 @@ async def test_weak_claim_without_codes_gets_the_hint_and_stays_weak(authenticat
         assert "record this same CV again as strong" in hints[0] and "costs no try" in hints[0]
         events = (await client.get(f"/api/applications/{app_id}")).json()["events"]
         stored = next(e for e in events if e["id"] == resp.json()["event_id"])["payload"]
-        assert (stored["confidence"], stored["claimed"], stored["downgraded"]) == ("weak", "weak", [])
+        # 2026-11-18 (apps 1048, 1049): every weak store names a code; a reviewer-only weak is ``reviewer_weak``
+        assert (stored["confidence"], stored["claimed"], stored["downgraded"]) == ("weak", "weak", ["reviewer_weak"])
 
 
 @pytest.mark.asyncio
@@ -49,6 +50,8 @@ async def test_weak_claim_with_codes_and_strong_claims_get_no_hint(authenticated
 
 def test_the_hint_is_a_pure_function_of_the_stored_review():
     assert cv_review.no_codes_warning({"claimed": "weak", "confidence": "weak", "downgraded": []}) is not None
+    assert cv_review.no_codes_warning({"claimed": "weak", "confidence": "weak", "downgraded": ["reviewer_weak"]}) \
+        == cv_review.NO_CODES_HINT
     assert cv_review.no_codes_warning({"claimed": "weak", "confidence": "weak", "downgraded": ["jd_gap_claimed"]}) is None
     assert cv_review.no_codes_warning({"claimed": "strong", "confidence": "strong", "downgraded": []}) is None
     assert cv_review.no_codes_warning({"claimed": "strong", "confidence": "weak", "downgraded": ["x"]}) is None
