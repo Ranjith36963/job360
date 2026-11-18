@@ -321,6 +321,7 @@ ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
 DEFAULT_SKIP: tuple[str, ...] = ()
 WORKDAY_MAX: int | None = None  # explicit --workday-max override of the Workday slice; None = the --open-days slice
 WORKDAY_SEARCH_TITLES = 6  # Workday boards are searched by at most this many titles
+QUERY_TITLES = 12  # titles (and variants) a run sends to the searching sources; the rest rotate in next runs
 
 DEFAULT_TITLES = (
     "ai engineer, llm engineer, agent engineer, agentic engineer, generative ai engineer, "
@@ -548,6 +549,9 @@ class Prefs:
     only: frozenset[str] = frozenset()
     exclude: frozenset[str] = frozenset()
     any_row: bool = False
+    # --plan-rows (2026-11-18 coverage audit): the user's search-plan rows, most specific first. When set, the
+    # plan alone says where on-site and "Remote - <country>" ads count, whatever an ad says about visas.
+    plan: tuple[PlanRow, ...] = ()
 
 
 def make_prefs(
@@ -558,17 +562,64 @@ def make_prefs(
     only: str | Iterable[str] | None = None,
     exclude: str | Iterable[str] | None = None,
     any_row: bool = False,
+    plan_rows: str | None = None,
 ) -> Prefs:
     """Build Prefs from CSV strings or iterables of ISO2 codes."""
+    plan = parse_plan_rows(plan_rows)
     return Prefs(
         parse_country_list(work),
         remote,
-        visa_onsite,
+        visa_onsite and not plan,  # --visa-onsite is a no-op once the plan names the places
         maybe_relocation,
         parse_country_list(only),
         parse_country_list(exclude),
         any_row,
+        plan,
     )
+
+
+PLAN_KINDS = ("remote", "onsite", "contract")
+# Job360's region codes (services/profile/regions.py) to the kit's own region words (places.json).
+_PLAN_REGION_WORDS = {"SOUTH_AMERICA": "latin america"}
+
+
+@dataclass(frozen=True)
+class PlanRow:
+    """One search-plan row as whats_due names it (``GB:onsite``, ``EUROPE:remote``, ``ANY:contract``)."""
+
+    id: str
+    kind: str
+    members: frozenset[str] | None  # None = ANY (every other country)
+
+
+def parse_plan_rows(value: str | None) -> tuple[PlanRow, ...]:
+    """``--plan-rows`` to rows, countries first, then regions, then ANY. Raises ValueError for a bad row."""
+    rows: list[PlanRow] = []
+    for item in split_csv(value):
+        place, _, kind = item.rpartition(":")
+        place, kind = place.strip().upper(), kind.strip().lower()
+        if kind not in PLAN_KINDS or not place:
+            raise ValueError("bad plan row: %s (use PLACE:remote|onsite|contract, as whats_due plan_rows names it)"
+                             % item)
+        if place == "ANY":
+            members: frozenset[str] | None = None
+        elif len(place) == 2 or place == "UK":
+            members = parse_country_list(place)
+        else:
+            members = frozenset(get_places().region_members(_PLAN_REGION_WORDS.get(place, place.lower()
+                                                                                    .replace("_", " "))))
+            if not members:
+                raise ValueError("unknown plan region: %s" % place)
+        rows.append(PlanRow("%s:%s" % (place, kind), kind, members))
+    return tuple(sorted(rows, key=lambda r: (r.members is None, len(r.members or ()))))
+
+
+def plan_row_for(plan: tuple[PlanRow, ...], countries: frozenset[str], kind: str) -> str | None:
+    """The most specific plan row of ``kind`` whose place holds one of ``countries`` (no country = ANY only)."""
+    for r in plan:
+        if r.kind == kind and (r.members is None or countries & r.members):
+            return r.id
+    return None
 
 
 # ===================================================== pure filter functions
@@ -847,7 +898,11 @@ def _classify_place(
             return "remote_region" if p.remote and not locked else None
         return None if locked else "work_country"
     if remote_only:
-        if not p.remote or locked:
+        if not p.remote:
+            return None
+        if c and plan_row_for(p.plan, c, "remote"):
+            return "remote_place"  # "Remote - <country>" in a plan row's place: kept, the judge reads the lock
+        if locked:
             return None
         if c:
             # An explicit country list that excludes every work country wins over a region tag
@@ -859,6 +914,9 @@ def _classify_place(
             return "remote_world"
         return None
     pos, rel = visa_signals(desc)
+    if p.plan and (plan_row_for(p.plan, c, "onsite") or plan_row_for(p.plan, c, "contract")):
+        # Owner decision 2026-11-18: every ad in a plan place is kept, whatever it says about sponsorship.
+        return "visa_onsite" if (pos or visa_flag) else "plan_onsite"
     if (pos or visa_flag) and p.visa_onsite:
         return "visa_onsite"
     # The ad says nothing, but the employer holds a sponsor licence in the job's country (official
@@ -1212,7 +1270,7 @@ FINGERPRINT_ARGS = (
     "titles", "exclude_title_words", "work_countries", "remote", "visa_onsite", "maybe_relocation",
     "only_countries", "exclude_countries", "any_location", "max_years", "days", "sources", "companies",
     "universe", "companies_extra", "skip_companies", "limit_boards", "freehire_pages", "workday_max",
-    "open_days", "retry_dead",
+    "open_days", "retry_dead", "plan_rows",
 )
 
 
@@ -1730,12 +1788,69 @@ def text_class(desc: str) -> str:
     return "full"
 
 
+CONTRACT_WORDS = re.compile(r"\b(?:contract|contractor|freelance|freelancer|fixed[- ]term|interim|temporary)\b",
+                            re.I)
+_REMOTE_ROWS = ("remote_region", "remote_world", "remote_place")
+
+
+def result_plan_row(plan: tuple[PlanRow, ...], row: str, loc: str, contract: bool) -> str | None:
+    """The plan row a kept ad counts for: a contract ad under its place's contract row when there is one, else
+    the remote or on-site row of its place (an ad with no country: ANY)."""
+    countries = parse_loc(loc).countries
+    kind = "remote" if row in _REMOTE_ROWS else "onsite"
+    return ((plan_row_for(plan, countries, "contract") if contract else None)
+            or plan_row_for(plan, countries, kind))
+
+
+TITLE_VARIANTS: tuple[tuple[str, ...], ...] = (
+    ("machine learning", "ml"), ("generative ai", "genai", "gen ai"), ("ai/ml", "ai ml", "ai & ml"),
+    ("forward deployed engineer", "fde"),
+)
+
+
+def title_variants(titles: Iterable[str]) -> list[str]:
+    """The user's titles, each followed by the spellings ads use for it (one swap per variant group)."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(t: str) -> None:
+        k = " ".join(t.lower().split())
+        if k and k not in seen:
+            seen.add(k)
+            out.append(t)
+
+    for t in titles:
+        add(t)
+        low = " %s " % " ".join(t.lower().split())
+        for group in TITLE_VARIANTS:
+            for word in group:
+                if " %s " % word in low:
+                    for other in group:
+                        if other != word:
+                            add(low.replace(" %s " % word, " %s " % other, 1).strip())
+                    break
+    return out
+
+
+def rotate_titles(titles: list[str], start: float, take: int) -> list[str]:
+    """Every title in turn across runs: run N (``start`` = hour / 24) begins ``N * take`` titles in, wrapping."""
+    if not titles:
+        return []
+    k = (int(round(start * 24)) * take) % len(titles)
+    return titles[k:] + titles[:k]
+
+
 def write_done_file(out: str, results: list[dict[str, Any]], col: Collector, stop_reason: str | None) -> None:
     """``<out>.done.json``, written once the run ended: what mark_done's kit report copies (``kit.done``)."""
     counts = collections.Counter(text_class(str(r.get("description") or "")) for r in results)
-    done = {"results": len(results), "full": counts["full"], "snippet": counts["snippet"], "empty": counts["empty"],
+    done: dict[str, Any] = {
+            "results": len(results), "full": counts["full"], "snippet": counts["snippet"], "empty": counts["empty"],
             "known_skipped": col.known_skipped, "known_ct_skipped": col.known_ct_skipped,
             "complete": not stop_reason, "stop_reason": stop_reason or None}
+    if col.prefs.plan:  # results per search-plan row (mark_done's report.coverage, row by row)
+        per_row = collections.Counter(r.get("plan_row") for r in results)
+        done["plan_rows"] = {r.id: per_row[r.id] for r in col.prefs.plan}
+        done["plan_rows_contract"] = sum(1 for r in results if r.get("contract"))
     with open(out + ".done.json", "w", encoding="utf-8") as f:
         json.dump(done, f)
 
@@ -1762,7 +1877,9 @@ class Collector:
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
         self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
         self.board_outcomes: dict[str, str] = {}  # "ats:token" -> "ok" | "404" for boards that gave a clear answer
-        self.matcher = make_title_matcher(args.titles, args.exclude_title_words)
+        # Every target title and the variants ads use for it (ML / Machine Learning, GenAI / Generative AI...).
+        self.matcher = make_title_matcher(None if args.titles is None else title_variants(split_csv(args.titles)),
+                                          args.exclude_title_words)
         self.cursor: dict[str, int] = {}  # {ats: next offset into its open list}; moved on at the end of run()
         self.rotation: dict[str, dict[str, Any]] = {}  # per rotated slow ATS: pool size, start, slice keys
         self.visited: set[str] = set()  # "ats:token" of boards whose task ran to its end this session
@@ -1775,6 +1892,7 @@ class Collector:
             args.only_countries,
             args.exclude_countries,
             args.any_location,
+            getattr(args, "plan_rows", None),
         )
         self.skip = [s.lower() for s in split_csv(args.skip_companies)]
 
@@ -1911,6 +2029,12 @@ class Collector:
         }
         if row == "visa_maybe_register":
             rec["sponsor_register"] = reg_ids
+        # The ad's own word on a visa, kept on every result (the judge and bring_job report it; nothing drops it).
+        rec["visa_signal"] = ("stated" if visa_signals(desc)[0] or raw.get("visa_flag")
+                              else "refused" if _visa_refused(desc) else "silent")
+        rec["contract"] = bool(CONTRACT_WORDS.search(title + " " + desc[:600]))
+        if self.prefs.plan:
+            rec["plan_row"] = result_plan_row(self.prefs.plan, row, raw.get("loc") or "", rec["contract"])
         key = job_key(rec)
         with self.lock:
             if url in self.seen_url:
@@ -2068,7 +2192,10 @@ def _freehire(col: Collector, queries: list[str]) -> None:
         filters += [dict(work_mode="remote", regions="global"), dict(work_mode="remote", regions="none")]
         if pl.region_members("apac") & pr.work:
             filters.append(dict(work_mode="remote", regions="apac"))
-    filters += [dict(countries=cc) for cc in sorted(pr.work)]
+    plan_cc = {cc for r in pr.plan if r.members is not None and len(r.members) == 1 for cc in r.members}
+    filters += [dict(countries=cc) for cc in sorted(pr.work | plan_cc)]
+    if any(r.members is None or len(r.members) > 1 for r in pr.plan):
+        filters.append({})  # a region or ANY row: every place, the plan filter keeps the ones in the plan
     if not filters:
         filters.append({})
     seen_rows: set[str] = set()
@@ -2521,11 +2648,17 @@ def run(args: argparse.Namespace) -> Collector:
     if run_log is not None:
         run_log.col = col  # lets the failure-path snapshot see the live counters
     sources = select_sources(args.sources)
-    queries = split_csv(args.titles or "")[:12]
-    countries = sorted(col.prefs.only or col.prefs.work)
+    # 2026-11-18 coverage audit: titles 13-23 were never queried (always the first 12). All titles and their
+    # variants now rotate: each hourly run (--sweep-start hour) starts QUERY_TITLES further into the list.
+    start = sweep_start(getattr(args, "sweep_start", "0"))
+    queries = rotate_titles(title_variants(split_csv(args.titles or "")), start, QUERY_TITLES)[:QUERY_TITLES]
+    plan = col.prefs.plan
+    plan_cc = {cc for r in plan if r.members is not None and len(r.members) == 1 for cc in r.members}
+    countries = sorted(col.prefs.only or (col.prefs.work | plan_cc))
     # "*" lets the country-gated national services run everywhere when on-site jobs abroad count
-    # (--visa-onsite, the default): their ads are then kept only when they say they sponsor a visa.
-    feed_countries = countries + (["*"] if (col.prefs.visa_onsite or col.prefs.any_row) and not col.prefs.only else [])
+    # (--visa-onsite, the default, or a region / ANY plan row): the place filter then decides.
+    wide = col.prefs.visa_onsite or col.prefs.any_row or any(r.members is None or len(r.members) > 1 for r in plan)
+    feed_countries = countries + (["*"] if wide and not col.prefs.only else [])
     sink = col.sink
     if sink is not None:
         sink.seed(col)
@@ -3682,7 +3815,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--visa-onsite",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="keep on-site ads elsewhere only if the ad says it sponsors visas",
+        help="keep on-site ads elsewhere only if the ad says it sponsors visas (a no-op with --plan-rows)",
+    )
+    p.add_argument(
+        "--plan-rows", default="",
+        help="whats_due's hunt plan_rows, e.g. GB:onsite,EUROPE:remote,ANY:contract: every ad in a row's place is "
+             "kept whatever it says about visas, tagged visa_signal and plan_row; the done file counts each row",
     )
     p.add_argument("--maybe-relocation", action="store_true", help="also keep ads that only mention relocation")
     p.add_argument("--only-countries", default="", help="optional ISO2 filter: keep only these countries")
@@ -3784,7 +3922,8 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     try:
-        make_prefs(args.work_countries, only=args.only_countries, exclude=args.exclude_countries)
+        make_prefs(args.work_countries, only=args.only_countries, exclude=args.exclude_countries,
+                   plan_rows=args.plan_rows)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
