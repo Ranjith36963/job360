@@ -68,6 +68,41 @@ def role_words(title: str, location: str = "") -> str:
     return " ".join("".join(ch if ch.isalnum() else " " for ch in core).split())
 
 
+# Trailing words that do not tell two employers apart (2026-11-18 16:13 run: "Lloyds Bank" vs "Lloyds Banking
+# Group", "Stratos" vs "STRATOS Technologies", "Evnek" vs "Evnek Technologies"). The hunt kit's copy
+# (hunt_kit.py COMPANY_STEM_DROP) must stay equal: tests/test_hunt_dedupe_employer.py checks both keys agree.
+COMPANY_STEM_DROP = frozenset({
+    "ltd", "limited", "inc", "llc", "plc", "gmbh", "ag", "sa", "pvt", "private", "corp", "corporation", "co",
+    "company", "holdings", "group", "bank", "banking", "technologies", "technology", "tech", "labs", "lab",
+    "solutions", "systems", "services", "software", "consulting", "consultancy", "digital", "india", "uk", "us",
+    "usa", "global", "international",
+})
+
+
+def _alnum_words(text: str) -> list[str]:
+    """NFD, combining marks dropped, case-folded letter/digit runs (a character scan, no regex on caller text)."""
+    decomposed = unicodedata.normalize("NFD", text or "")
+    plain = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn").casefold()
+    return "".join(ch if ch.isalnum() else " " for ch in plain).split()
+
+
+def company_stem(company: str) -> str:
+    """The employer's name without a leading "the" and trailing legal / sector words (COMPANY_STEM_DROP); at
+    least one word stays. "Lloyds Banking Group" and "Lloyds Bank" -> "lloyds". A comparison key only."""
+    words = _alnum_words(company)
+    if len(words) > 1 and words[0] == "the":
+        words = words[1:]
+    while len(words) > 1 and words[-1] in COMPANY_STEM_DROP:
+        words.pop()
+    return " ".join(words)
+
+
+def company_title_key(company: str, title: str) -> str:
+    """``company_stem | role words`` (location noise and one trailing "(...)" off the title): the key the hunt
+    kit's ``--known-ct`` and bring_job's duplicate guard share, so a run and Job360 call the same pair known."""
+    return company_stem(company) + "|" + " ".join(_alnum_words(role_core(title)))
+
+
 # Words that name no place: a work arrangement or filler ("Remote (UK)" is the place "uk").
 _PLACE_NOISE = frozenset({
     "remote", "hybrid", "onsite", "on", "site", "office", "based", "in", "the", "and", "or", "of", "from", "home",
@@ -139,14 +174,16 @@ async def open_duplicate_of(
 ) -> Optional[int]:
     """The id of THIS user's earliest OPEN application (status not in
     ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES``) at the same company (rule-1
-    company key) with the same ``role_core`` title, else None. Scoped by user
-    (rules 12/25). An application with exactly the same title is skipped: that
-    is a re-bring, which the normal path handles."""
+    company key) with the same ``role_core`` title, or with the same
+    :func:`company_title_key` (another label for the same employer), else None.
+    Scoped by user (rules 12/25). The same rule-1 company with exactly the same
+    title is skipped: that is a re-bring, which the normal path handles."""
     from src.services.applications.kit import normalized_company_key  # noqa: PLC0415
 
     want_company, want_core = normalized_company_key(company or ""), role_core(title, location)
     if not want_company or not want_core:
         return None
+    want_key = company_title_key(company, title)
     cur = await db._db.execute(
         "SELECT id, status, job_company, job_title, job_location FROM applications WHERE user_id = ? ORDER BY id",
         (user_id,),
@@ -154,12 +191,13 @@ async def open_duplicate_of(
     for r in await cur.fetchall():
         if str(r["status"]) in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
             continue
-        have_title = str(r["job_title"] or "")
-        if have_title.strip().casefold() == (title or "").strip().casefold():
+        have_title, have_company = str(r["job_title"] or ""), str(r["job_company"] or "")
+        same_company = normalized_company_key(have_company) == want_company
+        if same_company and have_title.strip().casefold() == (title or "").strip().casefold():
             continue
-        if normalized_company_key(str(r["job_company"] or "")) != want_company:
-            continue
-        if role_core(have_title, str(r["job_location"] or "")) == want_core:
+        if same_company and role_core(have_title, str(r["job_location"] or "")) == want_core:
+            return int(r["id"])
+        if company_title_key(have_company, have_title) == want_key:
             return int(r["id"])
     return None
 

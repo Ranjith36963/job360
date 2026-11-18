@@ -5390,6 +5390,8 @@ export interface components {
             employer_published_at?: string | null;
             /** Employer Search */
             employer_search?: "not_found" | null;
+            /** Employer Searched */
+            employer_searched?: string[] | null;
             /** Found On */
             found_on?: string | null;
             /** Listed People */
@@ -5399,6 +5401,10 @@ export interface components {
              * @default
              */
             location: string;
+            /** Not Duplicate Of */
+            not_duplicate_of?: number | null;
+            /** Not Duplicate Reason */
+            not_duplicate_reason?: ("different_location" | "different_team" | "different_level" | "different_contract" | "new_opening") | null;
             /** Origin */
             origin?: ("ai_hunt" | "user_link" | "user_paste" | "your_mail") | null;
             /** Posted At */
@@ -7394,10 +7400,28 @@ export interface components {
             event_id: number;
         };
         /**
+         * HuntKitDoneIn
+         * @description The kit's own ``<out>.done.json``, written only when it ends (2026-11-18 16:13: mark_done at 16:31, kit to
+         *     16:41): its result count and each ad's text class (full | snippet = 500 chars or fewer, or cut | empty).
+         */
+        HuntKitDoneIn: {
+            /** Complete */
+            complete?: boolean | null;
+            /** Empty */
+            empty: number;
+            /** Full */
+            full: number;
+            /** Results */
+            results: number;
+            /** Snippet */
+            snippet: number;
+        };
+        /**
          * HuntKitIn
          * @description The hunt kit's funnel: results, new after the known drop, passing the title/place pre-filter, read in full.
          */
         HuntKitIn: {
+            done?: components["schemas"]["HuntKitDoneIn"] | null;
             /** New */
             new: number;
             /** Prefilter Passed */

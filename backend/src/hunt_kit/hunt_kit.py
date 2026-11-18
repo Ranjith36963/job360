@@ -1638,6 +1638,82 @@ def load_known(path: str) -> set[str]:
         return {k for k in (norm_known_url(line) for line in f) if k}
 
 
+# --known-ct: Job360's known list as "company ||| title ||| id" lines. One job under another company label
+# ("Lloyds Bank" vs "Lloyds Banking Group", 2026-11-18 16:13 run) is known too. A copy of Job360's
+# services/applications/reposts.py company_title_key; tests/test_hunt_dedupe_employer.py checks they agree.
+COMPANY_STEM_DROP = frozenset({
+    "ltd", "limited", "inc", "llc", "plc", "gmbh", "ag", "sa", "pvt", "private", "corp", "corporation", "co",
+    "company", "holdings", "group", "bank", "banking", "technologies", "technology", "tech", "labs", "lab",
+    "solutions", "systems", "services", "software", "consulting", "consultancy", "digital", "india", "uk", "us",
+    "usa", "global", "international",
+})
+
+
+def _alnum_words(text: str) -> list[str]:
+    decomposed = unicodedata.normalize("NFD", text or "")
+    plain = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn").casefold()
+    return "".join(ch if ch.isalnum() else " " for ch in plain).split()
+
+
+def _role_core(title: str) -> str:
+    """The title without trailing " - " segments that hold a comma, then one trailing "(...)" group."""
+    parts = [" ".join(seg.split()) for seg in (title or "").split(" - ")]
+    while len(parts) > 1 and (not parts[-1] or "," in parts[-1]):
+        parts.pop()
+    core = " - ".join(parts)
+    if core.endswith(")") and "(" in core:
+        head = core[: core.rindex("(")].strip()
+        if head:
+            core = head
+    return " ".join(core.casefold().split())
+
+
+def company_title_key(company: str, title: str) -> str:
+    """``company stem | role words``: the key Job360's bring_job duplicate guard uses."""
+    words = _alnum_words(company)
+    if len(words) > 1 and words[0] == "the":
+        words = words[1:]
+    while len(words) > 1 and words[-1] in COMPANY_STEM_DROP:
+        words.pop()
+    return " ".join(words) + "|" + " ".join(_alnum_words(_role_core(title)))
+
+
+def load_known_ct(path: str) -> set[str]:
+    """Read a --known-ct file (``company ||| title ||| id`` per line) into a set of company_title_key values."""
+    if not path:
+        return set()
+    out: set[str] = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            cols = line.split(" ||| ")
+            if len(cols) >= 2 and cols[0].strip():
+                out.add(company_title_key(cols[0], cols[1]))
+    return out
+
+
+SNIPPET_MAX_CHARS = 500  # freehire cuts its text at exactly 500 characters (2026-11-18 14:11 run: 21 ads)
+
+
+def text_class(desc: str) -> str:
+    """``empty`` | ``snippet`` (500 characters or fewer, or ends cut with an ellipsis) | ``full``."""
+    text = (desc or "").strip()
+    if not text:
+        return "empty"
+    if len(text) <= SNIPPET_MAX_CHARS or text.endswith("…") or text.endswith("..."):
+        return "snippet"
+    return "full"
+
+
+def write_done_file(out: str, results: list[dict[str, Any]], col: Collector, stop_reason: str | None) -> None:
+    """``<out>.done.json``, written once the run ended: what mark_done's kit report copies (``kit.done``)."""
+    counts = collections.Counter(text_class(str(r.get("description") or "")) for r in results)
+    done = {"results": len(results), "full": counts["full"], "snippet": counts["snippet"], "empty": counts["empty"],
+            "known_skipped": col.known_skipped, "known_ct_skipped": col.known_ct_skipped,
+            "complete": not stop_reason, "stop_reason": stop_reason or None}
+    with open(out + ".done.json", "w", encoding="utf-8") as f:
+        json.dump(done, f)
+
+
 class Collector:
     """Thread-safe stats + results, applying the shared filter pipeline."""
 
@@ -1654,6 +1730,8 @@ class Collector:
         self.skipped_seen = 0  # jobs dropped at output because history already has them
         self.known: set[str] = load_known(getattr(args, "known", "") or "")  # --known: URLs already in Job360
         self.known_skipped = 0
+        self.known_ct: set[str] = load_known_ct(getattr(args, "known_ct", "") or "")  # --known-ct
+        self.known_ct_skipped = 0
         self.boards_listed: dict[str, int] = {}  # per ATS, after dedup and dead-board skip, before rotation
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
         self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
@@ -1761,6 +1839,10 @@ class Collector:
             with self.lock:
                 self.known_skipped += 1
             return  # already in Job360: dropped before any detail fetch, output or stream
+        if self.known_ct and company_title_key(raw.get("company") or "", title) in self.known_ct:
+            with self.lock:
+                self.known_ct_skipped += 1
+            return  # the same company and role is already in Job360 under another link or label
         det = raw.get("detail")
         if callable(det):  # lazy detail fetch, only for title matches
             extra = det() or {}
@@ -3548,6 +3630,8 @@ def format_stats(col: Collector, skipped_seen: int = 0) -> str:
         lines.append("boards_this_run: " + ", ".join("%s=%d" % kv for kv in sorted(col.boards_this_run.items())))
     if col.known:
         lines.append("known_skipped=%d" % col.known_skipped)
+    if col.known_ct:
+        lines.append("known_ct_skipped=%d" % col.known_ct_skipped)
     lines.append("total kept: %d   skipped as already seen: %d   boards skipped as dead: %d"
                  % (len(col.results), skipped_seen, col.dead_skipped))
     return "\n".join(lines)
@@ -3652,6 +3736,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--known", default="", metavar="FILE",
                    help="file of URLs already in Job360, one per line: matching jobs are dropped before output")
+    p.add_argument("--known-ct", default="", metavar="FILE",
+                   help="Job360's known list as 'company ||| title ||| id' lines: the same company and role "
+                        "(another label or link) is dropped before output")
     p.add_argument("--stats", action="store_true", help="print coverage counts per source to stderr")
     return p
 
@@ -3742,6 +3829,7 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
                 with open(args.out, "w", encoding="utf-8") as f:
                     for r in results:
                         f.write(json.dumps(r, ensure_ascii=False) + "\n")
+                write_done_file(args.out, results, col, sink.stop_reason)
             counts = {"kept": len(results), "stored": sink.count}
             if not partial:  # a partial run must not mark its jobs "seen": the resumed run still outputs them
                 # Only now, after the output was written in full: a run that died before this line

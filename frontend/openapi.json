@@ -3495,6 +3495,21 @@
             ],
             "title": "Employer Search"
           },
+          "employer_searched": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Searched"
+          },
           "found_on": {
             "anyOf": [
               {
@@ -3526,6 +3541,36 @@
             "maxLength": 300,
             "title": "Location",
             "type": "string"
+          },
+          "not_duplicate_of": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Duplicate Of"
+          },
+          "not_duplicate_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "different_location",
+                  "different_team",
+                  "different_level",
+                  "different_contract",
+                  "new_opening"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Duplicate Reason"
           },
           "origin": {
             "anyOf": [
@@ -8509,10 +8554,64 @@
         "title": "HiddenOut",
         "type": "object"
       },
+      "HuntKitDoneIn": {
+        "description": "The kit's own ``<out>.done.json``, written only when it ends (2026-11-18 16:13: mark_done at 16:31, kit to\n16:41): its result count and each ad's text class (full | snippet = 500 chars or fewer, or cut | empty).",
+        "properties": {
+          "complete": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Complete"
+          },
+          "empty": {
+            "minimum": 0.0,
+            "title": "Empty",
+            "type": "integer"
+          },
+          "full": {
+            "minimum": 0.0,
+            "title": "Full",
+            "type": "integer"
+          },
+          "results": {
+            "minimum": 0.0,
+            "title": "Results",
+            "type": "integer"
+          },
+          "snippet": {
+            "minimum": 0.0,
+            "title": "Snippet",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "full",
+          "snippet",
+          "empty"
+        ],
+        "title": "HuntKitDoneIn",
+        "type": "object"
+      },
       "HuntKitIn": {
         "additionalProperties": false,
         "description": "The hunt kit's funnel: results, new after the known drop, passing the title/place pre-filter, read in full.",
         "properties": {
+          "done": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HuntKitDoneIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "new": {
             "minimum": 0.0,
             "title": "New",
