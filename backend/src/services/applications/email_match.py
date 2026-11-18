@@ -27,6 +27,7 @@ MATCH_EMAIL_REASONS = (
 )
 _NO_COMPANY = frozenset({"", "unknown"})  # models.Job._clean_company stores "Unknown" for a blank company
 _MIN_COMPANY_CHARS = 2
+_MIN_SITE_CHARS = 3  # "ey", "hp": too short to say a domain names the company
 
 
 def _clean(name: str, value: str, cap: int, setting_name: str) -> str:
@@ -43,8 +44,25 @@ def _company_site(job_url: str) -> str:
     an ATS (``email_senders`` covers it), a job board or a shared host: many employers' jobs live there, so their
     mail ties to none of them. Gmail check 2026-11-18: a company's own careers mail (``careeralerts.kainos.com``)
     with no company name in its subject matched nothing and was parked unmatched. One rule with the email-code
-    check (:func:`email_codes.employer_domain`), so the two cannot drift apart."""
+    check (:func:`email_codes.employer_domain`), so the two cannot drift apart.
+
+    Coverage audit 2026-11-18: an applicant system Job360 does not list yet (``vinove.keka.com``) looked like the
+    employer's own site and tied its mail to every employer on it. The domain must also name the company
+    (``kainos.com`` / Kainos, ``royallondon.com`` / Royal London), else it is no tie."""
     return employer_domain(job_url)
+
+
+def _fold(text: str) -> str:
+    return "".join(ch for ch in text.casefold() if ch.isalnum())
+
+
+def _site_names_company(site: str, company: str) -> bool:
+    """True when the site's own label (``kainos`` of kainos.com) and the company name, letters and digits only, hold
+    one another (``cmacgmgroup`` / CMA CGM, ``seagatecareers`` / Seagate). Short names never count."""
+    label, name = _fold(site.split(".", 1)[0]), _fold(company)
+    if len(label) < _MIN_SITE_CHARS or len(name) < _MIN_SITE_CHARS:
+        return False
+    return label in name or name in label
 
 
 def _named_in(company_key: str, subject_folded: str) -> bool:
@@ -120,7 +138,7 @@ async def match_email(
         if domain and any(_is_or_under(domain, s) for s in senders):
             reasons.append("sender_domain_in_email_senders")
         site = _company_site(a["job_url"] or "")
-        if sender_site and site and sender_site == site:
+        if sender_site and site and sender_site == site and _site_names_company(site, a["job_company"] or ""):
             reasons.append("sender_domain_is_job_site")
         company = (a["normalized_company"] or a["job_company"] or "").strip().casefold()
         if subject and _named_in(company, subject_folded):

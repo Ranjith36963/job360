@@ -421,3 +421,63 @@ async def test_mail_from_the_jobs_own_careers_domain_is_listed(authenticated_asy
         assert (await _ok(client, sender="x@uk.indeed.com"))["candidates"] == []
         greenhouse = (await _ok(client, sender="no-reply@greenhouse.io"))["candidates"]
         assert [c["reasons"] for c in greenhouse] == [["sender_domain_in_email_senders"]]
+
+
+def _app(company: str, url: str, n: int) -> dict[str, Any]:
+    return {"title": f"AI Engineer {n}", "company": company, "location": "Remote", "apply_url": url,
+            "description": "Agents and RAG in Python."}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "sender", "senders"),
+    [
+        # Coverage audit 2026-11-18 (owner via Kits): ATS mail whose domain is not the company's must still tie.
+        ("https://acme.wd3.myworkdayjobs.com/en-US/careers/job/123", "Acme <acme@myworkday.com>",
+         ["myworkdayjobs.com", "myworkday.com"]),
+        ("https://jobs.lever.co/acme/07c51b46", "Acme <no-reply@hire.lever.co>", ["lever.co"]),
+        ("https://job-boards.greenhouse.io/acme/jobs/1", "no-reply@us.greenhouse-mail.io",
+         ["greenhouse.io", "greenhouse-mail.io"]),
+        # Seen on the owner's open applications, missing from the list until now: Breezy mails from breezy-mail.com.
+        ("https://acme.breezy.hr/p/95e9f2e27554-ai-engineer", "Hiring Team <no-reply@breezy-mail.com>",
+         ["breezy.hr", "breezy-mail.com"]),
+        ("https://acme.keka.com/careers/jobdetails/164757", "Acme Careers <careers@keka.com>", ["keka.com"]),
+    ],
+)
+async def test_ats_mail_not_named_after_the_company_is_listed(authenticated_async_context, url, sender, senders):
+    async with authenticated_async_context() as client:
+        app = await _bring(client, _app("Acme", url, 1))
+        data = await _ok(client, sender=sender, subject="Thanks for applying")
+        assert [(c["application_id"], c["reasons"], c["email_senders"]) for c in data["candidates"]] == [
+            (app, ["sender_domain_in_email_senders"], senders)
+        ]
+
+
+@pytest.mark.asyncio
+async def test_an_applicant_system_is_never_one_employers_own_site(authenticated_async_context):
+    """keka.com hosts many employers' careers pages (vinove.keka.com, skanai.keka.com): its mail ties to each as
+    an ATS sender, never as that employer's own site, and the submit gates still treat it as a new site."""
+    from src.services.applications.job_checks import classify_host
+
+    async with authenticated_async_context() as client:
+        one = await _bring(client, _app("Vinove", "https://vinove.keka.com/careers/jobdetails/145551", 1))
+        two = await _bring(client, _app("Skan AI", "https://skanai.keka.com/careers/jobdetails/86878", 2))
+        data = await _ok(client, sender="noreply@keka.com")
+        assert sorted((c["application_id"], tuple(c["reasons"])) for c in data["candidates"]) == [
+            (one, ("sender_domain_in_email_senders",)), (two, ("sender_domain_in_email_senders",)),
+        ]
+    assert classify_host("vinove.keka.com") == "unknown"  # the new-site ask before a first submit is unchanged
+
+
+@pytest.mark.asyncio
+async def test_a_job_site_whose_domain_does_not_name_the_company_is_no_tie(authenticated_async_context):
+    """A careers host on an applicant system Job360 does not know yet (jobs.unknownats.com) is shared by many
+    employers: the job-site reason needs the domain to name the company."""
+    async with authenticated_async_context() as client:
+        await _bring(client, _app("Zephyr Systems", "https://zephyr.unknownats.com/jobs/7", 1))
+        assert (await _ok(client, sender="no-reply@unknownats.com"))["candidates"] == []
+        named = await _bring(client, _app("Royal London", "https://careers.royallondon.com/jobs/9", 2))
+        data = await _ok(client, sender="talent@royallondon.com")
+        assert [(c["application_id"], c["reasons"]) for c in data["candidates"]] == [
+            (named, ["sender_domain_is_job_site"])
+        ]

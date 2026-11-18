@@ -30,7 +30,7 @@ def email_senders_for(url: str) -> list[str]:
     """The ATS sender domains for an apply link; ``[]`` when the host is not a known ATS
     (a company's own careers site: its domain is unknown to us, so we stay silent)."""
     host = apply_host(url or "")
-    for apex in settings.OFFICIAL_ATS_HOSTS:
+    for apex in (*settings.OFFICIAL_ATS_HOSTS, *settings.ATS_EMAIL_ONLY_HOSTS):
         if host and _is_or_under(host, apex):
             return [apex, *settings.ATS_EXTRA_EMAIL_SENDERS.get(apex, ())]
     return []
