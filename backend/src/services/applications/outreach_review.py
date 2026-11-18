@@ -208,14 +208,21 @@ async def check(
     actual: dict[str, list[str]] = {}
     for ln in text.splitlines():  # the draft's own text decides case, never the entry's copy
         actual.setdefault(cv_review.line_key(ln), []).append(ln.strip().lstrip(cv_review._BULLETS + " \t"))
+    quotes: dict[str, list[str]] = {}
     for e in entries:
         quote = e["profile_quote"]
         if not cv_review.quote_in_profile(quote, source, source_words):
             down.add("quote_not_in_profile")
         if len(evidence._words(quote)) < 3:
             down.add("quote_too_thin")
-        for body in actual.get(cv_review.line_key(e[LINE_FIELD])) or [e[LINE_FIELD]]:
-            if review_rows.hard_facts(body, [quote, context, own], *terms):  # the CV rules, every sentence
+        quotes.setdefault(cv_review.line_key(e[LINE_FIELD]), []).append(quote)
+    # 2026-11-18: a LinkedIn note is ONE line naming facts from several profile fields, and each quote must sit in
+    # ONE field, so a line judged against each quote alone was always weak. A line's facts are judged against all
+    # the quotes given for that line (each still inside one field).
+    for key, given in quotes.items():
+        lines = actual.get(key) or [e[LINE_FIELD] for e in entries if cv_review.line_key(e[LINE_FIELD]) == key][:1]
+        for body in lines:
+            if review_rows.hard_facts(body, [*given, context, own], *terms):  # the CV rules, every sentence
                 down.add("claim_not_in_quote")
     weak_ids = {
         p.get(ID_KEY) for p in (_parse(r.get("text")) for r in rows if r["entry"] == ENTRY)

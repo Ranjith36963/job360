@@ -408,3 +408,21 @@ def test_auto_send_reasons_are_the_automatic_ones_with_text():
 
     sends = {"auto_mode", "owner_clicked", *rules.LINKEDIN_AUTO_SEND_REASONS}
     assert set(outreach_review.AUTO_SEND_REASONS) == sends - {"owner_clicked", "connect_no_note", "auto_connect"}
+
+
+@pytest.mark.asyncio
+async def test_a_one_line_note_backed_by_two_quotes_is_strong(authenticated_async_context, fixture_user_id):
+    """2026-11-18 people runs: every LinkedIn note stored weak. A note is ONE line naming facts from two profile
+    lines, a quote must sit in ONE line, so each quote judged alone never carried the whole line. All the quotes
+    given for a line now back it together; a fact no quote carries is still weak."""
+    one = "I am a data engineer with 2 years of Python experience at Acme and built dbt pipelines on Snowflake."
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{one}\nBest regards,\nAda Lovelace")
+        sha = (await _review_block(client, cid))["sha256"]
+        resp = await _record(client, app_id, cid, _payload(mid, sha, _rows((one, QUOTE_1), (one, QUOTE_2))))
+        assert resp.status_code == 201, resp.text
+        verdict = await _check(client, cid, mid)
+    [stored] = _reviews(cid)
+    assert (stored["confidence"], stored["downgraded"]) == ("strong", []), stored
+    assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
