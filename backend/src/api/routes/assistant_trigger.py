@@ -1,8 +1,10 @@
 """Send starts my assistant — the website's routes (services/browser_agent/trigger.py).
 
-Every route is a browser session only (``require_session_user``): a token — an assistant —
-can neither read where Send points, nor change it, nor fire it. The token itself is never
-returned. No MCP tool exposes these (rule M5 is about tools that exist; none should).
+Every route that reads, sets, deletes or presses a start link is a browser session only
+(``require_session_user``): a token — an assistant — can neither read where a link points nor
+change it, and the token itself is never returned. One route only STARTS a duty's routine for a
+token too (owner 2026-11-18, ``start_duty``; MCP ``whats_due(start=...)``): fixed words, the same
+cool-down and hourly cap as every other start, refused while paused.
 """
 from __future__ import annotations
 
@@ -14,9 +16,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.core import settings
+from src.repositories.database import JobDatabase
 from src.services.browser_agent import duty_trigger as duty_service
 from src.services.browser_agent import trigger as trigger_service
 from src.services.browser_agent.sign_ins import SignInKeyMissingError
@@ -181,4 +184,33 @@ async def run_duty(
             await own_browser.run_now(db, user.id, datetime.now(timezone.utc))
         result = await duty_service.fire(db, user.id, duty, cause=cause, resolve=DEFAULT_RESOLVE)
     _audit(user, f"{cause}_{duty}", "started" if result.get("fired") else str(result.get("reason")))
+    return result
+
+
+@router.post("/assistant-duty-triggers/{duty}/start", dependencies=AUTH_FIRST)
+async def start_duty(
+    duty: str,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The user's assistant (or the website) starts ONE duty's routine now (owner 2026-11-18: "job360 and the
+    assistant can trigger"). Fire only: the link and token stay session-only above. Same cool-down and hourly
+    cap as every other start; refused while the user has paused the assistant. MCP: ``whats_due(start=...)``."""
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
+    from src.services.fetch.fetcher import DEFAULT_RESOLVE  # noqa: PLC0415
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    _duty_or_404(duty)
+    profile = load_profile(user.id) or UserProfile()
+    paused, until = rules.pause_state(profile.assistant_settings, datetime.now(timezone.utc))
+    if paused:
+        result: dict[str, Any] = {"fired": False, "reason": "paused", "paused_until": until}
+    else:
+        result = await duty_service.fire(db, user.id, duty, cause="assistant_asked", resolve=DEFAULT_RESOLVE)
+    get_audit_logger().info("assistant_duty_start", extra={
+        "event": "assistant_duty_start", "user_id": safe_log_value(user.id), "duty": safe_log_value(duty),
+        "actor": safe_log_value(actor_for(user)),
+        "result": safe_log_value("started" if result.get("fired") else str(result.get("reason")))})
     return result

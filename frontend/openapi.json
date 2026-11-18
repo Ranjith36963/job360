@@ -26274,6 +26274,83 @@
         ]
       }
     },
+    "/api/assistant-duty-triggers/{duty}/start": {
+      "post": {
+        "description": "The user's assistant (or the website) starts ONE duty's routine now (owner 2026-11-18: \"job360 and the\nassistant can trigger\"). Fire only: the link and token stay session-only above. Same cool-down and hourly\ncap as every other start; refused while the user has paused the assistant. MCP: ``whats_due(start=...)``.",
+        "operationId": "start_duty_api_assistant_duty_triggers__duty__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "duty",
+            "required": true,
+            "schema": {
+              "title": "Duty",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Duty Api Assistant Duty Triggers  Duty  Start Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Duty",
+        "tags": [
+          "assistant-trigger"
+        ]
+      }
+    },
     "/api/assistant-settings": {
       "get": {
         "description": "The caller's settings (each raw + effective), the practice-run state and\nthe requests waiting for the user's OK. Read-only; any signed-in caller.",

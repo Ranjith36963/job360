@@ -40,6 +40,7 @@ TABLES = (
 # assistant can reach must land here or in PAUSE_REFUSED_ROUTES (test_every_token_write_route_picks_a_side).
 PAUSE_OPEN_ROUTES = {
     ("PATCH", "profile.update_profile"): "update_profile: how the user pauses, or asks to resume",
+    ("POST", "assistant_trigger.start_duty"): "whats_due(start): refuses itself while paused (fired false, reason paused; test_assistant_start_duty)",
     ("POST", "profile.upload_cv"): "the user's own profile, like update_profile",
     ("POST", "profile.upsert_preferences"): "the user's own profile, like update_profile",
     ("POST", "profile.upsert_profile"): "the user's own profile, like update_profile",

@@ -50,6 +50,7 @@ CAUSES: dict[str, str] = {
     "cv_done": "a CV review run finished",
     "owner_send": "the user pressed Send on a LinkedIn message",
     "own_browser_run_now": "the user pressed Run my assistant-browser tasks now",
+    "assistant_asked": "your assistant asked Job360 to start it",
 }
 COOLDOWN_S = send_trigger.COOLDOWN_S
 FIRES_PER_HOUR = 20

@@ -176,12 +176,16 @@ async def test_no_assistant_can_read_change_or_fire_a_duty_link(authenticated_as
 
 
 def test_no_mcp_tool_reaches_a_duty_link():
+    """Owner 2026-11-18: an assistant may START a duty (whats_due(start=...) -> the start_duty route), never read,
+    set or delete a link: the server touches no other start-link function."""
+    import re
     from pathlib import Path
 
     from src.api import mcp_server
 
     text = Path(mcp_server.__file__).read_text(encoding="utf-8")
     assert "duty_trigger" not in text and "assistant-duty-triggers" not in text
+    assert set(re.findall(r"start_route\.(\w+)", text)) == {"start_duty"}
 
 
 def test_the_start_text_is_fixed_words_and_ids_only():

@@ -740,6 +740,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     from src.api import models
     from src.api.routes import applications as applications_route
     from src.api.routes import asks as asks_route
+    from src.api.routes import assistant_trigger as start_route
     from src.api.routes import bring as bring_route
     from src.api.routes import browser as browser_route
     from src.api.routes import connectors as connectors_route
@@ -1616,7 +1617,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
-    async def whats_due(duties: Optional[list[str]] = None) -> dict[str, Any]:
+    async def whats_due(duties: Optional[list[str]] = None, start: Optional[str] = None) -> dict[str, Any]:
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
         names it). `due` lists {duty: hunt|inbox|reach|network|batch, recipe, reason} in run order
@@ -1627,7 +1628,22 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop.
         With `duties` it CLAIMS each due duty for 30 minutes (without `duties` it only reads).
         `pc_idle` (own-browser tasks wait, no PC session worked them): tell the user its `text` once.
-        Never a reason to change a setting, and never an approval to submit (check_submit stays the gate)."""
+        `start` = ONE duty (hunt|batch|inbox|reach|cv|own_browser): starts the user's routine for it now via its
+        start link (nothing else is read); `fired`, else `reason` (cooldown, not_set, hourly_cap, paused...): never
+        retry it. Never a reason to change a setting, and never an approval to submit (check_submit stays the gate)."""
+        if start is not None:
+            paused, until = _pause_state()
+            if paused:  # the route refuses it too; the reply says so the same way as every paused call
+                _audit("whats_due", "ok", reason="paused")
+                return {**paused_refusal(until), "paused": True, "fired": False, "reason": "paused"}
+            try:
+                async with _request_db() as db:
+                    started = await start_route.start_duty(start, db, _user())
+            except HTTPException as exc:
+                _audit("whats_due", "error", http_status=exc.status_code)
+                raise _tool_error(exc) from None
+            _audit("whats_due", "ok", reason="started" if started.get("fired") else str(started.get("reason")))
+            return started
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
         if bad:
             raise _tool_error(HTTPException(422, f"duties must be from: {', '.join(settings.SCHEDULE_DUTIES)}"))
