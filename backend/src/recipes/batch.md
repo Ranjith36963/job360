@@ -42,7 +42,7 @@ blocker. "approve_cv:you" waits on the CV run (`get_recipe("cv")`) or the user's
      `form_checked`, upload the CV, fill, `form_filled`, re-read every field, `form_swept`, the Doctor's Form answers check as its own pass (fix, sweep again; "Doctor check run: yes"), `check_submit`.
    - Any other browser (rules "Which browser"; own browser, sign-in sites): never open it, never read its kit. Make it ready (one ask for its missing answers if none is open), list it under Ready for your PC. A row
      whose apply link is on linkedin.com (Easy Apply) runs only in the user's own browser.
-   - CAPTCHA or bot check in Job360's browser (or its `needs_you`): `blocked` {reason captcha or bot_check, browser "job360", page_host, step, detail}; Job360 moves it to the PC. An emailed one-time code only while
+   - CAPTCHA or bot check in Job360's browser (or its `needs_you`, or a `captcha_text` signal whose `quote` is a real check): `blocked` {reason captcha or bot_check, browser "job360", page_host, step, detail}; Job360 moves it to the PC. An emailed one-time code only while
      `use_email_codes` is on (rules EMAIL CODES); Job360's browser or the setting off: `blocked` {reason otp_needed, browser}.
    - Posting gone (404, "no longer available", an ended window, on the employer's page or an aggregator): `blocked` {reason "posting_closed", evidence, browser, page_host}, never "other". The site says you applied:
      already_applied_on_site. Sign-in, account, site error: `blocked` with the real reason. Then the next row.

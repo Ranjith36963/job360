@@ -60,7 +60,13 @@ from src.services.browser_agent.page_js import (
     WATCH_READ_JS,
     WATCH_START_JS,
 )
-from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
+from src.services.browser_agent.safety import (
+    RequestScreen,
+    _captcha_frame,
+    blocker_for,
+    captcha_text_quote,
+    control_kind,
+)
 from src.services.browser_agent.sites import (
     MIN_LABELLED_FIELDS,
     account_step,
@@ -1055,7 +1061,13 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
             "above": above, "below": below,
             "hint": "Only the controls nearest the screen are listed. scroll up or down, then look, to see the rest.",
         }
-    blocker = blocker_for(captcha_urls, text, has_password, account_step(site, out["title"], text))
+    account = account_step(site, out["title"], text)
+    blocker = blocker_for(captcha_urls, text, has_password, account)
+    if blocker is not None and blocker.from_text and not await _challenge_shown(page):
+        # CAPTCHA words with no frame and no challenge element (an ad for a bot-detection firm): a hint for
+        # Claude, never a stop (owner rule 2026-11-18, audit 6.2). The sign-in checks still run without them.
+        out.setdefault("signals", []).append({"signal": CAPTCHA_TEXT_SIGNAL, "quote": captcha_text_quote(text)})
+        blocker = blocker_for(captcha_urls, "", has_password, account)
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
         if blocker.from_text:
@@ -1123,7 +1135,35 @@ async def _page_captcha(page: Any) -> bool:
             continue
         read += 1
     blocker = blocker_for(urls, "\n\n".join(texts)[:MAX_TEXT], False)
-    return blocker is not None and blocker.reason == "captcha"
+    if blocker is None or blocker.reason != "captcha":
+        return False
+    # Words alone are a hint (look's ``captcha_text``): only a frame or a shown challenge element stops.
+    return not blocker.from_text or await _challenge_shown(page)
+
+
+# look's hint that the page text holds CAPTCHA words with no check on the page; Claude decides what it means.
+CAPTCHA_TEXT_SIGNAL = "captcha_text"
+
+# A CAPTCHA widget or challenge element in the page itself (no frame yet): the vendors' own widget classes and
+# site-key attribute, Cloudflare's challenge form, and a box or picture named captcha. DOM facts, never prose.
+CHALLENGE_SELECTOR = (
+    ".g-recaptcha, .h-captcha, .cf-turnstile, .frc-captcha, [data-sitekey], #challenge-form, #challenge-running, "
+    "#cf-challenge-running, input[name*='captcha' i], input[id*='captcha' i], img[src*='captcha' i], "
+    "img[alt*='captcha' i], img[id*='captcha' i]"
+)
+CHALLENGE_JS = "(sel) => !!document.querySelector(sel)"
+
+
+async def _challenge_shown(page: Any) -> bool:
+    """Whether the page or one of its first frames holds a CAPTCHA widget or challenge element
+    (``CHALLENGE_SELECTOR``). A frame that cannot be read counts as none."""
+    for f in page.frames[:MAX_FRAMES_CHECKED]:
+        try:
+            if await asyncio.wait_for(f.evaluate(CHALLENGE_JS, CHALLENGE_SELECTOR), FRAME_READ_TIMEOUT_S):
+                return True
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation holds nothing readable
+            continue
+    return False
 
 
 async def _find(s: Session, ref: str) -> tuple[Any, Any]:

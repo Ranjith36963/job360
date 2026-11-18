@@ -278,8 +278,19 @@ async def browser_action(
         result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
     if url_warning:
         result["url_warning"] = url_warning
+    _log_signals(user, body.application_id, result)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
+
+
+def _log_signals(user: CurrentUser, application_id: Optional[int], result: dict[str, Any]) -> None:
+    """One line per hint look gave (ids and the signal code, never the quote): a hint Claude then confirmed
+    or ignored shows next to the ``blocked`` it did or did not record."""
+    for sig in result.get("signals") or []:
+        get_audit_logger().info("browser_signal", extra={
+            "event": "browser_signal", "user_id": safe_log_value(user.id),
+            "application_id": application_id, "signal": safe_log_value(str(sig.get("signal", ""))),
+        })
 
 
 URL_MISMATCH = "browser_url_mismatch"
