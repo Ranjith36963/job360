@@ -596,7 +596,15 @@ SHARED_ATS_HOSTS = ("app.ripplehire.com", "www.ripplehire.com")
 # them. Each application exposes `email_senders` = the ATS host's domain plus the
 # extra sender domains below, for the assistant's Gmail `from:` search. Data, not
 # a keyword list: a vendor missing here still gets its own domain.
+# Gmail coverage audit 2026-11-18: applicant systems on the owner's open applications that were in neither list.
+# Here they only give `email_senders` and are never "one employer's own site" (match_email, email codes); they
+# stay OUT of OFFICIAL_ATS_HOSTS, which also waives the new-site ask before a first submit (kit._new_site).
+ATS_EMAIL_ONLY_HOSTS = (
+    "breezy.hr", "keka.com", "hibob.com", "darwinbox.com", "oraclecloud.com", "successfactors.eu",
+    "successfactors.com", "pinpointhq.com", "phenompro.com", "umantis.com",
+)
 ATS_EXTRA_EMAIL_SENDERS: dict[str, tuple[str, ...]] = {
+    "breezy.hr": ("breezy-mail.com",),  # seen in the owner's Gmail 2026-11-04: no-reply@breezy-mail.com
     "greenhouse.io": ("greenhouse-mail.io",),
     "myworkdayjobs.com": ("myworkday.com",),
     "workable.com": ("workablemail.com",),

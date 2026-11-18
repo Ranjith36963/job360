@@ -2623,6 +2623,8 @@ async def match_email(
             "has_subject": bool(body.subject.strip()),
             "candidate_count": len(result["candidates"]),
             "application_ids": [c["application_id"] for c in result["candidates"]],
+            # closed reason codes per candidate (2026-11-18): shows WHICH tie listed it, e.g. an ATS vs the job site
+            "reasons": [c["reasons"] for c in result["candidates"]],
             "truncated": result["truncated"],
             "result": "ok",
         },

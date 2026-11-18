@@ -115,6 +115,8 @@ def employer_domain(job_url: str) -> str:
     host = _host(apply_host(job_url or ""))
     if not host or classify_host(host) != "unknown" or host in settings.SHARED_ATS_HOSTS:
         return ""
+    if any(_within(host, d) for d in settings.ATS_EMAIL_ONLY_HOSTS):  # an applicant system: many employers live there
+        return ""
     return registrable(host)
 
 
