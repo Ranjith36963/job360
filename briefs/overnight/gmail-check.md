@@ -16,8 +16,11 @@ open application. Scores come from the run's transcript (reads only).
   Greenhouse (sender greenhouse-mail.io) and match_email offered app 1047 (Brunswick Group, also on
   Greenhouse). The run read the body, saw DoiT, and parked it: correct, but the recipe gives Claude no way to
   pick a candidate the BODY names when the sender is a shared ATS.
-- Fix: working audit item 4.1 next (recipe: let Claude pick the one application the body names, quote the line).
-- Decision taken without the owner: none.
+- Fix: PR #1680 (audit 4.1): recipe step 5 says match_email's candidates are hints and the email body decides; a
+  candidate the body does not name is no match; record on the one application the body names with source.quote.
+  Failing test first; gate PASS; auto-merge on. No new refusal.
+- Decision taken without the owner: #1680 changes recipe wording only (Claude judges from the body); nothing
+  the server accepts changed. Audit 4.2 (alert/digest/newsletter senders hidden when older): noted only, low risk.
 - Coverage: the search is date-only, so it lists all mail; search.application_ids = every open application
   (audit 18 Nov, PR #1670). ATS senders now include Breezy, Keka, HiBob, Darwinbox, Oracle, SuccessFactors,
   Pinpoint, Phenom, Umantis (#1670, merged 19:17).
