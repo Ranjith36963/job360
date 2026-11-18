@@ -552,6 +552,17 @@ def test_the_own_browser_recipe_takes_again_after_the_hunt_duty_and_keeps_sweepi
     assert "never stopping after one alert while time is left" in sweep
 
 
+def test_the_own_browser_run_closes_its_tab_group_before_the_summary():
+    """Owner 2026-11-18: every hourly PC run left its Chrome tab group open (4 "Job360 PC browser" groups piled up)."""
+    from src.api.routes.recipes import load_recipe
+
+    lines = [flat(line) for line in load_recipe("own_browser").text.splitlines()]
+    summary = next(i for i, line in enumerate(lines) if line.startswith("**summary**"))
+    close = next(i for i, line in enumerate(lines) if line.startswith("**close the run's tabs**"))
+    assert close == summary - 1 or (close < summary and not any(lines[close + 1:summary]))
+    assert "tabs_close_mcp" in lines[close] and "whole tab group" in lines[close]
+
+
 def test_the_own_browser_recipe_is_the_whole_pc_run_with_its_closed_tokens():
     """The PC task is three stable lines (get_recipe("own_browser"), obey Job360); every rule of the run lives here:
     start, LinkedIn safety, the queue kinds, the CV file step, the job-alert sweep, the summary and the hard lines."""

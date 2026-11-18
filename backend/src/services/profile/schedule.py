@@ -58,6 +58,10 @@ RUNNING = "running:"  # + duty: the slot that says a run has this duty now (owne
 # past its interval, the hunt queue hold and any back-off, until its next mark_done.
 RUN_NOW = "run_now:"
 RUN_NOW_MINUTES = 15
+# + duty: claims of that duty that ran out with no mark_done, in a row (``failures``); a mark_done that is not
+# failed clears it. Prod 2026-11-18: two batch runs claimed at 16:29 and 17:07, read kits, never marked done;
+# the claims expired silently and whats_due kept saying failures_in_row 0.
+LAPSED = "lapsed:"
 INBOX_AUTO_MODES = frozenset({"auto", "scheduled"})
 INBOX_DEFAULT_HOURS = 24
 _EVERY_RE = re.compile(r"^(\d{1,3})h$")
@@ -141,6 +145,9 @@ class DueFacts:
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
     running: dict[str, datetime] = field(default_factory=dict)
+    # Claims that ran out with no mark_done, in a row, per duty (LAPSED slots): shown in failures_in_row only,
+    # never a back-off (a lapsed claim frees its duty at once).
+    lapsed: dict[str, int] = field(default_factory=dict)
     # Duties the user pressed Run now for: {duty: pressed_at} (RUN_NOW slots).
     forced: dict[str, datetime] = field(default_factory=dict)
     # 2026-11-18 hunt: the user saved no target titles and the run invented 23. A due hunt then says `needs`.
@@ -271,7 +278,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         "run_now": sorted(forced_due),
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
         "last_tick_at": _iso(f.stamps.get(TICK)),
-        "failures_in_row": {d: int(f.failures.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
+        "failures_in_row": {d: int(f.failures.get(d, 0)) + int(f.lapsed.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
         "expected_every_hours": settings.SCHEDULE_TICK_HOURS,
         "checked_at": _iso(now),
     }
@@ -323,6 +330,48 @@ async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime)
             got.add(duty)
     await db._db.commit()
     return got
+
+
+async def sweep_lapsed(db: JobDatabase, user_id: str, now: datetime) -> list[str]:
+    """Count every claim that ran out with no ``mark_done``: ONE delete per duty frees the expired claim, so
+    each lapse is counted once however many reads race, then the duty's LAPSED slot adds one. Logged as
+    ``duty_claim_lapsed``. Returns the duties that lapsed (rule #12: scoped by user)."""
+    from src.utils.logger import safe_log_value  # noqa: PLC0415
+
+    cutoff = (now - timedelta(minutes=settings.DUTY_CLAIM_MINUTES)).astimezone(timezone.utc).isoformat(
+        timespec="microseconds"
+    )
+    lapsed: list[str] = []
+    for duty in settings.SCHEDULE_DUTIES:
+        cur = await db._db.execute(
+            "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ? AND done_at <= ? RETURNING done_at",
+            (user_id, RUNNING + duty, cutoff),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            continue
+        claimed_at = str(dict(row)["done_at"])
+        await db._db.execute(
+            "INSERT INTO assistant_duty_runs (user_id, duty, done_at, failures) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, "
+            "failures = assistant_duty_runs.failures + 1",
+            (user_id, LAPSED + duty, claimed_at),
+        )
+        log.warning("duty_claim_lapsed", extra={
+            "event": "duty_claim_lapsed", "user_id": safe_log_value(user_id), "duty": duty,
+            "claimed_at": safe_log_value(claimed_at), "reason": "no_mark_done"})
+        lapsed.append(duty)
+    if lapsed:
+        await db._db.commit()
+    return lapsed
+
+
+async def load_lapsed(db: JobDatabase, user_id: str) -> dict[str, int]:
+    """``{duty: claims lapsed in a row}`` (LAPSED slots; rule #12)."""
+    cur = await db._db.execute(
+        "SELECT duty, failures FROM assistant_duty_runs WHERE user_id = ? AND duty LIKE ?", (user_id, LAPSED + "%")
+    )
+    return {str(dict(r)["duty"])[len(LAPSED):]: int(dict(r)["failures"] or 0) for r in await cur.fetchall()}
 
 
 async def claim_held(db: JobDatabase, user_id: str, now: datetime) -> bool:
@@ -382,6 +431,10 @@ async def mark(
     await db._db.execute(  # the run is over: the duty is free for the next run
         "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, RUNNING + duty)
     )
+    if not failed:  # a run that ended done or partial ends the lapses in a row
+        await db._db.execute(
+            "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, LAPSED + duty)
+        )
     await db._db.execute(
         "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
         "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
@@ -642,6 +695,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         running={k[len(RUNNING):]: v for k, v in stamps.items() if k.startswith(RUNNING)},
         forced={k[len(RUN_NOW):]: v for k, v in stamps.items() if k.startswith(RUN_NOW)},
         failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
+        lapsed=await load_lapsed(db, user_id),
         people_hunt=cfg.people_hunt,
         titles_missing=not [t for t in (profile.preferences.target_job_titles or []) if str(t).strip()],
         reach_ids=await _reach_ids(db, user_id, now, cfg.apply_min_score) if cfg.people_hunt else [],

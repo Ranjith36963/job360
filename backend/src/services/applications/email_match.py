@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 from src.core import settings
 from src.services.applications.contacts import _contacts_by_current_email
-from src.services.applications.email_codes import registrable, sender_domain
+from src.services.applications.email_codes import employer_domain, registrable, sender_domain
 from src.services.applications.inbox import email_senders_for
-from src.services.applications.job_checks import _is_or_under, apply_host, classify_host
+from src.services.applications.job_checks import _is_or_under
 from src.services.applications.spine import SpineError, _has_control_chars
 
 if TYPE_CHECKING:
@@ -42,11 +42,9 @@ def _company_site(job_url: str) -> str:
     """The registrable domain of the job's OWN site (``careers.kainos.com`` -> ``kainos.com``), "" when the link is
     an ATS (``email_senders`` covers it), a job board or a shared host: many employers' jobs live there, so their
     mail ties to none of them. Gmail check 2026-11-18: a company's own careers mail (``careeralerts.kainos.com``)
-    with no company name in its subject matched nothing and was parked unmatched."""
-    host = apply_host(job_url or "")
-    if not host or classify_host(host) != "unknown" or host in settings.SHARED_ATS_HOSTS:
-        return ""
-    return registrable(host)
+    with no company name in its subject matched nothing and was parked unmatched. One rule with the email-code
+    check (:func:`email_codes.employer_domain`), so the two cannot drift apart."""
+    return employer_domain(job_url)
 
 
 def _named_in(company_key: str, subject_folded: str) -> bool:
