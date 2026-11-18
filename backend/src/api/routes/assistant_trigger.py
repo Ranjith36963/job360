@@ -173,8 +173,12 @@ async def run_duty(
     _duty_or_404(duty)
     cause = "test" if body is not None and body.test else "run_now"
     async with _db() as db:
-        if cause == "run_now":  # the press itself is what whats_due then honours (never for Test)
+        if cause == "run_now" and duty in settings.SCHEDULE_DUTIES:  # what whats_due then honours (never Test)
             await schedule_service.press_run_now(db, user.id, duty, datetime.now(timezone.utc))
+        elif cause == "run_now" and duty == "own_browser":  # the same press as "Run my own-browser tasks now"
+            from src.services.applications import own_browser  # noqa: PLC0415
+
+            await own_browser.run_now(db, user.id, datetime.now(timezone.utc))
         result = await duty_service.fire(db, user.id, duty, cause=cause, resolve=DEFAULT_RESOLVE)
     _audit(user, f"{cause}_{duty}", "started" if result.get("fired") else str(result.get("reason")))
     return result

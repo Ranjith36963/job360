@@ -655,10 +655,11 @@ async def mark_done(
     _log("schedule_duty_done", user, duty=body.duty, outcome=outcome, reason=reason or "",
          next_batch=str(len(later)))
     failures = int((await schedule.load_runs(db, user.id)).get(body.duty, {}).get("failures") or 0)
-    if body.duty == "hunt" and body.outcome != "failed":  # Ignition: a finished hunt starts reach and the batch
+    if body.duty == "hunt" and body.outcome != "failed":  # Ignition: a finished hunt starts CV review and reach
         from src.services.browser_agent import duty_trigger  # noqa: PLC0415
 
-        await duty_trigger.ignite(user.id, ("reach", "batch"), "hunt_done", db=db)
+        # (no CV review link, or its start failed: the batch, as before; the CV run's end starts the batch)
+        await duty_trigger.ignite(user.id, ("cv", "reach"), "hunt_done", db=db)
     stamp = now.isoformat(timespec="seconds")
     return MarkDoneOut(
         duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=outcome, failures_in_row=failures,

@@ -866,12 +866,13 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         queued, queue_note = await applications_spine.queue_if_open(
             db, user.id, birth["application_id"], recorded_by=actor_for(user)
         )
-        # Ignition: a job the assistant found (hunt or the user's mail), once queued, starts reach and the batch
+        # Ignition: a job the assistant found (hunt or the user's mail), once queued, starts CV review and reach
+        # (no CV review link, or its start failed: the batch, as before)
         if queued and body.origin in ("ai_hunt", "your_mail"):
             from src.services.browser_agent import duty_trigger  # noqa: PLC0415
 
             await duty_trigger.ignite(
-                user.id, ("reach", "batch"), "job_queued", [int(birth["application_id"])], db=db
+                user.id, ("cv", "reach"), "job_queued", [int(birth["application_id"])], db=db
             )
     warnings = (
         await _bring_warnings(db, user.id, body, birth["application_id"], new_application=not birth["existing"])

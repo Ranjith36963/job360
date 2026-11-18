@@ -88,7 +88,9 @@ async def test_a_job_from_the_users_mail_is_tagged_your_mail_and_starts_the_batc
     authenticated_async_context, fixture_user_id, monkeypatch
 ):
     """Owner 2026-10-27: a job-alert email is a third source beside the hunt and the user's own link;
-    its jobs carry the tag "Your mail" and, queued, start the batch like a hunted job."""
+    its jobs carry the tag "Your mail" and, queued, start the work like a hunted job: CV review and the people
+    hunt (owner 2026-11-18: hunt -> CV review -> apply; with no CV review link the batch starts instead, pinned in
+    test_cv_own_browser_start_links)."""
     from src.services.browser_agent import duty_trigger
 
     lit: list[tuple[str, ...]] = []
@@ -100,7 +102,7 @@ async def test_a_job_from_the_users_mail_is_tagged_your_mail_and_starts_the_batc
     async with authenticated_async_context() as client:
         mailed = await _bring(client, _ad(1, origin="your_mail", queue=True))
         assert (mailed["queued"], mailed["queue_note"]) == (True, None)
-        assert lit == [("reach", "batch")]
+        assert lit == [("cv", "reach")]
         rows = await _rows(client, queued=True)
         assert rows[mailed["application_id"]]["origin"] == "your_mail"
 
