@@ -54,7 +54,7 @@ Per ATS (only what was seen):
 | Zoho, Wellfound | Zoho renders client-side. Wellfound wants an account and a timed test: `account_needed`. |
 
 Facts a form asks:
-- "Must be located in <country>" or "authorised to work in <country>": answer from the stored record, confirmed with the user on this form (visa status is `sensitive`). A willingness
+- "Must be located in <country>" or "authorised to work in <country>": answer from the user's own Memory record for that country, filled without asking; ask only when `check_form` flags `needs_confirmation`. A willingness
   answer ("willing to work from <country>") is NOT a "yes" to either: ask the user.
 - Consent and marketing boxes (SMS, email, data): never skipped silently; each goes in the job's ONE ask with the
   privacy-safe choice (No) pre-filled, unless the user approved that employer, or "Leave blank". Never tick an attestation for the user.

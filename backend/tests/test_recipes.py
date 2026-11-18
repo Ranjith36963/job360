@@ -579,3 +579,13 @@ def test_the_own_browser_recipe_is_the_whole_pc_run_with_its_closed_tokens():
     assert "never call whats_due with duties and never call mark_done" in flat_text
     for match in re.finditer("mark_done", flat_text):
         assert flat_text[: match.start()].endswith("never call "), flat_text[max(0, match.start() - 40): match.end()]
+
+
+def test_forms_recipe_never_confirms_the_users_own_right_to_work_per_form():
+    """2026-11-18: forms.md:57 still said work-rights answers are "confirmed with the user on this form" after #1641,
+    contradicting its own step 2 and check_form (the user's own Memory row is filled without asking)."""
+    from src.api.routes.recipes import load_recipe
+
+    text = load_recipe("forms").text
+    assert "confirmed with the user on this form" not in text
+    assert "answer from the user's own Memory record for that country, filled without asking" in text
