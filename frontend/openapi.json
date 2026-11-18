@@ -15105,6 +15105,18 @@
             ],
             "title": "Next"
           },
+          "next_task": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Task"
+          },
           "occurred_at": {
             "title": "Occurred At",
             "type": "string"
@@ -15634,6 +15646,18 @@
               }
             ],
             "title": "Next"
+          },
+          "next_task": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Task"
           },
           "outcome": {
             "anyOf": [
