@@ -98,7 +98,9 @@ async def _only_here(db: JobDatabase, user_id: str, application_id: int, note_id
             ids.add(int(c["application_id"]))
             mine = reasons if int(c["application_id"]) == application_id else mine
     # A company named in the subject alone is no tie (review of #1496): any sender can write that.
-    return ids == {application_id} and bool(mine - {"company_in_subject"}) and not found["truncated"]
+    # Nor the sender sharing the job site's domain alone (2026-11-18): a careers site's alerts and nudges come from it.
+    weak = {"company_in_subject", "sender_domain_is_job_site"}
+    return ids == {application_id} and bool(mine - weak) and not found["truncated"]
 
 
 def _when(value: Any) -> Optional[datetime]:

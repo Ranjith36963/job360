@@ -191,12 +191,15 @@ async def test_contact_email_uses_the_current_email(authenticated_async_context)
         assert [c["application_id"] for c in data["candidates"]] == [b]
         assert "contact_email" in data["candidates"][0]["reasons"]
         assert data["candidates"][0]["contact_ids"] == [cid]
-        assert (await _ok(client, sender="old.maya@contoso.example"))["candidates"] == []
+        # the old address is no contact any more; it only shares the job's own site (contoso.example)
+        old = (await _ok(client, sender="old.maya@contoso.example"))["candidates"]
+        assert [(c["application_id"], c["reasons"], c["contact_ids"]) for c in old] == [(b, ["sender_domain_is_job_site"], [])]
         cold = await client.post(
             "/api/contacts", json={"name": "Lee", "email": "cold.lee@contoso.example", "company": "Contoso"},
         )
         assert cold.status_code == 201, cold.text
-        assert (await _ok(client, sender="cold.lee@contoso.example"))["candidates"] == []
+        lee = (await _ok(client, sender="cold.lee@contoso.example"))["candidates"]  # a contact on no application
+        assert [(c["application_id"], c["reasons"], c["contact_ids"]) for c in lee] == [(b, ["sender_domain_is_job_site"], [])]
 
 
 @pytest.mark.asyncio
@@ -236,8 +239,9 @@ async def test_reasons_are_facts_in_fixed_order_no_verdict(authenticated_async_c
         )
         assert set(data) == {"candidates", "truncated"}
         by_id = {c["application_id"]: c for c in data["candidates"]}
-        assert by_id[older]["reasons"] == ["same_thread", "contact_email", "company_in_subject"]
-        assert by_id[newer]["reasons"] == ["company_in_subject"]
+        # northwind.example is both jobs' own site, so the sender shares it (a fact, listed for both)
+        assert by_id[older]["reasons"] == ["same_thread", "contact_email", "sender_domain_is_job_site", "company_in_subject"]
+        assert by_id[newer]["reasons"] == ["sender_domain_is_job_site", "company_in_subject"]
         assert set(by_id[older]) == {
             "application_id", "job_title", "job_company", "status", "reasons",
             "thread_event_ids", "contact_ids", "email_senders",
@@ -397,3 +401,23 @@ async def test_validation_error_log_never_carries_the_input(authenticated_async_
             assert r.status_code == 422
     assert any(rec.getMessage() == "validation_error" for rec in caplog.records)
     assert "priya.secret" not in "".join(f"{rec.getMessage()} {rec.__dict__}" for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_mail_from_the_jobs_own_careers_domain_is_listed(authenticated_async_context):
+    """Gmail check 2026-11-18: a careers site's own mail (``opportunities@careeralerts.<company>.com``, subject
+    "Your application is almost complete") named no company and no ATS, so it matched nothing and was parked."""
+    async with authenticated_async_context() as client:
+        own = await _bring(client, {**_CONTOSO, "apply_url": "https://careers.contoso.co.uk/gb/en/job/42"})
+        await _bring(client, _ACME)  # an ATS link: email_senders covers it, never this reason
+        await _bring(client, {**_NORTHWIND, "apply_url": "https://uk.indeed.com/viewjob?jk=1"})  # a board: no tie
+        data = await _ok(client, sender="Contoso <opportunities@careeralerts.contoso.co.uk>",
+                         subject="Your application is almost complete - take the next step!")
+        assert [(c["application_id"], c["reasons"]) for c in data["candidates"]] == [
+            (own, ["sender_domain_is_job_site"])
+        ]
+        # a look-alike domain is not the site; an Indeed or Greenhouse sender ties to no board or ATS link this way
+        assert (await _ok(client, sender="x@contoso.co.uk.evil.com"))["candidates"] == []
+        assert (await _ok(client, sender="x@uk.indeed.com"))["candidates"] == []
+        greenhouse = (await _ok(client, sender="no-reply@greenhouse.io"))["candidates"]
+        assert [c["reasons"] for c in greenhouse] == [["sender_domain_in_email_senders"]]

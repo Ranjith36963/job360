@@ -13,15 +13,18 @@ from typing import TYPE_CHECKING, Any
 
 from src.core import settings
 from src.services.applications.contacts import _contacts_by_current_email
+from src.services.applications.email_codes import registrable, sender_domain
 from src.services.applications.inbox import email_senders_for
-from src.services.applications.job_checks import _is_or_under
+from src.services.applications.job_checks import _is_or_under, apply_host, classify_host
 from src.services.applications.spine import SpineError, _has_control_chars
 
 if TYPE_CHECKING:
     from src.repositories.database import JobDatabase
 
 # The closed set of reasons, in the order they appear on a candidate.
-MATCH_EMAIL_REASONS = ("same_thread", "contact_email", "sender_domain_in_email_senders", "company_in_subject")
+MATCH_EMAIL_REASONS = (
+    "same_thread", "contact_email", "sender_domain_in_email_senders", "sender_domain_is_job_site", "company_in_subject",
+)
 _NO_COMPANY = frozenset({"", "unknown"})  # models.Job._clean_company stores "Unknown" for a blank company
 _MIN_COMPANY_CHARS = 2
 
@@ -33,6 +36,17 @@ def _clean(name: str, value: str, cap: int, setting_name: str) -> str:
     if len(value) > cap:
         raise SpineError(422, f"{name} exceeds {setting_name} ({cap} chars)")
     return value
+
+
+def _company_site(job_url: str) -> str:
+    """The registrable domain of the job's OWN site (``careers.kainos.com`` -> ``kainos.com``), "" when the link is
+    an ATS (``email_senders`` covers it), a job board or a shared host: many employers' jobs live there, so their
+    mail ties to none of them. Gmail check 2026-11-18: a company's own careers mail (``careeralerts.kainos.com``)
+    with no company name in its subject matched nothing and was parked unmatched."""
+    host = apply_host(job_url or "")
+    if not host or classify_host(host) != "unknown" or host in settings.SHARED_ATS_HOSTS:
+        return ""
+    return registrable(host)
 
 
 def _named_in(company_key: str, subject_folded: str) -> bool:
@@ -70,6 +84,7 @@ async def match_email(
     if "@" not in address:
         address = ""
     domain = address.rsplit("@", 1)[1] if address else ""
+    sender_site = registrable(sender_domain(address)) if address else ""
 
     thread_events: dict[int, list[int]] = {}
     if thread_id:
@@ -106,6 +121,9 @@ async def match_email(
             reasons.append("contact_email")
         if domain and any(_is_or_under(domain, s) for s in senders):
             reasons.append("sender_domain_in_email_senders")
+        site = _company_site(a["job_url"] or "")
+        if sender_site and site and sender_site == site:
+            reasons.append("sender_domain_is_job_site")
         company = (a["normalized_company"] or a["job_company"] or "").strip().casefold()
         if subject and _named_in(company, subject_folded):
             reasons.append("company_in_subject")
