@@ -20,3 +20,25 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
 - Next cause queued: the run works one company then stops (4 of 5 untouched); audit 3B (company_team_page 422 on
   hosts without the company name, e.g. Alphabet on abc.xyz) to become a warning.
 - failures_in_row.reach: 0 at 22:39 (the earlier 1 was the 11:59 claim taken outside the routine; cleared since).
+
+## 22:56 run  (score 0%)
+- Achieved: nothing recorded. reach and network were both marked FAILED at 22:57:41, about 90 s into the run
+  (failures_in_row 1 each). The 2h back-off now holds both until 00:57, so the 23:56 run will find nothing due.
+- Missed: the 5 due jobs (930-934) and network.
+- Biggest cause: unknown from here. The scheduled task's last_run was overwritten by the 23:08 ignition run (a 6 s
+  "not due"), so the 22:56 transcript is not readable to me. mark_done refuses tool_unavailable / no_work /
+  needs_user for people runs, so the reason was network_blocked, rate_limited or error. No deploy landed before it
+  (#1681 deployed 23:00, after the failure).
+- Fix: "Needs the owner / Kits": read Railway's `schedule_duty_done` line for duty reach at 22:57:41 (its reason
+  field) to name the cause.
+- Note for Kits: #1681, #1680 and #1679 merged at 22:58-23:00, inside the people hunt's :51-:06 window.
+
+## #1682 correction (23:35)
+- #1682 merged at 23:09. I re-armed its auto-merge at 23:06, before reading Kits' 23:10 orders; my mistake.
+- The safety gap Kits named was real and live: user_claims() judged only the first-person sentences, so
+  "...at Acme. Built systems serving 1M users." stored strong.
+- Fix: PR #1688. Every sentence is judged again unless the fresh reviewer marks it as about the recipient (a
+  field_path "page:<url>" row naming that sentence, with a page quote of 3+ words). Kits' test (an unsupported
+  second sentence with no "I") fails on main and passes with the fix. The word list is removed. Auto-merge is
+  armed for 00:07 (after the :51-:06 window).
+- Also open: PR #1683 (audit 3B: a company page whose host lacks the company name is a logged hint, not a 422).
