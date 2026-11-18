@@ -97,13 +97,33 @@ def company_stem(company: str) -> str:
     return " ".join(words)
 
 
+def role_key(title: str, location: str = "") -> str:
+    """The role words of a duplicate key. Only place text is dropped: trailing " - " segments that hold a comma
+    or name only the place (the location's words, remote, hybrid...), then a last "(...)" that names only the
+    place. A qualifier stays: "Software Engineer (Backend)" and "(Frontend)" are two roles (pattern audit
+    finding 6: a pattern hints, Claude judges). A character scan, no regex on caller text."""
+    place = set(_alnum_words(location)) | _PLACE_NOISE
+
+    def only_place(text: str) -> bool:
+        return all(w in place for w in _alnum_words(text))
+
+    parts = [" ".join(seg.split()) for seg in (title or "").split(" - ")]
+    while len(parts) > 1 and ("," in parts[-1] or only_place(parts[-1])):
+        parts.pop()
+    core = " - ".join(parts)
+    if core.endswith(")") and "(" in core:
+        cut = core.rindex("(")
+        if core[:cut].strip() and only_place(core[cut + 1:-1]):
+            core = core[:cut]
+    return " ".join(_alnum_words(core))
+
+
 def company_title_key(company: str, title: str, location: str = "") -> str:
-    """``company_stem | role words | place words`` (location noise and one trailing "(...)" off the title; the
-    place is :func:`_place_key`, "" when the location names none): the key the hunt kit's ``--known-ct`` and
-    bring_job's duplicate guard share, so a run and Job360 call the same job known. Compare with
-    :func:`known_keys_match`, never ``==``: "Citi | AI Engineer" in London and in Pune are two jobs."""
-    role = " ".join(_alnum_words(role_core(title)))
-    return company_stem(company) + "|" + role + "|" + " ".join(_place_key(location))
+    """``company_stem | role_key | place words`` (the place is :func:`_place_key`, "" when the location names
+    none): the key the hunt kit's ``--known-ct`` and bring_job's duplicate guard share, so a run and Job360
+    call the same job known. Compare with :func:`known_keys_match`, never ``==``: "Citi | AI Engineer" in
+    London and in Pune are two jobs."""
+    return company_stem(company) + "|" + role_key(title, location) + "|" + " ".join(_place_key(location))
 
 
 def known_keys_match(a: str, b: str) -> bool:
@@ -145,24 +165,29 @@ def same_place(a: str, b: str) -> bool:
 
 
 async def open_same_role(
-    db: JobDatabase, user_id: str, *, title: str, location: str = "", exclude_application_id: int
+    db: JobDatabase, user_id: str, *, title: str, location: str = "", exclude_application_id: int,
+    company: str = "",
 ) -> list[int]:
     """Ids of THIS user's OPEN applications (not ``exclude_application_id``) whose ``role_words`` equal
     this title's AND whose location is :func:`same_place`, whatever company label they carry, when the
     role has at least ``POSSIBLE_DUPLICATE_MIN_WORDS`` words (a short title like "AI Engineer" says
-    nothing). At most ``POSSIBLE_DUPLICATE_MAX_IDS``, oldest first. Scoped by user (rules 12/25). Never
-    raises: a failure is logged and returns []; a bring must never fail on it.
+    nothing) or the row is at the same :func:`company_stem` (a qualifier apart, finding 6: "Software
+    Engineer (Backend)" vs "(Frontend)" is a hint, never a refusal). At most ``POSSIBLE_DUPLICATE_MAX_IDS``,
+    oldest first. Scoped by user (rules 12/25). Never raises: a failure is logged and returns []; a bring
+    must never fail on it.
 
     Why: open_duplicate_of matches the whole company key, and an agent that writes the agency's client
     into the label ("Robert Walters (PE firm client)") slips past it - prod 2026-11-17, the same role
     brought four times. The place (2026-11-18): a generic title ("AI/ML Engineer", application 1034 in
     Pune) named 10 open jobs in other cities, so the warning was noise and the run read past it."""
     try:
-        want = role_words(title, location)
-        if len(want.split()) < settings.POSSIBLE_DUPLICATE_MIN_WORDS:
+        want, stem = role_words(title, location), company_stem(company) if company else ""
+        long_enough = len(want.split()) >= settings.POSSIBLE_DUPLICATE_MIN_WORDS
+        if not want or not (long_enough or stem):
             return []
         cur = await db._db.execute(
-            "SELECT id, status, job_title, job_location FROM applications WHERE user_id = ? AND id <> ? ORDER BY id",
+            "SELECT id, status, job_company, job_title, job_location FROM applications "
+            "WHERE user_id = ? AND id <> ? ORDER BY id",
             (user_id, exclude_application_id),
         )
         found: list[int] = []
@@ -170,6 +195,8 @@ async def open_same_role(
             if str(r["status"]) in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
                 continue
             have_loc = str(r["job_location"] or "")
+            if not long_enough and company_stem(str(r["job_company"] or "")) != stem:
+                continue
             if role_words(str(r["job_title"] or ""), have_loc) == want and same_place(have_loc, location):
                 found.append(int(r["id"]))
                 if len(found) >= settings.POSSIBLE_DUPLICATE_MAX_IDS:
@@ -185,13 +212,16 @@ async def open_duplicate_of(
 ) -> Optional[int]:
     """The id of THIS user's earliest OPEN application (status not in
     ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES``) at the same company (rule-1
-    company key) with the same ``role_core`` title, or with the same
+    company key) with the same :func:`role_key`, or with the same
     :func:`company_title_key` (another label for the same employer), else None.
-    Scoped by user (rules 12/25). The same rule-1 company with exactly the same
-    title is skipped: that is a re-bring, which the normal path handles."""
+    Only place text is trimmed: a qualifier ("(Backend)" vs "(Frontend)") is
+    another role, which bring_job's ``possible_duplicate`` hint leaves to the
+    assistant (finding 6). Scoped by user (rules 12/25). The same rule-1
+    company with exactly the same title is skipped: that is a re-bring, which
+    the normal path handles."""
     from src.services.applications.kit import normalized_company_key  # noqa: PLC0415
 
-    want_company, want_core = normalized_company_key(company or ""), role_core(title, location)
+    want_company, want_core = normalized_company_key(company or ""), role_key(title, location)
     if not want_company or not want_core:
         return None
     want_key = company_title_key(company, title, location)
@@ -206,7 +236,7 @@ async def open_duplicate_of(
         same_company = normalized_company_key(have_company) == want_company
         if same_company and have_title.strip().casefold() == (title or "").strip().casefold():
             continue
-        if same_company and role_core(have_title, str(r["job_location"] or "")) == want_core:
+        if same_company and role_key(have_title, str(r["job_location"] or "")) == want_core:
             return int(r["id"])
         if known_keys_match(company_title_key(have_company, have_title, str(r["job_location"] or "")), want_key):
             return int(r["id"])

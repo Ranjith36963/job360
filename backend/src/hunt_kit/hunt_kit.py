@@ -1700,19 +1700,48 @@ def _place_words(location: str) -> str:
     return ""
 
 
-def company_title_key(company: str, title: str, location: str = "") -> str:
-    """``company stem | role words | place words``: the key Job360's bring_job duplicate guard uses."""
+def _role_key(title: str, location: str = "") -> str:
+    """Job360's reposts.role_key: only place text is dropped (trailing " - " segments with a comma or only place
+    words, then a last "(...)" of only place words); a qualifier stays ("(Backend)" vs "(Frontend)")."""
+    place = set(_alnum_words(location)) | _PLACE_NOISE
+
+    def only_place(text: str) -> bool:
+        return all(w in place for w in _alnum_words(text))
+
+    parts = [" ".join(seg.split()) for seg in (title or "").split(" - ")]
+    while len(parts) > 1 and ("," in parts[-1] or only_place(parts[-1])):
+        parts.pop()
+    core = " - ".join(parts)
+    if core.endswith(")") and "(" in core:
+        cut = core.rindex("(")
+        if core[:cut].strip() and only_place(core[cut + 1:-1]):
+            core = core[:cut]
+    return " ".join(_alnum_words(core))
+
+
+def _company_stem(company: str) -> str:
     words = _alnum_words(company)
     if len(words) > 1 and words[0] == "the":
         words = words[1:]
     while len(words) > 1 and words[-1] in COMPANY_STEM_DROP:
         words.pop()
-    return " ".join(words) + "|" + " ".join(_alnum_words(_role_core(title))) + "|" + _place_words(location)
+    return " ".join(words)
 
 
-def load_known_ct(path: str) -> dict[str, set[str]]:
+def company_title_key(company: str, title: str, location: str = "") -> str:
+    """``company stem | role key | place words``: the key Job360's bring_job duplicate guard uses."""
+    return _company_stem(company) + "|" + _role_key(title, location) + "|" + _place_words(location)
+
+
+def _loose_key(company: str, title: str, location: str = "") -> str:
+    """The hint key: company stem | the title without any last "(...)" | place (a qualifier apart = maybe)."""
+    return _company_stem(company) + "|" + " ".join(_alnum_words(_role_core(title))) + "|" + _place_words(location)
+
+
+def load_known_ct(path: str, loose: bool = False) -> dict[str, set[str]]:
     """Read a --known-ct file (``company ||| title ||| id [||| location]`` per line): company|role -> places
-    ("" = a row with no place, which matches the company and role anywhere)."""
+    ("" = a row with no place, which matches the company and role anywhere). ``loose``: the hint key
+    (:func:`_loose_key`) -> "place|id" entries, for ``possible_duplicate``."""
     if not path:
         return {}
     out: dict[str, set[str]] = {}
@@ -1720,16 +1749,27 @@ def load_known_ct(path: str) -> dict[str, set[str]]:
         for line in f:
             cols = line.rstrip("\n").split(" ||| ")
             if len(cols) >= 2 and cols[0].strip():
-                head, _, place = company_title_key(cols[0], cols[1], cols[3] if len(cols) > 3 else "").rpartition("|")
-                out.setdefault(head, set()).add(place)
+                loc = cols[3] if len(cols) > 3 else ""
+                head, _, place = (_loose_key if loose else company_title_key)(cols[0], cols[1], loc).rpartition("|")
+                ident = cols[2].strip() if len(cols) > 2 else ""
+                out.setdefault(head, set()).add(place + "|" + ident if loose else place)
     return out
 
 
 def known_ct_hit(known: dict[str, set[str]], company: str, title: str, location: str) -> bool:
-    """The same job as a known row: the same company and role, and the same place when both name one."""
+    """The same job as a known row: the same company and role, and the same place when both name one. Only
+    this identical key drops a job; anything weaker is :func:`known_ct_maybe`, a hint the assistant reads."""
     head, _, place = company_title_key(company, title, location).rpartition("|")
     places = known.get(head)
     return places is not None and (not place or "" in places or place in places)
+
+
+def known_ct_maybe(loose: dict[str, set[str]], company: str, title: str, location: str) -> list[str]:
+    """Known-row ids with the same company and title words but another qualifier (pattern audit finding 6):
+    ``possible_duplicate`` on the job, for the assistant to compare the ads. Never a drop."""
+    head, _, place = _loose_key(company, title, location).rpartition("|")
+    ids = {e.split("|", 1)[1] for e in loose.get(head, ()) if not place or e.split("|", 1)[0] in ("", place)}
+    return sorted(i for i in ids if i)
 
 
 SNIPPET_MAX_CHARS = 500  # freehire cuts its text at exactly 500 characters (2026-11-18 14:11 run: 21 ads)
@@ -1772,6 +1812,7 @@ class Collector:
         self.known: set[str] = load_known(getattr(args, "known", "") or "")  # --known: URLs already in Job360
         self.known_skipped = 0
         self.known_ct: dict[str, set[str]] = load_known_ct(getattr(args, "known_ct", "") or "")  # --known-ct
+        self.known_ct_loose = load_known_ct(getattr(args, "known_ct", "") or "", loose=True)
         self.known_ct_skipped = 0
         self.boards_listed: dict[str, int] = {}  # per ATS, after dedup and dead-board skip, before rotation
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
@@ -1933,6 +1974,10 @@ class Collector:
             rec["sponsor_register"] = reg_ids
         if self.every_title:
             rec["title_hint"] = title_hint(title, self.target_phrases, y)
+        loose = self.known_ct_loose
+        maybe = known_ct_maybe(loose, rec["company"], title, rec["location"]) if loose else []
+        if maybe:
+            rec["possible_duplicate"] = maybe  # Job360 ids, a qualifier apart: the assistant compares the ads
         key = job_key(rec)
         with self.lock:
             if url in self.seen_url:

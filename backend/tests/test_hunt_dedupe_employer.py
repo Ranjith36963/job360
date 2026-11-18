@@ -89,7 +89,8 @@ def test_company_title_key_matches_the_three_1613_pairs_and_keeps_others_apart()
 
     assert key("Lloyds Bank", "Machine Learning & AI Engineer") == key(
         "Lloyds Banking Group", "Machine Learning & AI Engineer")
-    assert key("Stratos", "Forward Deployed Engineer (Graduate)") == key("STRATOS Technologies",
+    # Pattern audit finding 6 (owner rule: a pattern hints, Claude judges): a qualifier is part of the role.
+    assert key("Stratos", "Forward Deployed Engineer (Graduate)") != key("STRATOS Technologies",
                                                                          "Forward Deployed Engineer")
     assert key("Evnek", "Junior Generative AI Engineer") == key("Evnek Technologies Pvt Ltd",
                                                                 "Junior Generative AI Engineer")
@@ -106,6 +107,8 @@ def test_company_title_key_matches_the_three_1613_pairs_and_keeps_others_apart()
     ("Evnek Technologies", "Junior Generative AI Engineer", "Bengaluru, Karnataka, India"),
     ("Opus Recruitment Solutions Ltd", "AI Engineer", "Remote"),
     ("The Hut Group", "AI Engineer - Manchester, UK", "Manchester; UK"), ("Café Labs GmbH", "KI-Ingenieur | Berlin", ""),
+    ("Acme", "Software Engineer (Backend)", "London"), ("Acme", "Software Engineer (London)", "London, UK"),
+    ("Acme", "Data Engineer - Remote", ""), ("Acme", "Data Engineer - Platform (Remote)", "Leeds"),
     ("", "", ""),
 ])
 def test_the_kit_and_bring_job_share_one_key(pair: tuple[str, str, str]) -> None:
@@ -125,6 +128,39 @@ def test_the_place_tells_two_known_jobs_apart_only_when_both_name_one() -> None:
     assert match(key("Citi", "AI Engineer", ""), london) and match(london, key("Citi", "AI Engineer", "Remote")), (
         "a side that names no place matches on company and role")
     assert not match(key("Citi", "ML Engineer", "London"), london)
+
+
+def test_a_qualifier_is_another_role_and_only_place_text_is_dropped() -> None:
+    from src.services.applications.reposts import company_title_key as key
+    from src.services.applications.reposts import known_keys_match as match
+
+    backend, frontend = key("Acme", "Software Engineer (Backend)", "London"), key("Acme", "Software Engineer (Frontend)",
+                                                                                   "London")
+    assert backend == "acme|software engineer backend|london" and not match(backend, frontend)
+    assert key("Acme", "Software Engineer (London)", "London, UK") == key("Acme Ltd", "Software Engineer", "London")
+    assert key("Acme", "Software Engineer (Remote)", "") == key("Acme", "Software Engineer - Remote", "") == (
+        "acme|software engineer|")
+    assert key("Acme", "Data Engineer - Platform (Remote)", "Leeds") == "acme|data engineer platform|leeds"
+
+
+BACKEND = {"title": "Software Engineer (Backend)", "company": "Acme", "location": "London",
+           "apply_url": "https://acme.example/careers/backend", "description": "Python services. " * 8,
+           "origin": "ai_hunt"}
+FRONTEND = {**BACKEND, "title": "Software Engineer (Frontend)", "apply_url": "https://acme.example/careers/frontend",
+            "description": "React and TypeScript. " * 8}
+
+
+@pytest.mark.asyncio
+async def test_backend_and_frontend_at_one_company_are_two_jobs_with_a_hint(authenticated_async_context):
+    async with authenticated_async_context() as client, await _agent(client) as agent:
+        first = (await agent.post("/api/jobs/bring", json=BACKEND)).json()
+        second = await agent.post("/api/jobs/bring", json=FRONTEND)
+        apps = await _count_apps()
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["existing"] is False and body["duplicate_of"] is None and apps == 2, "never refused"
+    hints = [w for w in body["warnings"] if w["code"] == "possible_duplicate"]
+    assert hints and hints[0]["application_ids"] == [first["application_id"]], "Claude compares the two ads"
 
 
 CITI_LONDON = {"title": "AI Engineer", "company": "Citi", "location": "London, United Kingdom",
@@ -163,16 +199,19 @@ async def test_the_lloyds_rebring_under_another_label_returns_application_1036(a
 
 
 @pytest.mark.asyncio
-async def test_stratos_and_evnek_variants_stay_caught(authenticated_async_context):
+async def test_evnek_stays_caught_and_the_stratos_graduate_role_is_a_hint(authenticated_async_context):
     async with authenticated_async_context() as client, await _agent(client) as agent:
         s0 = (await agent.post("/api/jobs/bring", json=STRATOS_892)).json()
         e0 = (await agent.post("/api/jobs/bring", json=EVNEK_763)).json()
         s1 = await agent.post("/api/jobs/bring", json=STRATOS_KIT)
         e1 = await agent.post("/api/jobs/bring", json=EVNEK_KIT)
         apps = await _count_apps()
-    assert s1.json()["duplicate_of"] == s0["application_id"]
+    # "(Graduate)" is a qualifier: brought, with a possible_duplicate hint naming 892's twin (finding 6).
+    assert s1.json()["duplicate_of"] is None
+    assert [w["application_ids"] for w in s1.json()["warnings"] if w["code"] == "possible_duplicate"] == [
+        [s0["application_id"]]]
     assert e1.status_code in (200, 409) and str(e0["application_id"]) in e1.text
-    assert apps == 2
+    assert apps == 3
 
 
 @pytest.mark.asyncio
@@ -233,6 +272,34 @@ def test_the_kit_reads_old_three_column_rows_and_place_rows(tmp_path) -> None:
     assert hk.known_ct_hit(known, "Citi", "AI Engineer", "Pune, India"), "an old row has no place: company + role"
     assert hk.known_ct_hit(known, "Lloyds Bank", "Machine Learning & AI Engineer", "London, United Kingdom")
     assert not hk.known_ct_hit(known, "Lloyds Bank", "Machine Learning & AI Engineer", "Leeds, United Kingdom")
+
+
+def test_the_kit_drops_only_an_identical_key_and_hints_a_qualifier(tmp_path, monkeypatch) -> None:
+    long_text = "<p>" + "Build services in Python with tests and reviews. " * 30 + "</p>"
+    jobs = {"acme": "Software Engineer (Frontend)", "lloyds": "Machine Learning & AI Engineer"}
+    names = {"acme": "Acme", "lloyds": "Lloyds Bank"}
+
+    def _get(url: str, params: Any = None, retries: int = 0, data: Any = None) -> tuple[int, Any]:
+        token = url.split("/boards/")[1].split("/")[0]
+        return 200, {"jobs": [{"title": jobs[token], "absolute_url": f"https://boards.example/{token}/1",
+                               "location": {"name": "London, United Kingdom"}, "content": long_text,
+                               "company_name": names[token]}]}
+
+    monkeypatch.setattr(hk, "load_companies", lambda p: [
+        {"name": names[t], "ats": "greenhouse", "token": t, "source": "user"} for t in jobs])
+    monkeypatch.setattr(hk, "http_get_json", _get)
+    known_ct = tmp_path / "known_ct.txt"
+    known_ct.write_text("Acme ||| Software Engineer (Backend) ||| 7 ||| London\n"
+                        "Lloyds Banking Group ||| Machine Learning & AI Engineer ||| 1036 ||| London (hybrid)\n",
+                        encoding="utf-8")
+    out = tmp_path / "found.jsonl"
+    argv = ["--sources", "greenhouse", "--no-universe", "--work-countries", "GB", "--every-title", "--titles",
+            "engineer", "--history", "none", "--workers", "1", "--out", str(out), "--known-ct", str(known_ct)]
+    assert hk.main(argv) == 0
+    kept = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+    assert [(j["company"], j["title"]) for j in kept] == [("Acme", "Software Engineer (Frontend)")], "Lloyds dropped"
+    assert kept[0]["possible_duplicate"] == ["7"], "a hint for Claude to compare, never a drop"
+    assert json.loads(Path(str(out) + ".done.json").read_text(encoding="utf-8"))["known_ct_skipped"] == 1
 
 
 def test_the_kit_text_class_reads_snippets_and_cuts() -> None:

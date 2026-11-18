@@ -410,7 +410,8 @@ class BringJobResponse(BaseModel):
     # Hunt recipe v24 (owner 2026-11-17), agent brings only: things to fix that do not block the bring,
     # each {"code", "reason", "next"} plus its facts. Closed codes BRING_WARNING_CODES:
     # ``possible_duplicate`` (+ ``application_ids``: at most 5 OPEN applications with the same role words and
-    # place under another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
+    # place under another company label, or at the same company a qualifier apart) and ``board_link``
+    # (+ ``host``: the apply link is a job board's page).
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -437,13 +438,14 @@ async def _bring_warnings(
     if new_application:
         same = await reposts_service.open_same_role(
             db, user_id, title=body.title, location=body.location, exclude_application_id=application_id,
+            company=body.company,
         )
         if same:
             out.append({
                 "code": "possible_duplicate", "application_ids": same,
-                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role in the "
-                          "same place under another company label: possibly the same job (an agency and its "
-                          "client, or a renamed employer).",
+                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role words in "
+                          "the same place: possibly the same job (an agency and its client, a renamed employer) or "
+                          "another team; compare the ads.",
                 "next": _DUPLICATE_NEXT,
             })
             get_audit_logger().info(
@@ -662,9 +664,9 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         except SpineError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
-    # Agent guard (2026-10-30, prod app 328 duplicated 126): same company + same role (location/suffix
-    # noise trimmed, see reposts.role_core) as an application this user still has OPEN -> return that
-    # one, create nothing. Code, not prompt: "never bring a job already in the list" got broken.
+    # Agent guard (2026-10-30, prod app 328 duplicated 126): same company + same role (only place text
+    # trimmed, see reposts.role_key; a qualifier is another role) as an application this user still has
+    # OPEN -> return that one, create nothing. Code, not prompt: "never bring a job already in the list" got broken.
     # Web sessions skip it so a human can deliberately re-bring.
     if actor_for(user) != "web":
         from src.services.applications import reposts as reposts_service  # noqa: PLC0415
