@@ -176,6 +176,9 @@ class MarkDoneOut(BaseModel):
     failures_in_row: int = 0
     # 2026-11-17: a batch stop - queued rows queued after this run's claim; they wait for the next batch.
     next_batch: list[int] = Field(default_factory=list)
+    # 2026-11-18 (12:41 run, application 361): a batch stop - this batch's queued rows still missing their job
+    # country (set it from the ad with update_job, or name it under Not submitted).
+    country_missing: list[int] = Field(default_factory=list)
     note: str = ""
     score: Optional[PeopleScoreOut] = None
 
@@ -602,12 +605,19 @@ async def mark_done(
     if body.duty == "batch" and actor_for(user) != "web" and not await schedule.claim_live(db, user.id, "batch", now):
         raise HTTPException(status_code=409, detail=BATCH_NOT_CLAIMED)
     later: list[int] = []
+    no_country: list[int] = []
+    # The website never claims (None: every queued row counts); an assistant's claim was checked above.
+    claimed_at = None
+    if body.duty == "batch" and actor_for(user) != "web":
+        claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
     if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
-        # The website never claims (None: every queued row counts); an assistant's claim was checked above.
-        claimed_at = None
-        if actor_for(user) != "web":
-            claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
         later = await _refuse_early_batch_stop(db, user, claimed_at)
+    if body.duty == "batch":
+        from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
+
+        no_country = await queue_preflight.country_missing_ids(db, user.id, queued_by=claimed_at)
+        if no_country:
+            _log("batch_country_missing", user, rows=str(len(no_country)), ids=",".join(map(str, no_country[:20])))
     if body.duty in ("reach", "network") and actor_for(user) != "web":
         if body.outcome == "failed" and body.reason in _ONE_TOOL_DOWN:
             _log("people_run_refused", user, duty=body.duty, reason=body.reason)
@@ -663,10 +673,19 @@ async def mark_done(
         # (no CV review link, or its start failed: the batch, as before; the CV run's end starts the batch)
         await duty_trigger.ignite(user.id, ("cv", "reach"), "hunt_done", db=db)
     stamp = now.isoformat(timespec="seconds")
+    note = said or _next_batch_note(later)
+    if no_country:
+        note = " ".join(x for x in (note, _country_note(no_country)) if x)
     return MarkDoneOut(
         duty=body.duty, done_at=stamp, last_tick_at=stamp, outcome=outcome, failures_in_row=failures,
-        next_batch=later, note=said or _next_batch_note(later), score=score,
+        next_batch=later, country_missing=no_country, note=note, score=score,
     )
+
+
+def _country_note(ids: list[int]) -> str:
+    shown = ", ".join(map(str, ids[:20])) + (f" and {len(ids) - 20} more" if len(ids) > 20 else "")
+    return (f"{len(ids)} queued jobs still have no job country: {shown}. Set each from its ad with update_job "
+            "(country), or name it under Not submitted if the ad does not say.")
 
 
 @router.get("/schedule/problems", response_model=RunProblemsOut, dependencies=AUTH_FIRST)
