@@ -48,12 +48,15 @@ def test_india_only_user_never_gets_the_uk():
     assert "GB" not in str(brief)
 
 
-def test_germany_user_who_needs_a_visa_gets_on_site_only_when_the_ad_sponsors():
+def test_germany_user_who_needs_a_visa_gets_every_on_site_ad_with_its_visa_recorded():
     brief = build_search_brief(_rtw(
         {"country": "DE", "needs_sponsorship": True, "remote_ok": False, "onsite": "only_if_sponsored"},
     ))
     assert _places(brief) == ["DE"] and brief["gaps"] == []
-    assert brief["rows"][0]["counts_if"] == ["on-site or hybrid in DE, only when the ad says it sponsors a visa"]
+    assert brief["rows"][0]["counts_if"] == [(
+        "on-site or hybrid in DE; you need a visa there: keep the ad whatever it says about sponsorship and record "
+        "what it says"
+    )]
     assert brief["work_from"] == []
 
 
@@ -67,7 +70,10 @@ def test_worldwide_remote_seeker_gets_every_named_place_and_any_other_country_la
     assert brief["work_from"] == ["IN"]
     anywhere = brief["rows"][-1]["counts_if"]
     assert anywhere[0] == "fully remote with an employer in any other country; the ad must let you work from IN or anywhere"
-    assert anywhere[1] == "on-site or hybrid in any other country, only when the ad says it sponsors a visa"
+    assert anywhere[1] == (
+        "on-site or hybrid in any other country; you need a visa there: keep the ad whatever it says about "
+        "sponsorship and record what it says"
+    )
 
 
 def test_the_live_profile_of_2026_10_12_has_no_place_and_asks_once():

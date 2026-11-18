@@ -6999,6 +6999,20 @@
             ],
             "title": "Needs"
           },
+          "plan_rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Rows"
+          },
           "reason": {
             "enum": [
               "never_done",
@@ -8584,6 +8598,122 @@
         "title": "HiddenOut",
         "type": "object"
       },
+      "HuntCoverageIn": {
+        "additionalProperties": false,
+        "description": "One search-plan row (2026-11-18 coverage audit: 3 runs searched GB/IN and never the other 26 rows): what\nwas searched there, or why not ({code, detail}, the same closed codes as a source).",
+        "properties": {
+          "ads": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ads"
+          },
+          "brought": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brought"
+          },
+          "row": {
+            "maxLength": 40,
+            "title": "Row",
+            "type": "string"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HuntSkipIn"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HuntCoverageSourcesIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "titles": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "items": {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Titles"
+          }
+        },
+        "required": [
+          "row"
+        ],
+        "title": "HuntCoverageIn",
+        "type": "object"
+      },
+      "HuntCoverageSourcesIn": {
+        "additionalProperties": false,
+        "description": "How many searches each kind of source ran for one plan row (Himalayas and FoundRole count as connectors).",
+        "properties": {
+          "browser": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Browser",
+            "type": "integer"
+          },
+          "connectors": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Connectors",
+            "type": "integer"
+          },
+          "kit": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Kit",
+            "type": "integer"
+          },
+          "web": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Web",
+            "type": "integer"
+          }
+        },
+        "title": "HuntCoverageSourcesIn",
+        "type": "object"
+      },
       "HuntKitDoneIn": {
         "description": "The kit's own ``<out>.done.json``, written only when it ends (2026-11-18 16:13: mark_done at 16:31, kit to\n16:41): its result count and each ad's text class (full | snippet = 500 chars or fewer, or cut | empty).",
         "properties": {
@@ -8711,6 +8841,21 @@
       "HuntReportIn": {
         "additionalProperties": false,
         "properties": {
+          "coverage": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HuntCoverageIn"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
+          },
           "kit": {
             "anyOf": [
               {

@@ -65,8 +65,13 @@ def effort_split(places: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return them sorted most-wanted first. ``places`` items carry ``priority`` (level or None)."""
     weights = [(_UNSET_WEIGHT if p["priority"] is None else _WEIGHT[p["priority"]]) for p in places]
     total = sum(weights)
-    for p, w in zip(places, weights):
-        p["effort_pct"] = round(100 * w / total) if total else 0
+    # Largest remainder (2026-11-18: round() gave the owner's 30 places 107%): floor each share, then hand the
+    # points left over to the biggest remainders, earlier places first on a tie. The shares sum to exactly 100.
+    shares = [divmod(100 * w, total) if total else (0, 0) for w in weights]
+    left = 100 - sum(q for q, _ in shares) if total else 0
+    extra = set(sorted(range(len(places)), key=lambda i: -shares[i][1])[:left])
+    for i, (p, (q, _)) in enumerate(zip(places, shares)):
+        p["effort_pct"] = q + (1 if i in extra else 0)
     # Most effort first; at equal effort a chosen level before an unchosen one. Stable otherwise.
     return sorted(places, key=lambda p: (-p["effort_pct"], p["priority"] is None))
 

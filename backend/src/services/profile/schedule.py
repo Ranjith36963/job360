@@ -156,6 +156,9 @@ class DueFacts:
     forced: dict[str, datetime] = field(default_factory=dict)
     # 2026-11-18 hunt: the user saved no target titles and the run invented 23. A due hunt then says `needs`.
     titles_missing: bool = False
+    # 2026-11-18 coverage audit: the user's search plan rows (search_brief.row_id, effort over 0), in plan order.
+    # A due hunt lists them as `plan_rows`; mark_done's hunt report needs one coverage entry per row.
+    plan_rows: tuple[str, ...] = ()
 
 
 def inbox_every_hours(mode: str, check_every: str) -> Optional[int]:
@@ -244,6 +247,9 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         for item in due:
             if item["duty"] == "hunt":
                 item["needs"] = [HUNT_TITLES_PATH]
+    for item in due:
+        if item["duty"] == "hunt" and f.plan_rows:
+            item["plan_rows"] = list(f.plan_rows)
     if f.people_hunt and f.reach_ids and is_forced("reach"):
         forced_due.add("reach")
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
@@ -727,6 +733,15 @@ async def _pending_only(db: JobDatabase, user_id: str, app_ids: list[int]) -> se
     return {a for a, s in states.items() if s and all(v == "pending" for v in s)}
 
 
+def hunt_plan_rows(profile: Any) -> list[str]:
+    """The row ids a hunt must cover, rebuilt from the user's own profile (never from the run's word)."""
+    from src.services.profile.search_brief import build_search_brief, plan_row_ids  # noqa: PLC0415
+
+    info = profile.user_info
+    return plan_row_ids(build_search_brief(info.right_to_work, (info.contact or {}).get("residence_country"),
+                                           info.logistics))
+
+
 async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
     """Read everything :func:`due_now` needs for ONE user (rule #12)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
@@ -761,5 +776,6 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         lapsed=await load_lapsed(db, user_id),
         people_hunt=cfg.people_hunt,
         titles_missing=not [t for t in (profile.preferences.target_job_titles or []) if str(t).strip()],
+        plan_rows=tuple(hunt_plan_rows(profile)),
         reach_ids=await _reach_ids(db, user_id, now, cfg.apply_min_score) if cfg.people_hunt else [],
     )
