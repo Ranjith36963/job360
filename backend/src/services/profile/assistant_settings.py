@@ -1813,7 +1813,7 @@ def _signed_in_ask() -> SubmitDecision:
     """Rule 7 / 8b: a submit through the user's own signed-in account, while ``ask_before_signed_in_submit`` is on."""
     return SubmitDecision(
         "ask", "ask_always_site",
-        "This submit goes through your own signed-in account (your own browser, a sign-in saved in Job360's "
+        "This submit goes through your own signed-in account (your assistant browser, a sign-in saved in Job360's "
         "browser, or Indeed / LinkedIn), and you asked to say yes to each one. Fill the form, stop before "
         "submit and ask yes.",
     )

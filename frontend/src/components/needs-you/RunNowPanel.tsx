@@ -63,7 +63,7 @@ export function RunNowPanel() {
     setBusy("own");
     try {
       await runOwnBrowserNow();
-      toast.success("Your own-browser tasks are starting");
+      toast.success("Your assistant-browser tasks are starting");
       setRan(true);
       const q = await getOwnBrowserQueue();
       if (q) setOwn(q);
@@ -106,9 +106,9 @@ export function RunNowPanel() {
       <p className="text-xs text-muted-foreground">These run on your schedule anyway. Press one to start it early.</p>
       {(waitN > 0 || ran) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2" data-testid="own-browser-queue">
-          <h3 className="sr-only">Your own browser</h3>
+          <h3 className="sr-only">Assistant browser</h3>
           <p className="text-sm font-medium" data-testid="own-browser-count">
-            {waitN} waiting for your own browser
+            {waitN} waiting for your assistant browser
           </p>
           {own && <p className="text-xs text-muted-foreground" data-testid="own-browser-window">{windowText(own)}</p>}
           <button type="button" data-testid="own-browser-run-now" disabled={busy === "own"} onClick={() => void runOwn()} className={`ml-auto ${BTN}`}>

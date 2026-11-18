@@ -215,7 +215,7 @@ async def test_a_trick_job_link_waits_in_the_own_browser_as_link_unclear_and_is_
         assert got.json()["status"] == "task" and task["application_id"] == app_id
         assert task["browser"] == {
             "kind": "own_browser", "reason": "link_unclear",
-            "label": "This link looks broken or disguised: your own browser checks it",
+            "label": "This link looks broken or disguised: your assistant browser checks it",
         }
         async with browser_routes._db() as db:  # noqa: SLF001
             await spine.append_event(

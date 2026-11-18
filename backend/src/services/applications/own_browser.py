@@ -82,8 +82,8 @@ WHY_WORDS = {
     "job360_safety_stop": "Job360's browser stopped for safety.",
     "default": "You pressed Send for this message.",
     "auto": "Sent under your outreach auto setting.",
-    "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
-    "link_unclear": "This link looks broken or disguised: your own browser checks it.",
+    "linkedin_own_browser": "LinkedIn runs only in your assistant browser: your choice.",
+    "link_unclear": "This link looks broken or disguised: your assistant browser checks it.",
     "learned_bot_check": "Job360's browser was blocked twice on this site (a CAPTCHA or bot check).",
     "captcha_handoff": "Job360's browser hit a CAPTCHA or bot check: you solve it in your own tab.",
 }
@@ -323,7 +323,7 @@ async def decide(
             _log("own_browser_decide", user.id, "stale", contact_id=contact_id)
             raise SpineError(409, "the draft changed since you looked - look again")
         if target["channel"] != "linkedin":
-            raise SpineError(422, "only a LinkedIn message is sent from your own browser")
+            raise SpineError(422, "only a LinkedIn message is sent from your assistant browser")
         if any(r["entry"] in ("sent", "reply") and int(r["id"]) > int(message_id) for r in rows):
             raise SpineError(409, "this message was already sent")
         current = derive(rows, now)
@@ -970,7 +970,7 @@ async def take(
         _log("own_browser_take", user.id, refusal["status"])
         return refusal
     _log("own_browser_take", user.id, "empty")
-    return _answer("empty", "nothing is waiting for your own browser", **held_back)
+    return _answer("empty", "nothing is waiting for your assistant browser", **held_back)
 
 
 def _held_back(

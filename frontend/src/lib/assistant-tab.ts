@@ -131,7 +131,7 @@ export const PEOPLE_HUNT_HELP =
 export const P_PC_ON = "assistant_settings.pc_on_hours";
 export const PC_ON_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const PC_ON_HELP =
-  "When your computer is usually on. Your assistant uses its own browser only then, for tasks Job360's browser could not finish. Blank = any time.";
+  "When your computer is usually on. Your assistant uses the assistant browser only then, for tasks Job360's browser could not finish. Blank = any time.";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
   P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE, P_SIGNED_IN_ASK, P_EMAIL_CODES,

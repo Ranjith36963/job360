@@ -36,7 +36,7 @@ def test_job360_failure_moves_to_own_browser(failure):
     route = routing.browser_for(job360_failed=failure)
     assert route == routing.Route("own_browser", routing.JOB360_FAILURES[failure])
     assert route.reason in routing.ROUTE_REASONS
-    assert routing.label(route)["label"] == "Needs your own browser: turn your PC on"
+    assert routing.label(route)["label"] == "Needs your assistant browser: turn your PC on"
 
 
 @pytest.mark.parametrize("stop", sorted(routing.HUMAN_STOPS))
@@ -151,7 +151,7 @@ async def test_asks_carry_browser(authenticated_async_context, monkeypatch):
         assert cap_ask["finish_here"] is True  # Job360's browser holds the page: the user solves it right here
         assert cap_ask["browser"] == {"kind": "human", "label": "You: on the site", "reason": "only_you"}
         assert (await _ask_browser(client, login_id))["browser"] == {
-            "kind": "own_browser", "label": "Needs your own browser: turn your PC on",
+            "kind": "own_browser", "label": "Needs your assistant browser: turn your PC on",
             "reason": "job360_login_required",
         }
         assert (await _ask_browser(client, otp_id))["browser"] == {
@@ -247,7 +247,7 @@ async def test_one_open_block_map_serves_finish_here_and_the_label(authenticated
             # Once the hold is gone (not finish_here) the same browser-written CAPTCHA waits for the own browser.
             gone = await blocked_service.browser_for_asks(db, user_id, rows, blocks, set())
             assert gone[cap["id"]] == {
-                "kind": "own_browser", "label": "Needs your own browser: turn your PC on", "reason": "job360_bot_check",
+                "kind": "own_browser", "label": "Needs your assistant browser: turn your PC on", "reason": "job360_bot_check",
             }
             assert none_id not in blocks
 
@@ -273,7 +273,7 @@ async def test_contact_send_browser(authenticated_async_context):
         contacts = {c["id"]: c for c in (await client.get(f"/api/applications/{app_id}")).json()["contacts"]}
         # Owner 2026-10-26 (reverses 2026-10-25 "Job360 first for LinkedIn"): the own browser, from the start.
         assert contacts[views["linkedin"]]["send_browser"] == {
-            "kind": "own_browser", "label": "Your own browser: runs when your PC is on", "reason": "linkedin_own_browser",
+            "kind": "own_browser", "label": "Your assistant browser: runs when your PC is on", "reason": "linkedin_own_browser",
         }
         assert contacts[views["email"]]["send_browser"] is None
 
@@ -293,5 +293,5 @@ async def test_a_captcha_is_the_users_only_while_job360s_browser_holds_the_page(
         ask = await _ask_browser(client, app_id)
         assert ask["finish_here"] is False
         assert ask["browser"] == {
-            "kind": "own_browser", "label": "Needs your own browser: turn your PC on", "reason": "job360_bot_check",
+            "kind": "own_browser", "label": "Needs your assistant browser: turn your PC on", "reason": "job360_bot_check",
         }

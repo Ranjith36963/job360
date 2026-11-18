@@ -34,12 +34,13 @@ MAX_TEXT = 20_000
 
 NOT_A_JOB_PAGE = (
     "Only a public LinkedIn job page (linkedin.com/jobs/view/<number>) is read by Job360's server. Every other "
-    "LinkedIn page opens only in the user's own browser (their choice): leave it in the own-browser queue."
+    "LinkedIn page opens only in the user's assistant browser (their choice): leave it in the own-browser queue."
 )
 BLOCKED = (
-    "LinkedIn blocked Job360's signed-out read, so LinkedIn job pages wait for the user's own browser until {date}."
+    "LinkedIn blocked Job360's signed-out read, so LinkedIn job pages wait for the user's assistant browser "
+    "until {date}."
 )
-NOT_LOADED = "The LinkedIn job page did not load ({outcome}). Read it in the user's own browser."
+NOT_LOADED = "The LinkedIn job page did not load ({outcome}). Read it in the user's assistant browser."
 
 
 def job_id(url: str) -> Optional[str]:

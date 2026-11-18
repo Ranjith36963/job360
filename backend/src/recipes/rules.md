@@ -144,8 +144,8 @@ or a safety stop: its `needs_you` / open `blocked`) does that task wait for the 
 app drives on the user's PC, there only while the PC is on and the user agrees. A scheduled cloud run never has
 one: leave the task on Needs you and go on. Passwords and MFA are the user's alone, and so is a one-time code unless Email codes (below) allows it (then it is yours); no browser
 solves a CAPTCHA: it is always solved by the user, on Needs you while Job360's browser holds the page
-(Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your own
-browser: turn your PC on", "Your own browser: runs when your PC is on" (LinkedIn) or "You: on the site".
+(Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your assistant
+browser: turn your PC on", "Your assistant browser: runs when your PC is on" (LinkedIn) or "You: on the site".
 **Say which browser did it:** every `form_checked`, `form_filled`, `form_swept`, `submit_attempted`, `blocked` and
 `record_application` takes `browser`: `job360` (the `browser` tool; refused when it has no page open for you),
 `own_browser` (the user's browser your app drives) or `manual` (the user by hand). Left out: `unknown`.

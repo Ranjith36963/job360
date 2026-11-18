@@ -83,27 +83,28 @@ HUMAN_STOPS: dict[str, str] = {"password": "password", "mfa": "mfa", "otp": "mfa
 
 LABELS: dict[str, str] = {
     "job360": "I'll use Job360's browser",
-    "own_browser": "Needs your own browser: turn your PC on",
+    "own_browser": "Needs your assistant browser: turn your PC on",
     "human": "You: on the site",
 }
 # The chip for linkedin.com: the user's own browser by their choice, not because anything failed.
-LINKEDIN_LABEL = "Your own browser: runs when your PC is on"
+LINKEDIN_LABEL = "Your assistant browser: runs when your PC is on"
 
 # One chip per route reason (and the "waiting" chip). {site} {date} {until} {n} {cap} are filled from closed
 # values by :func:`label`; the frontend mirrors this block in ``browser-labels.ts``.
 ROUTE_LABELS: dict[str, str] = {
     "default": "I'll use Job360's browser",
-    "linkedin_own_browser": "Your own browser: runs when your PC is on",
-    "learned_blocked": "Job360's browser was blocked on {site} on {date}: your own browser until {until}",
-    "learned_login": "{site} asks you to sign in: your own browser, or sign in once in Job360's browser",
+    "linkedin_own_browser": "Your assistant browser: runs when your PC is on",
+    "learned_blocked": "Job360's browser was blocked on {site} on {date}: your assistant browser until {until}",
+    "learned_login": "{site} asks you to sign in: your assistant browser, or sign in once in Job360's browser",
     "probe": "Trying Job360's browser on {site} again",
     "at_cap": "Today's LinkedIn limit is used ({n} of {cap}): waits until tomorrow",
     "linkedin_paused": "LinkedIn showed a limit warning: LinkedIn tasks paused until {date}",
-    "account_step": "This site wants a new account: your own browser, or sign in once in Job360's browser",
+    "account_step": "This site wants a new account: your assistant browser, or sign in once in Job360's browser",
     "linkedin_guest_blocked": "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
-    "link_unclear": "This link looks broken or disguised: your own browser checks it",
-    "learned_bot_check": "Job360's browser was blocked twice on {site}: your own browser runs it",
-    "captcha_handoff": "Job360's browser hit a CAPTCHA on {site}: your own browser, you solve it, it fills the rest",
+    "link_unclear": "This link looks broken or disguised: your assistant browser checks it",
+    "learned_bot_check": "Job360's browser was blocked twice on {site}: your assistant browser runs it",
+    "captcha_handoff":
+        "Job360's browser hit a CAPTCHA on {site}: your assistant browser, you solve it, it fills the rest",
     "email_code": "Your assistant reads the code from Gmail: runs when your PC is on",
     "waiting": "Waiting for your PC",
 }

@@ -309,7 +309,7 @@ def blocker_for(
         return Blocker(
             "captcha",
             "This page asks for a human check (CAPTCHA). Job360's browser never solves one: the user finishes "
-            "this job with their own browser.",
+            "this job with their assistant browser.",
             from_text=not framed,
         )
     if has_password_box:

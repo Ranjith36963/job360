@@ -22,7 +22,7 @@ from src.services.browser_agent import routing
 HUNT = "assistant_settings.hunt_every_hours"
 PEOPLE = "assistant_settings.people_hunt"
 PAUSE = "assistant_settings.paused_until"
-LINKEDIN = {"kind": "own_browser", "label": "Your own browser: runs when your PC is on", "reason": "linkedin_own_browser"}
+LINKEDIN = {"kind": "own_browser", "label": "Your assistant browser: runs when your PC is on", "reason": "linkedin_own_browser"}
 _AD = {
     "title": "Data Engineer", "company": "Northwind", "location": "London", "country": "GB", "remote": False,
     "description": "Build the pipelines.",

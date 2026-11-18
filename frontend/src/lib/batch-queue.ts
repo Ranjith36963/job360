@@ -72,7 +72,7 @@ export type QueueBrowserFilter = "all" | "job360" | "own_browser" | "human";
 
 const BROWSER_FILTER_WORDS: Record<Exclude<QueueBrowserFilter, "all">, string> = {
   job360: "Job360's browser",
-  own_browser: "Your own browser",
+  own_browser: "Assistant browser",
   human: "Only you",
 };
 
