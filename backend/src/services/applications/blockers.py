@@ -461,10 +461,9 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             fill_when = _when(s["fill"]["recorded_at"])
             fold = [k for k in question_asks if _when(k["asked_at"]) >= fill_when]
             question_asks = [k for k in question_asks if k not in fold]
+        # 2026-11-18 (20:55 batch run, apps 125 / 136): an open ask stays the user's on a stale fill too; check_submit
+        # says question_open until they answer, so "refill the form" never hides it.
         stale_fill = s["fill_open"] and s["stale"]
-        if stale_fill:  # an old fill's asks belong to a form that is being redone
-            fill_when = _when(s["fill"]["recorded_at"])
-            question_asks = [k for k in question_asks if _when(k["asked_at"]) < fill_when]
         mine_flags = [] if (why or stale_fill) else flags.get(app_id, [])
         if (s["fill_open"] and not why and not stale_fill) or question_asks or reason == "unknown_question":
             fill_at = s["fill"]["recorded_at"] if s["fill"] else block_since

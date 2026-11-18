@@ -4,8 +4,9 @@ had the open ask of its OLD fill, so ``preflight.waiting_on_owner`` was true and
 them before opening anything; ``mark_done`` accepted the stop because ``fillable_rows`` counted any filled
 form as done. Application 361 was one of them, so its missing job country was never set either.
 
-A. ``waiting_on_owner`` follows the blockers' rule: an ask of a fill that a newer CV made stale is not the
-   user's to answer (the form is being redone), so a refill row reads false, like its ``waiting_on``;
+A. a refill row with no open ask reads ``waiting_on_owner`` false, like its ``waiting_on``. (#1660 also dropped
+   the old fill's ask; the 20:55 run proved check_submit still counts it, so an open ask now waits on the user:
+   test_batch_ask_gate_parity.py.)
 B. ``mark_done(batch)`` counts a refill row as work left (409 names it);
 D. ``mark_done(batch)`` names the claimed queued rows still missing a job country (``country_missing``).
 """
@@ -57,8 +58,12 @@ async def _filled_and_asked(client: AsyncClient, app_id: int) -> None:
 
 
 async def _refill_row(client: AsyncClient, app_id: int) -> None:
-    """...and then a newer CV: the fill is stale, the next step is the assistant's "refill the form"."""
-    await _filled_and_asked(client, app_id)
+    """CV, a filled form, then a newer CV: the fill is stale, the next step is the assistant's "refill the form".
+    2026-11-18 (20:55 run, test_batch_ask_gate_parity.py): an open ask on it would make it the user's, as at
+    check_submit, so this row has none."""
+    await _cv(client, app_id)
+    await _event(client, app_id, "form_filled", {
+        "form_url": f"https://northwind.example/careers/{app_id}/apply", "fields_count": 1})
     await _cv(client, app_id, "Ada, engineer. Tailored again.")
 
 
@@ -90,11 +95,11 @@ async def _stop(client: AsyncClient):
     return await client.post("/api/schedule/done", json={"duty": "batch", "outcome": "partial", "reason": "needs_user"})
 
 
-# ── A. a refill row's old ask does not make it wait on the user ──────────────────────────────────────
+# ── A. a refill row without an ask does not wait on the user ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_a_refill_row_with_its_old_fills_ask_needs_nothing_from_the_user(
+async def test_a_refill_row_with_no_open_ask_needs_nothing_from_the_user(
     authenticated_async_context, fixture_user_id
 ):
     async with authenticated_async_context() as client:
