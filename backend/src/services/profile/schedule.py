@@ -61,7 +61,7 @@ _EVERY_RE = re.compile(r"^(\d{1,3})h$")
 RUN_OUTCOMES: tuple[str, ...] = ("done", "partial", "failed")
 RUN_REASONS: tuple[str, ...] = (
     "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
-    "needs_user", "error",
+    "needs_user", "error", "no_review",
 )
 BACKOFF_CAP_HOURS = 24
 # An hourly routine wakes at a fixed minute but a duty is stamped when the run ENDS, so the next due time
@@ -87,6 +87,8 @@ REASON_WORDS: dict[str, tuple[str, str]] = {
     "error": ("something went wrong in the run",
               "Open your assistant's last run to see what happened, then press Run now."),
     "no_work": ("it had nothing to do", "Nothing to do."),
+    "no_review": ("it skipped the check of the people and notes it saved",
+                  "Nothing to do: the next run checks them before it finishes."),
 }
 DUTY_WORDS: dict[str, str] = {
     "hunt": "Hunt", "inbox": "Gmail check", "reach": "People hunt", "batch": "Apply", "network": "Network",

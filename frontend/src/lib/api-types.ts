@@ -6765,7 +6765,7 @@ export interface components {
             /** Last Outcome */
             last_outcome?: ("done" | "partial" | "failed") | null;
             /** Last Reason */
-            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error") | null;
+            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review") | null;
             /** Last Run At */
             last_run_at?: string | null;
             /** Next Due At */
@@ -8226,8 +8226,13 @@ export interface components {
              */
             outcome: "done" | "partial" | "failed";
             /** Reason */
-            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error") | null;
+            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review") | null;
             report?: components["schemas"]["HuntReportIn"] | null;
+            /**
+             * Reviewed
+             * @default false
+             */
+            reviewed: boolean;
         };
         /** MarkDoneOut */
         MarkDoneOut: {
@@ -10184,7 +10189,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error";
+            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error" | "no_review";
             /** Title */
             title: string;
             /** What To Do */

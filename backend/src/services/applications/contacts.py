@@ -229,6 +229,66 @@ def _refuse_directory_proof(user_id: str, clean: Optional[str]) -> Optional[str]
     return clean
 
 
+_LINKEDIN_VIA = ("linkedin", "apollo")
+_COMPANY_PAGE_VIA = ("company_site", "company_team_page")
+_NAME_STOPWORDS = frozenset({"the", "of", "and", "for", "ltd", "inc", "llc", "plc", "gmbh", "limited", "group"})
+FOUND_VIA_MISMATCH = (
+    "found_via {via} does not match source_url on {host}: {fix} found_via says where the proof page is, so the two "
+    "must agree. Fix found_via (or source_url) and call again."
+)
+
+
+def _on_host(host: str, base: str) -> bool:
+    return host == base or host.endswith("." + base)
+
+
+def _company_owns_host(host: str, company: str, job_url: str) -> bool:
+    """True when ``host`` plausibly belongs to ``company``: a name word (3+ letters) or the initials of the
+    name appear in the host, or the host is the job ad's own host. Unknown company: never refuse."""
+    words = ["".join(ch for ch in w if ch.isalnum()) for w in company.lower().split()]
+    words = [w for w in words if w and w not in _NAME_STOPWORDS]
+    if not words:
+        return True
+    labels = host.split(".")
+    if any(len(w) >= 3 and w in host for w in words) or "".join(w[0] for w in words) in labels:
+        return True
+    try:
+        ad_host = (urlsplit(job_url).hostname or "").lower() if job_url else ""
+    except ValueError:
+        ad_host = ""
+    return bool(ad_host) and (host == ad_host or host.endswith("." + ad_host) or ad_host.endswith("." + host))
+
+
+def _refuse_found_via_mismatch(
+    user_id: str, actor: str, found_via: Optional[str], source_url: Optional[str], company: str, job_url: str
+) -> None:
+    """People hunt (Kits review, 2026-11-18): a run saved a news page as found_via company_team_page and a
+    LinkedIn-proven contact as other. An assistant's found_via must agree with the host of its source_url:
+    LinkedIn pages are linkedin or apollo (lookup-proven), GitHub pages are github, and a company page is on
+    that company's own host. The website's own adds are never checked."""
+    if actor == "web" or not found_via or not source_url:
+        return
+    host = (urlsplit(source_url).hostname or "").lower().rstrip(".")
+    on_linkedin, on_github = _on_host(host, "linkedin.com"), _on_host(host, "github.com")
+    fix = ""
+    if on_linkedin and found_via not in _LINKEDIN_VIA:
+        fix = "a LinkedIn page is found_via linkedin, or apollo when two lookups proved them."
+    elif found_via in _LINKEDIN_VIA and not on_linkedin:
+        fix = f"found_via {found_via} needs the LinkedIn profile as source_url; a news article is found_via other."
+    elif on_github != (found_via == "github"):
+        fix = "a GitHub profile is found_via github, and found_via github needs the GitHub profile as source_url."
+    elif found_via in _COMPANY_PAGE_VIA and not _company_owns_host(host, company, job_url):
+        fix = (f"{host} is not {company}'s own site; a news article is found_via other, a talk is speaker_page, "
+               "an event page is event.")
+    if not fix:
+        return
+    get_audit_logger().info(
+        "contact_found_via_refused", extra={"event": "contact_found_via_refused", "user_id": user_id,
+                                            "reason": "found_via_host_mismatch", "found_via": found_via, "host": host},
+    )
+    raise SpineError(422, FOUND_VIA_MISMATCH.format(via=found_via, host=host, fix=fix))
+
+
 def _validate_company(raw: Optional[str]) -> Optional[str]:
     """The employer this person works at, as given (inner whitespace collapsed).
     None/blank -> None (rule #29). Matching uses company_key, never this text."""
@@ -783,10 +843,15 @@ async def add_contact(
     if application_id is None and not company_key(clean_company or ""):
         raise SpineError(422, COLD_COMPANY_REQUIRED)
 
+    app_row = None
     if application_id is not None:
         app_row = await get_owned_application(db, user_id, application_id)
         if app_row is None:
             raise SpineError(404, "application not found")
+    _refuse_found_via_mismatch(
+        user_id, actor, clean_found_via, clean_source_url,
+        clean_company or str((app_row or {}).get("job_company") or ""), str((app_row or {}).get("job_url") or ""),
+    )
     clean_shared = await _validate_shared(user_id, shared)
 
     if not clean_email:

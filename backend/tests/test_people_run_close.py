@@ -102,3 +102,22 @@ async def test_the_website_marks_as_before(authenticated_async_context):
         failed = await client.post("/api/schedule/done", json={
             "duty": "network", "outcome": "failed", "reason": "tool_unavailable"})
         assert failed.status_code == 200, failed.text
+
+
+@pytest.mark.asyncio
+async def test_done_without_a_review_is_recorded_partial_no_review(authenticated_async_context):
+    """2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer."""
+    async with authenticated_async_context() as client:
+        async with await _agent(client) as agent:
+            plain = await agent.post("/api/schedule/done", json={"duty": "network"})
+            assert plain.status_code == 200, plain.text
+            assert plain.json()["outcome"] == "partial" and "no_review" in plain.json()["note"]
+            runs = (await client.get("/api/schedule/status")).json()["duties"]
+            net = next(r for r in runs if r["duty"] == "network")
+            assert (net["last_outcome"], net["last_reason"]) == ("partial", "no_review"), net
+            checked = await agent.post("/api/schedule/done", json={"duty": "network", "reviewed": True})
+            assert checked.status_code == 200 and checked.json()["outcome"] == "done", checked.text
+            wrong = await agent.post("/api/schedule/done", json={"duty": "inbox", "reviewed": True})
+            assert wrong.status_code == 422, wrong.text
+        web = await client.post("/api/schedule/done", json={"duty": "network"})
+        assert web.status_code == 200 and web.json()["outcome"] == "done", web.text
