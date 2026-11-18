@@ -395,3 +395,14 @@ async def test_the_assistant_drafts_every_memory_question_and_the_users_edit_is_
         after = [q["topic"] for c in (await client.get("/api/profile/questionnaire")).json()["countries"]
                  if c["country"] == "GB" for q in c["questions"]]
         assert "salary.GB" not in after and "right_to_work.GB.work_authorization" in after
+
+
+@pytest.mark.asyncio
+async def test_get_profile_tells_the_assistant_to_draft_a_missing_answer_never_to_leave_it():
+    """Owner 2026-11-18: get_profile's text still said "ask only that, once, then save it; never guess",
+    which contradicts drafting every Answer-once question. It now says draft a guess the user confirms."""
+    from src.api.mcp_server import build_server
+
+    text = " ".join(next(t.description or "" for t in await build_server().list_tools() if t.name == "get_profile").split())
+    assert "never guess" not in text
+    assert 'A missing key means "not answered": draft a guess (user_info.answers, approved: false)' in text

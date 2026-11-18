@@ -1016,7 +1016,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
 
         MEMORY: form facts are user_info.contact, user_info.right_to_work, user_info.logistics,
         user_info.languages, user_info.equality, user_info.answers and preferences.salary_by_country.
-        A missing key means "not answered": ask only that, once, then save it; never guess. Use the
+        A missing key means "not answered": draft a guess (user_info.answers, approved: false); only the
+        user confirms it. Use the
         HIRING country's record (also for a remote job). Never convert currency. A salary floor is never stored or
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
