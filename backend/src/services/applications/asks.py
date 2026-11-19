@@ -349,9 +349,10 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
 
 async def _withdraw_code_asks(db: JobDatabase, user_id: str) -> int:
     """F8 (2026-11-13): with ``use_email_codes`` on, an open ask that Job360 itself opened from an
-    ``otp_needed`` block (matched by the block's own ``ask_id`` and the same asker, never by words) is the
-    assistant's work: withdrawn with a fixed reason. A block handed back to the owner (``code_escalated``), an
-    ask_user the agent wrote by hand and every other reason stay. Scoped by ``user_id``; logs counts only."""
+    ``otp_needed`` block (and, with ``site_sign_in`` on, from a sign-in / sign-up wall on a job site, 2026-11-19)
+    (matched by the block's own ``ask_id`` and the same asker, never by words) is the assistant's work:
+    withdrawn with a fixed reason. A block handed back to the owner (``code_escalated``), an ask_user the agent
+    wrote by hand and every other reason stay. Scoped by ``user_id``; logs counts only."""
     from src.services.applications import blocked  # noqa: PLC0415 - blocked imports this module
 
     cur = await db._db.execute(
@@ -361,17 +362,20 @@ async def _withdraw_code_asks(db: JobDatabase, user_id: str) -> int:
     )
     app_ids = [int(r[0]) for r in await cur.fetchall()]
     found = await blocked.open_blocks(db, user_id, app_ids)
-    blocks = {i: p for i, p in found.items() if p.get("reason") == "otp_needed"}
-    if not blocks or not await blocked.codes_mine(user_id, blocks):
+    blocks = {i: p for i, p in found.items() if p.get("reason") in ("otp_needed", *blocked.SIGN_IN_WALLS)}
+    owned = await blocked.codes_mine(user_id, blocks) if blocks else frozenset()
+    if not owned:
         return 0
     linked = {int(p["ask_id"]): i for i, p in blocks.items() if isinstance(p.get("ask_id"), int)
-              and blocked.assistant_reads_code(p, True)}
+              and blocked.assistant_reads_code(p, owned)}
     withdrawn = 0
     for ask_id, ask in (await _get_asks(db, user_id, sorted(linked))).items():
         if ask.get("status") != "open" or ask["asked_by"] != blocks[linked[ask_id]].get("assistant"):
             continue
         try:
-            await withdraw_ask(db, user_id, ask_id, TIDY_ACTOR, blocked.CODES_WITHDRAWN)
+            sign_in = blocks[linked[ask_id]].get("reason") in blocked.SIGN_IN_WALLS
+            await withdraw_ask(db, user_id, ask_id, TIDY_ACTOR,
+                               blocked.SIGN_IN_WITHDRAWN if sign_in else blocked.CODES_WITHDRAWN)
             withdrawn += 1
         except SpineError:  # answered or withdrawn in between
             continue

@@ -118,6 +118,11 @@ export const P_EMAIL_CODES = "assistant_settings.use_email_codes";
 export const EMAIL_CODES_LABEL = "Use codes job sites email me";
 export const EMAIL_CODES_HELP =
   "Your assistant may read a one-time code from your Gmail and type it into the same job site, only when the email is to you, from that site, and came in the last 15 minutes. Never passwords, password resets, or codes from Google, Microsoft, Apple, LinkedIn or banks.";
+/** Owner 2026-11-19: the assistant may sign in to / sign up on a job site with the user's own email. Off unless the user says. */
+export const P_SITE_SIGN_IN = "assistant_settings.site_sign_in";
+export const SITE_SIGN_IN_LABEL = "Sign in to job sites for me";
+export const SITE_SIGN_IN_HELP =
+  "In your own browser, your assistant may sign in to or create an account on a job site with your email, using an emailed code or link, or a new password it sets from the site's reset email and never saves. Never Google, Microsoft, Apple, LinkedIn, Indeed, banks or email accounts. CAPTCHAs stay yours.";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Owner 2026-10-23: hunt for jobs every N hours (1-168); empty or 0 = off. */
@@ -135,7 +140,7 @@ export const PC_ON_HELP =
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
   P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND, P_CV_AUTO_APPROVE, P_SIGNED_IN_ASK, P_EMAIL_CODES,
-  P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
+  P_SITE_SIGN_IN, P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
   P_PEOPLE_HUNT, P_PC_ON,
   P_OUTREACH_PER_COMPANY, P_NETWORK_PER_HOUR, P_LINKEDIN_PER_DAY, P_EMAIL_PER_DAY,
 ] as const;
@@ -159,6 +164,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_CV_AUTO_APPROVE]: CV_AUTO_APPROVE_LABEL,
   [P_SIGNED_IN_ASK]: SIGNED_IN_ASK_LABEL,
   [P_EMAIL_CODES]: EMAIL_CODES_LABEL,
+  [P_SITE_SIGN_IN]: SITE_SIGN_IN_LABEL,
   [P_COMPANY_CAP]: "Applications per company",
   [P_COMPANY_DAYS]: "Days for the company limit",
   [P_WEEKLY_CAP]: "Weekly limit",
@@ -220,7 +226,7 @@ export function pcOnText(v: unknown): string {
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
-  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM || path === P_CV_AUTO_APPROVE || path === P_EMAIL_CODES) return v === true ? "on" : "off";
+  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT || path === P_LINKEDIN_PREMIUM || path === P_CV_AUTO_APPROVE || path === P_EMAIL_CODES || path === P_SITE_SIGN_IN) return v === true ? "on" : "off";
   if (path === P_OUTREACH_SEND) return v === "auto" ? "on" : "off";
   if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
   if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;

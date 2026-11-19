@@ -780,9 +780,10 @@ async def _application_tasks(
         if p.get(blocked.BY_KEY) != blocked.BY_BROWSER and not handoff and not code:
             continue
         reason = str(p.get("reason") or "")
+        codes_flag, sign_in_flag = blocked.assistant_route(p, codes)
         route = routing.ask_route(
             blocked.ASK_KIND_FOR_REASON.get(reason, ""), block_reason=reason, block_by_browser=not handoff,
-            handoff=handoff, email_codes=code,
+            handoff=handoff, email_codes=codes_flag, site_sign_in=sign_in_flag,
             # While Job360's browser still holds that page the user finishes it on Needs you; once it let go, no.
             finish_here=reason == "captcha" and blocked.browser_hold_live(user.id, app_id),
         )

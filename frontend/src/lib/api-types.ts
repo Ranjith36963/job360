@@ -5225,6 +5225,7 @@ export interface components {
              *     }
              */
             setup_progress: components["schemas"]["SetupProgressOut"];
+            site_sign_in: components["schemas"]["SettingFieldOut"];
             submit_mode: components["schemas"]["SettingFieldOut"];
             use_email_codes: components["schemas"]["SettingFieldOut"];
             /**
@@ -8379,6 +8380,8 @@ export interface components {
         };
         /** MarkDoneIn */
         MarkDoneIn: {
+            /** Agency */
+            agency?: number[] | null;
             /** Application Ids */
             application_ids?: number[] | null;
             /**
@@ -8979,6 +8982,8 @@ export interface components {
          *     network people this run, against the target and the minimum.
          */
         PeopleScoreOut: {
+            /** Agency */
+            agency?: string[];
             /** Minimum */
             minimum: number;
             /** Network */

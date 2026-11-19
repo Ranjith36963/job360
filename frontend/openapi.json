@@ -3047,6 +3047,9 @@
               "total": 6
             }
           },
+          "site_sign_in": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "submit_mode": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -3092,6 +3095,7 @@
           "ask_before_signed_in_submit",
           "cv_auto_approve",
           "use_email_codes",
+          "site_sign_in",
           "paused",
           "practice_run"
         ],
@@ -11159,6 +11163,21 @@
       "MarkDoneIn": {
         "additionalProperties": false,
         "properties": {
+          "agency": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agency"
+          },
           "application_ids": {
             "anyOf": [
               {
@@ -12549,6 +12568,13 @@
       "PeopleScoreOut": {
         "description": "2026-11-18: Job360's own count for a people run, never the run's claim: people saved at each job, and new\nnetwork people this run, against the target and the minimum.",
         "properties": {
+          "agency": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Agency",
+            "type": "array"
+          },
           "minimum": {
             "title": "Minimum",
             "type": "integer"

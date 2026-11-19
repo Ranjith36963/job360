@@ -32,6 +32,7 @@ export const ROUTE_LABELS = {
   learned_bot_check: "Job360's browser was blocked twice on {site}: your assistant browser runs it",
   captcha_handoff: "Job360's browser hit a CAPTCHA on {site}: your assistant browser, you solve it, it fills the rest",
   email_code: "Your assistant reads the code from Gmail: runs when your PC is on",
+  site_sign_in: "Your assistant signs in on {site} with your email: runs when your PC is on",
   waiting: "Waiting for your PC",
 } as const;
 

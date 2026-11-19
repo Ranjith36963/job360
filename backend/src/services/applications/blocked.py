@@ -289,19 +289,50 @@ def captcha_handoff(block_payload: dict[str, Any]) -> bool:
 ESCALATED_KEY = "code_escalated"
 CODE_WORDS = "read the code from Gmail and enter it"
 CODES_WITHDRAWN = "Job360: the assistant reads the code from your email"
+# Owner 2026-11-19 (SITE SIGN-IN): with ``site_sign_in`` on, a plain sign-in or sign-up wall on a JOB SITE is the
+# assistant's (it signs in with the user's own email, in the user's own browser), exactly as F8 treats a code box.
+SIGN_IN_WALLS = frozenset({"login_needed", "account_creation"})
+SIGN_IN_WORDS = "sign in or sign up on the site with the user's email (rules SITE SIGN-IN)"
+SIGN_IN_WITHDRAWN = "Job360: the assistant signs in on this site with your email"
+_ASSISTANT_REASONS = frozenset({"otp_needed"}) | SIGN_IN_WALLS
 
 
-def assistant_reads_code(block_payload: dict[str, Any], codes_on: bool) -> bool:
-    """A code box the user's setting (``use_email_codes``, read live by the caller) makes the assistant's: an
-    ``otp_needed`` block that was not escalated back to the owner. Decided at read time from the stored block."""
-    return bool(codes_on) and block_payload.get("reason") == "otp_needed" and not block_payload.get(ESCALATED_KEY)
+def _owned(codes_on: bool | frozenset[str]) -> frozenset[str]:
+    """The block reasons the user's settings make the assistant's: a bool is the old ``use_email_codes`` flag."""
+    if isinstance(codes_on, frozenset):
+        return codes_on
+    return frozenset({"otp_needed"}) if codes_on else frozenset()
 
 
-async def codes_mine(user_id: str, blocks: dict[int, dict[str, Any]]) -> bool:
-    """The setting, read (one profile read) only when some open block is an assistant-readable code box."""
-    if not any(p.get("reason") == "otp_needed" and not p.get(ESCALATED_KEY) for p in blocks.values()):
+def assistant_reads_code(block_payload: dict[str, Any], codes_on: bool | frozenset[str]) -> bool:
+    """A step the user's settings (read live by the caller: :func:`codes_mine`) make the assistant's: an
+    ``otp_needed`` block with ``use_email_codes`` on, or a sign-in / sign-up wall on a job site
+    (``email_codes.sign_in_site`` of its ``page_host``; none = the user's) with ``site_sign_in`` on, either one not
+    escalated back to the owner. Decided at read time from the stored block."""
+    reason = block_payload.get("reason")
+    if reason not in _owned(codes_on) or block_payload.get(ESCALATED_KEY):
         return False
-    return await email_codes.codes_are_assistants(user_id)
+    return reason not in SIGN_IN_WALLS or email_codes.sign_in_site(block_payload.get("page_host"))
+
+
+def assistant_route(block_payload: dict[str, Any], codes_on: bool | frozenset[str]) -> tuple[bool, bool]:
+    """``routing.ask_route``'s ``(email_codes, site_sign_in)`` flags for one block (:func:`assistant_reads_code`)."""
+    mine = assistant_reads_code(block_payload, codes_on)
+    sign_in = block_payload.get("reason") in SIGN_IN_WALLS
+    return mine and not sign_in, mine and sign_in
+
+
+def assistant_words(block_payload: dict[str, Any]) -> str:
+    """What the assistant does on an assistant-owned block (:func:`assistant_reads_code`)."""
+    return SIGN_IN_WORDS if block_payload.get("reason") in SIGN_IN_WALLS else CODE_WORDS
+
+
+async def codes_mine(user_id: str, blocks: dict[int, dict[str, Any]]) -> frozenset[str]:
+    """The settings, read (one profile read) only when some open block could be the assistant's: the reasons
+    they make the assistant's (empty = none; truthy like the old bool)."""
+    if not any(p.get("reason") in _ASSISTANT_REASONS and not p.get(ESCALATED_KEY) for p in blocks.values()):
+        return frozenset()
+    return await email_codes.assistant_reasons(user_id)
 
 
 async def browser_captcha_open(db: JobDatabase, user_id: str, application_id: int) -> bool:
@@ -456,10 +487,11 @@ async def browser_for_asks(
             continue
         p = blocks.get(int(a["application_id"]), {}) if a.get("application_id") else {}
         mine = p if p.get("ask_id") == a["id"] else {}
+        codes_flag, sign_in_flag = assistant_route(mine, codes)
         route = routing.ask_route(
             a.get("kind") or "", block_reason=str(mine.get("reason") or ""),
             block_by_browser=mine.get(BY_KEY) == BY_BROWSER, finish_here=a["id"] in finish,
-            handoff=captcha_handoff(mine), email_codes=assistant_reads_code(mine, codes),
+            handoff=captcha_handoff(mine), email_codes=codes_flag, site_sign_in=sign_in_flag,
             url=urls.get(int(a.get("application_id") or 0), ""),
         )
         out[int(a["id"])] = routing.label(route)
@@ -554,15 +586,24 @@ async def before_append(
     if stored["reason"] == "posting_closed":
         # No ask: the "posting closed" blocker alone shows; auto_close closes it when the proof holds.
         return {**stored, "ask_id": None}
-    if stored["reason"] == "otp_needed" and await email_codes.codes_are_assistants(user.id):
-        tries = await email_codes.refused_tries(db, user.id, application_id) + 1
-        audit = {"user_id": safe_log_value(user.id), "application_id": int(application_id), "reason": "otp_needed",
-                 "tries": tries}
+    if stored["reason"] in _ASSISTANT_REASONS and assistant_reads_code(
+        stored, await email_codes.assistant_reasons(user.id),
+    ):
+        sign_in = stored["reason"] in SIGN_IN_WALLS
+        tries = await email_codes.refused_tries(
+            db, user.id, application_id, SIGN_IN_WALLS if sign_in else frozenset({"otp_needed"}),
+        ) + 1
+        audit = {"user_id": safe_log_value(user.id), "application_id": int(application_id),
+                 "reason": stored["reason"], "tries": tries}
+        if sign_in:
+            audit["page_host"] = safe_log_value(stored.get("page_host") or "", max_len=100)
+        name = "signin_block" if sign_in else "otp_block"
         if tries < email_codes.OTP_ESCALATE_AT:
-            # F8: the assistant reads the code from Gmail; no owner ask. The job waits in the PC queue.
-            get_audit_logger().info("otp_block_assistant", extra={"event": "otp_block_assistant", **audit})
+            # F8 / SITE SIGN-IN: the assistant reads the code or signs in with the user's email; no owner ask.
+            # The job waits in the PC queue.
+            get_audit_logger().info(f"{name}_assistant", extra={"event": f"{name}_assistant", **audit})
             return {**stored, "ask_id": None}
-        get_audit_logger().info("otp_block_escalated", extra={"event": "otp_block_escalated", **audit})
+        get_audit_logger().info(f"{name}_escalated", extra={"event": f"{name}_escalated", **audit})
         stored = {**stored, ESCALATED_KEY: True}
     open_ids = await _open_ask_ids(db, user.id, _ask_ids(events, stored["reason"]))
     if open_ids:

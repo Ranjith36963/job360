@@ -209,6 +209,11 @@ SHAPES: dict[str, dict[str, Any]] = {
         "note": "type a one-time code the job site emailed to the user (record email_code_used first). "
         "On needs the user's OK",
     },
+    _settings.SITE_SIGN_IN_PATH: {
+        "example": False,
+        "note": "sign in to / create an account on a job site with the user's email (rules SITE SIGN-IN; a fresh "
+        "reset password, never stored). On needs the user's OK",
+    },
     _settings.PC_ON_HOURS_PATH: {
         "example": {"days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "18:00"},
         "note": "when the user's PC is on, in their timezone; null = any time. A from later than to runs overnight",
