@@ -119,3 +119,19 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
   held as drafts through the 03:51 window; readied at 04:07. Kits: the cage does not re-judge after a
   ready-for-review reviewer run; I cannot dispatch auto-merge.yml (403).
 - Decision taken without the owner: none.
+
+## 03:56 run (transcript overwritten) and 04:07 run  (score 32% by Job360; 44% with the agency fix)
+- 04:07 (started outside the hourly slot; reach 1110-1114; network not due): marked partial, 11 people, a draft each.
+  Engage People 5 (team page), FirstWork 3 (team page), David Joseph 2 recruiters (Sprouts + Clay agree, same
+  LinkedIn URL), BCU 1, Evnek 0. Job360 scored 8 of 25: it gave David Joseph 0 although both recruiters are on it.
+- Missed: Evnek and PBL Care (lookups never agreed); all 11 reviews stored weak (the run still records whole-note
+  rows; #1699 not yet merged); the run did not add the people the People check failed this time (good).
+- Biggest cause found: a scoring bug. _people_score keyed people by company only; the job reads "David Joseph &
+  Company (recruiting for a Series B enterprise AI company)" and the recruiters "David Joseph & Company", so an
+  agency job's named recruiters (the owner's agency target) never counted.
+- Fix: PR #1704: a job's count is everyone at its company plus everyone saved on the job, each once. Failing test
+  first ({'1': 0} -> {'1': 2}). Pushed 04:24, CI before the window.
+- #1700 (people_check gate) merged 04:15: live for the 04:56 run.
+- #1694 / #1699: green, reviewers passed, readied 04:07 with auto-merge, still blocked at 04:21 (merge-cage did not
+  re-judge again). Main merged in at 04:32; held as drafts through the 04:51 window; readied at 05:07.
+- Decision taken without the owner: none.
