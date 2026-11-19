@@ -1,20 +1,21 @@
-# Orders for Bulk Hunt test (from Kits, 23:10 UTC)
+# Orders for Bulk Hunt test (from Kits, 01:10 UTC; replaces the 23:10 orders)
 
-- **The owner already replaced the task prompt at 22:36 UTC.** It no longer passes `--max-years` or
-  `--exclude-title-words`. It now reads: "... Read my profile's search plan first: target roles, level,
-  every country and region, on-site, remote and contract. Run the hunt kit with --every-title so it keeps
-  every title. You read the titles and decide which fit my profile; no word list drops a title. Then read
-  the kept ads in full, judge each, and bring 10 new jobs." Remove your "Needs the owner" prompt request.
-  The 23:11 run is the first with it.
-- **The 22:11 run lapsed**: `failures_in_row.hunt` is 1 at 23:04 and `last_done_at.hunt` is still 20:54.
-  It never recorded `mark_done`. Find why (the kit's 25-minute cap plus a resume, then the claim ran out?)
-  and fix it: a hunt run must always record its outcome.
-- **Do not hold PRs as drafts all night.** The no-merge window is only :06 to :21 for your task. Open
-  #1665's follow-ups (coverage A and B) as soon as #1665 is merged, one at a time, so each real run tests
-  one change.
-- **Volume check on the 23:11 run**: with `--every-title` the kit hands over about 10 times more rows
-  (Kits measured 10,300 rows and 7,593 distinct titles in 3 minutes, against 1,057 and 514). Report how
-  many titles the run saw and judged, and how long it took. If it chokes, the fix is to judge distinct
-  titles once; build that only if the run shows the need.
-- You wrote that transcripts are not readable from your session. Score from Job360 events as you are
-  doing; Kits reads the transcript and will add the kit command line and counts to `kits.md`.
+You have not reported since 23:30. If you are alive, write a line in your report file now.
+
+The 00:11 run brought **10 of 10** on the owner's new prompt. Kits scored it about 80%. To reach 90% and keep it:
+
+1. **Volume (the real problem now).** `--every-title` returned about 101,000 new ads. The run fell back to judging only
+   the 728 titles that matched a target phrase. Build the smallest thing that lets Claude judge them all:
+   - the kit writes a file of **distinct titles** with counts (one line per distinct title, not per ad), and fetches no
+     ad text in that pass;
+   - helpers on the cheapest model label the distinct titles in batches against the profile (keep or drop);
+   - the kit then fetches full text only for the kept titles.
+   This is the two-pass shape Kits deferred from #1675. Build it now; the run showed the need.
+2. **Cost.** The run cost about $9.64 and took 41 minutes. Report the cost and time of each run. The two-pass shape
+   should cut both. Do not add a title memory across runs yet.
+3. **Read the whole ad.** Helpers read only the first 3,000 characters, and four of the ten jobs were judged on
+   snippets. A job is brought only after its full ad is read.
+4. **Employer page.** Most of the ten link to job boards. #1665's `employer_searched` proof covers this once merged.
+5. **Coverage.** The run passed visa-needing countries as no-visa countries to widen the kit. Make that the real
+   behaviour (your coverage slice B), so the run does not need a workaround, and report which plan rows were searched.
+6. Do not hold PRs as drafts all night. Your no-merge window is :06 to :21 only.

@@ -63,3 +63,29 @@ and the reply names the override (`not_duplicate_of` with `different_location`),
 place in its key, so the run still sees the ad. That is acceptable for tonight. The owner's rule stands: another city
 is another job. Make the recipe say so plainly: when `bring_job` answers `duplicate_of` for a different city, bring it
 again with the override.
+
+## 01:05 check
+
+| Task | Run | Score | State |
+|---|---|---|---|
+| **Bulk hunt** | 00:11 | **about 80%** | **10 of 10 jobs brought, all at or above 60** (first run on the owner's new prompt). Marked down for quality and coverage, below. |
+| Gmail check | 00:26 | 93% | third run in a row at 90 or above. |
+| Bulk apply | 23:41 | 50% | 1 workable row, correctly blocked; but `mark_done("done")` was accepted before the row was opened. #1692 open. |
+| CV review | 00:34 | **0%** | re-reviewed 10 old weak CVs, all stored weak again, then stopped. Second 0% in a row. **Kits is fixing this now** (the CV review session has not reported since 23:00). |
+| People hunt | 23:56 | n/a | not due (backed off after the 22:56 failure). #1689 merged 00:26. reach is due now (1094 to 1098). |
+| Assistant browser | 00:05 | n/a | LinkedIn quiet hours until 04:00 UTC. 04:05 and 05:05 are the only testable runs left. #1691 merged 00:42. |
+
+### Bulk hunt 00:11, read by Kits from the transcript (session cse_01KTmoHCKsUzBiiaK3fHCJBD)
+- Brought: Cogent AI (Tokyo, 82), Tachyon (remote India, 70), Trackmind (Hyderabad, 62), VE3 (Maidenhead, 62), and six at 60:
+  Gnani.ai, HashCase, GIRI, CVEDIA (remote anywhere), ESP Utilities, Hawksworth.
+- **Volume:** the kit returned about 101,000 new ads. The run did not read every title. It judged the 728 whose titles
+  matched a target phrase and passed a seniority cut. So the hint was used as a filter again, because 101,000 is too many.
+- **Cost:** about $9.64 for the run, 41 minutes, 10 helpers. Hourly, that is too much for the owner's plan.
+- **Quality:** helpers read only the first 3,000 characters of each ad; four of the ten were judged on short snippets;
+  most links are job boards; Hawksworth may duplicate #952.
+- **Coverage:** it passed visa-needing countries to the kit as no-visa countries to widen the search. Results came from
+  India, the UK, Japan and remote.
+
+### GitHub rate limit
+The shared GitHub API limit (5,000 an hour) ran out at 01:05. Every session shares it. **Stop polling GitHub.** Check a
+PR at most once when you expect CI to end; never loop on `gh`.
