@@ -732,7 +732,10 @@ async def mark_done(
     claimed_at = None
     if body.duty == "batch" and actor_for(user) != "web":
         claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
-    if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
+    # 2026-11-18 (23:41 run): "done" (the default) skipped this check, so a run closed the batch before it opened
+    # its one workable row (1087). "done" means nothing is left: it is checked like a partial stop.
+    if body.duty == "batch" and (body.outcome == "done" or (
+            body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER)):
         later = await _refuse_early_batch_stop(db, user, claimed_at)
     if body.duty == "batch":
         from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
