@@ -3559,7 +3559,9 @@ _SPONSOR_DIRECT = frozenset({
     f"visa sponsorship {CTRY}", f"sponsorship required for {CTRY}",
     # Greenhouse's standard US wording ("... for employment visa status (e.g. H-1B visa status)?").
     "will you require sponsorship for employment visa status e g h b visa status",
-}) | _wordings(("do", "will", "would"), ("you",), ("need", "require"), ("", "visa"), ("sponsorship",), _FOR)
+    # EDITED, live 2026-11-19 (ask 718): "require employment visa sponsorship" is still plainly Yes = you need it.
+}) | _wordings(("do", "will", "would"), ("you",), ("need", "require"), ("", "visa", "employment", "employment visa"),
+               ("sponsorship",), _FOR)
 _SPONSOR_INVERTED = _wordings(
     ("are you eligible to", "are you authorised to", "are you authorized to", "can you"),
     ("work", "live and work"), (f"in {CTRY} without",), ("", "requiring", "needing"), ("", "visa", "employer"),
@@ -3839,7 +3841,8 @@ def form_check(
     Also reads the control facts the assistant passed: a saved value that is
     not one of a select/radio/checkbox's ``options`` is a gap, one longer than the
     control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
-    flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
+    flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts`` - unless the
+    user's own Memory row for the job's country answers it (``users``; pay always stays, owner 2026-11-19).
     A ``file`` question for the CV or the cover letter is answered by the application's newest saved
     artifact of that kind (``documents``: kind -> artifact row), source ``artifact``, even when a saved
     answer matched; none saved = the saved answer, else a gap.
@@ -3964,8 +3967,9 @@ def form_check(
             item = None
         # A knock-out is spotted from the question and key alone - never from a gap in the profile or CV
         # (career-ops apply.md:72: a missing field is not evidence the candidate lacks the credential).
-        if _is_knockout(text, key) or pay:
-            knockouts.append({"question": text, "key": key, **({"value": item["value"]} if item is not None else {})})
+        knock = _is_knockout(text, key) or pay
+        if knock and item is None:
+            knockouts.append({"question": text, "key": key})
         if item is None:
             row_m: dict[str, Any] = {"question": text, "required": required, "why": why}
             if ftype != "unknown":
@@ -3997,6 +4001,11 @@ def form_check(
         if wait:
             row["needs_confirmation"] = True
             confirm.append(text)
+        # Owner 2026-11-19 (live 09:08 run, asks 716-718): a knock-out the user's OWN Memory row for this job's
+        # country answers is filled, never a stop; pay stays one (one figure out of a saved range is the user's).
+        if knock and (pay or wait or users is None or item.get("source") != "memory"
+                      or str(item["key"]) not in users):
+            knockouts.append({"question": text, "key": key, "value": item["value"]})
         answered.append(row)
     missing_required = sum(1 for m in missing if m["required"])
     nxt = FORM_NEXT_ASK if missing else FORM_NEXT_FILL
@@ -4067,6 +4076,16 @@ async def check_form(
         log.info("form_check_memory_cleared", extra={
             "event": "form_check_memory_cleared", "user_id": safe_log_value(user.id),
             "application_id": safe_log_value(application_id), "keys": safe_log_value(",".join(cleared)),
+            "country": safe_log_value(country or ""), "reason": "users_own_memory",
+        })
+    stops = {k["question"] for k in out["knockouts"]}
+    filled = sorted({str(a["key"]) for a in out["answered"]
+                     if a["question"] not in stops and _is_knockout(a["question"], str(a["key"]))})
+    if filled:
+        # Keys and a reason code only: knock-outs the user's own Memory answered, so no stop (owner 2026-11-19).
+        log.info("form_check_knockout_filled", extra={
+            "event": "form_check_knockout_filled", "user_id": safe_log_value(user.id),
+            "application_id": safe_log_value(application_id), "keys": safe_log_value(",".join(filled)),
             "country": safe_log_value(country or ""), "reason": "users_own_memory",
         })
     log.info("form_check", extra={
