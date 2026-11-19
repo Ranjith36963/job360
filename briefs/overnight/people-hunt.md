@@ -253,3 +253,56 @@ the owner's existing rule already accepts 3 for a firm under about 50 staff.
 3. micro1 (1131) scored 0 although 5 micro1 people are saved on job 1064: the job reads "Joblet-AI (micro1)" and those
    contacts "micro1". Same family as #1704 (company text with a note in brackets), at company level this time.
 4. The stored-weak warning should name the failing sentence (see 2).
+
+## 19 Nov 10:56 run (fired 10:57, worked until 11:04; read 11:20, read-only)
+Two PRs since the last entry: #1714 merged 10:28 ("lookup:<tool>" rows prove a recipient fact), so it was live for
+this run. #1713 (agency jobs: 1-2 recruiters is full, `mark_done(agency=...)`) is not merged yet; it is held for
+the merge cage.
+
+**Score: 35 of 40 (88%)**, counting each job capped at 5. Reach 30 of 35 across 7 jobs; network 5 of 5.
+Network was marked done and reach partial. Both duties were marked.
+
+| Job | Company | Added | Saved now | From the employer's own site |
+|---|---|---|---|---|
+| 1141 | Reply | 0 | 7 | - |
+| 1140 | Birmingham City University | 2 | 5 | 2 (bcu.ac.uk staff pages) |
+| 1136 | Genie AI | 0 | 5 | - |
+| 834 | Citation Group | 0 | 7 | - |
+| 839 | Atarus (a recruiter, per Clay) | 0 | 1 | own site names nobody |
+| 843 | Spectrum IT Recruitment | 1 | 5 | 1 (spectrumit.co.uk meet-the-team) |
+| 848 | Aries Global | 0 | 4 | never worked ("4 saved, no new") |
+| network | Tessl, H Company | 5 | - | 5 (tessl.io/about, hcompany.ai/team) |
+
+- **All 8 people added this run came from the employer's own site.** Lookups (Clay, Sprouts) found none that were usable.
+- **Agency handling.** Atarus and Spectrum are recruiters, but the run scored both against 5, because #1713 is not live
+  yet. Clay listed Paige Allen at Atarus; the run did not add her as she was found by one lookup only.
+- **ids drift.** whats_due gave 5 reach ids. mark_done then asked for 843 and then 848 ("not in application_ids"),
+  so the run worked 7 jobs. It lost its tail to this and to one connector reset on mark_done. Cause not yet traced.
+
+### Reviews: all 8 still weak. The code now is `line_uncovered`, not `claim_not_in_quote`.
+- The reviewer was a fresh Sonnet Agent, three of them in all.
+- **Each note got ONE row: the recipient sentence.** For example, contact 1717 had the row
+  `{"msg_line":"I saw you are Founder & CEO at Tessl.","field_path":"page:https://tessl.io/about","profile_quote":"Guy Podjarny: Founder & CEO"}`.
+- **No row covered the note's other sentences** (the user's own claims). `outreach_review.py` counts a line as covered
+  only when the whole line has a row, or EVERY sentence of it has a page/lookup row. So the server stored the notes weak:
+  "1 of 1 required lines had no row" (line_uncovered).
+- **The reach recipe's wording invites this:** "one row per sentence about the recipient". A run reads it as rows
+  ONLY for recipient sentences.
+- **The reviewer also judged every note weak itself**, and the content faults are real:
+  - all 5 network notes say "thanks for connecting" to people the user is not connected to;
+  - one note says "Dr";
+  - claims that are not word for word in the profile ("MSc in", "built");
+  - "the AI Software Engineer role you are recruiting for" (Spectrum).
+- **No `lookup:` row was used.** Every recipient fact in this run came from a page.
+- **Two notes were rewritten and never re-reviewed.** The BCU and Ian Cruickshank notes were rewritten after review and
+  saved with no new review.
+
+### Next causes, in order
+1. **Fix the reach recipe wording:** every sentence gets a row. Recipient sentences cite `page:` or `lookup:`; every
+   other sentence quotes the profile. Add a test that a note with a page row plus profile rows stores strong.
+2. **Fix write.md:** never "thanks for connecting" in a cold note (no connection exists), and never a title ("Dr") the
+   profile does not hold.
+3. **A rewrite after a review needs a new review** before the person counts as reviewed (the run skipped it twice).
+4. **Trace the ids drift:** whats_due listed 5 ids but mark_done required 843 and 848.
+5. **Carried over:** the review bypass ("self-check-pattern-reuse"), the micro1 company key, and the weak warning
+   should name the failing sentence.
