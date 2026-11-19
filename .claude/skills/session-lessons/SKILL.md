@@ -268,6 +268,17 @@ delete a lesson; if one stops being true, say so on its line and why.
   `fillable_rows` also counted any fill as done. 0 submitted; Kits caught it. Fixed in #1660. **Rule:** before a
   recipe (or a stop rule) acts on a summary flag, check on live data that the flag agrees with the per-row state it
   summarises (`waiting_on`, `next`), and add a test that asserts the two agree.
+- 2026-11-18/19 (overnight bulk-apply loop): two more of mine. (1) To keep PR #1687 from merging in the
+  23:36-23:51 window around the 23:41 batch run, I disabled auto-merge at 23:33. The repo's merge cage
+  (auto-merge.yml, "the cage's arm") re-armed it on the green status at 23:35:56 and it merged at 23:36:01; its
+  deploy finished 23:43:35, two minutes into the run. **Rule:** hold a PR as a draft (a draft cannot merge),
+  or push early enough that CI ends before the window; after a draft is marked ready, if the cage does not
+  re-judge (reviewer checks still "skipped" from the draft run), merge main into the branch to re-run them.
+  (2) I read `whats_due.last_done_at.batch` as the time a run called mark_done and scored the 23:41 and 01:41
+  runs as "closed before opening their rows". `schedule.mark` stamps the duty with the run's START (its claim,
+  `schedule.mark` in services/profile/schedule.py). #1692 still fixed a real gap (a "done" close with work left was
+  accepted), but its stated trigger was wrong. **Rule:** read how a timestamp is written before inferring the
+  order of events from it.
 
 ## Reference index (open these before "borrowing" anything)
 
