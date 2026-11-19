@@ -229,4 +229,4 @@ Run starts are read from the run's own `apply-<time>` session label (not from la
   job board, refuses once with "search the employer's own page first; update_job(apply_url) or say what you
   found" (same rule as #1697, applied before the page loads). Gradcracker is not on the board list either.
 
-## PR #1708 (batch_hold, owner's yes): open, auto-merge on, CI running (pushed 09:12).
+## PR #1708 (batch_hold, owner's yes): merged 09:28:08, backend deployed 09:30:28 (before the 09:41 run). Live check 09:30 (whats_due, read-only): batch_hold "waiting_on_you", batch not due: no row with a CV needs nothing from the owner and nobody pressed Send.
