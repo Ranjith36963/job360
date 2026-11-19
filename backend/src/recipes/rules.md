@@ -793,8 +793,10 @@ get_profile(view="full") `common_questions_open` lists the ones with no answer y
 included, from the profile and your judgement: never skip one, never leave one blank. Save each to `save_to`
 as {question, answer, approved: false, topic, country} (its `topic` and `country`): the user's Answer once box
 shows it as your guess, and only the user's own edit or confirm makes it count. Salary: a range with currency
-and period that fits the CV, role, level and that country ("55000-70000 GBP a year"). Work status: citizen,
-permanent resident, visa or needs sponsorship. Never send approved: true for a Memory question.
+and period that fits the CV, role, level and that country ("55000-70000 GBP a year"). The answer is exactly
+the row's `answer_as` shape, never a sentence (work status: one of citizen, permanent resident, visa, needs
+sponsorship; travel: a percent like 25); a draft in another shape is refused. Never send approved: true for a
+Memory question.
 
 Use `update_profile` to fill the structured fields, to correct something the
 structural read got wrong, and for a preference the user told you. An empty

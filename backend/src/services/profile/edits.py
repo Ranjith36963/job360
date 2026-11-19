@@ -845,15 +845,59 @@ def _refuse_memory_answer(path: str, value: dict[str, Any]) -> None:
     from src.services.profile.ask_once import memory_note  # noqa: PLC0415
     from src.services.profile.memory_cleanup import record_country  # noqa: PLC0415
 
-    if value.get("approved") is False:
-        return  # a guess for the user to check, never an answer
     topic, question = str(value.get("topic") or ""), str(value.get("question") or "")
+    if value.get("approved") is False:
+        _refuse_unfit_draft(path, topic, question, value)
+        return  # a guess for the user to check, never an answer
     note = memory_note(topic, question, record_country(value))
     if note:
         raise ProfileEditError(
             422, f"{path}: '{topic or question[:80]}' is {note}; ask the user to set it there. Nothing was saved.",
             "bad_value",
         )
+
+
+def _refuse_unfit_draft(path: str, topic: str, question: str, value: dict[str, Any]) -> None:
+    """Owner bug 2026-11-19: a draft for a Memory field must have that field's shape, or the user's
+    "This guess is right" cannot save it ("No, I would need visa sponsorship to work in NL." is no work
+    status). Refused naming the shape, so the assistant drafts it again at once."""
+    from src.services.profile import answer_to_memory  # noqa: PLC0415
+    from src.services.profile.ask_once import memory_question  # noqa: PLC0415
+    from src.services.profile.memory_cleanup import record_country  # noqa: PLC0415
+
+    family, template = memory_question(topic, question)
+    if not family or not template:
+        return
+    # The place is the topic's own {cc} part (a region such as NORTH_AMERICA too: `country` holds only an
+    # ISO code, review of this fix), else the record's country.
+    parts, slots = topic.split("."), template.split(".")
+    at = slots.index("{cc}") if "{cc}" in slots else -1
+    country = parts[at].upper() if 0 <= at < len(parts) and len(parts) == len(slots) else record_country(value)
+    if answer_to_memory.fits(template, str(value.get("answer") or ""), country):
+        return
+    import logging  # noqa: PLC0415
+
+    from src.utils.logger import safe_log_value  # noqa: PLC0415
+
+    logging.getLogger("job360.services.profile_edits").info(
+        "profile_draft_refused topic=%s reason=unfit_shape", safe_log_value(topic))
+    raise ProfileEditError(
+        422, f"{path}: the draft for '{topic}' must be {answer_to_memory.answer_as(template)}. Nothing was saved.",
+        "bad_value",
+    )
+
+
+def _refuse_unfit_drafts_in(path: str, value: Any, stored: Any) -> None:
+    """A whole-list ``set`` of saved answers: each NEW draft must fit its field too (review of this fix:
+    the item ops alone left the old door open). Records already stored are not judged again."""
+    from src.services.profile import user_info  # noqa: PLC0415
+
+    if path != user_info.USER_INFO_ANSWERS_PATH or not isinstance(value, list):
+        return
+    old = [r for r in stored or [] if isinstance(r, dict)]
+    for rec in value:
+        if isinstance(rec, dict) and rec.get("approved") is False and rec not in old:
+            _refuse_unfit_draft(path, str(rec.get("topic") or ""), str(rec.get("question") or ""), rec)
 
 
 def _apply_op(path: str, op: str, value: Any, index: Any, items: list[Any]) -> list[Any]:
@@ -905,6 +949,7 @@ def resolve_ops(edits: list[tuple[str, str, Any, Any]], current: dict[str, Any])
         if index is not None and op != "remove_at":
             raise ProfileEditError(422, f"{path}: index is only for op remove_at", "bad_value")
         if path not in op_paths:
+            _refuse_unfit_drafts_in(path, value, current.get(path))
             order.append((path, value))
             continue
         if path not in paths:

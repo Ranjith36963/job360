@@ -14,11 +14,14 @@ guess reads "guessed", never verified. Otherwise ``answer`` is None. Read-only.
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from src.services.profile import answer_guesses
+
+logger = logging.getLogger("job360.services.common_questions")
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "common_form_questions.json"
 # Owner 2026-10-26: "from memory" (the user's own), "guessed" (an assistant's draft), and "not known" when
@@ -212,12 +215,26 @@ def common_questions(
                 if not asked_for(key, cc):
                     continue  # work rights for a whole region: no form asks it
                 # Memory's own value, else the assistant's draft for this place (owner 2026-11-18).
-                item = items(by_country[cc]).get(key.replace("{cc}", cc)) or drafts.get(key.replace("{cc}", cc))
+                item = items(by_country[cc]).get(key.replace("{cc}", cc)) or _fit(drafts, key, cc)
                 rows.append(_row(q, item, cc, relayed, _guess(q, item, profile, cc)))
         else:
-            item = (items(plain).get(key) or drafts.get(key)) if key else by_topic(plain).get(q["topic"])
+            item = (items(plain).get(key) or _fit(drafts, key, None)) if key else by_topic(plain).get(q["topic"])
             rows.append(_row(q, item, None, relayed, _guess(q, item, profile, None)))
     return rows
+
+
+def _fit(drafts: dict[str, dict[str, Any]], key: str, cc: Optional[str]) -> Optional[dict[str, Any]]:
+    """The assistant's draft for ``key`` at ``cc`` when it has the field's shape, else ``None``: a draft
+    no field can hold ("No, I would need visa sponsorship to work in NL.") is no guess (owner bug
+    2026-11-19). The row then shows a guess read off the profile when there is one, else stays open for
+    the assistant to draft again."""
+    from src.services.profile import answer_to_memory  # noqa: PLC0415
+
+    item = drafts.get(key.replace("{cc}", cc) if cc else key)
+    if item is None or answer_to_memory.fits(key, str(item["value"]), cc):
+        return item
+    logger.debug("answer_once_draft_unfit key=%s country=%s", key, cc or "-")
+    return None
 
 
 def _guess(q: dict[str, Any], item: Optional[dict[str, Any]], profile: Any, country: Optional[str]) -> Any:
@@ -239,9 +256,17 @@ def open_questions(profile: Any, rows: Optional[list[dict[str, Any]]] = None) ->
     Owner 2026-11-18: EVERY row is drafted, so each is saved the same way: a ``user_info.answers`` draft
     (approved: false) under its ``topic`` (a Memory row's kit key, e.g. ``salary.GB``) and ``country``. The
     user's edit or confirm on Answer once is what writes Memory."""
+    from src.services.profile import answer_to_memory  # noqa: PLC0415
+
+    def _shape_of(r: dict[str, Any]) -> dict[str, str]:
+        key = str(r.get("kit_key") or "")
+        shape = answer_to_memory.answer_as("salary.{cc}" if key.startswith("salary.") else key or None)
+        return {"answer_as": shape} if shape else {}
+
     return [
         {"id": r["id"], "question": r["question"], "save_to": "user_info.answers",
-         "topic": r.get("topic") or r["kit_key"], **({"country": r["country"]} if r.get("country") else {})}
+         "topic": r.get("topic") or r["kit_key"], **({"country": r["country"]} if r.get("country") else {}),
+         **_shape_of(r)}
         for r in (common_questions(profile, []) if rows is None else rows)
         if r["answer"] is None and not r["per_job"]
     ]
