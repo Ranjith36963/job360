@@ -278,8 +278,20 @@ async def browser_action(
         result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
     if url_warning:
         result["url_warning"] = url_warning
+    _log_signals(user, body.application_id, result)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
+
+
+def _log_signals(user: CurrentUser, application_id: Optional[int], result: dict[str, Any]) -> None:
+    """One line per hint look gave (ids and the signal code, never the quote): a hint Claude then confirmed
+    or ignored shows next to the ``blocked`` it did or did not record."""
+    for sig in result.get("signals") or []:
+        get_audit_logger().info("browser_signal", extra={
+            "event": "browser_signal", "user_id": safe_log_value(user.id),
+            "application_id": int(application_id) if application_id is not None else None,
+            "signal": safe_log_value(str(sig.get("signal", "")), max_len=40),
+        })
 
 
 URL_MISMATCH = "browser_url_mismatch"
@@ -358,10 +370,8 @@ def _guest_read(body: BrowserActionRequest) -> bool:
 
 
 # Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).
-_BLOCKED_REASON = {
-    "captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check",
-    browser_agent.ALREADY_APPLIED: "already_applied_on_site",
-}
+# Never already_applied_on_site: the page's phrase is a hint (look's ``signals``) and Claude records it.
+_BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check"}
 
 
 def _open_outcome(result: dict[str, Any], stop_source: str) -> str:
@@ -412,10 +422,6 @@ BOT_CHECK_DETAIL = (
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. It is waiting for your assistant browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."
-)
-# The site said the user already applied: no browser can help, only the user's answer (blocked.py).
-ALREADY_APPLIED_DETAIL = (
-    "The site says you already applied for this job. Job360's browser stopped and will not try again."
 )
 # A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
 CAPTCHA_DETAIL = (
@@ -468,8 +474,6 @@ async def _hand_off(
         detail = HAND_OFF_DETAIL
         if held:
             detail = CAPTCHA_DETAIL
-        elif reason == "already_applied_on_site":
-            detail = ALREADY_APPLIED_DETAIL
         payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": detail}
         host = site_host(str(result.get("url", "")))
         if host and "." in host:

@@ -27,7 +27,7 @@ Will you now or in the future require sponsorship?</div></div>
 <li><label><input type="radio" name="cards[a2][field2]" value="Yes"><span>Yes</span></label></li>
 <li><label><input type="radio" name="cards[a2][field2]" value="No"><span>No</span></label></li>
 </ul></div></li>
-<p>I'm not a robot</p>
+<p>I'm not a robot</p><div class="h-captcha"></div>
 </form></body></html>"""
 
 
@@ -158,7 +158,7 @@ _IND = "\n" + " " * 24
 REVIEW = {
     "/indented": "<!doctype html><html><body>" + "".join(
         f"{_IND}<div>{_IND}  <span>Q{i}</span>{_IND}</div>" for i in range(300)
-    ) + "<p>I'm not a robot</p></body></html>",
+    ) + "<p>I'm not a robot</p><div class=\"h-captcha\"></div></body></html>",
     "/fields": """<!doctype html><html><body><form>
 <div><div>Enter it below</div><input type="text" name="password" title="Password"></div>
 <div><div>Your secret</div><input type="text" name="cards[s][field0]" title="Password"></div>

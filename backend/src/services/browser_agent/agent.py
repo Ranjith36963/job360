@@ -60,10 +60,17 @@ from src.services.browser_agent.page_js import (
     WATCH_READ_JS,
     WATCH_START_JS,
 )
-from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
+from src.services.browser_agent.safety import (
+    RequestScreen,
+    _captcha_frame,
+    blocker_for,
+    captcha_text_quote,
+    control_kind,
+)
 from src.services.browser_agent.sites import (
     MIN_LABELLED_FIELDS,
     account_step,
+    already_applied_quote,
     already_applied_said,
     greenhouse_embed_url,
     is_honeypot,
@@ -1055,7 +1062,13 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
             "above": above, "below": below,
             "hint": "Only the controls nearest the screen are listed. scroll up or down, then look, to see the rest.",
         }
-    blocker = blocker_for(captcha_urls, text, has_password, account_step(site, out["title"], text))
+    account = account_step(site, out["title"], text)
+    blocker = blocker_for(captcha_urls, text, has_password, account)
+    if blocker is not None and blocker.from_text and not await _challenge_shown(page):
+        # CAPTCHA words with no frame and no challenge element (an ad for a bot-detection firm): a hint for
+        # Claude, never a stop (owner rule 2026-11-18, audit 6.2). The sign-in checks still run without them.
+        out.setdefault("signals", []).append({"signal": CAPTCHA_TEXT_SIGNAL, "quote": captcha_text_quote(text)})
+        blocker = blocker_for(captcha_urls, "", has_password, account)
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
         if blocker.from_text:
@@ -1065,10 +1078,12 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
         # A 403 stays a page here: only the proxy's own refusal is a refusal (_refusal), and a site's 403 is
         # a bot wall the open route reads from ``transport``, which is attached below for it too.
         out.update(status="error", reason="http_error", detail=f"The site answered this page with HTTP {error}.")
-    elif not s.submitted_on[1] and already_applied_said(text):
-        # The site says the user already applied (never after this browser's own submit: that is the
-        # confirmation path). The job leaves the queue and waits on the user's one question (blocked.py).
-        out.update(status="needs_you", reason=ALREADY_APPLIED, detail=ALREADY_APPLIED_DETAIL)
+    if not s.submitted_on[1] and already_applied_said(text):
+        # A hint, never a stop (owner rule 2026-11-18, audit 6.1): a dashboard heading "Jobs you have already
+        # applied for" holds the phrase too. Claude reads the quote; only when it says THIS job's application
+        # exists does it record blocked already_applied_on_site. Never after this browser's own submit (that is
+        # the confirmation path).
+        out.setdefault("signals", []).append({"signal": ALREADY_APPLIED_SIGNAL, "quote": already_applied_quote(text)})
     doc = getattr(s, "doc_status", {}).get(page)
     if doc is not None and doc[0] >= 400:  # the same transport facts open reports
         out["transport"] = outcomes.transport_of(doc[0], doc[1], doc[2], str(page.url or ""))
@@ -1082,11 +1097,8 @@ def _http_error(s: Session, page: Any) -> Optional[int]:
     return doc[0] if doc is not None and doc[0] >= 400 and doc[0] != 403 else None
 
 
-ALREADY_APPLIED = "already_applied"
-ALREADY_APPLIED_DETAIL = (
-    "This site says you already applied for this job. Job360's browser stops here and never tries it again: "
-    "the user says whether to mark it applied."
-)
+# look's hint that the page text holds an already-applied phrase; Claude decides what it means.
+ALREADY_APPLIED_SIGNAL = "already_applied_text"
 
 
 CAPTCHA_DETAIL = (
@@ -1123,7 +1135,35 @@ async def _page_captcha(page: Any) -> bool:
             continue
         read += 1
     blocker = blocker_for(urls, "\n\n".join(texts)[:MAX_TEXT], False)
-    return blocker is not None and blocker.reason == "captcha"
+    if blocker is None or blocker.reason != "captcha":
+        return False
+    # Words alone are a hint (look's ``captcha_text``): only a frame or a shown challenge element stops.
+    return not blocker.from_text or await _challenge_shown(page)
+
+
+# look's hint that the page text holds CAPTCHA words with no check on the page; Claude decides what it means.
+CAPTCHA_TEXT_SIGNAL = "captcha_text"
+
+# A CAPTCHA widget or challenge element in the page itself (no frame yet): the vendors' own widget classes and
+# site-key attribute, Cloudflare's challenge form, and a box or picture named captcha. DOM facts, never prose.
+CHALLENGE_SELECTOR = (
+    ".g-recaptcha, .h-captcha, .cf-turnstile, .frc-captcha, [data-sitekey], #challenge-form, #challenge-running, "
+    "#cf-challenge-running, input[name*='captcha' i], input[id*='captcha' i], img[src*='captcha' i], "
+    "img[alt*='captcha' i], img[id*='captcha' i]"
+)
+CHALLENGE_JS = "(sel) => !!document.querySelector(sel)"
+
+
+async def _challenge_shown(page: Any) -> bool:
+    """Whether the page or one of its first frames holds a CAPTCHA widget or challenge element
+    (``CHALLENGE_SELECTOR``). A frame that cannot be read counts as none."""
+    for f in page.frames[:MAX_FRAMES_CHECKED]:
+        try:
+            if await asyncio.wait_for(f.evaluate(CHALLENGE_JS, CHALLENGE_SELECTOR), FRAME_READ_TIMEOUT_S):
+                return True
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation holds nothing readable
+            continue
+    return False
 
 
 async def _find(s: Session, ref: str) -> tuple[Any, Any]:

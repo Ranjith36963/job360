@@ -157,7 +157,9 @@ FORM = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
   <label for="c">Country</label><select id="c"><option>Choose</option><option>United Kingdom</option></select>
   <button type="submit">Submit application</button>
 </form></body></html>"""
-CAPTCHA = """<!doctype html><html><body><p>Checking your browser before you continue.</p></body></html>"""
+# Cloudflare's wait page: its words and its challenge element (words alone are a hint, audit 6.2).
+CAPTCHA = """<!doctype html><html><body><p>Checking your browser before you continue.</p>
+<div id="challenge-running"></div></body></html>"""
 LINKS = """<!doctype html><html><head><title>Links - Acme</title></head><body>
 <a href="/to-private">Partner site</a>
 <a href="/to-private" target="_blank">Apply in a new tab</a>

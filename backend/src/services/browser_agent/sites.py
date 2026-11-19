@@ -228,19 +228,50 @@ ALREADY_APPLIED_PHRASES: tuple[tuple[str, ...], ...] = (
 _NOT_AN_ANSWER = frozenset({"if", "whether", "unless", "once", "when"})
 
 
-def already_applied_said(text: str) -> bool:
-    """The page text says the user already applied for this job (``ALREADY_APPLIED_PHRASES``)."""
-    from src.services.browser_agent.safety import label_words  # noqa: PLC0415 - safety imports nothing back
-
-    words = label_words(text)
+def _already_applied_at(words: tuple[str, ...]) -> tuple[int, int]:
+    """(start, end) of the first already-applied phrase in ``words``, or (-1, -1)."""
     starts: dict[str, list[tuple[str, ...]]] = {}
     for p in ALREADY_APPLIED_PHRASES:
         starts.setdefault(p[0], []).append(p)
     for i, w in enumerate(words):
         for phrase in starts.get(w, ()):
             if words[i:i + len(phrase)] == phrase and not _NOT_AN_ANSWER & set(words[max(0, i - 2):i]):
-                return True
-    return False
+                return i, i + len(phrase)
+    return -1, -1
+
+
+def already_applied_said(text: str) -> bool:
+    """The page text holds an already-applied phrase (``ALREADY_APPLIED_PHRASES``). A hint only (owner rule,
+    2026-11-18): a dashboard heading can hold it too, so Claude reads the quote and decides."""
+    from src.services.browser_agent.safety import label_words  # noqa: PLC0415 - safety imports nothing back
+
+    return _already_applied_at(label_words(text))[0] >= 0
+
+
+# The quote around a phrase: a few page words either side, so Claude sees what the line is about.
+QUOTE_WORDS_BEFORE = 3
+QUOTE_WORDS_AFTER = 6
+QUOTE_MAX_CHARS = 200
+
+
+def already_applied_quote(text: str) -> str:
+    """The page's own words around the first already-applied phrase, for Claude to judge; "" when none.
+    Read word by word: each whitespace-separated token keeps its place, no regex over page text."""
+    from src.services.browser_agent.safety import label_words  # noqa: PLC0415 - safety imports nothing back
+
+    tokens = (text or "").split()
+    words: list[str] = []
+    owner: list[int] = []  # the token each word came from
+    for t, token in enumerate(tokens):
+        for w in label_words(token):
+            words.append(w)
+            owner.append(t)
+    start, end = _already_applied_at(tuple(words))
+    if start < 0:
+        return ""
+    first = max(0, owner[start] - QUOTE_WORDS_BEFORE)
+    last = owner[end - 1] + QUOTE_WORDS_AFTER + 1
+    return " ".join(tokens[first:last])[:QUOTE_MAX_CHARS]
 
 
 def looks_like_application(elements: Sequence[dict[str, Any]]) -> bool:

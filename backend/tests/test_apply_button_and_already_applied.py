@@ -7,8 +7,10 @@
    page (``sites.job_ad_page``) a button whose WHOLE label is an opener ("APPLY NOW", "Apply for This Job")
    now opens the form; every real final submit is still gated, and anything unsure stays a submit.
 2. Axmed (app 336): the form said "You already have an application for this role" and the job was tried six
-   more times. ``already_applied_on_site`` is a closed blocked reason: Job360's browser records it, the job
+   more times. ``already_applied_on_site`` is a closed blocked reason: the assistant records it, the job
    leaves the queue, is never retried, and Needs you asks one question; the web's "I applied" closes it.
+   Audit 6.1 (owner rule 2026-11-18): Job360's browser only reports the phrase as a hint (look's ``signals``,
+   with the page's words); a dashboard heading holding it never stops a job or takes it off the queue.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from httpx import AsyncClient
 
 from src.services.applications import blocked as blocked_service
 from src.services.browser_agent.safety import control_kind, label_words, opener_label
-from src.services.browser_agent.sites import already_applied_said, job_ad_page
+from src.services.browser_agent.sites import already_applied_quote, already_applied_said, job_ad_page
 from tests.test_browser_agent import _ats_pool, _ref, _resolver, _serve, needs_chromium
 
 ORACLE_HOST = "acme.fa.ocs.oraclecloud.com"
@@ -191,8 +193,18 @@ HELP_LINE = """<!doctype html><html><head><title>Apply</title></head><body>
 <p>If you have already applied for this job, sign in to see its status.</p>
 <label>Email <input type="text" name="email"></label></body></html>"""
 
+# Audit 6.1 (2026-11-18): a candidate dashboard's heading carries the phrase, above a normal application form.
+DASHBOARD = """<!doctype html><html><head><title>Apply</title></head><body>
+<h2>Jobs you have already applied for this month</h2><ul><li>Data Analyst, Initech</li></ul>
+<h1>AI Engineer</h1>
+<label>Full name <input type="text" name="name" required></label>
+<label>Email <input type="text" name="email" required></label>
+<label>CV <input type="file" name="cv" required></label>
+<button type="submit">Submit application</button></body></html>"""
+
 PAGES = {
     "/roles/x/apply": ALREADY,
+    "/roles/z/apply": DASHBOARD,
     "/roles/y/apply": HELP_LINE,
     "/hcmUI/CandidateExperience/en/sites/CX_1/job/13281": ORACLE_AD,
     "/hcmUI/CandidateExperience/en/sites/CX_1/job/13281/apply/email": ORACLE_EMAIL,
@@ -360,45 +372,77 @@ async def _open_asks(client: AsyncClient, app_id: int) -> list[dict[str, Any]]:
     return [a for a in resp.json()["asks"] if a["application_id"] == app_id]
 
 
+def test_the_quote_is_the_pages_own_words_around_the_phrase():
+    text = "Upload CV. You already have an application for this role with this email. Send me a link"
+    assert already_applied_quote(text) == (
+        "Upload CV. You already have an application for this role with this email. Send me"
+    )
+    assert already_applied_quote("If you have already applied for this job, sign in.") == ""
+    assert already_applied_quote("") == ""
+    assert len(already_applied_quote("You have already applied for this " + "x" * 500)) == 200
+
+
 @needs_chromium
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
-async def test_job360s_browser_reads_an_already_applied_page_as_a_stop(pool):
+async def test_job360s_browser_reads_an_already_applied_page_as_a_signal(pool):
+    """Axmed's real answer is still reported, with its words, for Claude to confirm (owner rule 2026-11-18)."""
     from src.services.browser_agent.agent import run
 
     out = await run(pool, "u1", "open", url=f"https://{BAMBOO_HOST}/roles/x/apply")
-    assert (out["status"], out["reason"]) == ("needs_you", "already_applied"), out
+    assert out["status"] == "ok", out
+    assert out["signals"] == [{"signal": "already_applied_text",
+                               "quote": "You already have an application for this role with this email. Send me"}]
     help_line = await run(pool, "u1", "open", url=f"https://{BAMBOO_HOST}/roles/y/apply")
     assert help_line["status"] == "ok", help_line
+    assert "signals" not in help_line
 
 
+@needs_chromium
+@pytest.mark.real_sleep
 @pytest.mark.asyncio
-async def test_an_already_applied_page_records_the_reason(authenticated_async_context, monkeypatch):
-    """Job360's browser reads the page (look), stops, and the route records the closed reason itself."""
+async def test_a_dashboard_heading_with_the_phrase_is_a_signal_not_a_stop(pool):
+    """Audit 6.1: the phrase is a hint for Claude, never a stop. A form under a "Jobs you have already applied
+    for this month" heading reads as an ordinary form, with the line quoted as ``already_applied_text``."""
+    from src.services.browser_agent.agent import run
+
+    out = await run(pool, "u1", "open", url=f"https://{BAMBOO_HOST}/roles/z/apply")
+    assert out["status"] == "ok", out
+    assert out["application_form"] is True
+    assert out["signals"] == [{"signal": "already_applied_text",
+                               "quote": "Jobs you have already applied for this month Data Analyst, Initech AI Engineer"}]
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_the_route_records_nothing_and_the_job_stays_queued(pool, authenticated_async_context, monkeypatch):
+    """Audit 6.1, the real route on a real page: the phrase alone never records ``blocked`` and never takes the
+    job off the queue. Claude reads the quote and records already_applied_on_site itself when it is true."""
+    from src.api.dependencies import get_request_db
     from src.core import settings
+    from src.services.applications import spine
     from src.services.browser_agent import agent
 
     monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
-    page = "https://axmed.firststage.co/roles/x/apply"
-
-    async def fake_run(_pool, _user_id, _action, **_kw):  # what look() answers on Axmed's page
-        assert already_applied_said("You already have an application for this role")
-        return {"status": "needs_you", "reason": agent.ALREADY_APPLIED, "detail": agent.ALREADY_APPLIED_DETAIL,
-                "url": page, "elements": [], "text": ""}
-
-    monkeypatch.setattr(agent, "run", fake_run)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+    url = f"https://{BAMBOO_HOST}/roles/z/apply"
     async with authenticated_async_context() as client:
-        app_id, _job = await _bring(client)
+        resp = await client.post("/api/jobs/bring", json={
+            "title": "AI Engineer", "company": "Acme", "location": "Remote", "country": "GB", "remote": True,
+            "apply_url": url, "description": "Build agents. " * 5,
+        })
+        app_id = int(resp.json()["application_id"])
         assert (await _event(client, app_id, "queued", {})).status_code == 201
-        out = (await client.post("/api/browser", json={"action": "look", "application_id": app_id})).json()
-        assert out["blocked_recorded"] is True
-        again = (await client.post("/api/browser", json={"action": "look", "application_id": app_id})).json()
-        assert again["blocked_recorded"] is False                       # once per open block
+        out = (await client.post("/api/browser", json={"action": "open", "url": url, "application_id": app_id})).json()
+        assert out["status"] == "ok", out
+        assert "blocked_recorded" not in out
+        assert [s["signal"] for s in out["signals"]] == ["already_applied_text"]
         user_id = authenticated_async_context.fixture_user_id
-        (row,) = await _rows(user_id, app_id, "blocked")
-        assert row["reason"] == "already_applied_on_site" and row["by"] == "browser"
-        assert row["page_host"] == "axmed.firststage.co"
-        assert await _rows(user_id, app_id, "unqueued") == [{"reason": "blocked"}]   # it left the queue
+        assert await _rows(user_id, app_id, "blocked") == []
+        assert await _rows(user_id, app_id, "unqueued") == []
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            assert app_id in await spine.queued_at_by_app(db, user_id, [app_id])
 
 
 @pytest.mark.asyncio
