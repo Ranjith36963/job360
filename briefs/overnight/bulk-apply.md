@@ -95,3 +95,5 @@ score is about handling, not submits.
   run's. Not built: it reverses your own rule, `tests/test_batch_waiting_on_you.py` encodes it, and Kits' order
   is not your yes. Cost of waiting: empty runs, not lost work. Say yes and I build it (failing test first).
 - Decision taken without the owner: not changing batch_hold tonight, for the reason above.
+- #1692 merged 01:32:43 (merge-main push at 01:14 re-ran CI and the cage); backend deploy finished 01:35:03,
+  before the 01:36 window. The 01:41 run is the first with the "done" work-left check.
