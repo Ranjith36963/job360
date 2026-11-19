@@ -41,11 +41,11 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime, timezone
-from typing import Any, Iterable, Literal, Optional
+from typing import Any, Iterable, Literal, Optional, get_args
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -263,6 +263,11 @@ class ListedPersonOut(BaseModel):
     error: Optional[Literal["contact_cap", "rate_limited"]] = None
 
 
+NotDuplicateReason = Literal["different_location", "different_team", "different_level", "different_contract",
+                             "new_opening"]
+NOT_DUPLICATE_REASONS: tuple[str, ...] = get_args(NotDuplicateReason)
+
+
 class BringJobRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=_MAX_FIELD)
     company: str = Field(..., min_length=1, max_length=_MAX_FIELD)
@@ -309,6 +314,26 @@ class BringJobRequest(BaseModel):
     # 2026-11-17 hunt: an assistant's hunt or mail job whose apply link is a job board's page must say it
     # searched the employer's own careers page and found no posting there ("not_found"); else 422.
     employer_search: Optional[Literal["not_found"]] = None
+    # 2026-11-18 16:13 hunt: "not_found" was sent after one generic web search (SKO) or none (N-Labs, SRG, Opus).
+    # It now carries what was searched: queries and URLs, at least one a careers page or an ATS (never a board).
+    employer_searched: Optional[list[str]] = Field(None, max_length=10)
+    # Same run: "Lloyds Bank" was brought again although "Lloyds Banking Group" (1036) held the same role. An agent
+    # bring of an open application's company + role is refused unless it names that id and why it differs.
+    not_duplicate_of: Optional[int] = Field(None, ge=1)
+    not_duplicate_reason: Optional[NotDuplicateReason] = None
+
+    @model_validator(mode="after")
+    def _override_says_why(self) -> BringJobRequest:
+        if (self.not_duplicate_of is None) != (self.not_duplicate_reason is None):
+            raise ValueError("not_duplicate_of and not_duplicate_reason go together: the id and why this job differs")
+        return self
+
+    @field_validator("employer_searched")
+    @classmethod
+    def _searched_items(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is not None and any(not item.strip() or len(item) > 500 for item in v):
+            raise ValueError("each employer_searched item is a query or URL of 1-500 characters")
+        return v
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -385,7 +410,8 @@ class BringJobResponse(BaseModel):
     # Hunt recipe v24 (owner 2026-11-17), agent brings only: things to fix that do not block the bring,
     # each {"code", "reason", "next"} plus its facts. Closed codes BRING_WARNING_CODES:
     # ``possible_duplicate`` (+ ``application_ids``: at most 5 OPEN applications with the same role words and
-    # place under another company label) and ``board_link`` (+ ``host``: the apply link is a job board's page).
+    # place under another company label, or at the same company a qualifier apart) and ``board_link``
+    # (+ ``host``: the apply link is a job board's page).
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -412,13 +438,14 @@ async def _bring_warnings(
     if new_application:
         same = await reposts_service.open_same_role(
             db, user_id, title=body.title, location=body.location, exclude_application_id=application_id,
+            company=body.company,
         )
         if same:
             out.append({
                 "code": "possible_duplicate", "application_ids": same,
-                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role in the "
-                          "same place under another company label: possibly the same job (an agency and its "
-                          "client, or a renamed employer).",
+                "reason": f"Open application(s) {', '.join(str(i) for i in same)} have the same role words in "
+                          "the same place: possibly the same job (an agency and its client, a renamed employer) or "
+                          "another team; compare the ads.",
                 "next": _DUPLICATE_NEXT,
             })
             get_audit_logger().info(
@@ -444,6 +471,12 @@ async def _bring_warnings(
     return out
 
 
+_NOT_DUPLICATE_NEXT = (
+    " A different job (the place, team, level or contract differs): bring it again with not_duplicate_of={id} "
+    "and not_duplicate_reason one of " + " | ".join(NOT_DUPLICATE_REASONS) + "."
+)
+
+
 # 2026-11-17 hunt run: 2 of its 4 jobs kept a Shine / Adzuna link although the reply warned `board_link`;
 # a warning that does not block is read past. A hunt or mail bring with a board link now says it searched.
 BOARD_SEARCH_ORIGINS = ("ai_hunt", "your_mail")
@@ -459,10 +492,44 @@ def _board_name(host: str) -> str:
     return next((f for f in settings.JOB_BOARD_FAMILIES if f in labels), "other")
 
 
+# Hosts that answer a web search, not an employer: a search there is a query, never a careers-page attempt.
+_SEARCH_ENGINE_LABELS = frozenset({"google", "bing", "duckduckgo", "yahoo", "yandex", "baidu", "brave", "ecosia"})
+_SEARCHED_NEXT = (
+    'employer_search "not_found" needs employer_searched: the queries and URLs you searched, at least one the '
+    "employer's careers page or an ATS search (boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, "
+    "jobs.ashbyhq.com/<slug>, apply.workable.com/<slug>), never a job board or a search engine. Search there "
+    "first; the same role there = bring that link. Nothing was recorded."
+)
+
+
+def _refuse_unproven_not_found(body: BringJobRequest, user_id: str) -> None:
+    """422 unless ``employer_searched`` holds a careers-page / ATS URL (counts logged, never the caller's text)."""
+    from src.services.applications.job_checks import apply_host, classify_host  # noqa: PLC0415
+
+    items = body.employer_searched or []
+    hosts = [apply_host(item) for item in items]
+    careers = sum(
+        1 for h in hosts
+        if h and classify_host(h) != "job_board" and not _SEARCH_ENGINE_LABELS.intersection(h.split("."))
+    )
+    if careers:
+        return
+    get_audit_logger().info(
+        "job_bring_board_refused",
+        extra={"event": "job_bring_board_refused", "user_id": user_id, "reason": "employer_search_unproven",
+               "urls": sum(1 for h in hosts if h), "careers_urls": careers,
+               "queries": sum(1 for h in hosts if not h), "status": "refused"},
+    )
+    raise HTTPException(status_code=422, detail=_SEARCHED_NEXT)
+
+
 def _refuse_unsearched_board_link(body: BringJobRequest, user_id: str) -> None:
     from src.services.applications.job_checks import apply_host, classify_host  # noqa: PLC0415
 
-    if body.origin not in BOARD_SEARCH_ORIGINS or body.employer_search is not None:
+    if body.employer_search is not None:
+        _refuse_unproven_not_found(body, user_id)
+        return
+    if body.origin not in BOARD_SEARCH_ORIGINS:
         return
     host = apply_host(body.apply_url)
     if not host or classify_host(host) != "job_board":
@@ -544,8 +611,11 @@ async def bring_job(
     # The MCP tool sends "" where a web body leaves the visa text out (None); both mean
     # "not said", so they hash the same and the two doors share one key space.
     key_body = {
-        # employer_search left out when unset, so keys stored before the field existed still match.
-        **body.model_dump(exclude={"client_key"} | ({"employer_search"} if body.employer_search is None else set())),
+        # Fields added later are left out when unset, so keys stored before they existed still match.
+        **body.model_dump(exclude={"client_key"} | {
+            k for k in ("employer_search", "employer_searched", "not_duplicate_of", "not_duplicate_reason")
+            if getattr(body, k) is None
+        }),
         "visa_detail": body.visa_detail or "", "visa_country": body.visa_country or "",
     }
     try:
@@ -594,9 +664,9 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         except SpineError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
-    # Agent guard (2026-10-30, prod app 328 duplicated 126): same company + same role (location/suffix
-    # noise trimmed, see reposts.role_core) as an application this user still has OPEN -> return that
-    # one, create nothing. Code, not prompt: "never bring a job already in the list" got broken.
+    # Agent guard (2026-10-30, prod app 328 duplicated 126): same company + same role (only place text
+    # trimmed, see reposts.role_key; a qualifier is another role) as an application this user still has
+    # OPEN -> return that one, create nothing. Code, not prompt: "never bring a job already in the list" got broken.
     # Web sessions skip it so a human can deliberately re-bring.
     if actor_for(user) != "web":
         from src.services.applications import reposts as reposts_service  # noqa: PLC0415
@@ -604,6 +674,14 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         dup_id = await reposts_service.open_duplicate_of(
             db, user.id, company=body.company, title=body.title, location=body.location
         )
+        if dup_id is not None and dup_id == body.not_duplicate_of:
+            # The run named this application and a closed reason it differs: bring it (ids and the code logged).
+            get_audit_logger().info(
+                "job_bring_duplicate_override",
+                extra={"event": "job_bring_duplicate_override", "user_id": user.id, "duplicate_of": dup_id,
+                       "reason": body.not_duplicate_reason, "status": "brought"},
+            )
+            dup_id = None
         if dup_id is not None:
             dup_app = await applications_spine.get_owned_application(db, user.id, dup_id) or {}
             dup_cat = await db.get_job_by_id(int(dup_app.get("job_id") or 0))
@@ -620,7 +698,7 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
                 job=application_job_response(dup_app, dict(dup_cat) if dup_cat else None),
                 existing=True, application_id=dup_id, status=str(dup_app.get("status") or ""),
                 duplicate_of=dup_id, matched_on="same_company_and_role", differs=dup_diffs,
-                next=existing_next(dup_id, dup_diffs, changed=False),
+                next=existing_next(dup_id, dup_diffs, changed=False) + _NOT_DUPLICATE_NEXT.format(id=dup_id),
                 **{k: dup_facts[k] for k in job_facts.JOB_FACT_FIELDS},
             )
 

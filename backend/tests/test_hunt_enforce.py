@@ -30,7 +30,7 @@ GOOD_REPORT: dict[str, Any] = {
                 "web": _ok_source(), "browser": {"skipped": {"code": "tool_missing",
                                                          "detail": "no browser tool in this scheduled cloud run"}}},
     "kit": {"results": 496, "new": 370, "prefilter_passed": 370, "read_in_full": 370, "unreadable": 0,
-            "snippet_only": 0},
+            "snippet_only": 0, "done": {"results": 496, "full": 400, "snippet": 90, "empty": 6}},
 }
 # The 2026-11-17 run as it reported itself: mail and kit only, 52 of 370 new kit ads read in full.
 REPLAY_1117: dict[str, Any] = {
@@ -134,6 +134,8 @@ async def test_the_mcp_mark_done_takes_the_report(authenticated_async_context, f
 _SHINE = {"title": "AI Engineer", "company": "Acme Analytics", "location": "Bengaluru",
           "apply_url": "https://www.shine.com/jobs/ai-engineer/acme/123", "description": "Build agents. " * 8,
           "origin": "ai_hunt"}
+# 2026-11-18 16:13: "not_found" names what was searched, at least one careers page or ATS.
+_SEARCHED = {"employer_search": "not_found", "employer_searched": ["https://careers.acme.example/jobs"]}
 _ADZUNA = {**_SHINE, "title": "ML Engineer", "apply_url": "https://www.adzuna.co.uk/jobs/details/456",
            "origin": "your_mail"}
 
@@ -166,7 +168,7 @@ async def test_employer_search_not_found_brings_with_the_warning_and_other_links
 ):
     async with authenticated_async_context() as client:
         async with await _agent(client) as agent:
-            searched = await agent.post("/api/jobs/bring", json={**_SHINE, "employer_search": "not_found"})
+            searched = await agent.post("/api/jobs/bring", json={**_SHINE, **_SEARCHED})
             own = await agent.post("/api/jobs/bring", json={**_SHINE, "title": "Agent Engineer",
                                                             "apply_url": "https://careers.acme.example/jobs/9"})
             no_origin = await agent.post("/api/jobs/bring", json={**_SHINE, "title": "Data Engineer", "origin": None})
@@ -196,7 +198,7 @@ async def test_the_mcp_bring_job_takes_employer_search(authenticated_async_conte
                               headers={"Authorization": f"Bearer {token}"})
     async with mcp_runtime(), Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
         refused = await mcp.call_tool("bring_job", dict(_SHINE))
-        brought = await mcp.call_tool("bring_job", {**_SHINE, "employer_search": "not_found"})
+        brought = await mcp.call_tool("bring_job", {**_SHINE, **_SEARCHED})
     assert refused.is_error and "employer_search" in refused.content[0].text
     assert not brought.is_error, brought.content[0].text
     assert [w["code"] for w in json.loads(brought.content[0].text)["warnings"]] == ["board_link"]

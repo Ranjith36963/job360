@@ -44,7 +44,7 @@ HONEST: dict[str, Any] = {
     "sources": {"mail": _RAN, "kit": {"calls": 1, "ads": 283, "brought": 6}, "connectors": _RAN, "web": _RAN,
                 "browser": {"skipped": {"code": "login_wall", "detail": "arbeitnow.co.uk asked for a sign-in"}}},
     "kit": {"results": 283, "new": 221, "prefilter_passed": 221, "read_in_full": 180, "unreadable": 29,
-            "snippet_only": 12},
+            "snippet_only": 12, "done": {"results": 283, "full": 240, "snippet": 34, "empty": 9}},
 }
 
 

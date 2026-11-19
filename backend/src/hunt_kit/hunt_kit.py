@@ -1743,6 +1743,148 @@ def load_known(path: str) -> set[str]:
         return {k for k in (norm_known_url(line) for line in f) if k}
 
 
+# --known-ct: Job360's known list as "company ||| title ||| id" lines. One job under another company label
+# ("Lloyds Bank" vs "Lloyds Banking Group", 2026-11-18 16:13 run) is known too. A copy of Job360's
+# services/applications/reposts.py company_title_key; tests/test_hunt_dedupe_employer.py checks they agree.
+COMPANY_STEM_DROP = frozenset({
+    "ltd", "limited", "inc", "llc", "plc", "gmbh", "ag", "sa", "pvt", "private", "corp", "corporation", "co",
+    "company", "holdings", "group", "bank", "banking", "technologies", "technology", "tech", "labs", "lab",
+    "solutions", "systems", "services", "software", "consulting", "consultancy", "digital", "india", "uk", "us",
+    "usa", "global", "international",
+})
+
+
+def _alnum_words(text: str) -> list[str]:
+    decomposed = unicodedata.normalize("NFD", text or "")
+    plain = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn").casefold()
+    return "".join(ch if ch.isalnum() else " " for ch in plain).split()
+
+
+def _role_core(title: str) -> str:
+    """The title without trailing " - " segments that hold a comma, then one trailing "(...)" group."""
+    parts = [" ".join(seg.split()) for seg in (title or "").split(" - ")]
+    while len(parts) > 1 and (not parts[-1] or "," in parts[-1]):
+        parts.pop()
+    core = " - ".join(parts)
+    if core.endswith(")") and "(" in core:
+        head = core[: core.rindex("(")].strip()
+        if head:
+            core = head
+    return " ".join(core.casefold().split())
+
+
+# Words that name no place (Job360's reposts._PLACE_NOISE): "Remote (UK)" is the place "uk".
+_PLACE_NOISE = frozenset({
+    "remote", "hybrid", "onsite", "on", "site", "office", "based", "in", "the", "and", "or", "of", "from", "home",
+    "wfh", "anywhere", "worldwide", "global", "flexible", "work", "only", "fully", "partly", "partially", "area",
+})
+
+
+def _place_words(location: str) -> str:
+    """The first segment of ``location`` (split on , ; | / and brackets) that names a place, noise words out."""
+    spaced = "".join("," if ch in ",;|/()[]" else ch for ch in (location or "").casefold())
+    for segment in spaced.split(","):
+        words = [w for w in "".join(ch if ch.isalnum() else " " for ch in segment).split() if w not in _PLACE_NOISE]
+        if words:
+            return " ".join(words)
+    return ""
+
+
+def _role_key(title: str, location: str = "") -> str:
+    """Job360's reposts.role_key: only place text is dropped (trailing " - " segments with a comma or only place
+    words, then a last "(...)" of only place words); a qualifier stays ("(Backend)" vs "(Frontend)")."""
+    place = set(_alnum_words(location)) | _PLACE_NOISE
+
+    def only_place(text: str) -> bool:
+        return all(w in place for w in _alnum_words(text))
+
+    parts = [" ".join(seg.split()) for seg in (title or "").split(" - ")]
+    while len(parts) > 1 and ("," in parts[-1] or only_place(parts[-1])):
+        parts.pop()
+    core = " - ".join(parts)
+    if core.endswith(")") and "(" in core:
+        cut = core.rindex("(")
+        if core[:cut].strip() and only_place(core[cut + 1:-1]):
+            core = core[:cut]
+    return " ".join(_alnum_words(core))
+
+
+def _company_stem(company: str) -> str:
+    words = _alnum_words(company)
+    if len(words) > 1 and words[0] == "the":
+        words = words[1:]
+    while len(words) > 1 and words[-1] in COMPANY_STEM_DROP:
+        words.pop()
+    return " ".join(words)
+
+
+def company_title_key(company: str, title: str, location: str = "") -> str:
+    """``company stem | role key | place words``: the key Job360's bring_job duplicate guard uses."""
+    return _company_stem(company) + "|" + _role_key(title, location) + "|" + _place_words(location)
+
+
+def _loose_key(company: str, title: str, location: str = "") -> str:
+    """The hint key: company stem | the title without any last "(...)" | place (a qualifier apart = maybe)."""
+    return _company_stem(company) + "|" + " ".join(_alnum_words(_role_core(title))) + "|" + _place_words(location)
+
+
+def load_known_ct(path: str, loose: bool = False) -> dict[str, set[str]]:
+    """Read a --known-ct file (``company ||| title ||| id [||| location]`` per line): company|role -> places
+    ("" = a row with no place, which matches the company and role anywhere). ``loose``: the hint key
+    (:func:`_loose_key`) -> "place|id" entries, for ``possible_duplicate``."""
+    if not path:
+        return {}
+    out: dict[str, set[str]] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            cols = line.rstrip("\n").split(" ||| ")
+            if len(cols) >= 2 and cols[0].strip():
+                loc = cols[3] if len(cols) > 3 else ""
+                head, _, place = (_loose_key if loose else company_title_key)(cols[0], cols[1], loc).rpartition("|")
+                ident = cols[2].strip() if len(cols) > 2 else ""
+                out.setdefault(head, set()).add(place + "|" + ident if loose else place)
+    return out
+
+
+def known_ct_hit(known: dict[str, set[str]], company: str, title: str, location: str) -> bool:
+    """The same job as a known row: the same company and role, and the same place when both name one. Only
+    this identical key drops a job; anything weaker is :func:`known_ct_maybe`, a hint the assistant reads."""
+    head, _, place = company_title_key(company, title, location).rpartition("|")
+    places = known.get(head)
+    return places is not None and (not place or "" in places or place in places)
+
+
+def known_ct_maybe(loose: dict[str, set[str]], company: str, title: str, location: str) -> list[str]:
+    """Known-row ids with the same company and title words but another qualifier (pattern audit finding 6):
+    ``possible_duplicate`` on the job, for the assistant to compare the ads. Never a drop."""
+    head, _, place = _loose_key(company, title, location).rpartition("|")
+    ids = {e.split("|", 1)[1] for e in loose.get(head, ()) if not place or e.split("|", 1)[0] in ("", place)}
+    return sorted(i for i in ids if i)
+
+
+SNIPPET_MAX_CHARS = 500  # freehire cuts its text at exactly 500 characters (2026-11-18 14:11 run: 21 ads)
+
+
+def text_class(desc: str) -> str:
+    """``empty`` | ``snippet`` (500 characters or fewer, or ends cut with an ellipsis) | ``full``."""
+    text = (desc or "").strip()
+    if not text:
+        return "empty"
+    if len(text) <= SNIPPET_MAX_CHARS or text.endswith("…") or text.endswith("..."):
+        return "snippet"
+    return "full"
+
+
+def write_done_file(out: str, results: list[dict[str, Any]], col: Collector, stop_reason: str | None) -> None:
+    """``<out>.done.json``, written once the run ended: what mark_done's kit report copies (``kit.done``)."""
+    counts = collections.Counter(text_class(str(r.get("description") or "")) for r in results)
+    done = {"results": len(results), "full": counts["full"], "snippet": counts["snippet"], "empty": counts["empty"],
+            "known_skipped": col.known_skipped, "known_ct_skipped": col.known_ct_skipped,
+            "complete": not stop_reason, "stop_reason": stop_reason or None}
+    with open(out + ".done.json", "w", encoding="utf-8") as f:
+        json.dump(done, f)
+
+
 class Collector:
     """Thread-safe stats + results, applying the shared filter pipeline."""
 
@@ -1759,6 +1901,9 @@ class Collector:
         self.skipped_seen = 0  # jobs dropped at output because history already has them
         self.known: set[str] = load_known(getattr(args, "known", "") or "")  # --known: URLs already in Job360
         self.known_skipped = 0
+        self.known_ct: dict[str, set[str]] = load_known_ct(getattr(args, "known_ct", "") or "")  # --known-ct
+        self.known_ct_loose = load_known_ct(getattr(args, "known_ct", "") or "", loose=True)
+        self.known_ct_skipped = 0
         self.boards_listed: dict[str, int] = {}  # per ATS, after dedup and dead-board skip, before rotation
         self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
         self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
@@ -1913,6 +2058,10 @@ class Collector:
             with self.lock:
                 self.known_skipped += 1
             return  # already in Job360: dropped before any detail fetch, output or stream
+        if self.known_ct and known_ct_hit(self.known_ct, raw.get("company") or "", title, raw.get("loc") or ""):
+            with self.lock:
+                self.known_ct_skipped += 1
+            return  # the same company and role is already in Job360 under another link or label
         if self.titles_only:
             return self._offer_listing(source, raw, rec_source)  # no detail call, no years check
         det = raw.get("detail")
@@ -1959,6 +2108,10 @@ class Collector:
             rec["sponsor_register"] = reg_ids
         if self.every_title:
             rec["title_hint"] = title_hint(title, self.target_phrases, y)
+        loose = self.known_ct_loose
+        maybe = known_ct_maybe(loose, rec["company"], title, rec["location"]) if loose else []
+        if maybe:
+            rec["possible_duplicate"] = maybe  # Job360 ids, a qualifier apart: the assistant compares the ads
         key = job_key(rec)
         with self.lock:
             if url in self.seen_url:
@@ -3753,6 +3906,8 @@ def format_stats(col: Collector, skipped_seen: int = 0) -> str:
         lines.append("boards_this_run: " + ", ".join("%s=%d" % kv for kv in sorted(col.boards_this_run.items())))
     if col.known:
         lines.append("known_skipped=%d" % col.known_skipped)
+    if col.known_ct:
+        lines.append("known_ct_skipped=%d" % col.known_ct_skipped)
     lines.append("total kept: %d   skipped as already seen: %d   boards skipped as dead: %d"
                  % (len(col.results), skipped_seen, col.dead_skipped))
     return "\n".join(lines)
@@ -3871,6 +4026,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--known", default="", metavar="FILE",
                    help="file of URLs already in Job360, one per line: matching jobs are dropped before output")
+    p.add_argument("--known-ct", default="", metavar="FILE",
+                   help="Job360's known list as 'company ||| title ||| id' lines: the same company and role "
+                        "(another label or link) is dropped before output")
     p.add_argument("--stats", action="store_true", help="print coverage counts per source to stderr")
     return p
 
@@ -4025,6 +4183,7 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
                 with open(args.out, "w", encoding="utf-8") as f:
                     for r in results:
                         f.write(json.dumps(r, ensure_ascii=False) + "\n")
+                write_done_file(args.out, results, col, sink.stop_reason)
             counts = {"kept": len(results), "stored": sink.count}
             if not partial:  # a partial run must not mark its jobs "seen": the resumed run still outputs them
                 # Only now, after the output was written in full: a run that died before this line

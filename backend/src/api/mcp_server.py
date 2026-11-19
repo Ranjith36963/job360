@@ -1232,24 +1232,24 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         client_key: Optional[str] = None,
         test: bool = False,
         employer_search: Optional[Literal["not_found"]] = None,
+        employer_searched: Optional[list[str]] = None,
+        not_duplicate_of: Optional[int] = None,
+        not_duplicate_reason: Optional[str] = None,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (the full ad text as `description`); returns the job id and
         application id. It never judges fit: record your verdict with `save_fit`. A job you already
         have returns existing=true, application_id, matched_on, differs (field names), next: read next.
         A different link/location/country is a 409 with the same fields. Never use this to search.
 
-        Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
-        `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
-        `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`.
-        If the ad is silent, leave it out.
+        Visa: only if the ad SAYS it: `visa_signal` = "sponsors" or "no_sponsorship", the sentence in
+        `visa_detail`, ISO alpha-2 `visa_country`.
 
-        Job facts (pass when known): `country` = the job's ISO alpha-2 code ("FR", "US"),
-        `remote` = true/false, `found_on` = one of
+        Job facts (when known): `country` = ISO alpha-2 ("FR"), `remote` = true/false, `found_on` = one of
         "indeed", "linkedin", "company_careers", "job_board", "referral",
         "visa_sponsor_list", "pasted_by_user", "other". Fix later: update_job.
 
-        Ad dates (YYYY-MM-DD, when the ad shows them): `posted_at` = the listing's date,
-        `employer_published_at` = the employer's own posting date. `test`=true: a practice job, kept off lists.
+        Ad dates (YYYY-MM-DD): `posted_at` = the listing's, `employer_published_at` = the employer's.
+        `test`=true: a practice job, kept off lists.
 
         `checks`: facts about this ad (text, apply site, age, repost, pay, sponsorship): title_only or
         partial text = fetch the full ad first; an unknown host = tell the user.
@@ -1257,11 +1257,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
         `origin`: "ai_hunt" (you found it), "your_mail" (a job-alert email), "user_link" or
         "user_paste"; `queue`=true puts it in the batch. A job-board apply link with origin ai_hunt or
-        your_mail: search the employer's careers page first; none there = `employer_search` "not_found".
+        your_mail: search the employer's careers page first; none there = `employer_search` "not_found"
+        with `employer_searched` (the queries and URLs; one a careers page or ATS).
         `listed_people` (max 10): people the ad names, each {"name", "role",
         "linkedin_url"}; saved as this job's contacts (found_via "job_ad").
         `known_people`: see rules. `client_key`: retry = first reply.
-        `duplicate_of` = your open application for that role: nothing new made. `warnings`: do each `next`."""
+        `duplicate_of` = your open application for that role: nothing new made (a different job: resend with
+        `not_duplicate_of` + `not_duplicate_reason`, see next). `warnings`: do each `next`."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         description, visa_detail = _unfence_in(description), _unfence_in(visa_detail)
         try:
@@ -1271,7 +1273,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 country=country, remote=remote, found_on=found_on,
                 posted_at=posted_at, employer_published_at=employer_published_at,
                 origin=origin, queue=queue, test=test, listed_people=listed_people,  # type: ignore[arg-type]  # the model validates the closed set and item shape
-                client_key=client_key, employer_search=employer_search,
+                client_key=client_key, employer_search=employer_search, employer_searched=employer_searched,
+                not_duplicate_of=not_duplicate_of, not_duplicate_reason=not_duplicate_reason,  # type: ignore[arg-type]
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1688,7 +1691,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         hunt (done/partial) needs `report` {sources: {mail, kit, connectors, web, browser}: each {calls, ads,
         brought} or {skipped: {code, detail}} (code = tool_missing | tool_error | no_results | paid_needs_yes |
         login_wall; detail = the exact error), kit: {results, new, prefilter_passed, read_in_full, unreadable,
-        snippet_only}} with read_in_full + unreadable + snippet_only = prefilter_passed; a short one is refused 422
+        snippet_only, done}} with read_in_full + unreadable + snippet_only = prefilter_passed and done = the
+        kit's <out>.done.json once it ended; a short one is refused 422
         with what is missing. reach/network: `reviewed`=true only when
         the Doctor and a separate reviewer checked every person and note; else done is recorded partial. Job360
         counts the people itself: a job under 3 (network under 5) is recorded partial; the reply has `score`. reach:
