@@ -93,8 +93,30 @@ Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, 
 - Harness note: every send_later check-in I armed failed with ACCESS_DENIED (all sessions' reminders tonight show the
   same); the background shell waits are what kept this loop on time.
 
+## 05:05 run  (score 15%)
+- Session cse_01KTmoHBm1njgkBg3wo5H6pH: 35 turns, 99 s.
+- Achieved: alert sweep ran (nothing new since 04:06; 10 LinkedIn pages today). Easy Apply was reached for the first time
+  tonight: 2 applications.
+  - Source-Right: check_submit said ask, because the CV claims "agentic coding" and "tool calling" and gives locations
+    for Calnex and Nethermind that the profile does not hold. One ask was sent; hold released.
+  - TechBaton: the LinkedIn ad is closed; not submitted.
+  - Tab closed.
+- Missed: about 38 applications untouched. Its words: "After the first two stopped, I ended the run instead of asking
+  the same question for each." Sends 0 (the 7 are held to 22 Nov, correct). People search and the pending check were
+  not reached.
+- Biggest cause: the same as 04:05. The model ends the run on its own judgment (here: "the rest will ask the same").
+  Job360 says each CV review is per application. #1705 (the run clock in every handover, "never stop early") is the fix.
+  It was green at 05:17 but the merge cage never posted. I merged main in at 05:33 so it re-judges, and it must land
+  before 06:00. 06:05 is the first run with it.
+- Second cause, not mine: check_submit asks because the tailored CVs carry claims the profile lacks. That is the CV
+  review task's area and is noted for Kits. If most of the 40 hit it, even a full-length run only releases them.
+- Decision taken without the owner: merged main into #1705 to wake a stale merge cage (lesson rule).
+
 ## Needs the owner
 - Scheduled task prompt (trig_0199qXCRxqD3Dy2eH6pCb6U5) could also say it plainly. Proposed exact prompt:
   `Job360 PC browser assistant run, in my own Chrome (Claude in Chrome). / Call get_recipe("own_browser") and follow it exactly. / Keep calling own_browser_queue take until it answers empty or closed, or 40 minutes pass; never write the summary before that. / Obey every Job360 reply and warning.`
 - linkedin_check_pending: 3 contacts (67, 130, 131) could not be matched by name on LinkedIn's Sent page. Their
   stored names may differ from their LinkedIn names; worth a look in the morning. The 04:05 run also called update_contact with no field for them (3 x 422).
+- CV claims: the 05:05 run's check_submit asked on Source-Right because the tailored CV says "agentic coding", "tool
+  calling", and gives Calnex (Stevenage) and Nethermind (Remote), none of which your profile holds. Answer the ask, and
+  say whether the profile or the CVs should change; about 38 Easy Apply jobs wait behind the same kind of question.
