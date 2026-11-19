@@ -8329,6 +8329,12 @@ export interface components {
              * @default false
              */
             reviewed: boolean;
+            /** Searched */
+            searched?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            } | null;
         };
         /** MarkDoneOut */
         MarkDoneOut: {

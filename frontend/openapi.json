@@ -10964,6 +10964,24 @@
             "default": false,
             "title": "Reviewed",
             "type": "boolean"
+          },
+          "searched": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object"
+                },
+                "maxProperties": 20,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searched"
           }
         },
         "required": [

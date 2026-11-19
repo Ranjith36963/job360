@@ -14,7 +14,8 @@ source or page in steps 1-2 is untried for that company. Network FIRST when both
 reach work; never skip it or mark it failed for lack of time. One person, one contact: never add anyone `list_people` already has at that company, for
 any job. It never sends and never calls `ask_user`, never a push. Then `mark_done("network")` and `mark_done("reach", application_ids)`: `outcome`
 done (each got a new person), partial (one got nobody), failed (nothing could run, with its closed `reason`); any explanation in `note` (300 chars);
-Before mark_done, work EVERY id in `application_ids`, one company after another (Job360 refuses a mark that leaves one out), and hand ALL notes to ONE
+Before mark_done, work EVERY id in `application_ids`, one company after another (Job360 refuses a mark that leaves one out; a job under 3 needs
+`searched` {id: {sprouts: n, clay: n, <source>: n}}: what each found at its company), and hand ALL notes to ONE
 fresh helper agent (the Agent tool; `get_recipe("doctor")`, row Outreach review), then `record_event` `outreach_reviewed` per note: Job360 refuses
 mark_done without them. A refused call: read the error, fix it, call again.
 1. **Find the right people**, for EVERY company, one company at a time until it has 5 or every source is tried (the summary lists each source per
@@ -52,8 +53,7 @@ mark_done without them. A refused call: read the error, fix it, call again.
    `check_outreach(contact_id, message_id)` on each saved draft and reports its answer.
    - `auto`, channel `email`: a strong `outreach_reviewed` first (`get_recipe("doctor")`, row Outreach review), then right
      before Send call `check_outreach(contact_id, message_id)` (`message_id` = the `artifact_id` `save_artifact` gave you).
-     It checks the user's settings, an earlier send or reply (the Gmail Sent folder too: look there first), the user's own
-     limits (settings: per company, network per hour, a day per channel).
+     It checks settings, an earlier send or reply (look in the Gmail Sent folder first) and the user's limits (per company, network per hour, a day per channel).
      - `send`: press Send in Gmail in the user's browser, when you control the browser. Never send through a Gmail
        connector - connectors only draft. No browser control: treat it as `ask`. Then record `outreach_sent` at once.
      - `ask`: save a Gmail draft; the saved message shows under People to reach on Needs you (no `ask_user`); the user sends (`outreach_not_reviewed` too).
