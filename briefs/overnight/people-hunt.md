@@ -67,3 +67,18 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
   sourcing-era token in my log name (people_run_searched contains run_search), renamed people_search_counts.
   Auto-merge on; it should land before :51, so the 00:56 run is the first under it.
 - Decision taken without the owner: none.
+
+## 00:56 run  (score n/a: nothing due, second hour lost)
+- Achieved: obeyed Job360 in 7 s ("Nothing is due for either duty ... next reach slot 00:57").
+- Missed: reach for 1094-1098 (the 00:11 hunt's jobs). The run woke at 00:56:42; reach's 2h back-off ended at
+  00:57:41, 59 s later. So one failed mark at 22:57 cost THREE hourly runs (22:56 failed, 23:56 and 00:56 idle).
+- Biggest cause (proven in code): `waiting_after_failure` in services/profile/schedule.py checked `until > now` with
+  no DUE_GRACE, while every interval check (inbox, hunt, network) uses `nxt - DUE_GRACE <= now`. A duty is stamped
+  at its claim, about a minute after the :56 wake, so a back-off always ended just after the next wake.
+- Fix: PR (below) does both of Kits' 01:10 orders plus this: (1) the back-off check gets DUE_GRACE; (2) an
+  assistant's people run marked failed for network_blocked or rate_limited is recorded partial with that reason
+  (no back-off, the reply says so); `error` stays failed; the website marks as before.
+- Also seen: network was marked done at 00:50:51 by something other than the people hunt (the 00:56 run did
+  nothing; last_done network 00:50:51, failures 0). Kits: which routine marked network at 00:50? It reset network's
+  hour without a people run.
+- reach is due now (1094-1098); the 01:56 run is the first real run under #1688 and #1689.
