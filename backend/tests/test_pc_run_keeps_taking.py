@@ -101,7 +101,7 @@ async def test_release_of_the_hunt_duty_says_take_again_while_tasks_wait(authent
             second = await _clicked_person(client, 2)
             body = await _release(agent, "duty:linkedin_search", "done")
             # pc-2306: the release takes that send for this session, so the run cannot stop here
-            assert body["next"] == f"Do this task now: contact:{second} (linkedin_outreach). Its claim is already yours."
+            assert body["next"] == f"Do this task now: contact:{second} (linkedin_outreach). Its claim is already yours. 40 of the run's 40 minutes are left: never stop early."
 
 
 @pytest.mark.asyncio
