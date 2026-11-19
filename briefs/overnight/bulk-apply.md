@@ -142,3 +142,9 @@ score is about handling, not submits.
 - PC queue: whats_due says nothing has worked the PC queue since 23:08 UTC; 50 tasks wait. Needs the owner's
   PC (browser-agents session's area).
 - #1697 merged 03:15:05 (outside the window); the 03:41 run is the first with the employer_page check.
+
+## 03:41 run  (not scored, 0 workable rows)
+- The batch claim is stamped 03:59:18 (a run start, not its close; see Correction) and no row was opened or
+  blocked. The 03:59 hunt's new rows (1107-1114, fits judged 03:56-04:07) have no CV yet: the CV run's work.
+  243 rows wait on the owner. Closed without a failure.
+- #1697 (employer_page on board blocks, live 03:15) not exercised yet. Nothing new to fix this hour.
