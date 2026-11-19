@@ -36,7 +36,9 @@ the owner has. 250 queued rows wait on the owner (whats_due).
   00:41 and 03:41 came due with nothing to work.
 - The answers and consents on Needs you (1107, 1109, 1110, 1112, 1088, 1090, 1100, 1105 tonight), and the
   CAPTCHAs/sign-ins moved to your PC. The PC queue was idle from 23:08 (50 tasks) until a pc-0505 run started.
-- From earlier: the single-source fix for 319 (waiting_on_owner vs waiting_on) is now done by Kits' #1676.
+- From earlier: row 319 (an ask whose answers you saved but never finished) - Kits' #1676 made waiting_on_owner
+  follow check_submit's open-ask count; I have not re-checked whether 319 now agrees with its waiting_on.
+  Finishing that ask on Needs you clears it either way.
 
 **Corrections and my mistakes:**
 - #1687 merged at 23:36:01, one minute into the no-merge window; its deploy finished 23:43:35 under the
