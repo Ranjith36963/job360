@@ -406,6 +406,10 @@ class AddContactRequest(BaseModel):
     # Stored only; phone normalised to +digits, links http(s), max CONTACT_LINKS_MAX.
     phone: Optional[str] = None
     links: Optional[list[str]] = None
+    # 2026-11-19 (02:21 and 02:56 People hunt runs): the fresh People Doctor check failed people and the run added
+    # them anyway. An assistant passes that check's verdict for this person; "fail" is refused, and while a
+    # scheduled people run holds reach or network the verdict is required (_refuse_unchecked_person).
+    people_check: Optional[Literal["pass", "fail"]] = None
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -2977,6 +2981,42 @@ async def add_contact(
     return await _add_contact_once(db, user, application_id, body, response)
 
 
+PEOPLE_CHECK_FAILED = (
+    "The People check failed this person, so they are not added. Find a page the check passes (get_recipe(\"reach\") "
+    "step 2: the employer's own page, or two lookups agreeing), check again, or leave them out."
+)
+PEOPLE_CHECK_MISSING = (
+    "A scheduled people run passes people_check: the fresh People Doctor check's verdict for this person "
+    "(get_recipe(\"doctor\"), row People), pass or fail. Run the check first, then add only those it passes."
+)
+
+
+PEOPLE_CHECK_BATCH = (
+    "A scheduled people run adds each person with add_contact(name=...) and its people_check verdict, not as a "
+    "people list. Add them one at a time."
+)
+
+
+async def _people_run_live(db: JobDatabase, user: CurrentUser) -> bool:
+    """True while a scheduled people run (reach or network) holds its claim."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    now = datetime.now(timezone.utc)
+    return any([await schedule.claim_live(db, user.id, duty, now) for duty in ("reach", "network")])
+
+
+async def _refuse_unchecked_person(db: JobDatabase, user: CurrentUser, body: AddContactRequest) -> None:
+    """An assistant never adds a person the People check failed; during a people run it says the verdict."""
+    if actor_for(user) == "web":
+        return
+    if body.people_check == "fail":
+        logger.info("people_check_refused user=%s reason=check_failed", safe_log_value(user.id))
+        raise HTTPException(status_code=422, detail=PEOPLE_CHECK_FAILED)
+    if body.people_check is None and await _people_run_live(db, user):
+        logger.info("people_check_refused user=%s reason=verdict_missing", safe_log_value(user.id))
+        raise HTTPException(status_code=422, detail=PEOPLE_CHECK_MISSING)
+
+
 async def _add_contact_once(
     db: JobDatabase, user: CurrentUser, application_id: Optional[int], body: AddContactRequest, response: Response
 ) -> dict[str, Any]:
@@ -2984,6 +3024,7 @@ async def _add_contact_once(
     ``add_contact`` key space: the key body always names ``application_id``."""
 
     _refuse_dev_talk(body.notes)
+    await _refuse_unchecked_person(db, user, body)
 
     async def _write() -> dict[str, Any]:
         try:
@@ -3069,6 +3110,10 @@ async def add_contacts_batch(
     limit = settings.CONTACTS_BATCH_MAX
     if not 1 <= len(body.people) <= limit:
         raise HTTPException(422, f"people must hold 1-{limit} entries (CONTACTS_BATCH_MAX)")
+    if not body.dry_run and actor_for(user) != "web" and await _people_run_live(db, user):
+        # A people run adds each person with its People check verdict, never as a list (the list skips it).
+        logger.info("people_check_refused user=%s reason=batch_in_people_run", safe_log_value(user.id))
+        raise HTTPException(status_code=422, detail=PEOPLE_CHECK_BATCH)
     valid: list[dict[str, Any]] = []
     bad: list[dict[str, Any]] = []
     for i, item in enumerate(body.people):
@@ -3080,6 +3125,9 @@ async def add_contacts_batch(
             continue
         if (talk := plain_words.dev_talk(model.notes)) is not None:
             bad.append({"index": i, "status": 422, "detail": talk})
+            continue
+        if model.people_check == "fail" and actor_for(user) != "web":
+            bad.append({"index": i, "status": 422, "detail": PEOPLE_CHECK_FAILED})
             continue
         valid.append({"index": i, **model.model_dump()})
     try:
