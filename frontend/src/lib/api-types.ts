@@ -8307,6 +8307,8 @@ export interface components {
         };
         /** MarkDoneIn */
         MarkDoneIn: {
+            /** Agency */
+            agency?: number[] | null;
             /** Application Ids */
             application_ids?: number[] | null;
             /**
@@ -8907,6 +8909,8 @@ export interface components {
          *     network people this run, against the target and the minimum.
          */
         PeopleScoreOut: {
+            /** Agency */
+            agency?: string[];
             /** Minimum */
             minimum: number;
             /** Network */

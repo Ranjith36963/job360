@@ -4,20 +4,20 @@
 Print this checklist and tick each step:
 [ ] 1 Find  [ ] 2 Check  [ ] 3 Record  [ ] 4 Write  [ ] 5 Send by mode
 
-**A scheduled people hunt** (a scheduled task that says "follow get_recipe("reach")"): call `whats_due(duties=["reach", "network"])`. Neither listed:
-say "people hunt not due" (or "held by a running claim") and stop. Read `get_profile()` once (`view="full"` too for a network run: past employers,
-schools) and `list_people()` once: everyone already saved. GOAL: a `network` run adds `max_people` (5) NEW people who fit the profile (people in the
-user's target roles, recruiters who hire for them, alumni, ex-colleagues, founders and leads), with `add_contact` WITHOUT `application_id` (pass
-`company`); a `reach` run brings each of its `application_ids` ONLY (up to 5) to 5 people at that company (recruiter or talent partner, hiring
-manager, 2 team peers, a lead or founder), counting who is saved there. 5 is the target and the cap: never a 6th, and never stop below 5 while a
-source or page in steps 1-2 is untried for that company. Network FIRST when both are listed, with its own search across several companies before any
-reach work; never skip it or mark it failed for lack of time. One person, one contact: never add anyone `list_people` already has at that company, for
-any job. It never sends and never calls `ask_user`, never a push. Then `mark_done("network")` and `mark_done("reach", application_ids)`: `outcome`
-done (each got a new person), partial (one got nobody), failed (nothing could run, with its closed `reason`); any explanation in `note` (300 chars);
-Before mark_done, work EVERY id in `application_ids` (Job360 refuses a mark that leaves one out; a job under 3 needs `searched` {id: {sprouts: n,
-clay: n, <source>: n}}: what each found at its company; leave out a source you did not run), and hand ALL notes to ONE fresh helper agent (the Agent
-tool), the Doctor's row Outreach review pasted in (`get_recipe("doctor")`): record ITS rows with `record_event` `outreach_reviewed` per note, one row
-per sentence about the recipient (`field_path` "page:<url>"), not one row for a whole note: Job360 refuses mark_done without them; a refused call: fix it, call again.
+**A scheduled people hunt**: call `whats_due(duties=["reach", "network"])`. Neither listed: say "people hunt not due" (or "held by a running claim")
+and stop. Read `get_profile()` (`view="full"` too for a network run: past employers, schools) and `list_people()` (everyone saved) once. GOAL: a
+`network` run adds `max_people` (5) NEW people who fit the profile (people in the user's target roles, recruiters for them, alumni, ex-colleagues,
+founders), with `add_contact` WITHOUT `application_id` (pass `company`); a `reach` run brings each of its `application_ids` ONLY (up to 5) to 5 people
+at that company (recruiter or talent partner, hiring manager, 2 team peers, a lead or founder), counting who is saved there. An AGENCY job (the
+company is a recruitment agency, or the ad names no employer): the named recruiter IS the target, 1 to 2 people; add them and list the job in
+`mark_done`'s `agency`. 5 is the target and the cap (never a 6th); never stop below it while a source in steps 1-2 is untried there. Network FIRST
+when both are listed, before any reach work; never skip it or fail it for lack of time. One person, one contact: never add anyone `list_people`
+already has at that company. It never sends, asks or pushes. Then `mark_done("network")` and `mark_done("reach", application_ids)`: `outcome` done
+(each got a new person), partial (one got nobody), failed (nothing could run, with its closed `reason`); explain in `note` (300 chars); Before
+mark_done, work EVERY id in `application_ids` (Job360 refuses a mark that leaves one out; a job under 3 needs `searched` {id: {sprouts: n, clay: n,
+<source>: n}}: what each found at its company; leave out a source you did not run), and hand ALL notes to ONE fresh helper agent (the Agent tool), the
+Doctor's row Outreach review pasted in (`get_recipe("doctor")`): record ITS rows with `record_event` `outreach_reviewed` per note, one row per
+sentence about the recipient (`field_path` "page:<url>"), not one row for a whole note: Job360 refuses mark_done without them (fix, call again).
 1. **Find the right people**, for EVERY company, one company at a time until it has 5 or every source is tried. Warm first: people the user already
    knows there (the kit's `known_people`, `list_people`, past employers and schools in `get_profile(view="full")`, or a `Connections.csv` the user
    hands you). Then the EMPLOYER'S OWN SITE (team, about, leadership, careers, blog and press pages; a small firm names most of its staff there): each
