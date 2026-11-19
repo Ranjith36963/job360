@@ -866,13 +866,15 @@ def _refuse_unfit_draft(path: str, topic: str, question: str, value: dict[str, A
     from src.services.profile.memory_cleanup import record_country  # noqa: PLC0415
 
     family, template = memory_question(topic, question)
-    if not family or not template:
-        return
+    if not topic or not family or not template:
+        return  # only an Answer-once draft (the card keys each guess by its topic) is judged
     # The place is the topic's own {cc} part (a region such as NORTH_AMERICA too: `country` holds only an
     # ISO code, review of this fix), else the record's country.
     parts, slots = topic.split("."), template.split(".")
     at = slots.index("{cc}") if "{cc}" in slots else -1
     country = parts[at].upper() if 0 <= at < len(parts) and len(parts) == len(slots) else record_country(value)
+    if at >= 0 and not country:
+        return  # no place: no Answer-once row to fill (CI on #1709: a placeless "Salary?" draft)
     if answer_to_memory.fits(template, str(value.get("answer") or ""), country):
         return
     import logging  # noqa: PLC0415
