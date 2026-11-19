@@ -115,4 +115,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Sibling hunt-kit PRs conflict in the shared registries after each merge: merge main in, keep both sides, re-gate, re-read `mergeable_state`.
 - Before a recipe or stop rule acts on a summary flag (`waiting_on_owner`), check on live data that it agrees with the
   row's own state (`waiting_on`, `next`) and test that they agree (2026-11-18: #1646 skipped ~46 refill rows; #1660).
+- To keep a PR from merging around a scheduled run, hold it as a draft: the merge cage re-arms auto-merge,
+  so disabling auto-merge is no hold (2026-11-18: #1687 merged 23:36, its deploy restarted under the 23:41 run).
+- `whats_due.last_done_at` is a run's START (its claim), not its `mark_done`: read how a stamp is written before
+  inferring order from it (2026-11-19: two runs wrongly scored as "closed before working"; #1692's stated cause).
 
