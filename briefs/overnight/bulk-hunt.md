@@ -73,3 +73,14 @@ Session: Bulk Hunt test (owner's task trig_01QSkCh1, starts :11). Check-ins at :
   10:11 run was not due (ended 10:12, $0.38).
 - Next: score the 11:11 run (first with #1665: is `kit.done` reported, `employer_searched` used, any 422s,
   cost, minutes). Only then open coverage A.
+
+## 12:30 — 11:11 run scored (first run with #1665 live): ~45/100
+
+- Time 11:12–12:12 UTC (60 min), cost $6.35 (Sonnet $6.24, Haiku $0.11). Outcome partial, below_target.
+- Brought 5 of 10, all at or above 60: Resonance Graduate Applied AI Engineer Berlin 78, Resonance Applied AI Engineer Berlin 66, UST Junior AI Engineer Singapore 76, Infosys Junior AI Engineer GenAI Hyderabad 63, ProClink Jr. Agentic AI Engineer Hyderabad 64. micro1 brought then rescored 40 (pay per task).
+- #1665 worked: the run waited for `found.jsonl.done.json`, resumed the kit once after the 25-minute stop, and sent `kit.done` (known_skipped 2, known_ct_skipped 2). mark_done accepted it.
+- Kit: 912 results, all passed the title cut, complete false (time budget twice). read_in_full 62, snippet_only 850: honest counts, but 850 ads were judged on title and years. This is the main loss: one run reads about 60–100 ads in full, so a 900-ad stream is never read.
+- Mail: opened 2 of 16 digests (the recipe says every one).
+- Level judged unevenly: Infosys (2–5 y) and ProClink (2.5+ y) brought, iion (2–4 y) and heizen (2–5 y) skipped.
+- Coverage by place: Berlin, Singapore, Hyderabad only; no remote or contract row brought. Coverage A will make that visible per row.
+- Next: open coverage A (report every plan row), score the next run, then coverage B on the single pass.
