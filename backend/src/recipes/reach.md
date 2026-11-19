@@ -37,7 +37,7 @@ mark_done without them. A refused call: read the error, fix it, call again.
    directory or contact-data broker (rocketreach, zoominfo, apollo, theorg, wellfound and the like; `add_contact` refuses them). A `linkedin_url`
    comes only from a lookup record whose name AND company match; a person proven by (a) on the employer's own page is added without one (its LinkedIn
    later). A saved contact proven only on such a site is kept (never deleted); once proven by (a) or (b), `update_contact` its `source_url`. BEFORE
-   any add_contact: ONE Doctor check on everyone (`get_recipe("doctor")`, row People) by a fresh helper; add only those it passes.
+   any add_contact: ONE Doctor check on everyone (`get_recipe("doctor")`, row People) by a fresh helper; add only those it passes, with its verdict as `people_check`.
 3. **Record them:** `add_contact` with the `application_id`, their `role`, and `found_via` - where you found them: `company_site`,
    `company_team_page`, `linkedin`, `apollo` (also Vibe Prospecting, Sprouts, Clay), `email_finder`, `github`, `speaker_page`, `referral`, `job_ad`,
    `email`, `event` or `other`. Pass the proof page as `source_url`; `found_via` names that page (a news article is `other`; Job360 refuses a
