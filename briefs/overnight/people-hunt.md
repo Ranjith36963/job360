@@ -306,3 +306,55 @@ Network was marked done and reach partial. Both duties were marked.
 4. **Trace the ids drift:** whats_due listed 5 ids but mark_done required 843 and 848.
 5. **Carried over:** the review bypass ("self-check-pattern-reuse"), the micro1 company key, and the weak warning
    should name the failing sentence.
+
+## 19 Nov 11:56 and 12:12 runs (read 12:30-12:45, read-only)
+Changes since the last entry:
+- **#1713 (agency jobs)** merged 12:22 and was deployed 12:24, so neither run below had it. The 12:12 run's tool list
+  was loaded before the deploy.
+- **#1717 (a review row for EVERY line, plus a row per recipient sentence)** is open as a draft, to be marked ready
+  after 13:06.
+
+### 11:56 (scheduled; inferred from Job360 data, because the 12:12 fire overwrote its record)
+- **Network.** Claimed 11:57; 5 people added, ids 1755-1759 (ElevenLabs, Palantir, OpenAI x2, Anthropic).
+- **Reach, inferred.** From 12:01 to 12:09, 22 contacts were added on 7 jobs:
+  - MBN Solutions 3, Graphcore 3, LA International 4, Ametek 3, Roku 5, Lloyds 2, Palantir 2.
+  - About 27 of 40 (68%) if these were this run's jobs.
+  - Its reach ids and mark_done are not visible.
+- **Every one of these 27 is `found_via` "apollo".** Apollo people search is on the no-pay list. Two things are
+  still unknown, and need the run's transcript or the owner: whether this was the scheduled run or another session,
+  and which Apollo call was made.
+- **Reviews.** Mostly weak (`line_uncovered`, `quote_too_thin`, `claim_not_in_quote`); one row is strong. Each row
+  covers 1 content line.
+
+### 12:12 (off-schedule fire; transcript read in full)
+- **Duties.** Reach only, ids [896, 884, 885, 891, 892]. Network was not due (claimed at 11:57).
+- **Score: 18 of 30 (60%).**
+
+| Job | Company | Added | Saved now | Source |
+|---|---|---|---|---|
+| 896 | Reply | 0 | 7 | - |
+| 892 | STRATOS | 1 | 5 | lookups (Sprouts and Clay agree) |
+| 884 | Spookling | 2 | 2 | the person's own site, X and GitHub |
+| 891 | Kainos | 1 | 2 | kainos.com (the employer's own site) |
+| 893 | SolveAI | 1 | 4 | apollo |
+| 885 | Tech Recruitment Specialists | 0 | 0 | a recruiter ad; `agency` was not yet deployed |
+
+- **Reviews: all 5 weak.**
+  - Four stored `line_uncovered` ("1 of 1 required lines had no row"): per-sentence rows again, so #1717 is the fix.
+  - Vissarion stored `claim_not_in_quote`.
+  - One `lookup:sprouts` row was used: the first lookup row seen in a run.
+- **mark_done** needed 5 calls. The refusals were "missing: sprouts, clay", then "not in application_ids: 893",
+  then "missing: clay", then "no Doctor review". The run ended reach partial (884 2 of 5, 885 0 of 5, 891 2 of 5).
+
+### Root cause found: mark_done demands jobs the run was never given (10:56: 843 and 848; 12:12: 893)
+- **What whats_due hands out.** `_reach_ids` (`backend/src/services/profile/schedule.py`) returns the first
+  `REACH_MAX_PER_RUN` (5) due jobs.
+- **What mark_done checks.** `_refuse_left_out_jobs` (`backend/src/api/routes/schedule.py:554`) RECOMPUTES that list
+  at mark time.
+- **Why they differ.** Jobs the run just brought to 5 people drop out of the list. The next due job slides into the
+  top 5, and mark_done then refuses with "N applications this run was given are not in application_ids". That
+  message is false: the run was never given the job.
+- **The cost.** Each run lost a call or more to this, and the 10:56 run lost its tail to it.
+- **Fix (next PR, failing test first).** Record the ids whats_due hands out with the claim, as stamp rows in
+  `assistant_duty_runs`, so no migration is needed. Refuse only the given ids that were left out. A job that slid in
+  waits for the next run.
