@@ -150,16 +150,18 @@ def test_the_two_pass_flags_are_part_of_the_run_fingerprint():
     assert hk.run_fingerprint(a) != hk.run_fingerprint(b)  # other kept titles = another search
 
 
-def test_recipe_gives_both_passes_and_the_full_read_rule():
+# Owner, 2026-11-19 (after the overnight runs): the RECIPE goes back to one kit pass. The two-pass flags stay in the
+# kit (the tests above), but the recipe no longer gives them; it keeps the full-read rule.
+def test_recipe_gives_one_pass_and_keeps_the_full_read_rule():
     from src.api.routes.recipes import load_recipe
 
     flat = " ".join(load_recipe("hunt").text.lower().split())
-    assert "--titles-only titles.jsonl" in flat
-    assert "--keep-titles kept.txt --rows titles.jsonl.rows.jsonl" in flat
-    assert "cheapest model" in flat and "about 500 titles" in flat and "unsure = keep" in flat
+    gives = flat.replace("never pass `--every-title`, `--titles-only` or `--keep-titles`", "")  # the one ban line
+    assert "--titles-only" not in gives and "--keep-titles" not in gives
+    assert "titles.jsonl" not in flat and "kept.txt" not in flat
+    assert "titles_seen" not in flat and "titles_kept" not in flat
     assert "never only its first 3,000 characters" in flat
     assert "never brought" in flat
-    assert "titles_seen" in flat and "titles_kept" in flat
 
 
 # 19 Nov 03:11 UTC: pass 1 hung past --max-minutes (a running source kept going) and was killed, so no titles file.
