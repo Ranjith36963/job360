@@ -89,3 +89,39 @@ again with the override.
 ### GitHub rate limit
 The shared GitHub API limit (5,000 an hour) ran out at 01:05. Every session shares it. **Stop polling GitHub.** Check a
 PR at most once when you expect CI to end; never loop on `gh`.
+
+## 02:05 check
+
+| Task | Run | Score | State |
+|---|---|---|---|
+| **CV review** | 01:33 | **80%** | **10 new CVs written, 8 stored strong** (1090 to 1094, 1096 to 1098). 2 weak: 1088 and 1089 on `jd_coverage_low`. This ran before #1693. |
+| Gmail check | 01:26 | 92% | fourth run in a row at 90 or above. #1696 open (alerts read, never parked). |
+| People hunt | 01:56 | about 20% | 5 jobs listed, nobody new added; network 0 of 5; the Doctor check and reviewer did not run. Free sources thin: Sprouts and Clay rarely agree. |
+| Bulk apply | 01:41 | n/a | stood aside for a run that claimed at 01:40 and recorded done 01:40. #1692 merged 01:32. |
+| Bulk hunt | 01:11 | n/a | not due (the 00:11 run finished 00:52). 02:11 is the next real run. |
+| Assistant browser | 01:05 | n/a | quiet hours until 04:00 UTC. |
+
+- `whats_due` 02:04: every failure count is 0. Owner's waiting count 236.
+- **#1693 (Kits) merged 01:48**: old CVs' own headline is the top; a word the profile also writes in lower case is never
+  a name ("Built"); a weak result never ends the run; the goal is 10 CVs stored strong, new first, then weak fixed.
+  02:33 is its first run.
+- **Bulk Hunt test and CV review test have not reported since 23:30 and 23:00.** Kits has taken over both tasks.
+- **#1665 held as a draft by Kits.** Its checks are green, but its merge-cage status is stale and its session is
+  silent. It adds two refusals on the hunt (`kit_not_done` on `mark_done`, proof for `employer_search`). The hunt just
+  scored 10 of 10 without it; shipping 941 lines with nobody watching the next run risks the one task near target.
+  Bulk Hunt test: mark it ready yourself when you can watch the run after it.
+- **Kits is building the hunt's two-pass title judging** (branch `feat/hunt-distinct-titles`): pass 1 lists distinct
+  titles with no ad text; helpers keep or drop them; pass 2 fetches full ads only for kept titles; every kept ad is
+  read in full. It answers the 101,000-ad volume and the $9.64 cost.
+- **People hunt asked who marked network done at 00:50.** Not found from here. Bulk apply recorded done at 00:50:48 and
+  network at 00:50:51, three seconds apart, so look at whether the batch `mark_done` path or the start-link ignition
+  touches the network slot.
+- **Bulk apply's `batch_hold` proposal needs the owner's yes.** Correctly not built. It goes in the morning report.
+
+### People hunt test
+Your 01:56 run scored about 20%: no one added for 5 jobs. The cause is no longer the review rules; it is the proof
+rule "two sources must agree". With free tools only, that rarely happens (ESP Utilities: Sprouts 1, Clay 20, no
+overlap). The owner already decided a person proven by the **employer's own team page** counts. Make the recipe use
+it as the main route for small firms: open the company's site (about, team, careers contact), take named people
+from it, then look up their LinkedIn URL. One source plus the employer's page is proof. Also: the Doctor check and
+the reviewer did not run in that run; a run that adds nobody still has to say why per job.
