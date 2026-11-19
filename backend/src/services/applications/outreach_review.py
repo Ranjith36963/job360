@@ -17,8 +17,9 @@ name the contact's NEWEST draft, or whose ``sha256`` is not that draft's text ha
     (``quote_not_in_profile``) and has 3+ words (``quote_too_thin``);
 (c) every hard fact of a ``msg_line`` (``review_rows.hard_facts``, the CV rules: numbers and number words, role
     words, capitalised names wherever they stand, a name opening a later sentence too) is in its own quote, the
-    person's name, their company, the job's company or title, or the user's name (``claim_not_in_quote``); words
-    are scanned one by one, no regex on caller text.
+    person's name, their company, the job's company or title, or the user's name (``claim_not_in_quote``; the
+    stored ``why`` lists which :data:`WHY_CODES` rule fired, codes only); words are scanned one by one, no regex on
+    caller text.
 After weak reviews of :data:`MAX_WEAK` other drafts to this person, a review of a new one is weak (``retry_limit``):
 two rewrites, each re-reviewed; never a fourth try.
 
@@ -52,6 +53,8 @@ DOWNGRADES = (
     "no_content", "line_uncovered", "line_not_in_message", "quote_not_in_profile", "claim_not_in_quote",
     "quote_too_thin", "retry_limit",
 )
+# Closed: which hard-fact rule made a line claim_not_in_quote (stored as ``why``, like cv_reviewed's ``where``).
+WHY_CODES = review_rows.HARD_FACT_CODES
 MAX_WEAK = cv_review.MAX_WEAK  # owner 2026-11-09: up to two rewrites, each re-reviewed
 REVIEW_LINES_CAP = cv_review.REVIEW_LINES_CAP
 # check_outreach's AUTOMATIC sends: nobody pressed Send for this text. owner_clicked and connect_no_note are the
@@ -281,14 +284,20 @@ async def check(
         quotes.setdefault(line_of.get(row_key, row_key), []).append(quote)
     # 2026-11-18: a LinkedIn note is ONE line naming facts from several profile fields, and each quote must sit in
     # ONE field: a line's facts are judged against all the quotes given for that line (each still inside one field).
+    why: set[str] = set()  # WHERE claim_not_in_quote fired: review_rows.HARD_FACT_CODES, never the draft's words
     for ln in text.splitlines():
         key = cv_review.line_key(ln)
         if key not in quotes or key in page_keys:  # an uncovered line is line_uncovered, as before
             continue
         body = ln.strip().lstrip(cv_review._BULLETS + " \t")  # the draft's own text decides case
         judged = " ".join(x for x in sentences(body) if cv_review.line_key(x) not in page_keys)
-        if judged and review_rows.hard_facts(judged, [*quotes.get(key, []), context, own], *terms):
+        codes = review_rows.hard_fact_codes(judged, [*quotes.get(key, []), context, own], *terms) if judged else []
+        if codes:
             down.add("claim_not_in_quote")
+            why |= set(codes)
+    if why:  # prod 2026-11-19 13:56: 17 reviews stored claim_not_in_quote and nothing said which rule fired
+        logger.info("outreach_reviewed claim_not_in_quote contact=%s why=%s", safe_log_value(contact_id),
+                    ",".join(c for c in WHY_CODES if c in why))
     weak_ids = {
         p.get(ID_KEY) for p in (_parse(r.get("text")) for r in rows if r["entry"] == ENTRY)
         if p.get("confidence") != STRONG and p.get("sha256")
@@ -299,7 +308,8 @@ async def check(
     return {
         ID_KEY: payload[ID_KEY], "sha256": payload["sha256"], "claimed": claimed,
         "confidence": STRONG if claimed == STRONG and not down else WEAK,
-        "downgraded": [c for c in DOWNGRADES if c in down], "lines": len(entries),
+        "downgraded": [c for c in DOWNGRADES if c in down], "why": [c for c in WHY_CODES if c in why],
+        "lines": len(entries),
         "content_lines": len(content), "covered": covered, "reviewer": cv_review._label(payload["reviewer"]),
         "by": actor_for(user), "channel": str(draft.get("channel") or ""),
     }

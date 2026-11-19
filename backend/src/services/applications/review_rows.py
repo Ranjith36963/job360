@@ -98,10 +98,18 @@ def _odd_letters(word: str) -> bool:
 
 # Closed: the word before one of these is a subject, never an -s / -ed / -ing verb: "Kubernetes is ..." names a tool.
 _SUBJECT_VERBS = frozenset("is was are were has had have will would can could does did".split())
+# Closed: words that open a question or a request, never a name ("Could I ask about the team?": prod 2026-11-19 13:56,
+# every note's question sentence read "Could" as a name). Lowercase "may" stays out (NUMBER_WORDS: a month).
+_OPENERS = _SUBJECT_VERBS | frozenset("should shall might must do you your my me our us please let".split())
+
+
+def _pronoun(w: str) -> bool:
+    """"I" and its contractions ("I'm", "I’ve", "I'd", "I'll"): grammar, never a name, even in an all-caps heading."""
+    return w == "i" or w[:2] in ("i'", "i’")
 
 
 def _grammar(w: str, names: set[str], known: set[str], subject: bool = False) -> bool:
-    return (w in _FUNCTION_WORDS or (not subject and w.endswith(("ed", "ing", "s")))
+    return (w in _FUNCTION_WORDS or w in _OPENERS or _pronoun(w) or (not subject and w.endswith(("ed", "ing", "s")))
             or (w in known and w not in names))
 
 
@@ -120,10 +128,18 @@ def _new_sentence_names(body: str, bank_words: set[str], names: set[str], known:
     return False
 
 
-def hard_facts(body: str, quotes: list[str], names: set[str], free_labels: frozenset[str], known: set[str]) -> bool:
-    """A hard fact of the line is missing from its own quotes (``claim_not_in_quote``, module doc). ``names``: the
-    profile's names (one-word skill items, mid-sentence capitalised words, company / project words), a fact even
-    opening the line; ``free_labels``: list label words that tie items to nothing."""
+# Closed: the sub-rule of :func:`hard_fact_codes` that found a fact missing from the quotes, in check order. Stored as
+# outreach_reviewed's ``why`` (codes only, never the draft's words) so a weak review says WHERE it failed.
+HARD_FACT_CODES = ("label", "unsupported_token", "number", "role_word", "odd_letters", "new_sentence_name",
+                   "listed_name", "first_name")
+
+
+def hard_fact_codes(body: str, quotes: list[str], names: set[str], free_labels: frozenset[str],
+                    known: set[str]) -> list[str]:
+    """Each :data:`HARD_FACT_CODES` rule by which a hard fact of the line is missing from its own quotes
+    (``claim_not_in_quote``, module doc), in that order; ``[]`` = every fact is quoted. ``names``: the profile's
+    names (one-word skill items, mid-sentence capitalised words, company / project words), a fact even opening the
+    line; ``free_labels``: list label words that tie items to nothing; ``known``: the profile's plain words."""
     bank = " ".join(cv_review._quote_bank(q) for q in quotes)
     bank_words = set(evidence._words(bank))
     bank_parts = bank_words | {p for w in bank_words for p in _parts(w)}
@@ -132,15 +148,25 @@ def hard_facts(body: str, quotes: list[str], names: set[str], free_labels: froze
     first = words[0] if words else ""
     parts = cv_review.list_parts(body)  # "MSc: Python, SQL": a list's label ties its items to that name
     label = cv_review._label_words(parts[0]) - {"and"} if parts else frozenset()
-    if label - bank_words - free_labels:
-        return True
-    numbers = any(p in NUMBER_WORDS and p not in bank_parts for p in pieces)
-    return bool(evidence.unsupported_tokens(body, bank) or numbers
-                or any(p in _ROLE_WORDS and not _ROLE_WORDS[p] & bank_parts for p in pieces)
-                or any(_odd_letters(w) and w not in bank_words for w in words)
-                or _new_sentence_names(body, bank_words, names, known)
-                or any(w not in bank_words for w in _listed_with_names(body))
-                or (first in names and first not in bank_words))
+    fired = {
+        "label": bool(label - bank_words - free_labels),
+        "unsupported_token": bool(evidence.unsupported_tokens(body, bank)),
+        "number": any(p in NUMBER_WORDS and p not in bank_parts for p in pieces),
+        "role_word": any(p in _ROLE_WORDS and not _ROLE_WORDS[p] & bank_parts for p in pieces),
+        "odd_letters": any(_odd_letters(w) and w not in bank_words for w in words),
+        "new_sentence_name": _new_sentence_names(body, bank_words, names, known),
+        # a plain word of the profile that is no name of it ("at Calnex Solutions and build in Python": the verb
+        # "build") is grammar, as in _new_sentence_names; a tool the profile never says ("and terraform") still fires
+        "listed_name": any(w not in bank_words and not (w in known and w not in names)
+                           for w in _listed_with_names(body)),
+        "first_name": first in names and first not in bank_words and not _pronoun(first),
+    }
+    return [c for c in HARD_FACT_CODES if fired[c]]
+
+
+def hard_facts(body: str, quotes: list[str], names: set[str], free_labels: frozenset[str], known: set[str]) -> bool:
+    """A hard fact of the line is missing from its own quotes: :func:`hard_fact_codes` found any."""
+    return bool(hard_fact_codes(body, quotes, names, free_labels, known))
 
 
 def held_numbers(text: str, profile: Any) -> list[int]:
@@ -188,7 +214,12 @@ def _proper_nouns(text: str) -> set[str]:
     dropped = out & plain
     if dropped:
         logger.info("cv_review proper_nouns_plain_words count=%s", len(dropped))
-    return out - plain
+    # 13:56 run 2026-11-19 (all 17 notes): the LinkedIn heading "WHAT I'M SEEKING" made "I'm" a name (all caps), so
+    # every note opening "I'm" was stored claim_not_in_quote
+    pronouns = {w for w in out if _pronoun(w)}
+    if pronouns:
+        logger.info("cv_review proper_nouns_pronouns count=%s", len(pronouns))
+    return out - plain - pronouns
 
 
 def profile_terms(profile: Any) -> tuple[set[str], frozenset[str], set[str]]:

@@ -575,3 +575,87 @@ async def test_a_recipient_fact_from_a_lookup_cites_the_lookup(authenticated_asy
     first, second = _reviews(cid)
     assert (first["confidence"], first["downgraded"]) == ("strong", []), first
     assert (second["confidence"], second["downgraded"]) == ("weak", ["claim_not_in_quote"]), second
+
+
+# Prod 2026-11-19 13:56 run: all 17 LinkedIn notes stored weak, claim_not_in_quote, every one truthful. The profile's
+# LinkedIn heading "WHAT I'M SEEKING" made "I'm" a profile name (all caps), so a sentence opening "I'm" needed a quote
+# saying "I'm"; "Could I ask ...?" opening a later sentence read as a name; "at Calnex Solutions and build in Python"
+# read the verb "build" as a tool listed with a name.
+_SEEKING = "WHAT I'M SEEKING\nA data role where I build pipelines for analysts."
+_NOTE_JOB = "Hi Rita, I saw Northwind's Data Engineer role."
+_NOTE_ME = "I'm a data engineer at Acme and build in Python and dbt."
+_NOTE_ASK = "Could I ask about the data team?"
+_NOTE_PAGE_ROW = {"msg_line": _NOTE_JOB, "profile_quote": "Northwind is hiring a Data Engineer",
+                  "field_path": "page:https://northwind.example/careers/7"}
+
+
+def _seed_seeking_profile(user_id: str) -> None:
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text=RAW, linkedin_raw_text=_SEEKING, name="Ada Lovelace", skills=["Python"]),
+            preferences=UserPreferences(target_job_titles=["Data Engineer"]),
+        ),
+        user_id,
+        source_action="cv_upload",
+    )
+
+
+async def _note_review(client: AsyncClient, app_id: int, cid: int, note: str,
+                       rows: list[dict[str, str]]) -> dict[str, Any]:
+    mid = await _draft(client, app_id, cid, note, channel="linkedin")
+    sha = (await _review_block(client, cid))["sha256"]
+    resp = await _record(client, app_id, cid, _payload(mid, sha, rows))
+    assert resp.status_code == 201, resp.text
+    return _reviews(cid)[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_truthful_linkedin_note_opening_im_with_a_question_is_strong(
+    authenticated_async_context, fixture_user_id
+):
+    """The 13:56 drafts' shape: a page row for the job sentence, two profile quotes for the sentence about the user,
+    a profile row for the question. Every fact is quoted: strong, ``why`` empty."""
+    note = f"{_NOTE_JOB} {_NOTE_ME} {_NOTE_ASK} Thanks, Ada"
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        _seed_seeking_profile(fixture_user_id)
+        stored = await _note_review(client, app_id, cid, note, [
+            _NOTE_PAGE_ROW, *_rows((_NOTE_ME, QUOTE_1), (_NOTE_ME, QUOTE_2), (_NOTE_ASK, QUOTE_1))])
+    assert (stored["confidence"], stored["downgraded"], stored["why"]) == ("strong", [], []), stored
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("me", "code"), [
+    ("I'm a staff engineer at Acme.", "role_word"),
+    ("I'm a data engineer at Acme and terraform in Python.", "listed_name"),
+    ("I'm a data engineer at Acme. Could I ask? Amazon adopted it.", "new_sentence_name"),
+])
+async def test_a_made_up_claim_in_such_a_note_stays_weak_and_says_why(
+    authenticated_async_context, fixture_user_id, me, code
+):
+    """The protections stay: a role the profile never held, a tool it never names listed with a name, and a new name
+    in a later sentence each store weak, and ``why`` names the rule (closed codes, never the draft's words)."""
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        _seed_seeking_profile(fixture_user_id)
+        stored = await _note_review(client, app_id, cid, f"{_NOTE_JOB} {me} Thanks, Ada",
+                                    [_NOTE_PAGE_ROW, *_rows(*((x, q) for x in outreach_review.sentences(me)
+                                                               for q in (QUOTE_1, QUOTE_2)))])
+    assert (stored["confidence"], stored["downgraded"], code in stored["why"]) == (
+        "weak", ["claim_not_in_quote"], True), stored
+    assert set(stored["why"]) <= set(outreach_review.WHY_CODES), stored
+
+
+def test_hard_fact_codes_name_each_rule_and_the_bool_agrees():
+    """``review_rows.hard_fact_codes`` returns the closed codes; ``hard_facts`` (the CV review's door) is its bool."""
+    from src.services.applications import review_rows
+
+    names, known = {"acme"}, {"build", "data"}
+    for body, want in (
+        ("I'm a data engineer.", []),
+        ("I'm a data engineer. Could I ask about the team?", []),
+        ("I led twelve people at Acme and terraform.", ["unsupported_token", "number", "role_word", "listed_name"]),
+    ):
+        got = review_rows.hard_fact_codes(body, ["data engineer at the lab"], names, frozenset(), known)
+        assert got == [c for c in review_rows.HARD_FACT_CODES if c in want], (body, got)
+        assert review_rows.hard_facts(body, ["data engineer at the lab"], names, frozenset(), known) == bool(want)
