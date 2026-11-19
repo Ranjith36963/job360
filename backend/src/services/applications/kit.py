@@ -1122,6 +1122,38 @@ async def cv_cleared_by(
     return ("review", review) if review is not None else (None, None)
 
 
+async def cvs_cleared_for_apps(
+    db: JobDatabase, user_id: str, application_ids: list[int],
+) -> tuple[dict[int, dict[str, Any]], set[int]]:
+    """``(newest CV by application, the applications whose newest CV check_submit would NOT stop on cv_not_seen)``
+    for many rows at once. The gate's own rule (``assistant_settings`` ``_first_ask``: ``cv_seen or approved or
+    (cv_auto_approve and cv_review == "strong")``), read from the same parts the gate reads: a ``cv_seen`` /
+    ``submit_approved`` matching that CV's id and text (:func:`cv_mark_matches`, as :func:`controls_state`), or
+    :func:`reviews_clearing` with ``auto_only=False`` (as :func:`_gate_cv_review`). A row with no CV is absent from
+    both. Three queries at most (plus the review rule's), whatever ``len(application_ids)``. Read-only."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    cvs = await ready.newest_cv_by_app(db, user_id, application_ids)
+    if not cvs:
+        return {}, set()
+    ids = sorted(cvs)
+    cur = await db._db.execute(
+        "SELECT application_id, event_type, payload FROM application_events WHERE user_id = ? "  # noqa: S608
+        f"AND event_type IN ('cv_seen', 'submit_approved') AND application_id IN ({','.join('?' for _ in ids)})",
+        (user_id, *ids),
+    )
+    cleared: set[int] = set()
+    for r in await cur.fetchall():
+        d = dict(r)
+        app_id = int(d["application_id"])
+        ev = {"event_type": d["event_type"], "payload": _json(d.get("payload"))}
+        if cv_mark_matches(ev, cvs[app_id]["artifact_id"], cvs[app_id]["sha"]):
+            cleared.add(app_id)
+    rest = {a: {"artifact_id": cvs[a]["artifact_id"], "sha": cvs[a]["sha"]} for a in ids if a not in cleared}
+    cleared |= set(await reviews_clearing(db, user_id, rest, auto_only=False))
+    return cvs, cleared
+
+
 async def _gate_cv_review(
     db: JobDatabase, user_id: str, application_id: int, cv: Optional[dict[str, Any]],
 ) -> str:

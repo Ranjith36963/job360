@@ -75,8 +75,9 @@ async def test_whats_due_gives_an_agent_the_known_list_and_the_files_match_it(au
     assert "no-store" in urls.headers["cache-control"]
     assert urls.text.splitlines() == ["https://careers.northwind.example/jobs/1", "https://jobs.contoso.example/ml/2"]
     assert ct.text.splitlines() == [
-        f"Northwind | Labs ||| Data Engineer ||| {ids[0]}", f"Contoso ||| ML Engineer ||| {ids[1]}",
-        f"Fabrikam ||| Analytics Engineer ||| {ids[2]}",
+        # 2026-11-18 (#1665): the place rides as a 4th column; readers of the first two columns are unchanged.
+        f"Northwind | Labs ||| Data Engineer ||| {ids[0]} ||| London",
+        f"Contoso ||| ML Engineer ||| {ids[1]} ||| Remote", f"Fabrikam ||| Analytics Engineer ||| {ids[2]} ||| Paris",
     ]
     served = [r for r in caplog.records if r.getMessage() == "known_list_served"]
     assert sorted(r.form for r in served) == ["ct", "urls"] and {r.lines for r in served} == {2, 3}

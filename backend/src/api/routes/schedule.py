@@ -62,7 +62,7 @@ class DueItemOut(BaseModel):
 class KnownListOut(BaseModel):
     """2026-11-17 hunt: the user's known jobs as two plain-text downloads (curl them; no copying by hand).
     ``urls_url``: one job link per line (``urls`` lines, the kit's ``--known``); ``ct_url``:
-    ``company ||| title ||| id`` per application (``total`` lines). Signed, read-only, this user only."""
+    ``company ||| title ||| id ||| location`` per application (``total`` lines). Signed, read-only, this user only."""
 
     urls_url: str
     ct_url: str
@@ -119,6 +119,18 @@ class HuntSourceIn(BaseModel):
     skipped: Optional[Union[HuntSkipIn, str]] = Field(default=None)
 
 
+class HuntKitDoneIn(BaseModel):
+    """The kit's own ``<out>.done.json``, written only when it ends (2026-11-18 16:13: mark_done at 16:31, kit to
+    16:41): its result count and each ad's text class (full | snippet = 500 chars or fewer, or cut | empty)."""
+
+    model_config = ConfigDict(extra="ignore")
+    results: int = Field(ge=0)
+    full: int = Field(ge=0)
+    snippet: int = Field(ge=0)
+    empty: int = Field(ge=0)
+    complete: Optional[bool] = None
+
+
 class HuntKitIn(BaseModel):
     """The hunt kit's funnel: results, new after the known drop, passing the title/place pre-filter, read in full."""
 
@@ -133,6 +145,8 @@ class HuntKitIn(BaseModel):
     snippet_only: Optional[int] = Field(default=None, ge=0)
     # Prose about the unread ads (never logged); it never replaces the two counts.
     unread_reason: Optional[str] = Field(default=None, max_length=300)
+    # Copied from the kit's <out>.done.json (HuntKitDoneIn); required when the kit ran.
+    done: Optional[HuntKitDoneIn] = None
 
 
 class HuntReportIn(BaseModel):
@@ -581,7 +595,8 @@ HUNT_SOURCES = ("mail", "kit", "connectors", "web", "browser")
 HUNT_SKIP_CODES = ("tool_missing", "tool_error", "no_results", "paid_needs_yes", "login_wall")
 HUNT_REPORT_SHAPE = (
     'report: {"sources": {"mail": S, "kit": S, "connectors": S, "web": S, "browser": S}, "kit": {"results": N, '
-    '"new": N, "prefilter_passed": N, "read_in_full": N, "unreadable": N, "snippet_only": N}}, each S = '
+    '"new": N, "prefilter_passed": N, "read_in_full": N, "unreadable": N, "snippet_only": N, "done": <out>.done.json'
+    '}}, each S = '
     '{calls, ads, brought} or {skipped: {code, detail}} with code one of ' + " | ".join(HUNT_SKIP_CODES)
     + " and detail the exact error"
 )
@@ -643,6 +658,28 @@ def _source_state(src: HuntSourceIn) -> Optional[str]:
     return None
 
 
+_KIT_DONE_FIX = (
+    "the kit writes <out>.done.json (results, full, snippet, empty) only after its last log line: wait for it "
+    "(judge the stream meanwhile; a --resume command = run it once), then copy it into kit.done"
+)
+
+
+def _check_kit_done(kit: HuntKitIn, codes: list[str], problems: list[str]) -> None:
+    """A kit that ran is reported with its done file: the run waited for the kit's end and its counts add up."""
+    done = kit.done
+    if done is None:
+        codes.append("kit_not_done")
+        problems.append(f"kit.done is missing: {_KIT_DONE_FIX}")
+    elif done.full + done.snippet + done.empty != done.results:
+        codes.append("kit_done_sum")
+        problems.append(f"kit.done full + snippet + empty = {done.full + done.snippet + done.empty}, but its results "
+                        f"is {done.results}: copy the file as it is")
+    elif kit.results != done.results:
+        codes.append("kit_done_results")
+        problems.append(f"kit.results is {kit.results} but the kit's done file says {done.results}: report the "
+                        "finished kit, not a count taken while it ran")
+
+
 def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> None:
     """Refuse (422, saying exactly what is missing) an assistant's hunt report that is short; log the counts."""
     if report is None:
@@ -700,6 +737,8 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
                 "(read the rest in full: batches of at most 40, up to 8 helpers; a 403 page is tried with Job360's "
                 "browser, TinyFish, then Apify first); kit.unread_reason never replaces a count"
             )
+    if not codes and kit is not None and states.get("kit") == "ran":
+        _check_kit_done(kit, codes, problems)
     if codes:
         _log("hunt_report_refused", user, codes=",".join(codes), missing=",".join(missing))
         raise HTTPException(
@@ -716,6 +755,8 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
         **({f"kit_{k}": getattr(kit, k) for k in ("results", "new", "prefilter_passed", "read_in_full",
                                                   "unreadable", "snippet_only")}
            if kit else {}),
+        **({f"kit_done_{k}": getattr(kit.done, k) for k in ("full", "snippet", "empty", "complete")}
+           if kit and kit.done else {}),
     })
 
 

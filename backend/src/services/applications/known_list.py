@@ -4,7 +4,8 @@ The 11-17 run's helpers paged ``list_applications`` and copied each ``job_url`` 
 proved the copy whole. Now ``whats_due`` hands an assistant a short-lived signed link (``mint``), and
 ``GET /api/known-list/<token>`` (routes/known_list.py) answers the user's known jobs as plain text, one
 line per job: ``urls`` = every job link (the application's and the catalog row's, distinct), ``ct`` =
-``company ||| title ||| id`` per application. The token is stateless (itsdangerous, HMAC-SHA256 over the
+``company ||| title ||| id ||| location`` per application (the place added 2026-11-18, #1665; a reader of the
+first columns is unchanged). The token is stateless (itsdangerous, HMAC-SHA256 over the
 user id, salt ``job360.known-list``, ``KNOWN_LIST_TTL_MINUTES``), read-only, and names one user: a token
 can only ever read the user it was minted for. Test applications are left out, as in list_applications.
 """
@@ -43,7 +44,8 @@ async def _rows(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
 
     test_sql, test_params = TEST_APP_SQL("a")
     cur = await db._db.execute(
-        "SELECT a.id, a.job_company, a.job_title, a.job_url, j.apply_url AS catalog_url FROM applications a "  # noqa: S608
+        "SELECT a.id, a.job_company, a.job_title, a.job_location, a.job_url, j.apply_url AS catalog_url "  # noqa: S608
+        "FROM applications a "
         f"LEFT JOIN jobs j ON j.id = a.job_id WHERE a.user_id = ? AND NOT {test_sql} ORDER BY a.id",
         [user_id, *test_params],
     )
@@ -57,7 +59,11 @@ def _one_line(value: Any) -> str:
 
 def render(rows: list[dict[str, Any]], form: Form) -> list[str]:
     if form == "ct":
-        return [f"{_one_line(r['job_company'])} ||| {_one_line(r['job_title'])} ||| {r['id']}" for r in rows]
+        return [
+            " ||| ".join((_one_line(r["job_company"]), _one_line(r["job_title"]), str(r["id"]),
+                          _one_line(r["job_location"])))
+            for r in rows
+        ]
     seen: dict[str, None] = {}
     for r in rows:
         for url in (r.get("job_url"), r.get("catalog_url")):

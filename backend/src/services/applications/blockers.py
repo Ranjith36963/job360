@@ -502,7 +502,12 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
                 out.append(_b("assistant_step", "assistant", step, yes["recorded_at"], {"event_id": yes["id"]}))
         if considering and app_id in queued_at:
             browser = queue_preflight.route_label(a.get("job_url") or "", s["block"] or {}, hosts)
-            if browser["kind"] == "own_browser":
+            if browser["kind"] == "own_browser" and not s["cv"]:
+                # 2026-11-19 (apps 1064, 1131, 1132): no CV, so the PC queue does not offer it (own_browser
+                # _not_ready): the true next step is the assistant's, as on a job never queued.
+                word = "write the CV" if a.get("fit_recorded_at") else "judge the fit"
+                out.append(_b("assistant_step", "assistant", word, a["updated_at"], {"reason": "no_cv"}))
+            elif browser["kind"] == "own_browser":
                 out.append(_b("queued", "your_pc", "apply from your PC", queued_at[app_id]))
             else:
                 place = position.get(app_id)  # None: open_queue left it out, so no number is claimed

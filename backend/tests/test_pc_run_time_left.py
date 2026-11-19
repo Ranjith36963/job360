@@ -17,6 +17,7 @@ from src.api.routes import browser as browser_routes
 from src.services.applications import blocked as blocked_service
 from src.services.applications import own_browser
 from src.services.profile.models import CVData, UserPreferences, UserProfile
+from tests._pc_ready import pc_ready
 
 HUNT = "assistant_settings.hunt_every_hours"
 _AD = {"title": "Data Engineer", "company": "Northwind", "location": "London", "country": "GB", "remote": False,
@@ -72,6 +73,7 @@ async def _bring_blocked(client: AsyncClient, ctx: Any, n: int) -> int:
     })
     assert resp.status_code == 200, resp.text
     app_id = int(resp.json()["application_id"])
+    await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
     user = CurrentUser(id=ctx.fixture_user_id, email="u@example.com")
     async with browser_routes._db() as db:  # noqa: SLF001
         await blocked_service.record_browser_block(
