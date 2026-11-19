@@ -243,8 +243,18 @@ async def check(
     profile_rows = [e for e in entries if e not in page_rows]
     keys = {cv_review.line_key(e[LINE_FIELD]) for e in entries}
 
+    own_words = cv_review._name_words(profile)
+
+    def _needs_row(sentence: str) -> bool:
+        """A sentence of the user's own sign-off ("Thanks, Ada") needs no row; every other sentence does."""
+        words = set(evidence._words(sentence))
+        return bool(words) and not words <= own_words | SIGNOFF_WORDS
+
     def _covered(line: str) -> bool:
-        return cv_review.line_key(line) in keys or all(cv_review.line_key(x) in page_keys for x in sentences(line))
+        # A whole-line row, or a row (page or profile) for every sentence that needs one (prod 2026-11-19 13:02,
+        # contacts 1769 / 1770: a note reviewed sentence by sentence stored weak, covered 0).
+        return cv_review.line_key(line) in keys or all(
+            cv_review.line_key(x) in keys for x in sentences(line) if _needs_row(x))
 
     covered = sum(1 for ln in content if _covered(ln))
     down |= {"no_content"} if not content else {"line_uncovered"} if covered < len(content) else set()
@@ -258,6 +268,8 @@ async def check(
     for e in page_rows:  # a recipient sentence still needs its page quote: a made-up compliment is weak too
         if len(evidence._words(e["profile_quote"])) < 3:
             down.add("quote_too_thin")
+    # A row may name one sentence of a line: its quote then counts for that whole line's facts check.
+    line_of = {cv_review.line_key(x): cv_review.line_key(ln) for ln in text.splitlines() for x in sentences(ln)}
     quotes: dict[str, list[str]] = {}
     for e in profile_rows:
         quote = e["profile_quote"]
@@ -265,7 +277,8 @@ async def check(
             down.add("quote_not_in_profile")
         if len(evidence._words(quote)) < 3:
             down.add("quote_too_thin")
-        quotes.setdefault(cv_review.line_key(e[LINE_FIELD]), []).append(quote)
+        row_key = cv_review.line_key(e[LINE_FIELD])
+        quotes.setdefault(line_of.get(row_key, row_key), []).append(quote)
     # 2026-11-18: a LinkedIn note is ONE line naming facts from several profile fields, and each quote must sit in
     # ONE field: a line's facts are judged against all the quotes given for that line (each still inside one field).
     for ln in text.splitlines():

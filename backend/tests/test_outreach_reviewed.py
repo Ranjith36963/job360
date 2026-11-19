@@ -437,6 +437,36 @@ async def test_an_email_with_a_subject_line_reviews_strong_and_sends(authenticat
         "strong", [], 2, 2)
 
 
+@pytest.mark.asyncio
+async def test_a_one_line_note_reviewed_sentence_by_sentence_is_strong(authenticated_async_context, fixture_user_id):
+    """Prod 2026-11-19 13:02 (contacts 1769, 1770): a one-line LinkedIn note reviewed with one row per sentence (a
+    page row for the job sentence, a profile row for each sentence about the user) stored weak, line_uncovered,
+    covered 0: only a whole-line row or all-page sentence rows could cover a line. Every sentence still needs its
+    row and every quote and fact is still judged; the user's own sign-off ("Thanks, Ada") needs none."""
+    about_job = "Hi Rita, I saw Northwind's Data Engineer role."
+    note = f"{about_job} {LINE_1} {LINE_2} Thanks, Ada"
+    page_row = {"msg_line": about_job, "profile_quote": "Northwind is hiring a Data Engineer",
+                "field_path": "page:https://northwind.example/careers/7"}
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, note)
+        block = await _review_block(client, cid)
+        assert block["lines"] == [note]
+        resp = await _record(client, app_id, cid, _payload(mid, block["sha256"], [
+            page_row, *_rows((LINE_1, QUOTE_1), (LINE_2, QUOTE_2))]))
+        assert resp.status_code == 201, resp.text
+        [stored] = _reviews(cid)
+        assert (stored["confidence"], stored["downgraded"], stored["covered"]) == ("strong", [], 1), stored
+        # A sentence with no row still leaves the line uncovered.
+        mid2 = await _draft(client, app_id, cid, note.replace("Thanks, Ada", "I led a team of 12. Thanks, Ada"))
+        block2 = await _review_block(client, cid)
+        resp2 = await _record(client, app_id, cid, _payload(mid2, block2["sha256"], [
+            page_row, *_rows((LINE_1, QUOTE_1), (LINE_2, QUOTE_2))]))
+        assert resp2.status_code == 201, resp2.text
+    weak = _reviews(cid)[-1]
+    assert (weak["confidence"], "line_uncovered" in weak["downgraded"]) == ("weak", True), weak
+
+
 def test_auto_send_reasons_are_the_automatic_ones_with_text():
     """The user's own Send (owner_clicked, connect_no_note) and a no-note request (auto_connect) need no review."""
     from src.services.profile import assistant_settings as rules
