@@ -84,3 +84,8 @@ Session: Bulk Hunt test (owner's task trig_01QSkCh1, starts :11). Check-ins at :
 - Level judged unevenly: Infosys (2–5 y) and ProClink (2.5+ y) brought, iion (2–4 y) and heizen (2–5 y) skipped.
 - Coverage by place: Berlin, Singapore, Hyderabad only; no remote or contract row brought. Coverage A will make that visible per row.
 - Next: open coverage A (report every plan row), score the next run, then coverage B on the single pass.
+
+## 13:58 — #1718 (coverage A) merged at 13:57 UTC
+- Every plan row has an id (`GB:onsite`, `EUROPE:remote`...); `mark_done(hunt)` now needs `report.coverage` with one entry per row, or 422 `place_missing`. On-site abroad keeps every ad whatever it says about sponsorship.
+- First CI run lost `frontend-e2e` to an Ubuntu mirror 503 before any test ran; re-run was 403 for this session, so main was merged in at 13:36 (outside :06–:21) and CI went green.
+- The 14:11 run is the first with it live. Watch for 422 `place_missing` / `row_kit_only` loops and how many of the 30 rows it covers. Coverage B waits for that score.
