@@ -214,3 +214,10 @@ A PR that is green but "blocked" after leaving draft has a stale merge cage. `au
 `pull_request_review` (submitted) and `pull_request_review_comment` (created). **Post one review comment on the PR**
 (a COMMENT review, or a reply on a review thread) and the cage re-judges within about a minute. #1702 and #1703 merged
 90 seconds after that. No need to merge main in and wait for CI again.
+
+## 06:05 check: final
+
+- CV review 05:33: 20 stored strong, none weak: 100%. Two in a row (04:33, 05:33): **achieved.**
+- Bulk hunt 05:11: 0 of 10. 84,379 distinct titles, cut by a word list, 45 ads read in full. Cost $2.88.
+- People hunt 04:56: about 67%. Bulk apply 04:41: 100%. Assistant browser 05:05: 15%.
+- The morning report is in `morning-report.md`. Kits' hourly check-ins have stopped.
