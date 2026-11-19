@@ -358,3 +358,37 @@ Changes since the last entry:
 - **Fix (next PR, failing test first).** Record the ids whats_due hands out with the claim, as stamp rows in
   `assistant_duty_runs`, so no migration is needed. Refuse only the given ids that were left out. A job that slid in
   waits for the next run.
+
+## 19 Nov 12:56 run (fired 12:56, ended 13:03; read 13:15, read-only). Score: 7 of 30 (23%)
+This is the first run with `agency` live (#1713 deployed 12:24). #1717 (a row for every line) and #1720 (demand only
+the given ids) are not merged yet.
+- **Duties.** Reach [880, 881, 897, 898, 899] and network. Both were due; neither was held.
+- **Reach.** 2 people added: Saman Khan (ByteDance 880) and Ella Krikler (Dentons 897), both lookup-proven
+  (Sprouts and Clay). None came from an employer's own site.
+- **Final counts:** 880 1, 881 1, 897 2, 898 1, 899 2. The run listed no job in `agency`, correctly: none was an
+  agency.
+- **Training Basket (898).** Its own about page names Manali Shrivastwa and Rishabh Raj, but the run skipped them
+  because the page shows only a 2026 footer date. The recipe accepts an employer page from the last 12 months, so this
+  was over-strict.
+- **Nucleo (899).** Clay found nothing because the run guessed the domain (nucleoresearch.ai).
+- **Network: 0 of 5.** The FIRST call was `mark_done("network", partial)`, before any network search, and Job360
+  accepted it (score network 0, with only a no_review note). The run then spent all its lookups on reach. The recipe
+  says network first, and never to fail it for lack of time, but Job360 accepts a network mark with 0 people and no
+  sign of a search. Reach has a `searched` gate for this; network has none.
+- **Reviews: 0 strong, 2 weak** (line_uncovered, quote_not_in_profile).
+  - Each note is ONE line in `review.lines`. The reviewer gave per-sentence rows, with the greeting joined to the
+    first sentence, so no row matched the line. #1717 fixes the recipe wording for this.
+  - One quote came from the job ad, not the profile.
+  - A batched `record_events` for cold contacts was refused (422: "one call each"); the single calls worked.
+- **mark_done.** Seven calls. The refusals: missing sprouts and clay (twice), no outreach note, and 899 searched
+  missing. The final call was accepted as partial.
+- **"apollo" is not Apollo.** `CONTACT_FOUND_VIA` has no sprouts or clay value. The mcp_server description says
+  "apollo" (Apollo, Vibe Prospecting, Sprouts), so this run saved its Sprouts and Clay finds as found_via "apollo".
+  The 11:56 run's 27 "apollo" contacts are therefore no sign of paid Apollo use.
+
+### Next causes, from this run
+1. **Network can be marked before any work.** mark_done(network) accepts 0 people with no record of a search.
+   Proposed fix: make it need `searched` (per company, what each free source found), as reach does. Failing test first.
+2. **The weak reviews:** #1717 is pending.
+3. **The employer-page date rule is read too strictly:** a footer year is not a page date. Proposed fix: name what
+   counts as dated in the recipe.
