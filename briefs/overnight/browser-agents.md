@@ -53,6 +53,13 @@ Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, 
   - #1686 open: audit 6.3, conflict resolved.
 - Decision taken without the owner: none.
 
+## 01:05 run  (score n/a: quiet hours by design)
+- Session cse_01KTmoHCiq6gAQav4mXmrsWL: 12 turns, 25 s. Same correct idle as 00:05: 50 tasks, all LinkedIn, outside
+  04:00-00:00 UK. Nothing taken; the tab was closed. LinkedIn is not paused; yesterday's 78 pages reset at the UK day.
+- Merged since 00:30: #1686 (alert ranking from the profile only, 00:33) and #1691 (a release hands the next task,
+  00:42). Every fix for this task is now on main. 04:05 is the first run that can show them.
+- Decision taken without the owner: none.
+
 ## Needs the owner
 - Scheduled task prompt (trig_0199qXCRxqD3Dy2eH6pCb6U5) could also say it plainly. Proposed exact prompt:
   `Job360 PC browser assistant run, in my own Chrome (Claude in Chrome). / Call get_recipe("own_browser") and follow it exactly. / Keep calling own_browser_queue take until it answers empty or closed, or 40 minutes pass; never write the summary before that. / Obey every Job360 reply and warning.`
