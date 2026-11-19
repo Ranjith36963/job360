@@ -170,7 +170,7 @@ Not at 90% yet. The trend is up because of the recipe (employer pages first) and
 | #1688 | every sentence judged unless the reviewer marks it as about the recipient (page row) | merged 23:50 |
 | #1689 | a job left under 3 needs `searched` (what each free lookup found) | merged 00:26 |
 | #1694 | back-off due at the wake (DUE_GRACE); a tool not reached is partial, not failed | OPEN, draft until 06:07 |
-| #1699 | recipe: employer's own site first; the helper gets the Doctor row; `searched` leaves out sources not run | OPEN, draft until 06:07 |
+| #1699 | recipe: employer's own site first; the helper gets the Doctor row; `searched` leaves out sources not run | OPEN at 08:15: green, reviewers passed, auto-merge on, merge-cage not re-judged |
 | #1700 | `people_check`: a person the People check failed is refused; a people run gives the verdict | merged 04:15 |
 | #1704 | people saved on a job count for it (agency recruiters) | merged 04:45 |
 
