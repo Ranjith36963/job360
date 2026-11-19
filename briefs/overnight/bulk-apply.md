@@ -238,3 +238,10 @@ Cause: check_form put every sponsorship / visa / right-to-work question into `kn
 
 ## 09:41 slot: batch held (PR #1708 working), hunt ran
 whats_due 10:06 (read-only): batch_hold "waiting_on_you", 266 rows wait on the owner, batch not due. The 09:41 slot ran the hunt (claimed 09:42:55; brought 1141, 1142 and requeued 62).
+
+## 10:41 run, session apply-20261119T1045Z  (score 67%)
+Batch claimed 10:42:34 (the hunt's new rows 1141/1142 and requeued 62 gave it work; #1708 held it otherwise). Rows: 62, 1141, 1142 (3).
+Fair: 62 Citi (HTTP 404, "Job Not Found": posting_closed, withdrawn). 1142 Apollo via devglobaljobs.com (Arbeitnow feed): Google sign-in, and the assistant says it looked for the employer's own page and found none.
+Not fair: 1141 Reply on www.gradcracker.com: bot check recorded by Job360's own browser, the same as 1130 at 07:43. Reply's own careers page was never tried. This is the browser-open board refusal still waiting on the owner.
+#1697: not exercised. Only 6 hosts are on JOB_BOARD_HOSTS (linkedin, naukri, reed, shine, totaljobs, whatjobs); gradcracker, instahyre, devglobaljobs and arbeitnow classify "unknown", so a block there never asks for employer_page.
+#1712 (merged 10:23): not exercised. No row reached check_form, so there is no proof yet; the next UK form with a sponsorship question is the test.
