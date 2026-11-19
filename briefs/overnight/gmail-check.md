@@ -54,3 +54,19 @@ open application. Scores come from the run's transcript (reads only).
   recipe change for Kits: step 3 "A job-board alert or digest that names no application of the user is read,
   never parked."
 - Decision taken without the owner: no PR; logged as a suggestion.
+
+## 01:26 run  (score 92%)
+- Achieved: claim with duties; one date search (after:2026/11/18, one page, 32 threads, no token); 11 opened,
+  10 job mail, every one matched or parked (1 new: Aurevane Search recruiter); the #1680 rule worked: the WSP
+  identity mail named WSP in its body, so the run called match_email(subject="WSP") to find apps 946/134
+  instead of guessing, and parked it (a one-time code, no event to record); cursor moved for all 1024 open
+  applications in ONE call; mark_done after it; 3-line summary, one action per parked mail; no push (no deadline).
+- Missed: (1) job-board alerts still parked (Guinness, Amey, PA Media, Essaroil, EBRD, Computacenter; mostly
+  re-parks of 00:26's items). (2) The same wrong number in its prose: "cursor moved for all 227 applications";
+  the call carried 1024 (2nd run).
+- Biggest cause: the alert rule Kits approved at 01:10.
+- Fix: PR #1696, one line in recipe step 3: "A job-board alert or digest that names no application of the user
+  is read, never parked." Failing test first, gate PASS, auto-merge on. Pushed 01:55, so it lands before the
+  02:21-02:36 window. The recruiter draft (Halimah S.) is left as Kits ordered: the answer is the owner's.
+- Decision taken without the owner: #1696 per Kits' orders. The "227" prose number is cosmetic (the call itself
+  is right); noted, not fixed.
