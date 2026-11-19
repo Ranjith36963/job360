@@ -60,6 +60,11 @@ Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, 
   00:42). Every fix for this task is now on main. 04:05 is the first run that can show them.
 - Decision taken without the owner: none.
 
+## 02:05 run  (score n/a: quiet hours by design)
+- Session cse_01KTmoHCmjV8JVKKdp1r8HFU: 12 turns, 28 s. Same correct idle: 50 tasks, all LinkedIn (now 6 sends, was 7),
+  02:06 UK is outside 04:00-00:00. Nothing taken, tab closed, not paused; alert cursor left at 17 by pc-2306.
+- Decision taken without the owner: none.
+
 ## Needs the owner
 - Scheduled task prompt (trig_0199qXCRxqD3Dy2eH6pCb6U5) could also say it plainly. Proposed exact prompt:
   `Job360 PC browser assistant run, in my own Chrome (Claude in Chrome). / Call get_recipe("own_browser") and follow it exactly. / Keep calling own_browser_queue take until it answers empty or closed, or 40 minutes pass; never write the summary before that. / Obey every Job360 reply and warning.`
