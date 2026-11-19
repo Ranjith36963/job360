@@ -22,3 +22,14 @@ Coverage: every queued job without a strong CV is done this run or listed as lef
 - #1679 merged at 23:00 UTC (CI, security and bugs reviewers green), 33 minutes before the 23:33 run, outside the no-merge window. I did not verify the Railway deploy (no Railway access in this session); the 23:33 run will show whether the recipe text is live.
 - No `orders-cv-review.md` from Kits yet.
 - Next: score the 23:33 run at the 23:58 check-in. Audit section 2 waits for that result, so that one run tests #1679 alone.
+
+## Catch-up entry, written 08:13 UTC 19 Nov (this session went silent from 23:00)
+- My 23:58 check-in and every later one never reached this session, so I scored no run after 22:33 and built nothing after #1679.
+  I read Kits' `orders-cv-review.md` (01:10) only now, at 08:13. I did NOT take audit section 2 findings 2 and 3.
+- The scores below are Kits' (`morning-report.md`), not my own reads of the runs: 23:33 unscored; 00:34 0%; 01:33 80%; 02:33 100%;
+  03:33 40%; 04:33 100%; 05:33 100% (two in a row at 04:33 and 05:33: target met). Fixes that landed from Kits: #1693, #1703.
+- Honest read of #1679: it merged before the 23:33 run, which Kits did not score; the 00:34 run still stopped after re-reviewing
+  weak CVs, so #1679 alone did not fix the stop. #1693 and #1703 did the work.
+- Open for the owner/Kits: audit section 2 findings 2 (closed skills-label list downgrades labels such as "Practice:") and
+  3 (literal token coverage: "k8s" against "Kubernetes") are unbuilt. The 03:33 run's 1105 weak on its skills line (no tries left) is likely finding 2.
+- Needs the owner: say whether to build findings 2 and 3 now that the overnight window is over (each ships to production on merge).
