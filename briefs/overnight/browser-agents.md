@@ -6,6 +6,35 @@ Target: the run keeps taking PC tasks until the queue is empty or 40 minutes are
 Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, #1666 blocked on shared host,
 #1669 compact kit, #1671 queue rotation + below-line drop (19:23), #1677 take again after hold_released (22:09).
 
+## Morning summary (06:00 UTC)
+- Scores, run by run:
+
+  | Run | Score | Note |
+  |---|---|---|
+  | 22:05 | 10% | early stop, no "next" |
+  | 23:05 | 5% | ignored "keep going" |
+  | 00:05 to 03:05 | n/a | LinkedIn quiet hours, correct idle |
+  | 04:05 | 10% | stopped 3 min in: "slow" |
+  | 05:05 | 15% | stopped 2 min in: "the rest will ask the same" |
+
+  Target not met: no run kept taking for 40 minutes.
+- Merged for this task tonight:
+  - #1677: take again after hold_released.
+  - #1690: main's batch.md line cap.
+  - #1684 and #1685: audit 6.1 and 6.2.
+  - #1686: alert ranking from the profile only.
+  - #1691: a release hands over the next task, already claimed.
+  - #1705, 05:48: every handover carries Job360's run clock, "N of 40 minutes left: never stop early", and at 40 it
+    ends the run. Application handovers no longer claim a claim they lack.
+- What worked: #1691 handed a next task on every release at 04:05. Easy Apply was reached at 05:05. Tabs were closed
+  every run. The LinkedIn window and the weekly limit were obeyed.
+- Still open:
+  1. The model still chooses to stop. #1705 is the third and strongest signal; 06:05 is its first test, unscored by me.
+  2. Tailored CVs carry claims the profile lacks, so check_submit asks (CV review task).
+  3. Contacts 67, 130 and 131 are never matched on the Sent page; the pending check has 3 failures in a row.
+  4. The people search (profile_read) is released unattempted (4 failures in a row).
+- If #1705 does not hold at 06:05, the next lever is the scheduled-task prompt below (owner only).
+
 ## 22:05 run  (score 10%)
 - Session cse_01KTmoHBvwM1pMFnjpBzMmjq: 72 turns, 205 s, then the summary.
 - Achieved: the LinkedIn alert duty swept 3 alerts and brought 1 job (application 1086, Harmonic Security, fit 66);
