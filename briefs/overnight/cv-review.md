@@ -73,3 +73,10 @@ Coverage: every queued job without a strong CV is done this run or listed as lef
 - TechBaton (620): newest review stored weak with only `retry_limit` (no other code, tries_left 0), so it waits on the
   owner's CV approval. The gate is not stricter than the review; the review gave out of tries.
 - Needs the owner: answer or withdraw ask 706 (617 now has a strong CV); approve or fix 620's CV.
+
+## 09:33 run  (score 100%) - first run on #1707 (merged 09:18)
+- Achieved: 10 stored strong (8 new: 1133, 1134, 1135, 1136, 1138, 1140, 668, 672; 2 weak fixed: 663, 667). Job360 replied
+  "CV run complete: 10 stored strong." The count rose 5 to 9 across record replies and never reset.
+- Missed: 669 stored weak (`jd_gap_claimed` on "Deep Learning", "API Development"); about 140 jobs left.
+- Fix: #1707 holds. Next slice opened: PR #1711 (finding 2, LinkedIn per-job Technologies lists are no skills group),
+  pushed 09:51, auto-merge on, outside the :28 to :43 window.
