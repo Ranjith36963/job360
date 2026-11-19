@@ -70,3 +70,15 @@ open application. Scores come from the run's transcript (reads only).
   02:21-02:36 window. The recruiter draft (Halimah S.) is left as Kits ordered: the answer is the owner's.
 - Decision taken without the owner: #1696 per Kits' orders. The "227" prose number is cosmetic (the call itself
   is right); noted, not fixed.
+
+## 02:26 run  (score 96%)
+- Achieved: the first run after #1696 (merged 02:14). Claim with duties; one date search (one page, 32 threads, no
+  token); 16 mails read, 10 job mail, all already handled (in skip_message_ids) so nothing parked twice; job-board
+  digests and a sales pitch read and NOT parked (the #1696 rule held: 0 alerts parked, against 11 at 00:26);
+  Dieture's alert matched app 1106 and was rightly not recorded (a posting alert, not news); cursor moved for all
+  1032 open applications in ONE call; mark_done after it; 3-line summary; no push.
+- Missed: nothing in the target. The run's prose said "cursor moved for all of the search's application ids"
+  (no wrong number this time).
+- Biggest cause: none.
+- Fix: none needed. #1696 confirmed on a real run.
+- Decision taken without the owner: none.
