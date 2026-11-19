@@ -4,6 +4,33 @@ Owner of this file: the Gmail check test session. Task: "Job360 Gmail check (hou
 Target: every mail since the last check is read; each job mail is matched or parked; the search covers every
 open application. Scores come from the run's transcript (reads only).
 
+## Morning summary (05:55 UTC, 19 Nov)
+
+**Target met all night.** Scores per run: 22:26 92%, 23:26 95%, 00:26 93%, 01:26 92%, 02:26 96%, 03:26 96%,
+04:26 95%, 05:26 95%. Every run read every listed mail (every page), matched or parked each job mail, and moved the
+cursor for every open application in one call (1012 to 1041 ids). No hard-rule break, nothing sent, no setting
+changed.
+
+**Merged:**
+- #1680 (23:00): the email body decides the application; match_email's candidates are hints (audit 4.1). Seen
+  working: DoiT's Greenhouse mail was never put on Brunswick Group; WSP was looked up from the body.
+- #1696 (02:14): a job-board alert that names no application is read, never parked (Kits' order). Seen working
+  from 02:26: 0 alerts parked (00:26 had parked 11).
+- Earlier on 18 Nov: #1633 (the inbox recipe, any number of ids in mark_inbox_checked), #1643 (mail from the job's
+  own careers domain is listed), #1670 (ATS mail from Breezy, Keka, HiBob, Darwinbox, Oracle, SuccessFactors,
+  Pinpoint, Phenom, Umantis ties; an ATS host is never one employer's own site).
+
+**For the owner:**
+- Halimah S. (Consulting Search) asks whether you want to stay under consideration: it needs your answer (on Needs
+  you). Left undrafted on Kits' order.
+- Connells and DoiT ask for consent to keep your data (on Needs you).
+- Not this task: Job360 says the PC browser queue has not been worked since 18 Nov 23:08 UTC (50 tasks).
+
+**Cosmetic, not fixed:** the run's prose sometimes misstates the cursor count ("227", "1,100+"); the tool call
+itself is always right.
+
+**Audit 4.2** (alert/digest/newsletter senders hidden when older): noted only, low risk, as ordered.
+
 ## 22:26 run  (score 92%)
 - Achieved: claim with duties=["inbox"]; ONE date search (after:2026/11/17), both pages read (51 threads,
   pageToken followed); 6 mails opened; 5 job mails (DoiT, Halimah S. recruiter, Amey, Placed, BNY), each
@@ -104,5 +131,15 @@ open application. Scores come from the run's transcript (reads only).
 - Missed: small prose slips only: "job mail: 7" also counted the sales pitch it then called "not job mail", and
   "1,100+ application IDs" for a call that carried 1041.
 - Biggest cause: none (prose numbers, the tool calls were right).
+- Fix: none.
+- Decision taken without the owner: none.
+
+## 05:26 run  (score 95%)
+- Achieved: claim with duties; one date search (one page, 36 threads); 12 mails read, 10 job mail; the WSP code
+  mail and the Connells consent mail matched nothing and were sent to unmatched, where Job360 answered
+  `already_existed` (no duplicate on Needs you); job-board digests read and left; cursor moved for all 1040 open
+  applications in ONE call; mark_done after it; exact 3-line summary with one action per parked mail.
+- Missed: it re-sent two already-parked mails to record_events (harmless: Job360 de-duplicated them).
+- Biggest cause: none.
 - Fix: none.
 - Decision taken without the owner: none.
