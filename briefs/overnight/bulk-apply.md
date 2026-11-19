@@ -230,3 +230,11 @@ Run starts are read from the run's own `apply-<time>` session label (not from la
   found" (same rule as #1697, applied before the page loads). Gradcracker is not on the board list either.
 
 ## PR #1708 (batch_hold, owner's yes): merged 09:28:08, backend deployed 09:30:28 (before the 09:41 run). Live check 09:30 (whats_due, read-only): batch_hold "waiting_on_you", batch not due: no row with a CV needs nothing from the owner and nobody pressed Send.
+
+## ~09:35 run, session apply-20261119T0936Z  (score 50%)
+Rows worked: 1133, 1134, 1135, 1136, 1138, 1140 (6). Fair: 1136 Genie AI (the essay draft needs the owner's OK; it also asked about the optional website field, a small miss), 1138 captcha on freshteam (the employer's ATS), 1140 login on jobs.bcu.ac.uk (the employer's own site). Not fair: 1133 Navan, 1134 Abound, 1135 EDITED. Nothing was typed on any of the three; they asked the owner to confirm answers already in Memory (asks 716-718).
+Cause: check_form put every sponsorship / visa / right-to-work question into `knockouts` from its wording alone, even when the owner's own Memory row filled it, and a knockout means "stop before typing". Fixed in PR #1712 (owner's yes): open, auto-merge on, CI running. The submit gate is unchanged; pay, missing answers and assistant-written rows still stop. Still gaps: Abound's "require a visa" (a visa is not sponsorship) and Navan's company-named wording.
+#1697: not exercised this run (both blocks were recorded by Job360's own browser, on the employers' hosts).
+
+## 09:41 slot: batch held (PR #1708 working), hunt ran
+whats_due 10:06 (read-only): batch_hold "waiting_on_you", 266 rows wait on the owner, batch not due. The 09:41 slot ran the hunt (claimed 09:42:55; brought 1141, 1142 and requeued 62).
