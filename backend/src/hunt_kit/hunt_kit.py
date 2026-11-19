@@ -40,6 +40,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import sys
 import threading
@@ -2697,23 +2698,65 @@ def run(args: argparse.Namespace) -> Collector:
     sems = {a: threading.BoundedSemaphore(SINGLE_HOST_CONCURRENCY) for a in SINGLE_HOST_ATS}
     progress = Progress(col, [src for src, _, _ in tasks])
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers)))
+    abandoned = 0
     try:
         futs = {ex.submit(with_slot, sems.get(src), guarded, src, tid, work): src for src, tid, work in tasks}
-        for f in concurrent.futures.as_completed(futs):
-            try:
-                f.result()
-            except Exception as e:
-                print("warning: task failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
-            progress.done(futs[f])
+        abandoned = _wait_sources(futs, sink, progress, hard=bool(getattr(args, "titles_only", "")))
     except BaseException:  # Ctrl-C or a crash: queued sources must not start while we unwind
+        abandoned = 1  # a source may still be running: never wait on it
+        if getattr(args, "titles_only", ""):  # pass 1 stopped: the CLI must not join that thread at exit either
+            _mark_abandoned()
         if sink is not None:
             sink.stop("interrupted")
         raise
     finally:
-        ex.shutdown(wait=True, cancel_futures=True)
+        ex.shutdown(wait=not abandoned, cancel_futures=True)
     # Finished = ran to its end this session (an exception counts) or already done in the run being resumed.
     col.cursor = advance_offsets(col.cursor, col.rotation, col.visited | col.resumed_done)
     return col
+
+
+def _wait_sources(futs: dict[Any, str], sink: Stream | None, progress: Progress | None, hard: bool) -> int:
+    """Wait for the source tasks. hard (pass 1): --max-minutes is a wall-clock deadline for the whole pass, so at
+    the deadline stop waiting on sources still running. Returns how many were abandoned (0 = all finished)."""
+    global ABANDONED
+    pending = set(futs)
+    while pending:
+        timeout = None
+        if hard and sink is not None and sink.deadline is not None:
+            timeout = max(0.0, sink.deadline - _now())
+        done, pending = concurrent.futures.wait(pending, timeout=timeout,
+                                                return_when=concurrent.futures.FIRST_COMPLETED)
+        for f in done:
+            try:
+                f.result()
+            except concurrent.futures.CancelledError:
+                pass
+            except Exception as e:
+                print("warning: task failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
+            if progress is not None:
+                progress.done(futs[f])
+        if pending and not done:  # the deadline passed with sources still running: leave them
+            for f in pending:
+                f.cancel()
+            running = sorted({futs[f] for f in pending if not f.cancelled()})
+            if sink is not None:
+                sink.stop("time budget reached (%d source task%s still running abandoned)"
+                          % (len(pending), "" if len(pending) == 1 else "s"))
+            print("pass 1 deadline: stopped waiting on %d source task(s): %s"
+                  % (len(pending), ", ".join(running) or "queued only"), file=sys.stderr, flush=True)
+            ABANDONED = True
+            return len(pending)
+    return 0
+
+
+ABANDONED = False  # a pass-1 source thread was left running: the CLI exits without joining it
+
+
+def _mark_abandoned() -> None:
+    """A stopped pass 1 (Ctrl-C, SIGTERM) left a source running: exit without joining it, as at the deadline."""
+    global ABANDONED
+    ABANDONED = True
 
 
 class Progress:
@@ -3752,6 +3795,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep-titles", default="", metavar="FILE",
                    help="pass 2: open full ads only for these titles (one per line, as pass 1 printed them); "
                         "needs --rows")
+    p.add_argument("--titles-from-rows", default="", metavar="ROWS",
+                   help="with --titles-only FILE: rebuild FILE from a pass-1 rows file; no request is made")
     p.add_argument("--rows", default="", metavar="FILE", help="pass 2: pass 1's FILE.rows.jsonl")
     p.add_argument("--days", type=int, default=30, help="only jobs posted in the last N days")
     p.add_argument(
@@ -3873,6 +3918,14 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         args.every_title = True
         args.keep_tasks = keep_task_ids(args.rows, args.keep_set)
+    if args.titles_from_rows:  # offline: rebuild pass 1's titles file from its rows file
+        if not args.titles_only:
+            print("--titles-from-rows needs --titles-only FILE: where to write the titles", file=sys.stderr)
+            return 2
+        n = _write_titles(args, None, args.titles_from_rows)
+        print("pass 1 titles: %d distinct titles from %s in %s" % (n, args.titles_from_rows, args.titles_only),
+              file=sys.stderr)
+        return 0
     if args.discover:
         for hit in discover(split_csv(args.discover)):
             print(json.dumps(hit, ensure_ascii=False))
@@ -3893,23 +3946,31 @@ def main(argv: list[str] | None = None) -> int:
         lock.release()
 
 
+def _write_titles(args: argparse.Namespace, col: Collector | None, rows_path: str) -> int:
+    """The distinct-titles file, most listings first, from the rows on disk (written atomically)."""
+    titles = distinct_titles(read_jsonl(rows_path), (col or Collector(args)).target_phrases)
+    _atomic_write_text(args.titles_only, "".join(json.dumps(t, ensure_ascii=False) + "\n" for t in titles))
+    return len(titles)
+
+
+def _sigterm_to_interrupt(signum: int, frame: Any) -> None:
+    raise KeyboardInterrupt  # pass 1 stopped from outside takes the same stop path as Ctrl-C
+
+
 def _finish_titles(args: argparse.Namespace, col: Collector, sink: Stream, run_log: RunLog, partial: bool,
                    cli: list[str]) -> int:
     """Pass 1's end: the distinct-titles file, most listings first, from the rows on disk."""
-    titles = distinct_titles(read_jsonl(sink.path), col.target_phrases)
-    with open(args.titles_only, "w", encoding="utf-8") as f:
-        for t in titles:
-            f.write(json.dumps(t, ensure_ascii=False) + "\n")
+    n_titles = _write_titles(args, col, sink.path)
     rows = sum(1 for _ in sink.iter_records())
     print("pass 1: %d listings, %d distinct titles in %s (rows: %s), %.1f min"
-          % (rows, len(titles), args.titles_only, sink.path, sink.elapsed() / 60), file=sys.stderr, flush=True)
+          % (rows, n_titles, args.titles_only, sink.path, sink.elapsed() / 60), file=sys.stderr, flush=True)
     if col.failed:
         print(format_failed(col), file=sys.stderr)
     if partial:
         print("\nStopped early: %s.\n%s" % (sink.stop_reason, resume_hint(cli, sink)), file=sys.stderr)
     else:
         sink.mark_complete()
-    run_log.write("partial" if partial else "completed", locked=True, kept=rows, titles=len(titles))
+    run_log.write("partial" if partial else "completed", locked=True, kept=rows, titles=n_titles)
     return 0
 
 
@@ -3928,6 +3989,12 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
         args.run_log_obj = run_log
         print("Results stream to %s as they come; if the run stops, rerun with --resume to continue."
               % stream_path, file=sys.stderr, flush=True)
+        prev_term = None
+        if args.titles_only:  # a stopped pass 1 still writes its titles file (the KeyboardInterrupt path below)
+            try:
+                prev_term = signal.signal(signal.SIGTERM, _sigterm_to_interrupt)
+            except ValueError:  # not the main thread
+                pass
         try:
             col = run(args)
             partial = bool(sink.stop_reason)
@@ -3990,15 +4057,30 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
             run_log.write("partial" if partial else "completed", locked=True, **counts)
             return 0
         except KeyboardInterrupt:  # scan.mjs: process.once('SIGINT', ...) writes the failure row, exits 130
+            if args.titles_only:
+                try:
+                    n = _write_titles(args, getattr(run_log, "col", None), sink.path)
+                    print("pass 1 stopped: %d distinct titles in %s from the rows on disk" % (n, args.titles_only),
+                          file=sys.stderr, flush=True)
+                except Exception as e:
+                    print("warning: could not write the titles file: %s: %s" % (type(e).__name__, e), file=sys.stderr)
             print("\nInterrupted.\n" + resume_hint(cli, sink), file=sys.stderr)
             run_log.write("interrupted")
             return 130
         except BaseException as e:  # scan.mjs: main().catch(... writeRunFailureRow('failed'))
             run_log.write("failed", error="%s: %s" % (type(e).__name__, e))
             raise
+        finally:
+            if prev_term is not None:
+                signal.signal(signal.SIGTERM, prev_term)
     finally:
         sink.close()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if ABANDONED:  # a pass-1 source still running must not hold the exit: the files are already written
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_rc)
+    sys.exit(_rc)
