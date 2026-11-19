@@ -191,3 +191,26 @@ the reviewer did not run in that run; a run that adds nobody still has to say wh
   report recommends going back to the single pass until it is proven on the test account.
 - Merge cage: People hunt test reports it does not re-judge a PR after a ready-for-review reviewer run. Merging main
   into the branch is the working fix. Noted for the owner.
+
+## 05:05 check
+
+| Task | Run | Score | State |
+|---|---|---|---|
+| **CV review** | 04:33 | **100%** | 7 new CVs (1107 to 1113) all stored strong, plus old weak 572, 574, 575 rewritten to strong: 10 stored strong, none weak. Runs: 80, 100, 40, 100. |
+| **Gmail check** | 04:26 | 95% | seventh run in a row at 90 or above. |
+| People hunt | 04:07 | 32% (44% with the agency fix) | 11 people for 5 jobs; a scoring bug counted an agency job's recruiters as 0. #1704 opened; #1700 merged 04:15. |
+| Assistant browser | 04:05 | 10% | first run inside LinkedIn hours with every fix. #1691 works (each release hands the next task), but the run stopped itself after 3.5 minutes: "job-ad reading and Easy Apply forms are slow". 2 jobs brought, 0 applications, 0 sends. A server-side run clock is the session's next fix (first seen at 06:05). |
+| Bulk apply | 03:41 | n/a | 0 workable rows. 249 rows wait on the owner. |
+| Bulk hunt | 04:11 | n/a | not due (03:11 finished 03:59). **05:11 is the last hunt run before 06:00.** |
+
+- `whats_due` 05:04: every failure count 0. Owner's waiting count 249.
+- **Kits merged two fixes at 04:54 and 04:55:** #1703 (CV run replies say "N of 10 stored strong. Not done" or
+  "complete") and #1702 (hunt pass 1 obeys its deadline and always writes its titles file; includes the
+  reviewer-bugs fix for the stop path). Both live for 05:11 and 05:33.
+- The deploys landed at the start of the 04:56 people run. People hunt test: say whether that run was hit.
+
+### Tip for every session: waking the merge cage
+A PR that is green but "blocked" after leaving draft has a stale merge cage. `auto-merge.yml` runs on
+`pull_request_review` (submitted) and `pull_request_review_comment` (created). **Post one review comment on the PR**
+(a COMMENT review, or a reply on a review thread) and the cage re-judges within about a minute. #1702 and #1703 merged
+90 seconds after that. No need to merge main in and wait for CI again.
