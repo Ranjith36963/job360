@@ -97,3 +97,23 @@ score is about handling, not submits.
 - Decision taken without the owner: not changing batch_hold tonight, for the reason above.
 - #1692 merged 01:32:43 (merge-main push at 01:14 re-ran CI and the cage); backend deploy finished 01:35:03,
   before the 01:36 window. The 01:41 run is the first with the "done" work-left check.
+
+## 01:41 run  (score 30%)
+- Achieved: first run on #1692 (done check, live 01:35). Worked 10 rows in 3 minutes (1088-1098 except 1095,
+  session apply-20261119T0142), one at a time; every row ended in a block or an ask. Real owner asks: 1090
+  (CVEDIA answers), 1088 (Cogent Labs consent box). No submit possible.
+- Missed (7 of 10): blocked on a job board without looking for the employer's own page: 1089, 1092
+  (Instahyre sign-in), 1091, 1093, 1094 (Shine sign-in), 1096 (WhatJobs CAPTCHA), 1098 (WhatJobs search page).
+  The kit's apply_host check, batch.md step 3 and #1681's hint all said to; 1094's detail even says
+  "Employer's own page not found in this run" with no search; 1098 names update_job but did not call it.
+  Three of the seven (1089, 1092, 1096) were recorded by Job360's own browser (by: browser), so #1681's
+  reply hint never reached the run for them.
+- Close: last_done_at batch is 01:40:30, before this run's work, and no later mark_done is recorded. I cannot
+  tell from the events whether this run called mark_done at the end (a 409 would leave no stamp).
+- Score: 3 of 10 rows in the right bucket (1090, 1088 asks; 1098 arguably), 30%.
+- Biggest cause: board links blocked without an employer-page search (second run in a row: 5/17, now 7/10).
+- Fix: PR #1697 (draft, ready at 02:52): an assistant's board block needs `employer_page` (what the search
+  found), else a 422 telling it to search, then update_job(apply_url) or say what it found. A requirement to
+  state the judgement, not a pattern judging; added only because the plain instruction failed on two real runs.
+- Decision taken without the owner: adding this refusal. The brief allows one where a real run shows the plain
+  instruction failing; it has now failed twice. Limit: blocks Job360's own browser records are not covered.
