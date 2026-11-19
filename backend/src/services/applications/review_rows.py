@@ -176,12 +176,19 @@ def _proper_nouns(text: str) -> set[str]:
     """Words the profile capitalises mid-sentence, line by line: a line's opening word, after any bullet glyph (the
     PDF's "(cid:127)", "•"), is grammar, never a name."""
     out: set[str] = set()
+    plain: set[str] = set()  # words the profile also writes in lower case: plain words, never names
     for line in text.splitlines():
         toks = line.split()
         while toks and not toks[0][:1].isalnum():
             toks.pop(0)
         out |= {t.casefold() for t in evidence.claim_tokens(" ".join(toks))}
-    return out
+        plain |= {w for t in toks if (w := t.strip(_OUTER)).isalpha() and w.islower()}
+    # 00:34 run 2026-11-19 (all 10 apps): a LinkedIn bullet joined into one line ("Key Achievements: - Built ...")
+    # made the verb "Built" a name, and every bullet opening "Built" was stored claim_not_in_quote
+    dropped = out & plain
+    if dropped:
+        logger.info("cv_review proper_nouns_plain_words count=%s", len(dropped))
+    return out - plain
 
 
 def profile_terms(profile: Any) -> tuple[set[str], frozenset[str], set[str]]:
