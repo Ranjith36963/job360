@@ -94,3 +94,15 @@ open application. Scores come from the run's transcript (reads only).
 - Needs the owner (not my task, passed on from the run): Job360 says nothing has worked the PC browser queue
   since 18 Nov 23:08 UTC and 50 tasks wait (the browser agents test owns that).
 - Decision taken without the owner: none.
+
+## 04:26 run  (score 95%)
+- Achieved: claim with duties; one date search (after:2026/11/18, one page, 36 threads, no token); 29 already
+  handled and skipped by id; the 7 left were read in full. Fitch Group and B. Braun alerts matched open
+  applications (239, 236) through match_email, and the run rightly recorded nothing (an alert is not news on the
+  application) and parked nothing; Dieture, findwork and Naukri digests read and left (#1696 rule); a sales pitch
+  read and left; cursor moved for all 1041 open applications in ONE call; mark_done after it; 3-line summary.
+- Missed: small prose slips only: "job mail: 7" also counted the sales pitch it then called "not job mail", and
+  "1,100+ application IDs" for a call that carried 1041.
+- Biggest cause: none (prose numbers, the tool calls were right).
+- Fix: none.
+- Decision taken without the owner: none.
