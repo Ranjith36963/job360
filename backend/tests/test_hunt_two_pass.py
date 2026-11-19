@@ -1,0 +1,162 @@
+"""Two-pass hunt (2026-11-19): pass 1 lists distinct titles and opens no ad; pass 2 opens full ads for kept titles.
+
+The 19 Nov run's --every-title single pass returned ~101,000 ads with full text. The run could not read them, so the
+title hint became the filter again. Pass 1 gives the assistant every distinct title cheaply; it keeps titles; pass 2
+fetches detail only for those.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
+
+
+def _load():
+    if str(KIT_DIR) not in sys.path:
+        sys.path.insert(0, str(KIT_DIR))
+    spec = importlib.util.spec_from_file_location("hunt_kit_two_pass", KIT_DIR / "hunt_kit.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+hk = _load()
+
+BASE = ["--titles", "AI Engineer", "--work-countries", "GB", "--days", "3650", "--history", "none"]
+
+
+def _args(*argv: str):
+    return hk.build_parser().parse_args([*BASE, *argv])
+
+
+def _raw(i: int, title: str, calls: list[str]):
+    def detail() -> dict[str, str]:
+        calls.append(title)
+        return {"desc": "Full ad text for %s. You have 8+ years of experience." % title}
+
+    return {"title": title, "url": "https://jobs.example/%d" % i, "loc": "London, UK", "desc": "",
+            "company": "Acme", "board": "acme", "detail": detail}
+
+
+LISTINGS = ["Senior AI Engineer", "senior ai-engineer", "Accountant", "Forward Deployed Engineer"]
+
+
+def test_pass_one_lists_distinct_titles_with_counts_and_never_opens_an_ad(tmp_path):
+    calls: list[str] = []
+    col = hk.Collector(_args("--titles-only", str(tmp_path / "t.jsonl")))
+    col.tl.tid = "greenhouse:acme"
+    for i, t in enumerate(LISTINGS):
+        col.offer("greenhouse", _raw(i, t, calls))
+    col.offer_job("feed", {"title": "Accountant", "company": "Bean Co", "url": "https://jobs.example/9",
+                           "location": "Leeds, UK", "description": "A listing text", "source": "feed"})
+    assert calls == []  # the detail callable is never invoked
+    assert all("description" not in r for r in col.results)
+    assert {r["task"] for r in col.results} == {"greenhouse:acme"}
+    titles = hk.distinct_titles(col.results, col.target_phrases)
+    assert [(t["title"], t["count"]) for t in titles] == [
+        ("Accountant", 2), ("Senior AI Engineer", 2), ("Forward Deployed Engineer", 1)]
+    assert titles[1]["hint"] == {"matched_target_phrase": True, "level_words": ["senior"]}
+    assert titles[1]["sample"] == {"company": "Acme", "place": "London, UK"}
+
+
+def test_a_title_with_every_hint_negative_is_in_the_pass_one_file():
+    col = hk.Collector(_args("--titles-only", "t.jsonl"))
+    col.offer("greenhouse", _raw(1, "Accountant", []))
+    (entry,) = hk.distinct_titles(col.results, col.target_phrases)
+    assert entry["title"] == "Accountant" and entry["hint"] == {"matched_target_phrase": False, "level_words": []}
+
+
+def test_pass_one_reader_gate_lists_the_title_and_spends_no_detail_request():
+    col = hk.Collector(_args("--titles-only", "t.jsonl"))
+    col.tl.tid = "icims:acme"
+    assert col.gate("Data Scientist") is False  # a reader asking "may I open this card?" is told no
+    assert col.results == [{"gate": True, "title": "Data Scientist", "task": "icims:acme"}]
+    assert [t["count"] for t in hk.distinct_titles(col.results, col.target_phrases)] == [1]
+    plain = hk.Collector(_args("--every-title"))
+    assert plain.gate("Data Scientist") is True and plain.results == []  # the single pass is unchanged
+
+
+def test_pass_two_opens_full_ads_only_for_kept_titles(tmp_path):
+    kept = tmp_path / "kept.txt"
+    kept.write_text(json.dumps({"title": "Senior AI Engineer", "count": 2}) + "\nForward Deployed Engineer\n")
+    args = _args("--keep-titles", str(kept), "--rows", "r.jsonl")
+    args.keep_set = hk.load_keep_titles(str(kept))
+    col = hk.Collector(args)
+    calls: list[str] = []
+    for i, t in enumerate(LISTINGS):
+        col.offer("greenhouse", _raw(i, t, calls))
+    assert calls == ["Senior AI Engineer", "senior ai-engineer", "Forward Deployed Engineer"]
+    out = {r["title"]: r for r in col.results}
+    assert sorted(out) == sorted(calls)
+    assert out["Senior AI Engineer"]["description"].startswith("Full ad text")  # full text, as the usual --out
+    assert out["Senior AI Engineer"]["title_hint"]["guessed_min_years"] == 8  # years only a hint, never a drop
+    assert col.gate("Accountant") is False and col.gate("Forward  Deployed Engineer") is True
+
+
+def test_pass_two_reruns_only_the_sources_holding_a_kept_title(tmp_path):
+    rows = tmp_path / "t.jsonl.rows.jsonl"
+    rows.write_text("\n".join(json.dumps(r) for r in [
+        {"title": "AI Engineer", "task": "lever:a", "url": "https://x/1"},
+        {"gate": True, "title": "AI Engineer", "task": "icims:b"},
+        {"title": "Accountant", "task": "lever:c", "url": "https://x/2"},
+    ]) + "\n")
+    assert hk.keep_task_ids(str(rows), {"ai engineer"}) == {"lever:a", "icims:b"}
+    rows.write_text(json.dumps({"title": "AI Engineer", "url": "https://x/1"}) + "\n")
+    assert hk.keep_task_ids(str(rows), {"ai engineer"}) is None  # no task id: re-run every source, never lose it
+
+
+def test_main_pass_one_writes_the_titles_file_and_rows_and_no_history(tmp_path, monkeypatch):
+    out = tmp_path / "titles.jsonl"
+    seen: dict[str, object] = {}
+
+    def fake_run(args):
+        col = hk.Collector(args)
+        seen["every_title"] = col.every_title
+        col.tl.tid = "lever:acme"
+        col.offer("lever", _raw(1, "Applied AI Engineer", []))
+        col.offer("lever", _raw(2, "Applied AI Engineer", []))
+        return col
+
+    monkeypatch.setattr(hk, "run", fake_run)
+    hist = tmp_path / "seen.json"
+    assert hk.main([*BASE[:-2], "--history", str(hist), "--titles-only", str(out), "--run-log", "none"]) == 0
+    assert seen["every_title"] is True  # --titles-only implies --every-title
+    (line,) = out.read_text().splitlines()
+    assert json.loads(line)["title"] == "Applied AI Engineer" and json.loads(line)["count"] == 2
+    rows = (tmp_path / "titles.jsonl.rows.jsonl").read_text().splitlines()
+    assert len(rows) == 2 and all("description" not in json.loads(r) for r in rows)
+    assert not hist.exists()  # pass 1 marks nothing seen and moves no cursor
+
+
+@pytest.mark.parametrize("extra", [["--keep-titles", "k.txt"], ["--keep-titles", "k.txt", "--titles-only", "t"]])
+def test_main_refuses_a_half_two_pass_command(extra):
+    assert hk.main([*BASE, *extra]) == 2
+
+
+def test_the_two_pass_flags_are_part_of_the_run_fingerprint():
+    plain = hk.run_fingerprint(_args("--every-title"))
+    assert plain == hk.run_fingerprint(_args("--every-title"))
+    assert hk.run_fingerprint(_args("--every-title", "--titles-only", "t.jsonl")) != plain
+    a, b = _args("--keep-titles", "k", "--rows", "r"), _args("--keep-titles", "k", "--rows", "r")
+    a.keep_set, b.keep_set = {"ai engineer"}, {"ai engineer", "llm engineer"}
+    assert hk.run_fingerprint(a) != hk.run_fingerprint(b)  # other kept titles = another search
+
+
+def test_recipe_gives_both_passes_and_the_full_read_rule():
+    from src.api.routes.recipes import load_recipe
+
+    flat = " ".join(load_recipe("hunt").text.lower().split())
+    assert "--titles-only titles.jsonl" in flat
+    assert "--keep-titles kept.txt --rows titles.jsonl.rows.jsonl" in flat
+    assert "cheapest model" in flat and "about 500 titles" in flat and "unsure = keep" in flat
+    assert "never only its first 3,000 characters" in flat
+    assert "never brought" in flat
+    assert "titles_seen" in flat and "titles_kept" in flat
