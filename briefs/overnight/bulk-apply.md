@@ -56,3 +56,21 @@ score is about handling, not submits.
 - Rule for the rest of the night: push a PR only when its CI can finish before :33 (CI took 13 to 24
   minutes tonight), i.e. push by about :05 past the hour, else hold the branch unpushed (or as a draft) until :52.
 - Effect on the 23:41 run: checked at 00:06 (did any call fail around 23:41-23:44?).
+
+## 23:41 run  (score 50%)
+- Achieved: one workable row, 1087 (Whitespace, Junior Engineer; CV reviewed strong 23:38). Opened at 23:42:08,
+  blocked at 23:42:38 with a real reason: on the CharlieHR careers page the role's link and form were not
+  reachable, and the list showed the role posted 22 days ago against an ad from 1 day ago. Coverage of
+  workable rows: 1 of 1. No submit was possible.
+- Missed: batch was marked done at 23:41:49, BEFORE the run opened 1087 (whats_due last_done_at), and Job360
+  accepted it: `mark_done(outcome="done")` never ran the work-left check. The run's close was not proof that
+  every row had been looked at. The block reason is "other"; "posting_closed" (with the 22-days evidence) may
+  fit better, but the page did not say the role was gone, so I count the bucket as correct.
+- Restart under the run: PR #1687's deploy finished 23:43:35 (my merge-window miss, note above). No call in
+  the run's events failed around it: kit_read 23:42:08, blocked 23:42:38, hold_released 23:42:38.
+- Biggest cause: `mark_done` "done" skips the work-left check (routes/schedule.py), so a run can close with
+  rows left. This is the coverage hole behind "no queued row left unlooked-at".
+- Fix: PR #1692 (draft): "done" runs the same 409 check as a partial stop. Held as a draft so it cannot merge
+  in the 00:36-00:51 window; marked ready at 00:30 if CI is green, else at 00:52.
+- Decision taken without the owner: I changed one case in test_run_outcomes that asserted "done" with a
+  ready row left is accepted. That case encoded this gap; it now asserts the 409. No assert was loosened.
