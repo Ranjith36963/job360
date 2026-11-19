@@ -141,3 +141,4 @@ score is about handling, not submits.
   `browser open` on a board link, before the page loads.
 - PC queue: whats_due says nothing has worked the PC queue since 23:08 UTC; 50 tasks wait. Needs the owner's
   PC (browser-agents session's area).
+- #1697 merged 03:15:05 (outside the window); the 03:41 run is the first with the employer_page check.
