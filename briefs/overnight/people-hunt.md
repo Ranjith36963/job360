@@ -82,3 +82,25 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
   nothing; last_done network 00:50:51, failures 0). Kits: which routine marked network at 00:50? It reset network's
   hour without a people run.
 - reach is due now (1094-1098); the 01:56 run is the first real run under #1688 and #1689.
+
+## 01:56 run (score ~20%, per Kits) and 02:21 run (score 40%)
+- 01:56 (transcript overwritten by the 02:21 run; Kits' read): 5 jobs listed, nobody new added, network 0 of 5, the
+  Doctor check and the reviewer did not run.
+- 02:21 (started outside the hourly slot; reach 1093, 1099-1102; network not due): 10 people added, a draft for each.
+  Job360's count: Datamatics 3, Instil 3, CGI 2, UnitedHealth Group 2, HashCase 0 = 10 of 25 (40%). mark_done
+  partial (below_target) after three 409s (lookups unreported; no review), each fixed by the run. #1689 behaved:
+  `searched` was needed only for the three jobs under 3.
+- Missed: 15 people; all 10 reviews stored weak (claim_not_in_quote); Clay not run for 3 companies, but `searched`
+  said clay 0 for them; two people the People Doctor check failed (Goodenough, Agarwal) were added anyway, with no
+  re-fetch visible between the check and add_contact.
+- Biggest cause: the recipe. Free lookups rarely agree, and the employer's own site (owner: that page is proof) was only
+  one of the "four more" sources. The run gave its outreach helper a free-text brief, then recorded each review as ONE
+  whole-note row (no page: rows), so #1688's page rows were never used and every review stored weak.
+- Fix: PR #1699 (draft until 03:07): the employer's own site is the first source after warm contacts; the helper gets
+  the Doctor's Outreach review row pasted in and the run records ITS rows (one per recipient sentence, page:<url>);
+  `searched` leaves out a source not run. Failing recipe test first; cap kept.
+- PR #1694 (back-off grace; tool-not-reached is partial): CI green; merge-cage did not re-judge after its reviewers
+  passed (I cannot dispatch auto-merge.yml: 403), so main was merged in at 02:32; held as draft until 03:07.
+- Not fixed, named for Kits/owner: the run overrode the People Doctor's fails. Job360 does not store that check, so
+  only the recipe line ("add only those it passes") stands; a stored People check would be the structural fix.
+- Decision taken without the owner: none.
