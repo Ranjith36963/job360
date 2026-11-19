@@ -2752,6 +2752,10 @@ async def cv_work(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     if include_profile and after is None:  # the CV run's first read (cv.md step 2): the run begins
         await cv_run.begin(db, user.id)
+    if out["items"]:  # the run's reviews hand back the next page (cv_run.next_text)
+        await cv_run.note_page(db, user.id, out["items"][-1]["application_id"], out["next_after"] is not None)
+    if out.get("next") and actor_for(user) != "web" and (prog := await cv_run.progress(db, user.id)) is not None:
+        out["next"] = f"CV run: {prog['strong']} of {cv_run.TARGET} stored strong so far. " + out["next"]
     if not out["total_needing_work"]:  # no items left: the run is over, so the batch starts (once)
         await cv_run.end_if_reached(db, user.id, no_items_left=True)
     return out
@@ -4511,7 +4515,12 @@ async def _record_event(
         if stored_type == cv_review_service.EVENT_TYPE:  # the run's TARGET-th new CV reviewed: the batch starts
             from src.services.applications import cv_run  # noqa: PLC0415
 
-            await cv_run.end_if_reached(db, user.id, no_items_left=False)
+            # 2026-11-19 (run 03:33 stopped after one batch): the reply hands back the next page, so no choice.
+            prog = await cv_run.progress(db, user.id) if actor_for(user) != "web" else None
+            ended = await cv_run.end_if_reached(db, user.id, no_items_left=False)
+            if prog is not None:
+                result = {**result, "next": cv_run.next_text(
+                    prog, ended=ended is not None, user_id=user.id, application_id=application_id)}
         if body.event_type == "note" and source and not result.get("already_existed"):
             from src.services.applications import auto_applied  # noqa: PLC0415
 
