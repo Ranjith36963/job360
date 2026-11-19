@@ -135,3 +135,54 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
 - #1694 / #1699: green, reviewers passed, readied 04:07 with auto-merge, still blocked at 04:21 (merge-cage did not
   re-judge again). Main merged in at 04:32; held as drafts through the 04:51 window; readied at 05:07.
 - Decision taken without the owner: none.
+
+## 04:56 run  (score ~67%: best of the night)
+- Achieved: both duties marked by the run itself (reach partial, network done). 27 people, a draft each.
+  Reach: THG Ingenuity 5, Keyideas 5, CustomerInsights.AI 5, Unloq 4, Cogent Labs (Tokyo) 3, FSP 2, Tagbin 1,
+  Whitespace 0 = 25 of 40. Network: 5 of 5 (Nethermind 3, Calnex 2: former employers). Proof: Sprouts + Clay with the
+  same LinkedIn URL, or Unloq's own pages; a separate reviewer passed all 27 people. It avoided a same-name company.
+- Missed: Tagbin, FSP, Whitespace short (Clay not run for them); all 27 outreach reviews stored weak (the run still
+  records whole-note rows; #1699, which fixes the recipe for that, is not merged yet).
+- Fix: none new; #1694 and #1699 are the open fixes (see below).
+
+## Morning summary (05:30)
+
+### Runs scored tonight
+| Run | Score | Notes |
+|---|---|---|
+| 22:07 | 44% | one company searched of five; reviews weak |
+| 22:56 | 0% | reach and network marked failed at 22:57:41; reason unknown here (needs Railway) |
+| 23:56 | n/a | not due (2h back-off) |
+| 00:56 | n/a | not due: back-off ended 59 s after the wake (bug, fixed in #1694) |
+| 01:56 | ~20% | nobody added, ended before review (Kits' read) |
+| 02:21 | 40% | 10 people; two the People check failed were added anyway |
+| 02:56 | ~55% | 22 people, mostly from employers' team pages; ended before review, never marked |
+| 04:07 | 32% (44% with #1704) | 11 people; agency recruiters not counted (bug, fixed in #1704) |
+| 04:56 | ~67% | 27 people; 5 jobs at 3-5; network 5 of 5; both marked |
+
+Not at 90% yet. The trend is up because of the recipe (employer pages first) and the hard checks.
+
+### PRs
+| PR | What | State |
+|---|---|---|
+| #1682 | recipient facts are not user claims | merged 23:09 (safety gap, superseded by #1688) |
+| #1683 | company page with no company name in the host: logged hint, not 422 | merged 23:24 |
+| #1688 | every sentence judged unless the reviewer marks it as about the recipient (page row) | merged 23:50 |
+| #1689 | a job left under 3 needs `searched` (what each free lookup found) | merged 00:26 |
+| #1694 | back-off due at the wake (DUE_GRACE); a tool not reached is partial, not failed | OPEN, draft until 06:07 |
+| #1699 | recipe: employer's own site first; the helper gets the Doctor row; `searched` leaves out sources not run | OPEN, draft until 06:07 |
+| #1700 | `people_check`: a person the People check failed is refused; a people run gives the verdict | merged 04:15 |
+| #1704 | people saved on a job count for it (agency recruiters) | merged 04:45 |
+
+### Needs the owner
+1. **22:56 failure reason.** Read Railway's `schedule_duty_done duty=reach` at 22:57:41 (no session had Railway).
+2. **Merge cage does not re-judge** a PR after a ready-for-review reviewer run. Seen four times tonight on
+   #1694/#1699: green, reviewers passed, auto-merge on, still `blocked`. Merging main in is the only remedy a session
+   has (`auto-merge.yml` dispatch is 403). Please merge #1694 and #1699 by hand if they are still open at 06:30.
+3. **People-check trust.** `people_check` is the run's own word for the helper's verdict; the run can still claim
+   "pass". A stored People-check verdict (like outreach_reviewed) would make it provable.
+4. **Reviews stay weak** until #1699 is live and the runs record per-sentence page rows; nothing auto-sends meanwhile.
+5. **Cadence and cost.** Sonnet runs cost about $2-4.5 each when there is work (04:56: $4.45). Your call whether the
+   hourly cadence stays.
+6. **Off-schedule runs.** Runs at 02:21 and 04:07 were started outside the :56 slot (ignition after the hunt); their
+   transcripts overwrite the scheduled run's last_run, so a scorer loses one run each time.
