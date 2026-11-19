@@ -16,6 +16,7 @@ from src.api.routes import browser as browser_routes
 from src.services.applications import blocked as blocked_service
 from src.services.applications import queue_preflight
 from src.services.browser_agent import learned, route_book, routing
+from tests._pc_ready import pc_ready
 
 HOST = "jobs.acme-careers.com"
 REASON = "Job360's browser was blocked twice on jobs.acme-careers.com: your assistant browser runs it"
@@ -69,6 +70,7 @@ async def test_two_captchas_on_one_host_send_the_next_job_there_to_the_own_brows
         first = await _job(client, "a", f"https://{HOST}/apply/1", queue=False)
         second = await _job(client, "b", f"https://{HOST}/apply/2", queue=False)
         nxt = await _job(client, "c", f"https://{HOST}/apply/3")
+        await pc_ready(client, nxt)  # 2026-11-19: only a row check_submit can pass is a PC task
         other = await _job(client, "d", "https://boards.greenhouse.io/acme/jobs/9")
 
         await _block(me, first)  # one CAPTCHA: still Job360's browser

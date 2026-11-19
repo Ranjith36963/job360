@@ -18,6 +18,7 @@ from src.repositories import pgsync
 from src.services.applications import blocked as blocked_service
 from src.services.applications import own_browser
 from src.services.browser_agent import duty_trigger, routing
+from tests._pc_ready import pc_ready
 
 _AD = {
     "title": "Data Engineer", "company": "Northwind", "location": "London", "country": "GB", "remote": False,
@@ -357,6 +358,8 @@ async def test_application_tasks_come_only_from_blocks_job360s_browser_wrote(aut
         by_browser = await _bring(client, 0)
         by_caller = await _bring(client, 1)
         captcha = await _bring(client, 2)
+        for app_id in (by_browser, by_caller, captcha):
+            await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
         await _browser_block(authenticated_async_context, by_browser, "login_needed")
         await _browser_block(authenticated_async_context, captcha, "captcha")  # the user finishes it on Needs you
         sent = await client.post(
@@ -389,6 +392,7 @@ async def test_a_captcha_is_queued_only_once_job360s_browser_let_go_of_the_page(
     monkeypatch.setattr(blocked_service, "browser_hold_live", lambda *_: held["live"])
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
+        await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
         await _browser_block(authenticated_async_context, app_id, "captcha")
         assert (await client.get("/api/own-browser/queue")).json()["count"] == 0  # live hold: Needs you, not queued
         held["live"] = False

@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from src.api.routes import browser as browser_routes
 from src.services.applications import own_browser, spine
 from src.services.browser_agent import routing
+from tests._pc_ready import pc_ready
 
 LINKEDIN = {"kind": "own_browser", "label": "Your assistant browser: runs when your PC is on", "reason": "linkedin_own_browser"}
 JOB360 = {"kind": "job360", "label": "I'll use Job360's browser", "reason": "default"}
@@ -172,6 +173,7 @@ async def test_easy_apply_waits_in_the_own_browser_queue_and_other_jobs_do_not(a
         easy = await _bring(client, 0, "https://www.linkedin.com/jobs/view/4001")
         company = await _bring(client, 1, "https://careers.example/c/1")
         unqueued = await _bring(client, 2, "https://www.linkedin.com/jobs/view/4002")
+        await pc_ready(client, easy)  # 2026-11-19: only a row check_submit can pass is a PC task
         for app_id in (easy, company):
             await _event(client, app_id, "queued")
         queue = (await client.get("/api/own-browser/queue")).json()
@@ -188,9 +190,13 @@ async def test_easy_apply_waits_in_the_own_browser_queue_and_other_jobs_do_not(a
         assert asked.status_code == 201, asked.text
         ask = next(a for a in (await client.get("/api/asks")).json()["asks"] if a["application_id"] == easy)
         assert ask["browser"] == LINKEDIN
+        # 2026-11-19: that open ask is the user's (check_submit says question_open), so the PC run is not offered
+        # the job until they answer (before 2026-11-19 take handed it out regardless).
+        queue = (await client.get("/api/own-browser/queue")).json()
+        assert queue["tasks"] == [] and queue["applications"]["held_back"]["waiting_on_owner"] == 1, queue
         async with await _agent(client) as agent:
             got = await _take(agent)
-            assert got["status"] == "task" and got["task"]["task_id"] == f"application:{easy}"
+            assert got["status"] == "empty" and got["task"] is None, got
 
 
 @pytest.mark.asyncio
@@ -211,6 +217,7 @@ async def test_easy_apply_stops_at_the_operator_cap_and_other_applications_still
                     )
             await db._db.commit()  # noqa: SLF001
         easy = await _bring(client, 20, "https://www.linkedin.com/jobs/view/20")
+        await pc_ready(client, easy)  # 2026-11-19: only a row check_submit can pass is a PC task
         await _event(client, easy, "queued")
         async with browser_routes._db() as db:  # noqa: SLF001
             from datetime import datetime, timezone
@@ -224,6 +231,7 @@ async def test_easy_apply_stops_at_the_operator_cap_and_other_applications_still
             from src.services.applications import blocked as blocked_service
 
             other = await _bring(client, 21, "https://careers.example/c/21")
+            await pc_ready(client, other)
             async with browser_routes._db() as db:  # noqa: SLF001
                 await blocked_service.record_browser_block(
                     db, CurrentUser(id=user_id, email="u@example.com"), other,
@@ -257,6 +265,7 @@ async def test_an_unnamed_link_is_listed_as_link_unclear_and_never_counts_toward
             assert await own_browser.easy_apply_today(db, user_id, datetime.now(timezone.utc)) == 10  # not 11
         extra = await _bring(client, 31, "https://www.linkedin.com/jobs/view/31")
         for app_id in (odd, extra):
+            await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
             await _event(client, app_id, "queued")
         tasks = {t["application_id"]: t for t in (await client.get("/api/own-browser/queue")).json()["tasks"]}
         assert tasks[odd]["kind"] == "application" and tasks[odd]["browser"] == unclear
@@ -283,6 +292,7 @@ async def test_easy_apply_has_no_job360_day_cap_by_default(authenticated_async_c
                 )
             await db._db.commit()  # noqa: SLF001
         easy = await _bring(client, 40, "https://www.linkedin.com/jobs/view/40")
+        await pc_ready(client, easy)  # 2026-11-19: only a row check_submit can pass is a PC task
         await _event(client, easy, "queued")
         async with await _agent(client) as agent:
             got = await _take(agent)
@@ -326,6 +336,7 @@ async def test_an_application_just_let_go_is_not_handed_straight_back(authentica
     # pc-1523, 2026-11-03: take returned the same application right after the run recorded hold_released.
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 50, "https://www.linkedin.com/jobs/view/50")
+        await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
         await _event(client, app_id, "queued")
         async with await _agent(client) as agent:
             got = await _take(agent)

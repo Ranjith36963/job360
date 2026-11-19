@@ -15,6 +15,7 @@ from src.api.routes import browser as browser_routes
 from src.services.applications import blocked as blocked_service
 from src.services.applications import own_browser, which_browser
 from src.services.browser_agent import routing
+from tests._pc_ready import pc_ready
 
 URL = "https://boards.greenhouse.io/acme/jobs/7"
 
@@ -25,6 +26,7 @@ async def _queued_job(client: AsyncClient, slug: str, url: str = URL) -> int:
     resp = await client.post("/api/jobs/bring", json=ad)
     assert resp.status_code == 200, resp.text
     app_id = int(resp.json()["application_id"])
+    await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
     assert (await client.post(f"/api/applications/{app_id}/events", json={"event_type": "queued"})).status_code == 201
     return app_id
 

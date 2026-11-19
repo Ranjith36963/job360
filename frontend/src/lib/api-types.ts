@@ -9498,8 +9498,39 @@ export interface components {
             /** Countries */
             countries: components["schemas"]["QuestionnaireCountry"][];
         };
+        /**
+         * QueueApplicationsOut
+         * @description 2026-11-19: the PC run is offered only applications check_submit can pass; the rest are counted, by why.
+         */
+        QueueApplicationsOut: {
+            held_back?: components["schemas"]["QueueHeldOut"];
+            /**
+             * Ready
+             * @default 0
+             */
+            ready: number;
+        };
+        /** QueueHeldOut */
+        QueueHeldOut: {
+            /**
+             * Cv Not Strong
+             * @default 0
+             */
+            cv_not_strong: number;
+            /**
+             * No Cv
+             * @default 0
+             */
+            no_cv: number;
+            /**
+             * Waiting On Owner
+             * @default 0
+             */
+            waiting_on_owner: number;
+        };
         /** QueueOut */
         QueueOut: {
+            applications?: components["schemas"]["QueueApplicationsOut"];
             /** Count */
             count: number;
             /** Open Now */

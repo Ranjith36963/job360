@@ -13696,8 +13696,47 @@
         "title": "QuestionnaireOut",
         "type": "object"
       },
+      "QueueApplicationsOut": {
+        "description": "2026-11-19: the PC run is offered only applications check_submit can pass; the rest are counted, by why.",
+        "properties": {
+          "held_back": {
+            "$ref": "#/components/schemas/QueueHeldOut"
+          },
+          "ready": {
+            "default": 0,
+            "title": "Ready",
+            "type": "integer"
+          }
+        },
+        "title": "QueueApplicationsOut",
+        "type": "object"
+      },
+      "QueueHeldOut": {
+        "properties": {
+          "cv_not_strong": {
+            "default": 0,
+            "title": "Cv Not Strong",
+            "type": "integer"
+          },
+          "no_cv": {
+            "default": 0,
+            "title": "No Cv",
+            "type": "integer"
+          },
+          "waiting_on_owner": {
+            "default": 0,
+            "title": "Waiting On Owner",
+            "type": "integer"
+          }
+        },
+        "title": "QueueHeldOut",
+        "type": "object"
+      },
       "QueueOut": {
         "properties": {
+          "applications": {
+            "$ref": "#/components/schemas/QueueApplicationsOut"
+          },
           "count": {
             "title": "Count",
             "type": "integer"
