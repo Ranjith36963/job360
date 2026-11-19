@@ -10,7 +10,7 @@ uses). Both take the user from the session / token / OAuth subject, never from i
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,6 +57,9 @@ class DueItemOut(BaseModel):
     # Only on `hunt` (2026-11-18): profile paths the hunt needs and the user has not filled (closed:
     # preferences.target_job_titles). Stop and ask the user; never invent them.
     needs: Optional[list[Literal["preferences.target_job_titles"]]] = None
+    # Only on `hunt` (2026-11-18 coverage audit): every search-plan row id (`GB:onsite`, `EU:remote`,
+    # `ANY:contract`; get_profile search_brief.plan `row`) this run searches; report.coverage names each one.
+    plan_rows: Optional[list[str]] = None
 
 
 class KnownListOut(BaseModel):
@@ -149,10 +152,37 @@ class HuntKitIn(BaseModel):
     done: Optional[HuntKitDoneIn] = None
 
 
+class HuntCoverageSourcesIn(BaseModel):
+    """How many searches each kind of source ran for one plan row (Himalayas and FoundRole count as connectors)."""
+
+    model_config = ConfigDict(extra="forbid")
+    kit: int = Field(default=0, ge=0)
+    connectors: int = Field(default=0, ge=0)
+    web: int = Field(default=0, ge=0)
+    browser: int = Field(default=0, ge=0)
+
+
+class HuntCoverageIn(BaseModel):
+    """One search-plan row (2026-11-18 coverage audit: 3 runs searched GB/IN and never the other 26 rows): what
+    was searched there, or why not ({code, detail}, the same closed codes as a source)."""
+
+    model_config = ConfigDict(extra="forbid")
+    row: str = Field(max_length=40)
+    # How many target titles (or which) were searched there.
+    titles: Optional[Union[Annotated[int, Field(ge=0)], Annotated[list[Annotated[str, Field(max_length=200)]],
+                                                               Field(max_length=100)]]] = None
+    sources: Optional[HuntCoverageSourcesIn] = None
+    ads: Optional[int] = Field(default=None, ge=0)
+    brought: Optional[int] = Field(default=None, ge=0)
+    skipped: Optional[Union[HuntSkipIn, str]] = Field(default=None)
+
+
 class HuntReportIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sources: dict[str, HuntSourceIn] = Field(default_factory=dict)
     kit: Optional[HuntKitIn] = None
+    # One entry per whats_due hunt `plan_rows` id (HuntCoverageIn); refused 422 place_missing when a row is left out.
+    coverage: Optional[list[HuntCoverageIn]] = Field(default=None, max_length=200)
 
 
 class MarkDoneIn(BaseModel):
@@ -608,7 +638,8 @@ HUNT_REPORT_SHAPE = (
     '"new": N, "prefilter_passed": N, "read_in_full": N, "unreadable": N, "snippet_only": N, "done": <out>.done.json'
     '}}, each S = '
     '{calls, ads, brought} or {skipped: {code, detail}} with code one of ' + " | ".join(HUNT_SKIP_CODES)
-    + " and detail the exact error"
+    + " and detail the exact error; coverage: one entry per plan row (whats_due hunt plan_rows) = {row, titles: N, "
+    '"sources": {kit, connectors, web, browser} search counts, ads, brought} or {row, skipped: {code, detail}}'
 )
 # Word runs that mean "I did not try it": an excuse, not a reason (matched on words, never a regex).
 _SKIP_EXCUSES = (
@@ -690,7 +721,57 @@ def _check_kit_done(kit: HuntKitIn, codes: list[str], problems: list[str]) -> No
                         "finished kit, not a count taken while it ran")
 
 
-def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> None:
+def _coverage_state(entry: HuntCoverageIn) -> Optional[str]:
+    titles = len(entry.titles) if isinstance(entry.titles, list) else entry.titles
+    counted = entry.sources is not None and None not in (entry.ads, entry.brought) and bool(titles)
+    if counted and entry.skipped is None:
+        return "ran"
+    if entry.skipped is not None and entry.sources is None and entry.ads is None and entry.brought is None:
+        return "skipped"
+    return None
+
+
+def _other_queries(entry: HuntCoverageIn) -> int:
+    """The row's searches beyond the kit (connectors, Himalayas, FoundRole, web, browser)."""
+    src = entry.sources
+    return src.connectors + src.web + src.browser if src else 0
+
+
+def _check_coverage(report: HuntReportIn, plan_rows: list[str], codes: list[str], problems: list[str]) -> None:
+    """Every plan row has an entry: searched (titles, search counts with one query beyond the kit, ads, brought) or
+    skipped with a closed code. Only plan row ids (built from the profile) are ever named back, never caller text."""
+    entries = {e.row: e for e in report.coverage or [] if e.row in plan_rows}
+    missing = [r for r in plan_rows if r not in entries]
+    if missing:
+        codes.append("place_missing")
+        problems.append(f"report.coverage has no entry for plan rows {', '.join(missing)}: search each one (kit and "
+                        "at least one connector, Himalayas, FoundRole, web or browser query, titles rotated), or "
+                        "send {row, skipped: {code, detail}}")
+    states = {r: _coverage_state(e) for r, e in entries.items()}
+    unclear = [r for r in plan_rows if r in states and states[r] is None]
+    if unclear:
+        codes.append("row_unclear")
+        problems.append(f"coverage rows {', '.join(unclear)} need titles (1 or more), sources, ads and brought, or "
+                        "only skipped")
+    kit_only = [r for r in plan_rows if states.get(r) == "ran" and _other_queries(entries[r]) == 0]
+    if kit_only:
+        codes.append("row_kit_only")
+        problems.append(f"coverage rows {', '.join(kit_only)} ran the kit only: run at least one connector, "
+                        "Himalayas, FoundRole, web or browser query there too")
+    bad: dict[str, list[str]] = {}
+    for r in plan_rows:
+        if states.get(r) == "skipped":
+            why = _skip_problem(entries[r].skipped)
+            if why:
+                bad.setdefault(why, []).append(r)
+    for why, rows in bad.items():
+        codes.append(f"row_{why}")
+        problems.append(f"coverage rows {', '.join(rows)}: {_SKIP_FIX[why]}")
+
+
+def _check_hunt_report(
+    user: CurrentUser, report: Optional[HuntReportIn], plan_rows: Optional[list[str]] = None,
+) -> None:
     """Refuse (422, saying exactly what is missing) an assistant's hunt report that is short; log the counts."""
     if report is None:
         _log("hunt_report_refused", user, codes="report_missing", missing="report")
@@ -749,8 +830,12 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
             )
     if not codes and kit is not None and states.get("kit") == "ran":
         _check_kit_done(kit, codes, problems)
+    rows = plan_rows or []
+    _check_coverage(report, rows, codes, problems)
+    covered = len({e.row for e in report.coverage or [] if e.row in rows})
     if codes:
-        _log("hunt_report_refused", user, codes=",".join(codes), missing=",".join(missing))
+        _log("hunt_report_refused", user, codes=",".join(codes), missing=",".join(missing),
+             plan_rows=str(len(rows)), rows_covered=str(covered))
         raise HTTPException(
             status_code=422, detail=f"Hunt report refused: {'; '.join(problems)}. The full shape: {HUNT_REPORT_SHAPE}. "
                                     "Nothing was recorded; fix it, then mark_done again.",
@@ -762,6 +847,8 @@ def _check_hunt_report(user: CurrentUser, report: Optional[HuntReportIn]) -> Non
     get_audit_logger().info("hunt_report_ok", extra={
         "event": "hunt_report_ok", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
         "sources": ",".join(f"{k}:{states[k]}" for k in HUNT_SOURCES), "skips": skips or "none", "result": "ok",
+        "plan_rows": len(rows), "rows_covered": covered,
+        "rows_skipped": sum(1 for e in report.coverage or [] if e.row in rows and _coverage_state(e) == "skipped"),
         **({f"kit_{k}": getattr(kit, k) for k in ("results", "new", "prefilter_passed", "read_in_full",
                                                   "unreadable", "snippet_only")}
            if kit else {}),
@@ -791,7 +878,11 @@ async def mark_done(
         raise HTTPException(status_code=404, detail="application not found")
     # A failed hunt (closed reason, backed off, carded) may end before any source ran; a report it sends is checked.
     if body.duty == "hunt" and actor_for(user) != "web" and (body.outcome != "failed" or body.report is not None):
-        _check_hunt_report(user, body.report)
+        from src.services.profile.models import UserProfile  # noqa: PLC0415
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+        # The plan is rebuilt here from the user's own profile, so a run cannot leave a row out of it.
+        _check_hunt_report(user, body.report, schedule.hunt_plan_rows(load_profile(user.id) or UserProfile()))
     now = datetime.now(timezone.utc)
     # S5 (prod, 4 runs): a run closed a batch it never claimed (a plain whats_due, or none), pushing the next
     # batch back. Only an assistant's whats_due(duties=["batch"]) claims, so only an assistant is refused.

@@ -1022,8 +1022,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
 
-        HUNT: `search_brief.rows` = the ONLY places to search (`plan` = their order, with search_plan=true);
-        `search_brief.gaps` = ask each once, save to the gap's `path`
+        HUNT: `search_brief.rows` = the ONLY places to search (`plan` = their order and `row` ids, with
+        search_plan=true); `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
         No profile yet: `profile_exists` false + `next`. Full rules: get_recipe("rules")."""
@@ -1635,7 +1635,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
         from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
         names it). `due` lists {duty: hunt|inbox|reach|network|batch, recipe, reason} in run order
-        (reach also lists `application_ids`: find people for those only; network lists `max_people`);
+        (reach also lists `application_ids`: find people for those only; network lists `max_people`; hunt lists
+        `plan_rows`, the search-plan row ids to cover, e.g. GB:onsite);
         inbox also lists `search` {gmail_after, companies, email_senders, application_ids, skip_message_ids}:
         build ONE Gmail search from it (no list_applications), skip those message ids, then mark_inbox_checked
         those application_ids (all in one call);
@@ -1692,8 +1693,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         brought} or {skipped: {code, detail}} (code = tool_missing | tool_error | no_results | paid_needs_yes |
         login_wall; detail = the exact error), kit: {results, new, prefilter_passed, read_in_full, unreadable,
         snippet_only, done}} with read_in_full + unreadable + snippet_only = prefilter_passed and done = the
-        kit's <out>.done.json once it ended; a short one is refused 422
-        with what is missing. reach/network: `reviewed`=true only when
+        kit's <out>.done.json once it ended; and coverage: one entry per whats_due hunt `plan_rows` id = {row,
+        titles, sources: {kit, connectors, web, browser} search counts, ads, brought} or {row, skipped: {code,
+        detail}}; a short one is refused 422 with what is missing (place_missing names the rows).
+        reach/network: `reviewed`=true only when
         the Doctor and a separate reviewer checked every person and note; else done is recorded partial. Job360
         counts the people itself: a job under 3 (network under 5) is recorded partial; the reply has `score`. reach:
         `searched` {application id: {sprouts: n, clay: n, <source>: n}} for each job left under 3, else 409;

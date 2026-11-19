@@ -68,12 +68,27 @@ def _contract_tail(contract_ok: Any) -> str:
     return ""
 
 
+def row_id(country: str, kind: str) -> str:
+    """The stable id of one plan row (``GB:onsite``, ``EU:remote``, ``ANY:contract``): whats_due's hunt item,
+    get_profile's ``search_brief.plan`` and mark_done's ``report.coverage`` all name a row by it."""
+    return f"{country}:{kind}"
+
+
+def plan_row_ids(brief: dict[str, Any]) -> list[str]:
+    """The rows a hunt must cover: every plan row with a share of the effort, in plan order."""
+    return [p["row"] for p in brief.get("plan") or [] if p.get("effort_pct", 0) > 0]
+
+
+def _plan_item(country: str, kind: str, line: str, lvl: Optional[str]) -> dict[str, Any]:
+    return {"row": row_id(country, kind), "country": country, "kind": kind, "counts_if": line, "priority": lvl}
+
+
 def _onsite_line(country: str, onsite: str, needs: bool) -> str:
     place = f"on-site or hybrid in {_name(country)}"
-    if onsite == "only_if_sponsored":
-        return f"{place}, only when the ad says it sponsors a visa"
-    if needs:
-        return f"{place}; you need a visa there, so an ad that refuses sponsorship is out"
+    # Owner decision 2026-11-18: every ad in the place is kept whatever it says about sponsorship (states it,
+    # refuses it, silent); the run records what the ad says, the user decides.
+    if onsite == "only_if_sponsored" or needs:
+        return f"{place}; you need a visa there: keep the ad whatever it says about sponsorship and record what it says"
     return place
 
 
@@ -164,7 +179,7 @@ def build_search_brief(
             if lvl != job_priority.OFF:  # the user switched this place off: never searched
                 counts_if.append(line)
                 priorities[job_priority.REMOTE] = lvl
-                plan.append({"country": country, "kind": job_priority.REMOTE, "counts_if": line, "priority": lvl})
+                plan.append(_plan_item(country, job_priority.REMOTE, line, lvl))
         if onsite in ("yes", "only_if_sponsored"):
             if needs is None and onsite == "yes":
                 gaps.append({
@@ -176,14 +191,14 @@ def build_search_brief(
             if lvl != job_priority.OFF:
                 counts_if.append(line)
                 priorities[job_priority.ONSITE] = lvl
-                plan.append({"country": country, "kind": job_priority.ONSITE, "counts_if": line, "priority": lvl})
+                plan.append(_plan_item(country, job_priority.ONSITE, line, lvl))
         if rec.get("contract_ok") is True:
             # Contract roles in this place, ranked on their own (owner decision 2026-10-26).
             lvl = job_priority.level_of(rec, job_priority.CONTRACT)
             if lvl != job_priority.OFF and counts_if:
                 line = f"contract roles in {_name(country)}, remote or on-site as above"
                 priorities[job_priority.CONTRACT] = lvl
-                plan.append({"country": country, "kind": job_priority.CONTRACT, "counts_if": line, "priority": lvl})
+                plan.append(_plan_item(country, job_priority.CONTRACT, line, lvl))
         if onsite not in ONSITE_VALUES:
             gaps.append({
                 "path": RIGHT_TO_WORK_PATH, "country": country,

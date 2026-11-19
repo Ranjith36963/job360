@@ -6771,6 +6771,8 @@ export interface components {
             max_people?: number | null;
             /** Needs */
             needs?: "preferences.target_job_titles"[] | null;
+            /** Plan Rows */
+            plan_rows?: string[] | null;
             /**
              * Reason
              * @enum {string}
@@ -7406,6 +7408,50 @@ export interface components {
             event_id: number;
         };
         /**
+         * HuntCoverageIn
+         * @description One search-plan row (2026-11-18 coverage audit: 3 runs searched GB/IN and never the other 26 rows): what
+         *     was searched there, or why not ({code, detail}, the same closed codes as a source).
+         */
+        HuntCoverageIn: {
+            /** Ads */
+            ads?: number | null;
+            /** Brought */
+            brought?: number | null;
+            /** Row */
+            row: string;
+            /** Skipped */
+            skipped?: components["schemas"]["HuntSkipIn"] | string | null;
+            sources?: components["schemas"]["HuntCoverageSourcesIn"] | null;
+            /** Titles */
+            titles?: number | string[] | null;
+        };
+        /**
+         * HuntCoverageSourcesIn
+         * @description How many searches each kind of source ran for one plan row (Himalayas and FoundRole count as connectors).
+         */
+        HuntCoverageSourcesIn: {
+            /**
+             * Browser
+             * @default 0
+             */
+            browser: number;
+            /**
+             * Connectors
+             * @default 0
+             */
+            connectors: number;
+            /**
+             * Kit
+             * @default 0
+             */
+            kit: number;
+            /**
+             * Web
+             * @default 0
+             */
+            web: number;
+        };
+        /**
          * HuntKitDoneIn
          * @description The kit's own ``<out>.done.json``, written only when it ends (2026-11-18 16:13: mark_done at 16:31, kit to
          *     16:41): its result count and each ad's text class (full | snippet = 500 chars or fewer, or cut | empty).
@@ -7445,6 +7491,8 @@ export interface components {
         };
         /** HuntReportIn */
         HuntReportIn: {
+            /** Coverage */
+            coverage?: components["schemas"]["HuntCoverageIn"][] | null;
             kit?: components["schemas"]["HuntKitIn"] | null;
             /** Sources */
             sources?: {
