@@ -12,6 +12,39 @@ question, blocked with the real reason after the recipe's own steps, PC-only, be
 record `mark_done`. No submit was possible on any row this run (sign-ins, a CAPTCHA, owner answers), so the
 score is about handling, not submits.
 
+## Morning summary (05:10 UTC, 19 Nov)
+
+**Scores (rows the run could work, each in the right bucket with its exact reason; mark_done recorded):**
+21:41 59% · 22:41 no workable rows · 23:41 100% (first scored 50%, corrected) · 00:41 no workable rows ·
+01:41 30% · 02:41 71% · 03:41 no workable rows · **04:41 100%**. Not yet two runs in a row at 90%.
+0 submitted all night: every workable row ended on a sign-in, a CAPTCHA, a closed posting or an answer only
+the owner has. 250 queued rows wait on the owner (whats_due).
+
+**Merged (each with a failing test first; all live):**
+- #1681 (22:58): a block on a job board gets a reply hint to find the employer's own apply page.
+- #1687 (23:36, inside the window: my mistake): batch.md never asks about an optional field or apply-or-skip;
+  a missing fit is judged with save_fit.
+- #1692 (01:32): mark_done "done" runs the work-left check like a partial stop. (Its stated trigger was a
+  misreading; the gap it closes is real.)
+- #1697 (03:15): an assistant's block on a job board must say what its employer-page search found
+  (employer_page), else 422. Added because the plain instruction failed on two runs (5/17, 7/10). Not yet
+  exercised. Gap: blocks Job360's own browser records (by: browser) are not covered.
+- #1701 (04:28): the two lessons below, in mistakes.md and session-lessons.
+
+**Needs the owner:**
+- batch_hold (your 1 Nov rule: a CV-less row keeps batch due): not changed; proposal below. Runs at 22:41,
+  00:41 and 03:41 came due with nothing to work.
+- The answers and consents on Needs you (1107, 1109, 1110, 1112, 1088, 1090, 1100, 1105 tonight), and the
+  CAPTCHAs/sign-ins moved to your PC. The PC queue was idle from 23:08 (50 tasks) until a pc-0505 run started.
+- From earlier: the single-source fix for 319 (waiting_on_owner vs waiting_on) is now done by Kits' #1676.
+
+**Corrections and my mistakes:**
+- #1687 merged at 23:36:01, one minute into the no-merge window; its deploy finished 23:43:35 under the
+  23:41 run (no failed call seen). Cause: disabling auto-merge does not hold a PR here; drafts do (#1701).
+- I read last_done_at as a run's close; it is the run's start. Two scores and #1692's stated cause were
+  wrong; corrected above (#1701).
+
+
 ## 21:41 run  (score 59%)
 - Achieved: first run on #1676. Claimed, worked 17 rows (1061-1084) one at a time in about 10 minutes, and
   `mark_done` was accepted at 22:07 (batch failures_in_row 0, the first recorded close since 15:42). Every
@@ -148,3 +181,15 @@ score is about handling, not submits.
   blocked. The 03:59 hunt's new rows (1107-1114, fits judged 03:56-04:07) have no CV yet: the CV run's work.
   243 rows wait on the owner. Closed without a failure.
 - #1697 (employer_page on board blocks, live 03:15) not exercised yet. Nothing new to fix this hour.
+
+## 04:41 run  (score 100%)
+- Achieved: 7 workable rows (1107-1113), one at a time, 04:42-04:47, every one in the right bucket:
+  - 4 forms checked, filled and swept, each stopped on required answers only the owner has: 1107 Ravelin
+    (3 required questions), 1109 THG Ingenuity (4 pre-employment check consents + 1), 1110 David Joseph & Co
+    (1 required answer), 1112 FirstWork (1 essay, 2 work-rights confirmations). The first filled forms tonight.
+  - 1108 and 1113: CAPTCHA on the employer's own site (keyideasinfotech.com, Zoho Recruit): correct.
+  - 1111: posting_closed on the employer's site (iuk-ktp.org.uk).
+  - No job-board block this run (#1697 not exercised: no row needed it).
+- Missed: none of the workable rows. 0 submitted: every filled form needs an owner answer.
+- Needs the owner: the answers above (Needs you on job360.uk), and the 2 CAPTCHAs.
+- Stop rule: 100% after 71%, so not yet two runs in a row at 90%.
