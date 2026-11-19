@@ -22,5 +22,9 @@ def test_the_employer_site_comes_before_the_lookups():
 def test_the_review_rows_and_the_searched_record_are_spelled_out():
     reach = _flat(load_recipe("reach").text)
     assert "the doctor's row outreach review pasted in" in reach
-    assert "one row per sentence about the recipient" in reach and "not one row for a whole note" in reach
+    # 19 Nov 10:56 run: "one row per sentence about the recipient, not one row for a whole note" was read as rows
+    # ONLY for recipient sentences, so every note stored weak (line_uncovered). Every line needs its own row too.
+    assert "a row for every line of `review.lines`" in reach, "each line gets its own row, quoting the profile"
+    assert "and a row per sentence about the recipient" in reach
+    assert "not one row for a whole note" not in reach, "that wording told the run to skip the whole-line rows"
     assert "leave out a source you did not run" in reach
