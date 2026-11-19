@@ -160,3 +160,93 @@ def test_recipe_gives_both_passes_and_the_full_read_rule():
     assert "never only its first 3,000 characters" in flat
     assert "never brought" in flat
     assert "titles_seen" in flat and "titles_kept" in flat
+
+
+# 19 Nov 03:11 UTC: pass 1 hung past --max-minutes (a running source kept going) and was killed, so no titles file.
+def _pass_one_with_a_stuck_source(hk_args, release):
+    """A fake run: one source lists two rows at once, the other never returns until released."""
+    import concurrent.futures as cf
+
+    col = hk.Collector(hk_args)
+
+    def fast():
+        col.tl.tid = "lever:fast"
+        col.offer("lever", _raw(1, "Applied AI Engineer", []))
+        col.offer("lever", _raw(2, "Applied AI Engineer", []))
+
+    def stuck():
+        col.tl.tid = "feed:freehire"
+        release.wait(30)
+
+    ex = cf.ThreadPoolExecutor(max_workers=2)
+    futs = {ex.submit(fn): src for src, fn in (("lever", fast), ("freehire", stuck))}
+    abandoned = hk._wait_sources(futs, col.sink, None, hard=True)
+    ex.shutdown(wait=False, cancel_futures=True)
+    return col, abandoned
+
+
+@pytest.mark.real_sleep
+def test_pass_one_ends_at_its_deadline_with_a_source_still_running(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    out = tmp_path / "titles.jsonl"
+    release = threading.Event()
+    seen: dict[str, object] = {}
+
+    def fake_run(args):
+        col, seen["abandoned"] = _pass_one_with_a_stuck_source(args, release)
+        return col
+
+    monkeypatch.setattr(hk, "run", fake_run)
+    t0 = time.monotonic()
+    try:
+        rc = hk.main([*BASE, "--titles-only", str(out), "--run-log", "none", "--max-minutes", "0.01"])
+    finally:
+        release.set()
+    assert rc == 0 and time.monotonic() - t0 < 10  # 0.6 s deadline; the stuck source would hold it 30 s
+    assert seen["abandoned"] == 1
+    (line,) = out.read_text().splitlines()
+    assert json.loads(line) == {**json.loads(line), "title": "Applied AI Engineer", "count": 2}
+
+
+@pytest.mark.parametrize("stop", ["sigint", "sigterm"])
+def test_a_stopped_pass_one_still_writes_its_titles_file(tmp_path, monkeypatch, stop):
+    import os
+    import signal
+
+    out = tmp_path / "titles.jsonl"
+
+    def fake_run(args):
+        col = hk.Collector(args)
+        col.tl.tid = "lever:acme"
+        col.offer("lever", _raw(1, "Applied AI Engineer", []))
+        if stop == "sigterm":
+            os.kill(os.getpid(), signal.SIGTERM)  # the handler turns it into the stop path
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(hk, "run", fake_run)
+    assert hk.main([*BASE, "--titles-only", str(out), "--run-log", "none"]) == 130
+    (line,) = out.read_text().splitlines()
+    assert json.loads(line)["title"] == "Applied AI Engineer"
+    assert signal.getsignal(signal.SIGTERM) is not hk._sigterm_to_interrupt  # handler restored
+
+
+def test_titles_from_rows_rebuilds_the_titles_file_offline(tmp_path, monkeypatch):
+    rows = tmp_path / "old.rows.jsonl"
+    rows.write_text("".join(json.dumps({"title": t, "url": "https://jobs.example/%d" % i, "company": "Acme",
+                                        "location": "London"}) + "\n"
+                            for i, t in enumerate(["ML Engineer", "ML Engineer", "Accountant"])))
+    monkeypatch.setattr(hk, "run", lambda args: pytest.fail("the rebuild must not run any source"))
+    out = tmp_path / "titles.jsonl"
+    assert hk.main([*BASE, "--titles-from-rows", str(rows), "--titles-only", str(out)]) == 0
+    assert [(json.loads(x)["title"], json.loads(x)["count"]) for x in out.read_text().splitlines()] == [
+        ("ML Engineer", 2), ("Accountant", 1)]
+
+
+def test_a_stopped_pass_one_marks_the_run_abandoned_so_the_cli_does_not_join_a_stuck_source(monkeypatch):
+    """reviewer-bugs on #1702: Ctrl-C / SIGTERM in pass 1 wrote the titles file but the CLI still joined the stuck
+    source thread at exit. The stop path now sets the same flag the deadline sets."""
+    monkeypatch.setattr(hk, "ABANDONED", False)
+    hk._mark_abandoned()
+    assert hk.ABANDONED is True

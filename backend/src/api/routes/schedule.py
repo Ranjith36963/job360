@@ -393,22 +393,22 @@ async def _people_score(db: JobDatabase, user: CurrentUser, duty: str, ids: list
             (user.id,),
         )
         people: dict[str, set[str]] = {}
+        # 2026-11-19 04:07 run: two recruiters saved ON agency job 1110 with company "David Joseph & Company" scored 0,
+        # because the job's company read "David Joseph & Company (recruiting for ...)". Everyone saved on a job
+        # counts for it, as well as everyone at its company.
+        on_job: dict[int, set[str]] = {}
         for row in map(dict, await cur.fetchall()):
+            who = (contacts.linkedin_identity_key(str(row["linkedin_url"] or ""))
+                   or contacts.name_identity_key(str(row["name"] or "")))
+            if row["application_id"] is not None:
+                on_job.setdefault(int(row["application_id"]), set()).add(who)
             key = contacts.contact_company_key(row)
             if key:
-                who = (contacts.linkedin_identity_key(str(row["linkedin_url"] or ""))
-                       or contacts.name_identity_key(str(row["name"] or "")))
                 people.setdefault(key, set()).add(who)
         per_job = {}
         for i in ids:
             key = job_key.get(i, "")
-            if key:
-                per_job[str(i)] = len(people.get(key, set()))
-            else:  # no company to match on: the people on this job only
-                cur = await db._db.execute(
-                    "SELECT COUNT(*) FROM application_contacts WHERE user_id = ? AND application_id = ?", (user.id, i))
-                got = await cur.fetchone()
-                per_job[str(i)] = int(got[0]) if got else 0
+            per_job[str(i)] = len((people.get(key, set()) if key else set()) | on_job.get(i, set()))
         score.per_job = per_job
         return score
     since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
