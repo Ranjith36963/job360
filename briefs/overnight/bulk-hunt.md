@@ -53,3 +53,15 @@ Session: Bulk Hunt test (owner's task trig_01QSkCh1, starts :11). Check-ins at :
   refuses or drops, a near match is a `possible_duplicate` hint. CI green; marked ready 23:30 (no run live).
 - Decision without the owner: at the SAME company with the same title, a different city is still refused
   (main's existing test 328 Glasgow vs 126 Austin is a real prod duplicate); not loosened overnight.
+
+## 02:15 — back (silent 23:30-02:06: my 23:36 self check-in never woke this session)
+- Read orders-bulk-hunt.md (01:10) and kits.md (02:05). Kits scored 00:11 at ~80% (10/10 brought; volume,
+  snippet judging, board links, coverage workaround). 01:11 not due. Kits owns the two-pass title judging
+  (`feat/hunt-distinct-titles`); I do not duplicate it.
+- #1665: merged current main in (clean, no conflicts); 161 targeted tests pass locally; gate running; then
+  push. Per Kits: I mark it ready only when I can watch the run after it, outside :06-:21. Plan: push now so
+  the merge-cage re-judges on the new head, ready at ~02:25, watch the 03:11 run, score it at 03:36.
+- Coverage slice B (kit plan rows, keep every ad whatever it says about sponsorship) is the fix for order 5;
+  it will be rebased on main after #1665 and checked against Kits' two-pass branch so they do not collide.
+- Decision without the owner: I keep #1665's two refusals (`kit_not_done`, `employer_searched` proof); both
+  come from real runs (16:13 marked done before the kit ended; 4 board links marked not_found with no search).
