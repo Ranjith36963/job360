@@ -186,3 +186,70 @@ Not at 90% yet. The trend is up because of the recipe (employer pages first) and
    hourly cadence stays.
 6. **Off-schedule runs.** Runs at 02:21 and 04:07 were started outside the :56 slot (ignition after the hunt); their
    transcripts overwrite the scheduled run's last_run, so a scorer loses one run each time.
+
+## Morning: 08:56 and 09:08 runs (first on #1694 and #1699; Kits' 08:30 orders)
+
+### 1. Scores
+**08:56 (scheduled; transcript overwritten, rebuilt from Job360 reads):** marked both duties itself (stamp 08:57:19).
+| Job | People added | From employer's own site | Review |
+|---|---|---|---|
+| 793 HiringBlaze | 1 (founder, via a Hirist job-board page) | 0 | weak |
+| 813 Sasken | 1 (sasken.com/about-us/our-leaders) | 1 | weak |
+Network: 0 added. A thin run: 2 people.
+
+**09:08 (started outside the slot; reach 1132, 1131, 815-819, 821):** marked reach itself (partial); network not due.
+| Job | People now (target 5) | Added this run from employer's own site |
+|---|---|---|
+| 816 IQVIA | 5 | 0 |
+| 817 Bajaj Finance | 5 | 0 |
+| 818 Ronald James | 5 | 0 |
+| 815 Algoleap | 4 | 0 |
+| 819 CoStar/Zonda | 4 | 0 |
+| 1132 Haystack | 4 | 0 (team page 404) |
+| 821 Student.com | 3 | 0 |
+| 1131 micro1 (Joblet-AI) | 0 | 0 |
+30 of 40 = **75%** (best so far). 17 added, all lookup-proven (Sprouts + Clay, same LinkedIn URL); two dropped by the
+People check (title conflict). #1700 worked: its first add_contact calls passed free text as people_check and were
+refused by the schema, then the run passed "pass".
+
+### Reviews: still all weak, but now for real reasons
+- 09:08: the fresh reviewer returned per-sentence rows with recipient sentences on `page:` rows (the #1699 shape) and
+  judged 1 of 9 strong. The 8 weak ones are genuine content faults in the drafts: "the ... role looks like a fit",
+  "interested in the Junior Python / Backend role", a city (Kochi, Pune) the profile never names, "a role Haystack is
+  hiring for" (the ad is for a partner), and one leaked internal note "(recipient evidence: ...)" in draft 2510.
+- 8 more drafts (Ronald James, CoStar, Student.com) got NO fresh review: the run recorded reviewer
+  "self-check-pattern-reuse", one whole-message row each, confidence weak. mark_done accepted it because a stored
+  outreach_reviewed exists. Weak blocks auto-send, so nothing unsafe went out, but it is a review bypass.
+
+### 2. Which rule fired (08:56, Sasken draft 2491, claimed strong, stored weak)
+`claim_not_in_quote`. The payload has lines 1, covered 1: ONE row for the whole one-line note. The line mixes facts
+about the recipient ("Sasken's leadership page", "Global Head of Marketing & Communication", "Gen AI Engineer role in
+Hyderabad") with the user's claims, and only a profile quote backs it, so the recipient words are judged against the
+profile and fail. #1699's per-sentence page rows were not used in that run (the 09:08 reviewer did use them).
+HiringBlaze 2490 also had `quote_not_in_profile` (its quote is not verbatim in one profile field).
+Gap that keeps this hidden: the stored-weak warning names only the code, never the failing sentence or words, so a
+run cannot tell what to fix. Candidate fix: name the first failing sentence and its unbacked words in the warning.
+
+### 3. Jobs where lookups never agree and there is no team page (Evnek, Whitespace, Tagbin)
+What a run can still do honestly, all free and all proof by (a) (a dated page naming person, role and company):
+- **The ad itself.** Many boards name the poster (Hirist, Naukri "posted by", LinkedIn job poster): `found_via job_ad`.
+  08:56 used exactly this for HiringBlaze.
+- **Official registers.** UK Companies House officers list (free, dated, official) names the directors of a small UK
+  firm; for Indian firms, the MCA director list. These are registers, not contact brokers. Small firms' directors are
+  usually the hiring decision-makers.
+- **The employer's own non-team pages.** Blog author bylines, press releases, careers-page contacts, privacy/imprint
+  pages (a named data officer or director), GitHub org members naming the employer.
+- **One lookup plus any one of the above** proves the person (rule (a) already allows it).
+If those are all tried and empty: I recommend the job counts as **done at fewer** when `searched` records every free
+source with its count (Sprouts, Clay, ad, register, own site, web search), shown as "exhausted: n of 5" rather than
+below_target, so a run is not pushed to pad the job. That changes the target, so it is the owner's (or Kits') call;
+the owner's existing rule already accepts 3 for a firm under about 50 staff.
+
+### Next causes (not yet fixed)
+1. Drafts make claims the profile does not hold (fit, interest in a narrower title, city). Fix in write.md: name the ad's
+   role as seen ("I saw the X role"), never claim fit, interest beyond target titles, or a location.
+2. Review bypass: "self-check-pattern-reuse" counts as a review. Fix: mark_done's review check requires a reviewer that
+   is not the run itself (a reviewer field the run did not also use as `by`), or the recipe names the fresh helper id.
+3. micro1 (1131) scored 0 although 5 micro1 people are saved on job 1064: the job reads "Joblet-AI (micro1)" and those
+   contacts "micro1". Same family as #1704 (company text with a note in brackets), at company level this time.
+4. The stored-weak warning should name the failing sentence (see 2).
