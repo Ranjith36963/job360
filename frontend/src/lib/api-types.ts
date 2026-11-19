@@ -10045,6 +10045,10 @@ export interface components {
             follow_up_on: string | null;
             /** Next */
             next?: string | null;
+            /** Next Task */
+            next_task?: {
+                [key: string]: unknown;
+            } | null;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */
@@ -10214,6 +10218,10 @@ export interface components {
             failures_in_row?: number | null;
             /** Next */
             next?: string | null;
+            /** Next Task */
+            next_task?: {
+                [key: string]: unknown;
+            } | null;
             /** Outcome */
             outcome?: ("done" | "failed") | null;
             /** Reason */

@@ -1242,8 +1242,10 @@ class RecordEventResponse(BaseModel):
     # wrote nothing at all — S corollary of R2).
     follow_up_on: Optional[str]
     # PC run pc-1905 (2026-11-18): an application a PC run lets go (``hold_released``) gets the queue's next step,
-    # "Keep going: N tasks still wait; call take again." (``own_browser.next_after_hold_release``); else absent/null.
+    # "Do this task now: ..." and `next_task`, what take answered for that same session (PC run pc-2306;
+    # ``own_browser.next_after_hold_release``); else absent/null.
     next: Optional[str] = None
+    next_task: Optional[dict[str, Any]] = None
 
 
 class ReceiptFileOut(BaseModel):
@@ -4521,12 +4523,12 @@ async def _record_event(
         if stored_type == "hold_released" and actor_for(user) != "web" and not result.get("already_existed"):
             from src.services.applications import own_browser as own_browser_service  # noqa: PLC0415
 
-            # PC run pc-1905: the release reply said "keep going"; this one said nothing, and the run ended.
+            # PC run pc-1905 / pc-2306: this reply hands the run its next task, so it has no choice to get wrong.
             nxt = await own_browser_service.next_after_hold_release(
                 db, user, application_id, datetime.now(timezone.utc)
             )
             if nxt is not None:
-                result = {**result, "next": nxt}
+                result = {**result, **nxt}
         return {**result, "warnings": warnings}
     except SpineError as exc:
         _raise(exc)

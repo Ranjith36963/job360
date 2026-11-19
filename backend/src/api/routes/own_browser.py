@@ -141,7 +141,9 @@ class ReleaseOut(BaseModel):
     summary: Optional[str] = None
     failures_in_row: Optional[int] = None
     # While open tasks remain that this session could take: "Keep going: N tasks still wait; call take again."
+    # In the live PC run: what take answered for this same session (PC run pc-2306), and `next` follows it.
     next: Optional[str] = None
+    next_task: Optional[dict[str, Any]] = None
 
 
 class RunNowOut(BaseModel):

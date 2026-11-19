@@ -1766,6 +1766,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         fence = _Fence()
         fence.records(resp.get("tasks"), ("draft_text",))
         fence.record(resp.get("task"), ("draft_text",))
+        fence.record((resp.get("next_task") or {}).get("task"), ("draft_text",))
         _audit("own_browser_queue", "ok", action=action)
         return resp
 
@@ -2146,6 +2147,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             _audit_refused("record_event", exc, application_id=application_id)
             raise _tool_error(exc) from None
         _audit("record_event", "ok", application_id=application_id, event_type=event_type)
+        _Fence().record((resp.get("next_task") or {}).get("task"), ("draft_text",))  # a PC run's next person
         return resp
 
     @mcp.tool()
