@@ -84,7 +84,10 @@ async def _state(client: AsyncClient, app_id: int) -> dict[str, Any]:
 
 
 def _needs_you(s: dict[str, Any]) -> bool:
-    return "approve_cv" in s["blockers"] and s["card"] and s["waiting"] == 1 and s["hold"] == "waiting_on_you"
+    # Owner 2026-11-19: the CV OK holds only the submit, never the fill, so the batch stays due for this row
+    # (mark_done's own test counts it as work); the CV still waits on the user (blocker, card, count).
+    return ("approve_cv" in s["blockers"] and s["card"] and s["waiting"] == 1 and s["hold"] is None
+            and s["batch_due"])
 
 
 @pytest.mark.asyncio

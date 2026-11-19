@@ -232,6 +232,11 @@ async def test_the_batch_is_due_only_when_the_user_lets_the_assistant_apply(
         held = await _due(client)
         assert held["batch_hold"] == "not_allowed" and held["nothing_due"] is True
         await _patch(client, SUBMIT, "auto_when_sure")  # the web user's own click
+        # Owner 2026-11-19: only batch work makes the batch due; a CV-less job is the CV run's.
+        assert (await _due(client))["batch_hold"] == "waiting_on_you"
+        saved = await client.post(f"/api/applications/{app.json()['application_id']}/artifacts",
+                                  json={"kind": "cv", "text": "Ada, Python."})
+        assert saved.status_code in (200, 201), saved.text
         assert [d["duty"] for d in (await _due(client))["due"]] == ["batch"]
         await _patch(client, PAUSE, "until_resumed")
         assert (await _due(client))["batch_hold"] == "paused"

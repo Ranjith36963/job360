@@ -169,8 +169,12 @@ async def test_an_old_row_queued_below_the_line_gets_no_cv_and_no_batch(authenti
         old = await _bring(client, 1)
         await _fit(client, old["application_id"], 35)
         assert await _queued_ids(client) == [old["application_id"]]
+        saved = await client.post(f"/api/applications/{old['application_id']}/artifacts",
+                                  json={"kind": "cv", "text": "Ada, Python."})
+        assert saved.status_code in (200, 201), saved.text
         before = (await client.get("/api/schedule/due")).json()
-        assert "batch" in [d["duty"] for d in before["due"]], "a queued job with no CV is batch work"
+        # Owner 2026-11-19: a queued job WITH its CV is batch work (a CV-less one is the CV run's).
+        assert "batch" in [d["duty"] for d in before["due"]], "a queued job with its CV is batch work"
         await _seed(client, fixture_user_id, apply_min_score=70, below_line="skip", submit_mode="auto_when_sure")
         assert await _queued_ids(client) == []
         after = (await client.get("/api/schedule/due")).json()
