@@ -392,3 +392,54 @@ the given ids) are not merged yet.
 2. **The weak reviews:** #1717 is pending.
 3. **The employer-page date rule is read too strictly:** a footer year is not a page date. Proposed fix: name what
    counts as dated in the recipe.
+
+## 19 Nov 13:56 and 14:09 runs (read 14:30, read-only)
+Merged since the last entry:
+- **#1720** (mark_done demands only the ids whats_due handed the run): merged 13:30.
+- **#1717** (a review row for EVERY line plus a row per recipient sentence): merged 14:24, so neither run had it.
+
+### 14:09 (off-schedule fire after the routine was renamed at 14:04): 16 of 16 (100%) with agency caps
+- **Duties.** Reach only, ids [1158, 901, 902, 837, 903]. Network was not due.
+
+| Job | Company | Added | Saved (server) | Counted |
+|---|---|---|---|---|
+| 1158 | Siemens | 5 | 5 | 5 of 5 |
+| 903 | Xapien | 1 | 5 | 5 of 5 |
+| 901 | Ronald James (agency) | 0 | 4 | 2 of 2 |
+| 902 | Hays (agency) | 0 | 2 | 2 of 2 |
+| 837 | RedCat (agency) | 0 | 3 | 2 of 2 |
+
+- **Sources.** Siemens: 2 from Siemens' own UK news page (14 Sep 2026), 3 from Sprouts and Clay. Xapien: 1 from
+  lookups. The run refused one person whose team page is dated 2025-09-01, which is correct.
+- **`agency` works.** The run passed `agency` [901, 902, 837]; the reply has `"agency":["901","902","837"]` and
+  outcome partial only because of the raw counts. All three are real recruitment agencies. Their recruiters were
+  already saved, so the run searched none of them.
+- **The ids fix works.** No "not in application_ids" refusal. Two mark_done calls: the first was refused for 3 notes
+  with no review; the second was accepted.
+- **Reviews: 7 stored, all weak.**
+  - Codes: `line_uncovered` and `claim_not_in_quote`.
+  - Rows were whole-message rows plus `lookup:sprouts` sentence rows: the first real use of lookup rows.
+  - A fresh reviewer ran, then re-reviewed 3 rewrites.
+  - `claim_not_in_quote` means the notes still claim facts about the user that the profile does not hold word for
+    word. That is a write fault, not a row fault.
+- **Free sources only:** Clay `search-contacts` and Sprouts `sprouts_lookup`. No Apollo, Crustdata or Vibe tool was
+  called.
+
+### 13:56 (scheduled; inferred from Job360 data, because the 14:09 fire overwrote its record)
+- **Claims.** Reach and network both claimed at 13:56:55.
+- **Visible work:**
+  - Estuary (857): 2 people from estuary.dev/about, the employer's own site.
+  - Network: 3 people (51D from its own job ad; HelmGuard x2 from helmguard.ai/about).
+  - Visible total: 5 of 10.
+  - Its other reach jobs and its mark_done are not visible.
+- **Reviews.** The reviewed people show review.state weak.
+- **Another session.** At 13:51, before this claim, another session added 16 contacts on jobs 1153-1157, all
+  lookup-proven, with reviews. Who it was is unknown.
+
+### What is left
+1. **Weak reviews: the content.** With row coverage fixed (#1717 live from the 14:56 run), the remaining code is
+   `claim_not_in_quote`: drafts state user facts in words the profile does not hold. Score the 14:56 run to separate
+   the two causes.
+2. **Network can be marked before any work** (12:56 run). Proposed: network needs `searched` when short. This is a
+   decision for Kits or the owner.
+3. **Read "dated employer page" correctly:** a footer year is not a page date (12:56 run). Proposed recipe line.
