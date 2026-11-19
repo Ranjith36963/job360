@@ -1,7 +1,7 @@
 """--every-title (owner, 2026-11-18): the assistant judges titles against the profile, never a word list.
 
 In that mode the kit drops no job by --titles phrases, --exclude-title-words or --max-years; it only attaches a
-``title_hint`` (a signal). The hunt recipe tells the assistant to read the titles and decide.
+``title_hint`` (a signal). Since 2026-11-19 the hunt recipe no longer passes it: one pass cut by the profile's titles.
 """
 
 from __future__ import annotations
@@ -65,12 +65,14 @@ def test_a_row_with_every_hint_negative_is_still_written():
     assert hint["matched_target_phrase"] is False and hint["guessed_min_years"] == 8
 
 
-def test_recipe_says_the_assistant_judges_titles_and_names_no_word_list():
+# Owner, 2026-11-19: the recipe no longer runs --every-title (the flag stays in the kit, tested above). The
+# profile's target phrases are the first cut; no exclude word and no years test drops an ad; the assistant judges
+# level and fit from the ad it reads in full.
+def test_recipe_cuts_by_the_profile_titles_only_and_the_assistant_judges_the_ad():
     from src.api.routes.recipes import load_recipe
 
     flat = " ".join(load_recipe("hunt").text.lower().split())
-    assert "--every-title" in flat
-    assert "you read the titles and decide which fit the profile's targets and level" in flat
-    assert "then read the kept ads in full" in flat
-    assert "title_hint" in flat and "only a signal" in flat
-    assert "--exclude-title-words" not in flat and "--max-years" not in flat
+    gives = flat.replace("never pass `--every-title`, `--titles-only` or `--keep-titles`", "")  # the one ban line
+    assert "--every-title" not in gives
+    assert "the kit keeps an ad only when its title contains one of those phrases" in flat
+    assert "you judge level and fit from the ad" in flat
