@@ -433,7 +433,7 @@ def _refuse_unsearched_jobs(user: CurrentUser, score: PeopleScoreOut, searched: 
     missing = [i for i in short if i not in searched]
     unsaid: dict[str, list[str]] = {}
     for i in (i for i in short if i in searched):
-        _log("people_run_searched", user, job=i, sources=",".join(f"{k}={v}" for k, v in searched[i].items()))
+        _log("people_search_counts", user, job=i, sources=",".join(f"{k}={v}" for k, v in searched[i].items()))
         names = [n for n in _FREE_LOOKUPS if n not in {k.lower() for k in searched[i]}]
         if names:
             unsaid[i] = names
