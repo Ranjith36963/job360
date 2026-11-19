@@ -701,8 +701,66 @@ def merged_order(queued_at: dict[int, str], outreach: list[dict[str, Any]]) -> l
     return [k[3] for k in sorted(keyed)]
 
 
+async def _not_ready(
+    db: JobDatabase, user_id: str, kept: list[tuple[int, routing.Route]], blocks: dict[int, dict[str, Any]],
+) -> dict[int, str]:
+    """``{application_id: why}`` for the rows the PC run cannot take to ``check_submit``'s yes (2026-11-19): ``no_cv``
+    (the CV run writes one), ``cv_not_strong`` (a CV check_submit stops on with ``cv_not_seen``: neither seen nor
+    cleared by a strong review, :func:`kit.cvs_cleared_for_apps`, the gate's own rule) or ``waiting_on_owner`` (an
+    open ask the gate counts, :func:`kit.open_ask_kinds_for_apps`, the ONE source #1676 made). A block routed here
+    is Job360's browser's failure, the PC run's to clear, so the ask that block opened (its kind,
+    ``blocked.ASK_KIND_FOR_REASON``) is not the owner's; a block that is the owner's never reaches ``kept``
+    (:func:`_application_tasks` routes only own-browser blocks). Read-only; a fixed number of queries."""
+    from src.services.applications import blocked, kit  # noqa: PLC0415
+
+    ids = [a for a, _ in kept]
+    if not ids:
+        return {}
+    cvs, cleared = await kit.cvs_cleared_for_apps(db, user_id, ids)
+    asks = await kit.open_ask_kinds_for_apps(db, user_id, ids)
+    out: dict[int, str] = {}
+    for app_id in ids:
+        own = None
+        if app_id in blocks:
+            own = blocked.ASK_KIND_FOR_REASON.get(str(blocks[app_id].get("reason") or ""), "") or "question"
+        if app_id not in cvs:
+            out[app_id] = "no_cv"
+        elif app_id not in cleared:
+            out[app_id] = "cv_not_strong"
+        elif any(k != own for k in asks.get(app_id, ())):
+            out[app_id] = "waiting_on_owner"
+    return out
+
+
+HELD_WHY = ("cv_not_strong", "no_cv", "waiting_on_owner")
+
+
+def _held_counts(ready: int, held: dict[int, str]) -> dict[str, int]:
+    """The list reply's ``applications`` counts: rows offered, and rows held back by why."""
+    return {"ready": ready, **{w: sum(1 for v in held.values() if v == w) for w in HELD_WHY}}
+
+
+def _selection_log(user_id: str, kept: list[tuple[int, routing.Route]], held: dict[int, str]) -> None:
+    """``pc_queue_selection ready=N held_cv=N held_owner=N``: the line that would have shown 09:08's run getting
+    three ``fix_cv`` rows first. Ids (capped) and reason codes only."""
+    cv = sorted(a for a, w in held.items() if w in ("cv_not_strong", "no_cv"))
+    owner = sorted(a for a, w in held.items() if w == "waiting_on_owner")
+    get_audit_logger().info(
+        f"pc_queue_selection ready={len(kept)} held_cv={len(cv)} held_owner={len(owner)}",
+        extra={
+            "event": "pc_queue_selection", "user_id": safe_log_value(user_id), "result": "ok",
+            "ready": len(kept), "held_cv": len(cv), "held_owner": len(owner),
+            "no_cv": sum(1 for w in held.values() if w == "no_cv"),
+            "ready_ids": safe_log_value(",".join(str(a) for a, _ in kept[:20]), max_len=200),
+            "held_cv_ids": safe_log_value(",".join(str(a) for a in cv[:20]), max_len=200),
+            "held_owner_ids": safe_log_value(",".join(str(a) for a in owner[:20]), max_len=200),
+        },
+    )
+
+
 async def _application_tasks(
-    db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str]
+    db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str],
+    summary: Optional[dict[str, int]] = None,
 ) -> list[dict[str, Any]]:
     from src.services.applications import blocked, kit, spine  # noqa: PLC0415
     from src.services.browser_agent import learned  # noqa: PLC0415
@@ -763,6 +821,15 @@ async def _application_tasks(
     if routes:
         _log("own_browser_application_order", user.id, "ok", total=len(routes), below_line=sorted(dropped),
              tried=len(last_try), first=[a for a, _ in kept[:3]])
+    # 2026-11-19 (PC run 09:08): 676, 677 and 679 were handed out first, all three stopped at submit_preview
+    # ``ask / cv_not_seen``, and the run stopped before the 116 rows that need nothing from the owner. Only a row
+    # check_submit can pass is the PC run's; the rest stay the CV run's or the owner's (``held``).
+    held = await _not_ready(db, user.id, kept, blocks)
+    kept = [(a, r) for a, r in kept if a not in held]
+    if kept or held:
+        _selection_log(user.id, kept, held)
+    if summary is not None:
+        summary.update(_held_counts(len(kept), held))
     out: list[dict[str, Any]] = []
     for app_id, route in kept:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
@@ -789,12 +856,22 @@ async def queue_tasks(
     applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
     batch-queued Easy Apply applications (an apply link on linkedin.com, no open block); applications never let go
     first, then the one let go longest ago, and never one the user's own rule drops below the line. With a
-    ``session`` (an assistant's read) an application another session holds is left out; the website passes none."""
+    ``session`` (an assistant's read) an application another session holds is left out; the website passes none.
+    An application is a task only when check_submit can pass it (:func:`_not_ready`, 2026-11-19)."""
+    return (await queue_selection(db, user, now, session))[0]
+
+
+async def queue_selection(
+    db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str] = None
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """:func:`queue_tasks` and the application counts the list reply shows: ``{ready, cv_not_strong, no_cv,
+    waiting_on_owner}`` (rows offered, and rows held back for the CV run or the owner, by why)."""
     from src.services.applications import pc_duties  # noqa: PLC0415
 
+    summary: dict[str, int] = _held_counts(0, {})
     tasks = (await _contact_tasks(db, user.id, now) + await pc_duties.tasks(db, user.id, now)
-             + await _application_tasks(db, user, now, session))
-    return tasks[:QUEUE_MAX]
+             + await _application_tasks(db, user, now, session, summary))
+    return tasks[:QUEUE_MAX], summary
 
 
 # ── Take and release ────────────────────────────────────────────────────────────────────────────────────

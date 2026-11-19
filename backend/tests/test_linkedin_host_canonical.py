@@ -20,6 +20,7 @@ from src.services.applications import own_browser, spine
 from src.services.browser_agent import routing
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, LINKEDIN_REFUSED, EgressProxy
 from src.services.fetch.guard import canonical_host, is_linkedin_host
+from tests._pc_ready import pc_ready
 
 TRICKS = [
     "https://www.ⓛinkedin.com/jobs/view/1",  # ⓛ
@@ -203,6 +204,7 @@ async def test_a_trick_job_link_waits_in_the_own_browser_as_link_unclear_and_is_
             stored = str(dict(await cur.fetchone())["job_url"])
         assert routing.is_linkedin(stored), stored  # whatever bring kept, it still fails closed
         assert not routing.names_linkedin(stored), stored  # ...but it is not LinkedIn
+        await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
         queued = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "queued"})
         assert queued.status_code == 201, queued.text
         token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]

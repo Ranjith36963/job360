@@ -21,6 +21,7 @@ from src.services.applications import blockers, needs_you_count
 from src.services.browser_agent import routing
 from src.services.profile import schedule
 from src.services.profile.models import CVData, UserProfile
+from tests._pc_ready import pc_ready
 
 CODES = "assistant_settings.use_email_codes"
 FORM = "https://job-boards.greenhouse.io/northwind/jobs/7"
@@ -124,6 +125,7 @@ async def test_the_pc_queue_lists_the_assistants_code_box_only_when_on(authentic
         _seed(uid)
         await _codes(client, True)
         app_id = await _bring(client)
+        await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
         await _otp(client, app_id)
         queue = (await client.get("/api/own-browser/queue")).json()
         assert queue["count"] == 1 and queue["tasks"][0]["task_id"] == f"application:{app_id}"

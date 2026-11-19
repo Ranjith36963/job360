@@ -20,6 +20,7 @@ from src.api.routes import schedule as schedule_route
 from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import needs_you_count as needs_you_module
+from tests._pc_ready import pc_ready
 
 NOW = datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)  # a Wednesday, inside 09:00-17:00 London (= UTC)
 LIMIT = timedelta(hours=settings.PC_IDLE_WARN_HOURS)
@@ -247,6 +248,7 @@ async def test_a_non_linkedin_application_taken_by_the_pc_is_pc_activity(authent
     clock = _Clock(monkeypatch)
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 2)
+        await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
         user = CurrentUser(id=authenticated_async_context.fixture_user_id, email="u@example.com")
         async with browser_routes._db() as db:  # noqa: SLF001 - Job360's own browser hit a sign-in wall
             await blocked_service.record_browser_block(

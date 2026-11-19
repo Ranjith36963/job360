@@ -4,7 +4,7 @@
   raises no blocker on the user or the user's PC: no ``approve_cv``, no ``apply_by_hand``, no queued-on-your-PC,
   and no batch place. ``needs_you_count`` and ``schedule._waiting_on_you`` agree on it.
 * F10: an open job with a CV, no fill and not queued is the ASSISTANT's ("queue or drop this job"), never the
-  user's; the your-PC queued blocker reads "apply from your PC".
+  user's; the your-PC queued blocker reads "apply from your PC" (a job with a CV; with none it is "write the CV").
 
 Real Postgres, real HTTP doors to seed, the services called directly to read. Helpers are copied, never imported
 from another test module (schema isolation).
@@ -181,6 +181,8 @@ async def test_an_open_job_with_a_cv_never_queued_is_the_assistants_queue_or_dro
 async def test_a_job_queued_on_the_users_pc_reads_apply_from_your_pc(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 4, queue=True, url="https://www.linkedin.com/jobs/view/4242424242")
+        # 2026-11-19: with a CV; a CV-less PC row reads "write the CV" (tests/test_pc_queue_ready_rows.py).
+        await _cv(client, app_id, seen=True)
     rows = (await _blockers(fixture_user_id, [app_id]))[app_id]
     queued = [b for b in rows if b["kind"] == "queued"]
     assert [(b["actor"], b["label"]) for b in queued] == [("your_pc", "apply from your PC")], rows

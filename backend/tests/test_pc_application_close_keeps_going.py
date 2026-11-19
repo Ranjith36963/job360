@@ -21,6 +21,7 @@ from src.api.auth_deps import CurrentUser
 from src.api.routes import browser as browser_routes
 from src.services.applications import blocked as blocked_service
 from src.services.profile.models import CVData, UserPreferences, UserProfile
+from tests._pc_ready import pc_ready
 
 
 def _seed(user_id: str) -> None:
@@ -42,7 +43,9 @@ async def _bring(client: AsyncClient, n: int) -> int:
         "remote": False, "apply_url": f"https://northwind{n}.example/careers/{n}", "description": "Build it. " * 8,
     })
     assert resp.status_code == 200, resp.text
-    return int(resp.json()["application_id"])
+    app_id = int(resp.json()["application_id"])
+    await pc_ready(client, app_id)  # 2026-11-19: only a row check_submit can pass is a PC task
+    return app_id
 
 
 async def _browser_block(ctx: Any, app_id: int) -> None:

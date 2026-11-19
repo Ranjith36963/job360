@@ -76,6 +76,18 @@ class PcIdleOut(BaseModel):
     text: str
 
 
+class QueueHeldOut(BaseModel):
+    cv_not_strong: int = 0  # a CV check_submit stops on (cv_not_seen): the CV run reviews or fixes it first
+    no_cv: int = 0  # no CV yet: the CV run writes one
+    waiting_on_owner: int = 0  # an open ask the user answers first
+
+
+class QueueApplicationsOut(BaseModel):
+    """2026-11-19: the PC run is offered only applications check_submit can pass; the rest are counted, by why."""
+    ready: int = 0
+    held_back: QueueHeldOut = Field(default_factory=QueueHeldOut)
+
+
 class QueueOut(BaseModel):
     open_now: bool
     why: Why
@@ -86,6 +98,7 @@ class QueueOut(BaseModel):
     tasks: list[OwnBrowserTaskItemOut]
     # Owner #12: `open_now` says the queue MAY run, never that a PC session is working it; this says none is.
     pc_idle: Optional[PcIdleOut] = None
+    applications: QueueApplicationsOut = Field(default_factory=QueueApplicationsOut)
 
 
 class TakeIn(BaseModel):
@@ -180,14 +193,16 @@ async def queue(
     try:
         label = own_browser.session_label(session) if session else None
         win = await own_browser.window(db, user.id, now)
-        tasks = await own_browser.queue_tasks(db, user, now, label)
+        tasks, counts = await own_browser.queue_selection(db, user, now, label)
         idle = await own_browser.pc_idle(db, user.id, now, len(tasks))
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # _raise always raises
     own_browser.log_read(user.id, len(tasks))
+    held = QueueHeldOut(**{w: counts[w] for w in own_browser.HELD_WHY})
     return QueueOut(**win, count=len(tasks), tasks=[OwnBrowserTaskItemOut(**t) for t in tasks],
-                    pc_idle=PcIdleOut(**idle) if idle else None)
+                    pc_idle=PcIdleOut(**idle) if idle else None,
+                    applications=QueueApplicationsOut(ready=counts["ready"], held_back=held))
 
 
 @router.post("/own-browser/take", response_model=TakeOut, dependencies=AUTH_FIRST)
