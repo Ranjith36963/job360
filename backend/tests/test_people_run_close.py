@@ -166,7 +166,8 @@ async def test_job360_counts_the_people_never_the_run(authenticated_async_contex
             body = resp.json()
             assert full != thin, (full, thin)
             assert body["outcome"] == "partial", body["score"]
-            assert body["score"] == {"per_job": {str(full): 3, str(thin): 1}, "network": None, "target": 5, "minimum": 3}
+            assert body["score"] == {"per_job": {str(full): 3, str(thin): 1}, "network": None, "target": 5, "minimum": 3,
+                                     "agency": []}
             assert f"{thin}: 1 of 5" in body["note"] and f"{full}:" not in body["note"]
             runs = (await client.get("/api/schedule/status")).json()["duties"]
             row = next(r for r in runs if r["duty"] == "reach")

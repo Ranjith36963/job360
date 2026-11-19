@@ -1679,6 +1679,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done",
         reason: MarkDoneReason = None, note: MarkDoneNote = "", report: Optional[dict[str, Any]] = None,
         reviewed: bool = False, searched: Optional[dict[str, dict[str, int]]] = None,
+        agency: Optional[list[int]] = None,
     ) -> dict[str, Any]:
         """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach | network (reach also
         takes `application_ids`, the ones you worked; batch is refused 409 unless whats_due(duties=["batch"])
@@ -1695,13 +1696,15 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         with what is missing. reach/network: `reviewed`=true only when
         the Doctor and a separate reviewer checked every person and note; else done is recorded partial. Job360
         counts the people itself: a job under 3 (network under 5) is recorded partial; the reply has `score`. reach:
-        `searched` {application id: {sprouts: n, clay: n, <source>: n}} for each job left under 3, else 409."""
+        `searched` {application id: {sprouts: n, clay: n, <source>: n}} for each job left under 3, else 409;
+        `agency` = ids of agency jobs (or ads naming no employer): full with 1 named recruiter."""
         if len(note) > 300:
             raise _tool_error(HTTPException(422, "note: at most 300 characters"))
         try:
             body = schedule_route.MarkDoneIn.model_validate({
                 "duty": duty, "application_ids": application_ids, "outcome": outcome, "reason": reason or None,
                 "note": note, "report": report, "reviewed": reviewed, "searched": searched,
+                "agency": agency,
             })
         except ValidationError as exc:
             raise _validation_error(exc) from None
