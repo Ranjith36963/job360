@@ -94,7 +94,8 @@ async def test_an_application_let_go_in_a_pc_run_says_take_again_and_take_gives_
             taken = int(first["task"]["application_id"])
             body = await _kit_then_let_go(agent, taken, "pc-1905")
             nxt = int(body["next_task"]["task"]["application_id"])  # pc-2306: the reply takes the next one
-            assert body["next"] == f"Do this task now: application:{nxt} (application). Its claim is already yours."
+            assert body["next"] == (f"Do this task now: application:{nxt} (application): start it with get_application_kit "
+                                    "(its next). 40 of the run's 40 minutes are left: never stop early.")
             again = await _take(agent, "pc-1905")
             assert again["status"] == "task", again
             assert int(again["task"]["application_id"]) in set(apps) - {taken}

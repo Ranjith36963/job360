@@ -116,7 +116,7 @@ async def test_a_duty_released_in_a_pc_run_hands_back_the_next_task_already_clai
             assert nxt["status"] == "task", nxt
             assert (nxt["task"]["kind"], nxt["task"]["contact_id"]) == ("linkedin_outreach", contact_id)
             assert body["next"] == (f"Do this task now: contact:{contact_id} (linkedin_outreach). "
-                                    "Its claim is already yours.")
+                                    "Its claim is already yours. 40 of the run's 40 minutes are left: never stop early.")
             again = await _take(agent)  # the same session asking again gets that claim back: it is its own
             assert (again["status"], again["task"]["contact_id"]) == ("already_yours", contact_id)
 
@@ -136,7 +136,8 @@ async def test_an_application_let_go_in_a_pc_run_hands_back_a_different_applicat
             assert nxt["status"] == "task", nxt
             other = int(nxt["task"]["application_id"])
             assert other in set(apps) - {taken}
-            assert body["next"] == f"Do this task now: application:{other} (application). Its claim is already yours."
+            assert body["next"] == (f"Do this task now: application:{other} (application): start it with get_application_kit "
+                                    "(its next). 40 of the run's 40 minutes are left: never stop early.")
 
 
 @pytest.mark.asyncio

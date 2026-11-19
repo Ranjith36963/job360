@@ -77,6 +77,8 @@ HELD_BACK_WHY = ("weekly_limit", "release_backoff", "pace_gap", "daily_max", "cl
 APPLICATION_RELEASE_COOLDOWN_MINUTES = 60
 # How long after its newest take a session still counts as the live PC run (the recipe's 40-minute cap + margin).
 PC_RUN_MINUTES = 45
+# The PC run's length in minutes (own_browser.md step 0): a release reply tells the model how many are left.
+PC_RUN_BUDGET_MINUTES = 40
 DECISIONS = ("approve", "decline")
 WHY_WORDS = {
     "job360_login_required": "Job360's browser hit a sign-in page.",
@@ -425,13 +427,51 @@ async def last_pc_activity_at(db: JobDatabase, user_id: str) -> Optional[datetim
 async def stamp_take(db: JobDatabase, user_id: str, now: datetime, session: str = "") -> None:
     """One slot per user: the newest own-browser take, whatever it answered (owner #12: a PC session that is up
     but finds nothing to do, or is told to wait, is alive), and that take's ``session`` label (``state``; read by
-    :func:`next_after_hold_release`). Not a scheduled duty: ``whats_due`` never reads it."""
+    :func:`next_after_hold_release`) with ``started``, the time of that session's FIRST take of the run (kept while
+    the same session's previous take is inside :data:`PC_RUN_MINUTES`; read by :func:`_minutes_left`). Not a
+    scheduled duty: ``whats_due`` never reads it."""
+    cur = await db._db.execute(
+        "SELECT done_at, state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, TAKE_SLOT)
+    )
+    prev = await cur.fetchone()
+    started = now.astimezone(timezone.utc)
+    if prev is not None:
+        got = dict(prev)
+        try:
+            old = json.loads(got["state"] or "{}")
+        except ValueError:
+            old = {}
+        fresh = _when(got["done_at"])
+        before = _when(old.get("started")) if isinstance(old, dict) and old.get("started") else None
+        if (isinstance(old, dict) and old.get("session") == session and fresh is not None and before is not None
+                and now - fresh <= timedelta(minutes=PC_RUN_MINUTES)):
+            started = before
     await db._db.execute(
         "INSERT INTO assistant_duty_runs (user_id, duty, done_at, state) VALUES (?, ?, ?, ?) "
         "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, state = EXCLUDED.state",
-        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat(), json.dumps({"session": session})),
+        (user_id, TAKE_SLOT, now.astimezone(timezone.utc).isoformat(),
+         json.dumps({"session": session, "started": started.isoformat()})),
     )
     await db._db.commit()
+
+
+async def _minutes_left(db: JobDatabase, user_id: str, now: datetime) -> int:
+    """Minutes of the run's :data:`PC_RUN_BUDGET_MINUTES` left, from the take slot's ``started`` (missing or
+    unparsable: the run starts now). PC run pc-0406 (2026-11-19) stopped 3 minutes in: only this clock ends a run."""
+    cur = await db._db.execute(
+        "SELECT state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, TAKE_SLOT)
+    )
+    slot = await cur.fetchone()
+    started = None
+    if slot is not None:
+        try:
+            state = json.loads(dict(slot)["state"] or "{}")
+            started = _when(state.get("started")) if isinstance(state, dict) and state.get("started") else None
+        except (ValueError, TypeError):
+            started = None
+    if started is None:
+        started = now
+    return max(0, PC_RUN_BUDGET_MINUTES - int((now - started).total_seconds() // 60))
 
 
 async def _pc_run_session(db: JobDatabase, user_id: str, now: datetime) -> str:
@@ -1115,17 +1155,26 @@ async def _hand_next(
     # The web (a person at Job360's site) is never a PC run; nor is any session but the newest live taker.
     if not label or actor_for(user) == "web" or label != await _pc_run_session(db, user.id, now):
         return await _keep_going(db, user, label, kind, reason, now, released_id)
+    left_min = await _minutes_left(db, user.id, now)
+    if left_min == 0:
+        _log("own_browser_next_task", user.id, "run_over", session=label, released=released_id, minutes_left=0)
+        return {"next": f"The run's {PC_RUN_BUDGET_MINUTES} minutes are up: write the summary.", "next_task": None}
     got = await take(db, user, label, now, skip_task_id=released_id)  # never the task just closed, backoff or not
     task = got.get("task")
+    clock = f"{left_min} of the run's {PC_RUN_BUDGET_MINUTES} minutes are left: never stop early."
     if got["status"] in ("task", "already_yours") and task is not None:
-        nxt: Optional[str] = (f'Do this task now: {task["task_id"]} ({task["kind"]}). '
-                              "Its claim is already yours.")
+        if task["kind"] != "application":
+            nxt: Optional[str] = (f'Do this task now: {task["task_id"]} ({task["kind"]}). '
+                                  f"Its claim is already yours. {clock}")
+        else:  # an application is claimed only when its kit is read with the session
+            nxt = (f'Do this task now: {task["task_id"]} (application): start it with get_application_kit '
+                   f"(its next). {clock}")
     else:  # wait / busy / daily_limit: "Keep going" only while something besides the task just closed waits
         left = None if got["status"] in ("empty", "closed", "paused") else (
             await _keep_going(db, user, label, kind, reason, now, released_id))["next"]
         nxt = left or "Queue done: write the summary."
     _log("own_browser_next_task", user.id, got["status"], session=label, released=released_id,
-         next_task=task["task_id"] if task is not None else None)
+         next_task=task["task_id"] if task is not None else None, minutes_left=left_min)
     return {"next": nxt, "next_task": got}
 
 
