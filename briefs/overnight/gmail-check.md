@@ -38,3 +38,19 @@ open application. Scores come from the run's transcript (reads only).
 - Fix: none. Two runs in a row at 90%+ (92, 95): per the orders I stop fixing and keep scoring until 06:00.
 - Decision taken without the owner: no recipe change for the missing draft; if Kits wants recruiter questions
   always drafted, the recipe line "A reply that needs an answer: a Gmail DRAFT only" can say "always".
+
+## 00:26 run  (score 93%)
+- Achieved: claim with duties; one date search, both pages read (54 threads); 19 mails read (17 opened, the two
+  large NaukriGulf digests read from saved tool output); every job mail matched or parked; DoiT's Greenhouse mail
+  again NOT put on Brunswick Group; 15 parked (3 new, rest already parked); cursor moved for all 1013 open
+  applications in ONE call; mark_done after the cursor; 3-line summary, one action per parked mail.
+- Missed: (1) this run parked 11 job-alert digests (Guinness, Amey, Essar, EBRD, Computacenter, Placed, PA Media,
+  NaukriGulf) that the 23:26 run read and left alone: inconsistent and it adds Needs-you noise (action "dismiss").
+  (2) A wrong number in its notes: "cursor moved ... for all 227 listed applications"; the tool call carried 1013.
+  (3) Halimah S. reply: still no draft (3rd run).
+- Biggest cause: the recipe's "pick the job mail" step does not say what to do with job-board alerts that name no
+  application of the user (read them, park nothing). Small; above target.
+- Fix: none tonight (above 90%, two earlier runs at 92 and 95: the orders say stop fixing). Suggested one-line
+  recipe change for Kits: step 3 "A job-board alert or digest that names no application of the user is read,
+  never parked."
+- Decision taken without the owner: no PR; logged as a suggestion.
