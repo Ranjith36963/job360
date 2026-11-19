@@ -74,3 +74,24 @@ score is about handling, not submits.
   in the 00:36-00:51 window; marked ready at 00:30 if CI is green, else at 00:52.
 - Decision taken without the owner: I changed one case in test_run_outcomes that asserted "done" with a
   ready row left is accepted. That case encoded this gap; it now asserts the 409. No assert was loosened.
+
+## 00:41 run  (not scored, 0 workable rows)
+- Achieved: claimed and closed (`mark_done` 00:50:48, failures 0). No row opened: every queued row with a CV
+  that Job360's browser runs waits on the owner (227 rows waiting on you, whats_due). The fit_judged events at
+  00:50-00:52 belong to the 00:52 hunt; its 10 new rows (1088-1098) were queued after this run's claim.
+- Second run in a row with nothing to work, but batch keeps coming due ("queue_waiting"): see batch_hold below.
+- #1692 (the "done" check): green at 00:30, held as a draft through the window, marked ready 00:53. It then sat
+  "blocked": the merge cage had not re-judged after the draft (its reviewer checks still read "skipped" from
+  the draft run). I cannot dispatch auto-merge.yml from this session (403), so I merged main into the branch
+  at 01:14 (the repo's own fix for a stale cage) to re-run CI. A draft-conversion guard at 01:32 keeps it out
+  of the 01:36-01:51 window if CI is slow.
+
+## Needs the owner
+- **batch_hold (owner rule of 2026-11-01).** `services/profile/schedule.py:175` keeps the batch due while any
+  queued row has no CV ("writing a CV needs nobody"). Since #1646 (your yes, 18 Nov) the batch never writes a
+  CV; the CV run does. So batch comes due every hour with nothing it may do (22:41 and 00:41 tonight, 15:41
+  to 17:41 yesterday). Proposed change: batch is due only while it has batch work, by the same test mark_done
+  uses (`queue_preflight.fillable_rows(with_cv=True)`, plus rows you pressed Send on). CV-less rows stay the CV
+  run's. Not built: it reverses your own rule, `tests/test_batch_waiting_on_you.py` encodes it, and Kits' order
+  is not your yes. Cost of waiting: empty runs, not lost work. Say yes and I build it (failing test first).
+- Decision taken without the owner: not changing batch_hold tonight, for the reason above.
