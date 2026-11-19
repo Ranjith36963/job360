@@ -535,3 +535,17 @@ def test_check_pdf_reads_the_rendered_text_layer():
     }
     detail = found["keyword_coverage"]["detail"]
     assert "covered: Docker" in detail and "missing (have it): Rust" in detail
+
+
+def test_a_line_break_ends_a_name():
+    """Prod 2026-11-19: an email's subject line ("... at Northwind") ran into the greeting below it ("Hi Rita,")
+    and the body's "I", so "Northwind Hi Rita I" was an unknown name and every email with a subject asked
+    unsupported_claims instead of sending."""
+    from src.services.applications import cv_checks as checks
+
+    source = "Data engineer with 2 years of Python experience at Acme."
+    text = "Subject: Data Engineer role at Northwind\n\nHi Rita,\n\nI am a data engineer at Acme."
+    assert checks.unsupported_names(text, source, "Rita Recruiter Northwind Data Engineer") is None
+    # A name on its own line that nothing vouches for is still caught.
+    caught = checks.unsupported_names("I worked at Globex Corp\nThanks", source, "Northwind")
+    assert caught is not None and "Globex Corp" in caught["detail"]
