@@ -68,6 +68,7 @@ async def test_a_row_queued_after_the_claim_waits_for_the_next_batch(authenticat
     async with authenticated_async_context() as client:
         async with await _agent(client, fixture_user_id) as agent:
             before = await _queued_job(client, 1)
+            await _has_cv(client, before)  # owner 2026-11-19: batch work makes the batch due (claimable)
             await _claim(agent)
             await _waits_on_owner(client, before)
             later = await _queued_job(client, 2)  # a hunt brought it while the batch ran: no CV, no ask

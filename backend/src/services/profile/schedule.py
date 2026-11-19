@@ -138,9 +138,13 @@ class DueFacts:
     reach_ids: list[int] = field(default_factory=list)
     # Queued jobs that wait on the user (an open ask, an open block, a CV not seen yet; owner 2026-10-25).
     waiting_on_you: int = 0
-    # Queued jobs still missing their tailored CV (owner 2026-11-01): writing one needs nobody, so they keep
-    # the batch due even when every queued job also waits on the user.
+    # Queued jobs still missing their tailored CV: the CV run's work, shown for counts only (owner 2026-11-19:
+    # no longer keeps the batch due; the batch never writes a CV since #1646).
     cv_missing: int = 0
+    # Owner 2026-11-19: the batch's own work - rows mark_done's stop counts (queue_preflight.fillable_rows,
+    # with_cv) plus rows the user pressed Send on (submit_now_ids). None (a caller that did not read it) =
+    # every queued row not waiting on the user.
+    batch_work: Optional[int] = None
     # Failed runs in a row per duty (0 or missing = the last run was done or partial).
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
@@ -170,9 +174,10 @@ def batch_hold(f: DueFacts) -> Optional[str]:
         return "not_allowed"
     if f.queued <= 0:
         return "queue_empty"
-    # Every queued job waits on the user and every one has its CV: a run could do nothing (2026-11-01: a
-    # missing CV is work a run can do, so a row without one keeps the batch due).
-    if f.waiting_on_you >= f.queued and f.cv_missing <= 0:
+    # Owner 2026-11-19 (reverses 2026-11-01): due only while the batch has work of its own. A CV-less row is the
+    # CV run's; it no longer keeps the batch due (22:41, 00:41, 03:41 runs on 18-19 Nov had nothing to do).
+    work = f.batch_work if f.batch_work is not None else max(0, f.queued - f.waiting_on_you)
+    if work <= 0:
         return "waiting_on_you"
     if f.daily_left is not None and f.daily_left <= 0:
         return "daily_cap_reached"
@@ -563,6 +568,21 @@ async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
     return len(waiting)
 
 
+async def _batch_work(db: JobDatabase, user_id: str) -> int:
+    """The batch's own work (owner 2026-11-19): the rows mark_done's stop counts, plus rows the user pressed Send
+    on. Read-only; scoped by ``user_id``."""
+    from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
+    from src.utils.logger import get_audit_logger, safe_log_value  # noqa: PLC0415
+
+    rows = await queue_preflight.fillable_rows(db, user_id, with_cv=True)
+    sent = await queue_preflight.submit_now_ids(db, user_id)
+    work = len({int(r["id"]) for r in rows} | set(sent))
+    if not work:  # the hold is visible in the logs: no batch work, whatever else the queue holds
+        get_audit_logger().info("batch_held_no_work", extra={
+            "event": "batch_held_no_work", "user_id": safe_log_value(user_id), "result": "held"})
+    return work
+
+
 async def _cv_missing(db: JobDatabase, user_id: str) -> int:
     """How many queued jobs still have no tailored CV: the same rows mark_done's 409 names (owner 2026-11-01)."""
     from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
@@ -730,6 +750,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         queued=len(queue_ids),
         waiting_on_you=await _waiting_on_you(db, user_id, queue_ids) if apply_on_own else 0,
         cv_missing=await _cv_missing(db, user_id) if apply_on_own and queue_ids else 0,
+        batch_work=await _batch_work(db, user_id) if apply_on_own and queue_ids else 0,
         daily_left=rules.daily_left(cfg, counts),
         weekly_left=weekly_left,
         inside_hours=inside,

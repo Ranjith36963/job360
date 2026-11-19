@@ -35,6 +35,17 @@ async def _setup(client: AsyncClient, user_id: str) -> AsyncClient:
         "apply_url": "https://northwind.example/careers/7", "description": "Build the pipelines. " * 8,
     })
     assert job.status_code == 200, job.text
+    # Owner 2026-11-19: the batch is due only with batch work. A row the user pressed Send on is that work and
+    # never refuses the close, which is what these claim tests need (a CV-less row no longer makes it due).
+    app_id = int(job.json()["application_id"])
+    cv = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
+    assert cv.status_code in (200, 201), cv.text
+    fill = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_filled", "payload": {
+        "form_url": "https://northwind.example/careers/7/apply", "fields_count": 1}})
+    assert fill.status_code == 201, fill.text
+    yes = await client.post(f"/api/applications/{app_id}/send/approve",
+                            params={"form_filled_event_id": fill.json()["event_id"]})
+    assert yes.status_code == 201, yes.text
     on = await client.patch("/api/profile", json={
         "edits": [{"path": "assistant_settings.submit_mode", "value": "auto_when_sure"}]})
     assert on.status_code == 200, on.text

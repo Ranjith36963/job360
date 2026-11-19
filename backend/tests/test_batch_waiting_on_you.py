@@ -38,12 +38,16 @@ def test_all_queued_jobs_waiting_means_no_run_and_one_ready_means_a_run():
 
 
 def test_a_queued_job_without_a_cv_keeps_the_batch_due_when_every_job_waits():
-    """2026-11-01: 94 queued jobs waited on the owner, many without a CV, and every hourly run stopped at
-    whats_due. Writing a CV needs nobody, so a job without one keeps the batch due."""
-    no_cv = schedule.due_now(_facts(waiting_on_you=2, cv_missing=1), NOW)
-    assert [d["duty"] for d in no_cv["due"]] == ["batch"] and no_cv["batch_hold"] is None
-    every_cv = schedule.due_now(_facts(waiting_on_you=2, cv_missing=0), NOW)
+    """Owner 2026-11-19 REVERSES the 2026-11-01 rule this test was written for ("a job without a CV keeps the
+    batch due"): since #1646 the batch never writes a CV (the CV run does), and the overnight runs of 18-19 Nov
+    came due with nothing to do. A job without a CV no longer keeps the batch due; only batch work does
+    (test_batch_hold_batch_work.py). The name is kept so the history of the rule stays findable."""
+    no_cv = schedule.due_now(_facts(waiting_on_you=2, cv_missing=1, batch_work=0), NOW)
+    assert (no_cv["batch_hold"], no_cv["nothing_due"]) == ("waiting_on_you", True)
+    every_cv = schedule.due_now(_facts(waiting_on_you=2, cv_missing=0, batch_work=0), NOW)
     assert (every_cv["batch_hold"], every_cv["nothing_due"]) == ("waiting_on_you", True)
+    work = schedule.due_now(_facts(waiting_on_you=2, cv_missing=1, batch_work=1), NOW)
+    assert [d["duty"] for d in work["due"]] == ["batch"] and work["batch_hold"] is None
 
 
 async def _queued(client: AsyncClient, n: int) -> int:
@@ -83,7 +87,8 @@ async def test_asks_blocks_and_unseen_cvs_hold_the_batch_until_the_user_answers(
         saved = await client.post(f"/api/applications/{cv}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
         assert saved.status_code in (200, 201), saved.text
         await owners_turn(fixture_user_id, cv)  # reviews spent: approve_cv is the user's (owner 2026-11-13)
-        # 2026-11-01: the asked and the blocked job have no CV yet, so a run still has work: write them.
+        # Owner 2026-11-19: the job whose CV waits for the user's OK is still batch work (mark_done's own test:
+        # "CV OK holds only the submit, never the fill"); the CV-less asked and blocked jobs are not.
         no_cv = await _due(client)
         assert [d["duty"] for d in no_cv["due"]] == ["batch"] and no_cv["batch_hold"] is None
         assert no_cv["waiting_on_you"] == 3
@@ -91,6 +96,9 @@ async def test_asks_blocks_and_unseen_cvs_hold_the_batch_until_the_user_answers(
             done = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, Python."})
             assert done.status_code in (200, 201), done.text
             await owners_turn(fixture_user_id, app_id)
+        fill = await client.post(f"/api/applications/{cv}/events", json={"event_type": "form_filled", "payload": {
+            "form_url": f"https://northwind.example/careers/{cv}/apply", "fields_count": 1}})
+        assert fill.status_code == 201, fill.text  # its form is filled: the rest is the user's OK, not batch work
         held = await _due(client)
         assert (held["batch_hold"], held["waiting_on_you"], held["nothing_due"]) == ("waiting_on_you", 3, True)
         stuck_free = await client.post(f"/api/applications/{blocked}/events", json={
@@ -99,4 +107,5 @@ async def test_asks_blocks_and_unseen_cvs_hold_the_batch_until_the_user_answers(
         answered = await client.post(f"/api/asks/{ask.json()['id']}/answer", json={"answer": "One month"})
         assert answered.status_code == 200, answered.text
         still = await _due(client)
-        assert still["batch_hold"] == "waiting_on_you", "every job now has a CV the user has not seen"
+        # Owner 2026-11-19: the freed asked/blocked jobs have CVs and nothing open: their forms are batch work.
+        assert still["batch_hold"] is None and [d["duty"] for d in still["due"]] == ["batch"]
