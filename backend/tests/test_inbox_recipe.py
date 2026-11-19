@@ -75,3 +75,19 @@ def test_the_inbox_recipe_carries_every_rule_the_prompt_carried():
         "never call `get_application_kit`".lower(),
     ):
         assert rule.lower() in text.lower(), rule
+
+
+def test_the_email_body_decides_the_application_not_the_sender():
+    """Pattern audit 4.1 (2026-11-18): match_email lists candidates from the sender domain or the subject. A shared
+    ATS sender (greenhouse-mail.io) lists every job on that ATS, and a generic subject lists none. The 22:26 run got
+    DoiT's Greenhouse mail with Brunswick Group (also on Greenhouse) as the only candidate. Claude reads the body
+    and picks the one application it names, quoting the line; a candidate the body does not confirm is no match."""
+    text = " ".join(load_recipe("inbox").text.split()).lower()
+    for rule in (
+        "candidates are hints",
+        "the email body decides",
+        "quote: the exact line of the body that names it",
+        'match_email(subject="<the company the body names>")',
+        "a candidate the body does not name is no match",
+    ):
+        assert rule.lower() in text, rule

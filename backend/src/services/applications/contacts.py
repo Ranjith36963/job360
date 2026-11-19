@@ -278,8 +278,14 @@ def _refuse_found_via_mismatch(
     elif on_github != (found_via == "github"):
         fix = "a GitHub profile is found_via github, and found_via github needs the GitHub profile as source_url."
     elif found_via in _COMPANY_PAGE_VIA and not _company_owns_host(host, company, job_url):
-        fix = (f"{host} is not {company}'s own site; a news article is found_via other, a talk is speaker_page, "
-               "an event page is event.")
+        # Kits audit 3B (2026-11-18): a company's own site need not carry its name (Alphabet on abc.xyz), so this
+        # is a hint in the log, never a refusal: the assistant judged the page. LinkedIn/GitHub mismatches stay 422.
+        get_audit_logger().info(
+            "contact_found_via_unverified", extra={"event": "contact_found_via_unverified", "user_id": user_id,
+                                                   "reason": "company_host_unmatched", "found_via": found_via,
+                                                   "host": host},
+        )
+        return
     if not fix:
         return
     get_audit_logger().info(

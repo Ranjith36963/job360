@@ -635,3 +635,20 @@ def test_the_pc_alert_ranking_comes_from_the_users_own_profile_only():
     assert "the profile's own target titles and level (get_profile, step 1) first" in rank
     for title in ("junior", "graduate", "forward deployed", "agentic", "ai-native"):
         assert title not in flat(load_recipe("own_browser").text), title
+
+
+def test_the_cv_run_waits_for_its_agents_and_treats_quote_codes_as_a_fixable_review():
+    """CV run 22:33 (2026-11-18, score 0%): the run said "I'll end my turn here and wait for the reviewer
+    notifications" with five reviews unrecorded, and read claim_not_in_quote / quote_too_thin on 4 CVs as "not
+    mine to fix", so nothing was recorded or rewritten. A scheduled run has no later turn."""
+    from src.api.routes.recipes import load_recipe
+
+    lines = [flat(line) for line in load_recipe("cv").text.splitlines()]
+    review = next(line for line in lines if line.startswith("4. **review**"))
+    assert "run every writer and reviewer agent in the foreground" in review
+    assert "never end the turn while one is still running" in review
+    assert "a review that was not recorded is a miss" in review
+    weak = next(line for line in lines if line.startswith("6. **weak.**"))
+    assert "`claim_not_in_quote`, `quote_too_thin`, `no_evidence`" in weak
+    assert "new reviewer whose quotes hold every fact of that line" in weak
+    assert "same code again: rewrite that line" in weak

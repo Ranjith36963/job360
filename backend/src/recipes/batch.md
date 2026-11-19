@@ -11,7 +11,7 @@ country's; pass that Memory key to `check_form`; keep them back until a question
 the exact text typed (whole essays) in `form_filled` and `form_swept` answers. Before each `check_submit` compare each typed answer with the kit's for this country; fix, sweep. Before any ask, drop questions the kit answers.
 **Asks:** a missing Memory fact is never an `ask_user` (Job360 refuses a job-less one): list it under Needs you as "set on your Answer once page", by country, with row ids. Other `kit_missing` keys from every row go in ONE
 `ask_user` with no `application_id`; a question about one job goes in that job's own ask, ONE per job (read its open asks first; a repeat merges into it). 429 (Needs you full): never retry it this run; still fill the form
-(guesses marked guessed), keep working, list the question in the summary.
+(guesses marked guessed), keep working, list the question in the summary. Never ask about an optional field (no fact: leave it blank); a row with no fit: judge it yourself (`save_fit`), never ask apply-or-skip.
 **Job facts are not user facts:** a row missing its job country (or remote) is never an ask: from its ad (`get_application`) `update_job(application_id, country="<ISO alpha-2>")` (or remote), EVERY such row, skipped rows too; not in the ad: Not
 submitted. `mark_done` lists any left in `country_missing`: set them, then call it again.
 **Tool shapes** (else refused): events, `blocked` reasons and `mark_done` values as rules "Events" and SCHEDULE say; `check_form(application_id, questions, form_url)` takes no `session`; `browser` fill fields = [{ref, text}];
@@ -42,10 +42,10 @@ blocker. "approve_cv:you" waits on the CV run (`get_recipe("cv")`) or the user's
      `form_checked`, upload the CV, fill, `form_filled`, re-read every field, `form_swept`, the Doctor's Form answers check as its own pass (fix, sweep again; "Doctor check run: yes"), `check_submit`.
    - Any other browser (rules "Which browser"; own browser, sign-in sites): never open it, never read its kit. Make it ready (one ask for its missing answers if none is open), list it under Ready for your PC. A row
      whose apply link is on linkedin.com (Easy Apply) runs only in the user's own browser.
-   - CAPTCHA or bot check in Job360's browser (or its `needs_you`): `blocked` {reason captcha or bot_check, browser "job360", page_host, step, detail}; Job360 moves it to the PC. An emailed one-time code only while
+   - CAPTCHA or bot check in Job360's browser (or its `needs_you`, or a `captcha_text` signal whose `quote` is a real check): `blocked` {reason captcha or bot_check, browser "job360", page_host, step, detail}; Job360 moves it to the PC. An emailed one-time code only while
      `use_email_codes` is on (rules EMAIL CODES); Job360's browser or the setting off: `blocked` {reason otp_needed, browser}.
    - Posting gone (404, "no longer available", an ended window, on the employer's page or an aggregator): `blocked` {reason "posting_closed", evidence, browser, page_host}, never "other". The site says you applied:
-     already_applied_on_site. Sign-in, account, site error: `blocked` with the real reason. Then the next row.
+     already_applied_on_site (a look's `already_applied_text` signal is only a hint: its `quote` must be about THIS job). Sign-in, account, site error: `blocked` with the real reason. Then the next row.
    - Email-only job: `check_submit` with form_url mailto:<address>, never send it, then `blocked` manual_only. A job board or 403 page: the employer's own apply page for the same role, `update_job(apply_url)`. The site says you
      hit its own daily limit: `blocked` {reason: site_limit_reached, page_host}, then skip every other row on that host for the rest of the run and tell the user; rows on other sites go on.
    - Close the browser and record `hold_released` for every job you opened. Every opened job ends with `check_submit` or `blocked` before `mark_done`.
