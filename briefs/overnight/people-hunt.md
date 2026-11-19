@@ -53,3 +53,17 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
   {id: {sprouts: n, clay: n, <source>: n}} for each job left under 3, else 409 naming the jobs. Job360 checks the
   record is there and logs its counts (people_run_searched); it never judges effort. Failing test first; CI ends
   about 00:13, after the window.
+
+## 23:56 run  (score n/a: nothing due)
+- Achieved: the run obeyed Job360 in 6 s: "People hunt not due. The next reach and network run is at 00:57."
+- Missed: a whole hour of people search. The 22:56 failed marks (22:57:41) backed both duties off 2h.
+- Biggest cause: still the 22:56 failure, reason unknown here. It was a real failed mark of the main slot (last_done
+  22:57:41, next due 00:57:41), not a lapsed claim (sweep_lapsed only adds a LAPSED slot at the claim time).
+  No Job360 MCP read shows `last_reason` (only GET /api/schedule/status does), and this session has no Railway CLI.
+- Fix: "Needs the owner / Kits": read `schedule_duty_done duty=reach` at 22:57:41 (its reason) in Railway logs, or
+  GET /api/schedule/status as the owner. If it was network_blocked or rate_limited from one connector, that is the
+  next fix (a people run with free tools left should not fail; see _ONE_TOOL_DOWN).
+- #1689 (searched per job): CI green except one shard still running at 00:22; the first CI run caught a
+  sourcing-era token in my log name (people_run_searched contains run_search), renamed people_search_counts.
+  Auto-merge on; it should land before :51, so the 00:56 run is the first under it.
+- Decision taken without the owner: none.
