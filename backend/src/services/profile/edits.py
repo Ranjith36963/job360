@@ -1087,6 +1087,74 @@ def _refuse_memory_overwrite(user_id: str, actor: str, edits: list[tuple[str, An
         raise ProfileEditError(422, memory_fill.refusal(changes), "bad_value")
 
 
+def _refuse_dropped_approved(user_id: str, actor: str, edits: list[tuple[str, Any]], source: Any = "") -> None:
+    """Owner 2026-11-19: an assistant never removes an answer the user approved. At 10:42 that day an
+    assistant redrafting 21 guesses sent the whole ``user_info.answers`` list with only those 21, and the 71
+    approved answers fell out of the live profile (164 -> 21). Every approved record must still be there,
+    still ``approved: true`` and with the same answer (a changed one only as the user's own chat word,
+    ``source: user_said``), matched one to one among approved records on the validated values: a
+    ``remove_at``, a whole-list ``set``, or a turn into a draft (then a drop) is refused. Here, in the one
+    writer every door goes through; the user's own web writes are never judged."""
+    if not is_assistant_actor(actor) or not any(path == ANSWERS_PATH for path, _ in edits):
+        return
+    import logging  # noqa: PLC0415
+
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - storage imports this module
+    from src.utils.logger import safe_log_value  # noqa: PLC0415
+
+    stored = field_values(load_profile(user_id) or UserProfile(), [ANSWERS_PATH]).get(ANSWERS_PATH)
+    approved = [r for r in stored or [] if isinstance(r, dict) and r.get("approved") is True]
+    said = (source.get(ANSWERS_PATH) if isinstance(source, dict) else source) == SOURCE_USER_SAID
+    for path, value in edits:
+        if path != ANSWERS_PATH or not approved:
+            continue
+        left = [r for r in value or [] if isinstance(r, dict) and r.get("approved") is True] \
+            if isinstance(value, list) else []
+        lost: list[dict[str, Any]] = []
+        for rec in approved:
+            at = next((i for i, r in enumerate(left) if _same_answer(rec, r)), None)
+            if at is None or not (said or _words_of(left[at].get("answer")) == _words_of(rec.get("answer"))):
+                lost.append(rec)
+            else:
+                left.pop(at)
+        if not lost:
+            continue
+        names = ", ".join(str(r.get("topic") or r.get("question") or "?")[:40] for r in lost[:3])
+        logging.getLogger("job360.services.profile_edits").warning(
+            "profile_edit_refused reason=drops_approved_answers user=%s actor=%s lost=%d of=%d",
+            safe_log_value(user_id), safe_log_value(actor, max_len=60), len(lost), len(approved))
+        raise ProfileEditError(
+            422,
+            f"{path}: this would remove or change {len(lost)} answer(s) the user approved (e.g. {names}). "
+            "Nothing was saved. Change answers one at a time with op upsert and keep the rest; never turn an "
+            "approved answer into a draft or change its text; only the user does that.",
+            "bad_value",
+        )
+
+
+def _words_of(text: Any) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def _same_answer(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """The same saved answer: same company (its normalised key: "Acme Ltd" = "Acme"), same country, and
+    the same topic, else the same question."""
+    from src.services.applications.kit import normalized_company_key  # noqa: PLC0415
+    from src.services.profile import user_info  # noqa: PLC0415
+    from src.services.profile.answer_match import topic_key  # noqa: PLC0415
+
+    def scope(r: dict[str, Any]) -> tuple[str, str]:
+        company = str(r.get("company") or "").strip()
+        return (normalized_company_key(company) if company else "", user_info._twin_scope({**r, "company": ""}))
+
+    if scope(a) != scope(b):
+        return False
+    ta, tb = topic_key(a.get("topic")), topic_key(b.get("topic"))
+    if ta and tb:
+        return ta == tb
+    return bool(_words_of(a.get("question"))) and _words_of(a.get("question")) == _words_of(b.get("question"))
+
+
 def _answer_key(rec: dict[str, Any]) -> str:
     return " ".join(str(rec.get("question") or "").lower().split()) + "|" + str(rec.get("country") or "")
 
@@ -1188,6 +1256,7 @@ def record_edits(
     if not normalised:
         return []
     _refuse_memory_overwrite(user_id, actor, normalised)
+    _refuse_dropped_approved(user_id, actor, normalised, source)
     normalised = _stamp_saved_by(user_id, actor, normalised)
 
     key = f"profile_edit:{user_id}"

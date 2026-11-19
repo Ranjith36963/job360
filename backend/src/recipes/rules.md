@@ -886,7 +886,8 @@ ITEM OPS. On a list path an edit may carry `"op"` instead of resending the list:
 item N of the current `fields[...]` list, counted from 0; no value); `"upsert"`
 (`user_info.answers` only: value = ONE answer record; it replaces the saved answer
 with the same `topic` and `company`, else the same question and `company`, else it is
-added). The default `"set"` = the value is the whole value. Ops run in order inside the
+added). The default `"set"` = the value is the whole value. Never resend `user_info.answers` whole to change
+some: upsert each one; a write that drops an answer the user approved is refused. Ops run in order inside the
 same all-or-nothing call and the history keeps the resulting full list. An unknown op,
 an op on a path that is not a list, or an index out of range is refused: nothing saved.
 TWO ASSISTANTS: get_profile (and every update_profile reply) returns `profile_edit_id`,
