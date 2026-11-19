@@ -485,3 +485,28 @@ async def test_a_recipient_sentence_needs_its_page_quote(authenticated_async_con
     first, second = _reviews(cid)
     assert (first["confidence"], first["downgraded"]) == ("weak", ["quote_too_thin"]), first
     assert (second["confidence"], second["downgraded"]) == ("strong", []), second
+
+
+@pytest.mark.asyncio
+async def test_a_recipient_fact_from_a_lookup_cites_the_lookup(authenticated_async_context, fixture_user_id):
+    """Kits, 19 Nov (09:56 run): the reviewer marked "at Abound" unsupported although Clay and Sprouts both list that
+    employer; only a page could be cited. A row may cite a lookup ("lookup:<tool>") with the lookup's own text as the
+    quote, as a page row cites a page. A claim about the user in the same line still needs the profile."""
+    about_them = "I saw you are a Talent Partner at Abound."
+    line = f"{about_them} {LINE_1}"
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{line}\nBest regards,\nAda Lovelace")
+        sha = (await _review_block(client, cid))["sha256"]
+        lookup = {"msg_line": about_them, "profile_quote": "Rita Shah, Talent Partner, Abound",
+                  "field_path": "lookup:clay"}
+        resp = await _record(client, app_id, cid, _payload(mid, sha, [lookup, *_rows((line, QUOTE_1))]))
+        assert resp.status_code == 201, resp.text
+        invented = f"{about_them} Built systems serving 1M users."
+        mid2 = await _draft(client, app_id, cid, f"Hi Rita,\n{invented}\nBest regards,\nAda Lovelace")
+        sha2 = (await _review_block(client, cid))["sha256"]
+        resp = await _record(client, app_id, cid, _payload(mid2, sha2, [lookup, *_rows((invented, QUOTE_1))]))
+        assert resp.status_code == 201, resp.text
+    first, second = _reviews(cid)
+    assert (first["confidence"], first["downgraded"]) == ("strong", []), first
+    assert (second["confidence"], second["downgraded"]) == ("weak", ["claim_not_in_quote"]), second
