@@ -71,8 +71,30 @@ Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, 
 - Next: 04:05 is the first run inside the window with every fix on main. I score it at 04:30.
 - Decision taken without the owner: none.
 
+## 04:05 run  (score 10%)
+- Session cse_01KTmoHBdEUx1tXCwTeVB2Q6, run pc-0406: 60 turns, 207 s (3 of its 40 minutes). First run inside the
+  LinkedIn window with every fix on main.
+- Achieved: the alert sweep covered 2 of 9 alerts and brought 2 jobs: Engage People, Junior AI Engineer, fit 74; Unloq,
+  AI Engineer, fit 66. It skipped Sia (no permit). #1691 works: every release answered with `next_task`, in this order:
+  profile_read, then linkedin_check_pending, then application 614. LinkedIn pages: 9. Tab closed.
+- Missed: Easy Apply 0 (about 40 waiting). Sends 0 (7 held to 22 Nov by the weekly limit, correct). People search
+  (profile_read) was released `other` 2 s after it was handed over, with no attempt (failures_in_row 4). Check pending:
+  contacts 67, 130 and 131 were still not matched (failures 3); update_contact was called with no field, 3 x 422.
+  Application 614 was handed over and let go unstarted. Doctor check skipped. 7 alerts were left.
+- Biggest cause: the model ends the run on its own sense of time. Its own words: "I stopped because the job-ad reading
+  and Easy Apply forms are slow". It still had 37 minutes; nothing in Job360 or the recipe said stop.
+  - Second cause: the application handover said "Its claim is already yours" while the task's claim was null
+    (an application is claimed only at get_application_kit).
+- Fix (PR to follow, merged after 05:15, so first seen by the 06:05 run): every handover's `next` carries Job360's own
+  clock ("N of the run's 40 minutes are left: never stop early"). At 40 minutes it says "write the summary" and takes
+  nothing. Application handovers say "start it with get_application_kit" instead of the false claim sentence. Recipe
+  line: only Job360's clock ends the run.
+- Decision taken without the owner: the run clock lives on the server (first take of a session), not in the model.
+- Harness note: every send_later check-in I armed failed with ACCESS_DENIED (all sessions' reminders tonight show the
+  same); the background shell waits are what kept this loop on time.
+
 ## Needs the owner
 - Scheduled task prompt (trig_0199qXCRxqD3Dy2eH6pCb6U5) could also say it plainly. Proposed exact prompt:
   `Job360 PC browser assistant run, in my own Chrome (Claude in Chrome). / Call get_recipe("own_browser") and follow it exactly. / Keep calling own_browser_queue take until it answers empty or closed, or 40 minutes pass; never write the summary before that. / Obey every Job360 reply and warning.`
 - linkedin_check_pending: 3 contacts (67, 130, 131) could not be matched by name on LinkedIn's Sent page. Their
-  stored names may differ from their LinkedIn names; worth a look in the morning.
+  stored names may differ from their LinkedIn names; worth a look in the morning. The 04:05 run also called update_contact with no field for them (3 x 422).
