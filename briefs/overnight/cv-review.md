@@ -80,3 +80,13 @@ Coverage: every queued job without a strong CV is done this run or listed as lef
 - Missed: 669 stored weak (`jd_gap_claimed` on "Deep Learning", "API Development"); about 140 jobs left.
 - Fix: #1707 holds. Next slice opened: PR #1711 (finding 2, LinkedIn per-job Technologies lists are no skills group),
   pushed 09:51, auto-merge on, outside the :28 to :43 window.
+
+## 10:33 run  (score 100%) - first run on #1711 (merged 10:10)
+- Achieved: 10 stored strong, none weak left: new 62, 1141, 1142; 669 fixed; 675, 676, 677, 679, 687, 690 rewritten.
+  The count rose 0 to 10 and Job360 replied "CV run complete: 10 stored strong." Two runs in a row at 100% on the fixes
+  (09:33, 10:33).
+- Missed: none against the target. About 133 left. No `skills_label_unknown` appeared. I cannot tell from the summary
+  whether a "Technologies:" line came up this run, so #1711 is shown not to break anything, not yet shown on a 1105-shaped line.
+- Note for Kits: the run wrote the CVs itself instead of using writer agents (cv.md step 3); results were still strong.
+- Status of Kits' orders: (1) #1707 merged and scored; (2) finding 2 as #1711, merged and scored; (3) finding 3 not
+  built, evidence above; check_submit question answered above. Needs the owner: ask 706 on 617, CV approval on 620.
