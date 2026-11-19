@@ -194,12 +194,14 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     next_due: dict[str, Optional[str]] = {}
 
     def waiting_after_failure(duty: str) -> bool:
-        """After a failed run a duty waits (2h, 4h, 8h... at most 24h) instead of retrying every hour."""
+        """After a failed run a duty waits (2h, 4h, 8h... at most 24h) instead of retrying every hour. Like every
+        interval check, within DUE_GRACE of its end it is due (2026-11-19: reach failed 22:57:41, the 00:56 wake
+        read "not due" 59 s early and the jobs waited a third hour)."""
         n, last = f.failures.get(duty, 0), f.stamps.get(duty)
         if n <= 0 or last is None:
             return False
         until = last + timedelta(hours=backoff_hours(n))
-        if until > now:
+        if until - DUE_GRACE > now:
             next_due[duty] = _iso(until)
             return True
         return False
