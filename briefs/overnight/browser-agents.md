@@ -40,6 +40,19 @@ Fixes merged today for this task: #1662 tab close, #1663 employer-domain codes, 
 - Decision taken without the owner: the structural fix above (it removes a decision point; it changes no safety
   rule, and take's own gates — pace, weekly limit, backoff, pause — still decide what is handed out).
 
+## 00:05 run  (score n/a: quiet hours by design)
+- Session cse_01KTmoHB8VLprJeoxza8ijfk: 13 turns, 26 s. Correct behaviour: the recipe allows LinkedIn only from
+  04:00 to 00:00 UK time, and all 50 queued tasks are LinkedIn (7 sends, the alert sweep, about 40 Easy Apply
+  applications). It took nothing, claimed nothing, closed its tab and wrote the summary.
+- Consequence: the 01:05, 02:05 and 03:05 runs will be the same. The first real tests of tonight's fixes are 04:05
+  and 05:05 (two runs in a row, as the 90% rule needs).
+- PRs since 23:30:
+  - #1684 and #1685 merged (audit 6.1 / 6.2).
+  - #1690 merged: main's batch.md was 71 lines after those two, red on test_recipes.
+  - #1691 open: release / hold_released hands the next task in the same reply, the fix for the 23:05 early stop.
+  - #1686 open: audit 6.3, conflict resolved.
+- Decision taken without the owner: none.
+
 ## Needs the owner
 - Scheduled task prompt (trig_0199qXCRxqD3Dy2eH6pCb6U5) could also say it plainly. Proposed exact prompt:
   `Job360 PC browser assistant run, in my own Chrome (Claude in Chrome). / Call get_recipe("own_browser") and follow it exactly. / Keep calling own_browser_queue take until it answers empty or closed, or 40 minutes pass; never write the summary before that. / Obey every Job360 reply and warning.`
