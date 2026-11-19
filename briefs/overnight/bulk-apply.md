@@ -195,3 +195,38 @@ the owner has. 250 queued rows wait on the owner (whats_due).
 - Missed: none of the workable rows. 0 submitted: every filled form needs an owner answer.
 - Needs the owner: the answers above (Needs you on job360.uk), and the 2 CAPTCHAs.
 - Stop rule: 100% after 71%, so not yet two runs in a row at 90%.
+
+# Day of 19 Nov (owner asked: score today's runs, report on #1697)
+
+Run starts are read from the run's own `apply-<time>` session label (not from last_done_at, which is a run's start).
+
+## 05:41 and 08:41  (not scored, 0 workable rows)
+- No `apply-` session, no row opened. The 09:08:25 batch claim (an ignited run) opened none either: the CV
+  run was writing and reviewing CVs (16 artifact_saved, 16 cv_reviewed 08:30-09:10). PC runs pc-0809 and
+  pc-0907 stopped on unreviewed CVs (cv_not_seen).
+
+## ~06:41 run, session apply-20261119T0636Z  (score 100%)
+- 1 workable row, 634 (Pencil): two required essays about image or video generation work; the profile has no
+  such project, so the run asked instead of inventing one. Correct.
+
+## ~07:41 run, sessions apply-20261119T0735Z / 0743Z  (score 67%)
+- 9 rows. Right bucket (6): 1119 (seal.run: no matching role on the careers page, asks the owner to confirm),
+  1120 (Y Combinator form: India "Current location" is not in Memory, set it on the Answer once page),
+  1126 (Shine sign-in, WITH employer_page, below), 1127 (unqueued duplicate), 1128 (posting_closed on
+  Workday), 1129 (Crowe Workday sign-in, the employer's own ATS).
+- Wrong or doubtful (3): 1124 and 1125 (Instahyre sign-in) and 1130 (Gradcracker bot check), all recorded by
+  Job360's own browser (by: browser) on a job board, with no search for the employer's own page.
+- Biggest cause: board links opened in Job360's browser, whose blocks #1697 does not cover.
+
+## #1697 (employer_page): exercised and working, once
+- 1126 (Shine, 07:38): the run recorded `employer_page: "Web search for WhiteCrow Research Applied GenAI Engineer
+  careers found no employer page."` That is the judgement the check asks for, so the block was accepted. No
+  board block recorded by the run itself lacked it today.
+- I cannot see whether any 422 refusal (`blocked_board_refused`) happened first: this session has no access to
+  production logs.
+- Not covered, and now the biggest cause: blocks Job360's own browser records on a board (1124, 1125, 1130).
+  Proposed next fix (needs the owner's yes): Job360's browser, asked to open an application's link that is a
+  job board, refuses once with "search the employer's own page first; update_job(apply_url) or say what you
+  found" (same rule as #1697, applied before the page loads). Gradcracker is not on the board list either.
+
+## PR #1708 (batch_hold, owner's yes): open, auto-merge on, CI running (pushed 09:12).
