@@ -91,3 +91,10 @@ def test_the_email_body_decides_the_application_not_the_sender():
         "a candidate the body does not name is no match",
     ):
         assert rule.lower() in text, rule
+
+
+def test_a_job_alert_naming_no_application_is_read_never_parked():
+    """Kits orders 2026-11-19 01:10: the 00:26 run parked 11 job-board alerts and digests that the 23:26 run read
+    and left alone, which adds noise to the owner's Needs you list."""
+    text = " ".join(load_recipe("inbox").text.split()).lower()
+    assert "a job-board alert or digest that names no application of the user is read, never parked" in text
