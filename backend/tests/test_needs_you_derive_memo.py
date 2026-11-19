@@ -66,7 +66,7 @@ def _store(user_id: str, approve_travel: bool = True) -> None:
     rtw = {"countries": [{"country": "GB", "work_authorization": "citizen", "needs_sponsorship": False},
                          {"country": "US", "work_authorization": "needs_sponsorship", "needs_sponsorship": True}]}
     profile_edits.record_edits(
-        user_id, "test", [(user_info.USER_INFO_ANSWERS_PATH, answers), ("user_info.right_to_work", rtw),
+        user_id, profile_edits.WEB_ACTOR, [(user_info.USER_INFO_ANSWERS_PATH, answers), ("user_info.right_to_work", rtw),
                           ("user_info.contact", {"email": "a@example.com"})],
         enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
     )
