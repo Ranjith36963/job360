@@ -154,7 +154,7 @@ def test_setup_is_six_short_rounds_and_forms_ask_only_what_is_missing():
     assert "the user agreed to remember it" in apply
     assert "use the answer for this form only and store nothing" in apply
     text = flat(instructions())
-    for words in ("run 360", 'get_recipe("rules")', "never type or ask for a password"):
+    for words in ("run 360", 'get_recipe("rules")', "never ask for, store or reuse a password"):
         assert words in text, words
 
 

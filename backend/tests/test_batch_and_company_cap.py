@@ -721,7 +721,10 @@ def test_the_batch_recipe_is_listed_short_and_names_the_gate():
     assert "Print this checklist and tick each step:" in recipe.text
     text = " ".join(recipe.text.lower().split())
     assert "check_submit" in text and "company_cap_reached" in text and "daily_cap_reached" in text
-    assert "queued=true" in text and "never solve a captcha" in text and "never store or type a password" in text
+    assert "queued=true" in text and "never solve a captcha" in text
+    # Hard line 5 (owner 2026-11-19, SITE SIGN-IN): no password is ever asked for, stored or reused; a site sign-in
+    # happens only in the user's own browser, never in a cloud batch run's browser.
+    assert "never ask for, store or reuse a password" in text and "only in the user's own browser" in text
     assert 'get_recipe("apply")' in recipe.text
 
 

@@ -1101,9 +1101,15 @@ def unsupported_names(text: str, source: str, allowed: str = "") -> Optional[dic
     """Capitalised names after ``_NAME_LEADS`` ("worked at Acme Corp") that the profile never mentions. Word by
     word, no regex on the caller's text (CodeQL: no backtracking). ``allowed`` (the person and the job) vouches only
     after a bare lead ("the role at Globex"), never after a claim lead: "I worked at Globex" needs the profile."""
-    raw = _scrub(text).split()
+    raw: list[str] = []
+    ends: list[bool] = []  # a sentence ends after this token: its own full stop, or the end of its line
+    for line in _scrub(text).splitlines():
+        toks = line.split()
+        raw += toks
+        # A line break ends a name too (prod 2026-11-19: "Subject: ... at Northwind" + "Hi Rita," + "I ..." read
+        # as one unknown name "Northwind Hi Rita I", so every email with a subject asked unsupported_claims).
+        ends += [t.rstrip("\"')]").endswith((".", "!", "?")) or k == len(toks) - 1 for k, t in enumerate(toks)]
     words = [w.strip(_OUTER_PUNCT) for w in raw]
-    ends = [w.rstrip("\"')]").endswith((".", "!", "?")) for w in raw]  # a sentence ends after this token
     hay, wider = _norm(source), _norm(source + "\n" + allowed)
     bad: list[str] = []
     for i, word in enumerate(words):

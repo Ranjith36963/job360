@@ -129,6 +129,15 @@ describe("describeSettingRequest", () => {
     );
   });
 
+  it("site sign-in: on and off read in plain words", () => {
+    const on = describeSettingRequest("assistant_settings.site_sign_in", true);
+    expect(on.title).toBe("Sign in to job sites for me");
+    expect(on.change).toContain("never a saved password");
+    expect(describeSettingRequest("assistant_settings.site_sign_in", false).change).toBe(
+      "I sign in to every job site myself",
+    );
+  });
+
   it("emailed codes: on and off read in plain words", () => {
     const on = describeSettingRequest("assistant_settings.use_email_codes", true);
     expect(on.title).toBe("Use codes job sites email me");

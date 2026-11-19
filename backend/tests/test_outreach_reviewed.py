@@ -402,6 +402,41 @@ def test_only_a_greeting_a_sign_off_the_users_name_and_contact_lines_are_exempt(
     assert outreach_review.content_lines("Hi Bob,\nThanks", profile, "Rita Recruiter") == ["Hi Bob,"]
 
 
+def test_an_email_subject_naming_only_the_job_and_its_greeting_are_exempt():
+    """Prod 2026-11-19 (apps 843, 1140): every email draft starts "Subject: ...", so the greeting sat on line 1 and
+    both became required lines no profile quote can back; every email review stored weak and nothing was sent."""
+    profile = UserProfile(cv_data=CVData(raw_text=RAW, name="Ada Lovelace"))
+    context = "Ian Cruickshank Spectrum IT Recruitment Spectrum IT Recruitment AI Software Engineer"
+    text = "Subject: AI Software Engineer role\n\nDear Ian,\n\n" + LINE_1 + "\n\nThanks,\nAda Lovelace"
+    assert outreach_review.content_lines(text, profile, "Ian Cruickshank", context) == [LINE_1]
+    # A subject that claims anything beyond the job, company or person still needs its quote.
+    claim = "Subject: 5 years leading ML teams\nDear Ian,\n" + LINE_1
+    assert outreach_review.content_lines(claim, profile, "Ian Cruickshank", context) == [
+        "Subject: 5 years leading ML teams", LINE_1,
+    ]
+    # Without the job context (the CV review path) a subject line is content, as before.
+    assert outreach_review.content_lines(text, profile, "Ian Cruickshank")[0] == "Subject: AI Software Engineer role"
+
+
+async def test_an_email_with_a_subject_line_reviews_strong_and_sends(authenticated_async_context, fixture_user_id):
+    """End to end: the subject (naming only the job and company) and the greeting under it need no quote, so a
+    review backing both body lines is stored strong and the automatic send goes through."""
+    text = f"Subject: Data Engineer role at Northwind\n\nHi Rita,\n\n{LINE_1}\n{LINE_2}\n\nBest regards,\nAda Lovelace"
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, text)
+        block = await _review_block(client, cid)
+        assert block["lines"] == [LINE_1, LINE_2]
+        resp = await _record(client, app_id, cid, _payload(mid, block["sha256"], _rows((LINE_1, QUOTE_1),
+                                                                                         (LINE_2, QUOTE_2))))
+        assert resp.status_code == 201, resp.text
+        verdict = await _check(client, cid, mid)
+    assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+    [stored] = _reviews(cid)
+    assert (stored["confidence"], stored["downgraded"], stored["covered"], stored["content_lines"]) == (
+        "strong", [], 2, 2)
+
+
 def test_auto_send_reasons_are_the_automatic_ones_with_text():
     """The user's own Send (owner_clicked, connect_no_note) and a no-note request (auto_connect) need no review."""
     from src.services.profile import assistant_settings as rules

@@ -781,6 +781,9 @@ class AssistantSettings:
     # Owner 2026-11-07: may the assistant type a one-time code the job site emailed to the user's own Gmail?
     # False = no (default). On is riskier; applications/email_codes.py checks every use.
     use_email_codes: bool = False
+    # Owner 2026-11-19: may the assistant (in the user's own browser) sign in to / create an account on a job site
+    # with the user's own email - an emailed code or link, or a fresh reset password never stored? False (default).
+    site_sign_in: bool = False
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

@@ -317,6 +317,8 @@ class AssistantSettingsView(BaseModel):
     ask_before_signed_in_submit: SettingFieldOut
     cv_auto_approve: SettingFieldOut
     use_email_codes: SettingFieldOut
+    # Owner 2026-11-19 - sign in to / create an account on a job site with the user's email (default false).
+    site_sign_in: SettingFieldOut
     people_hunt_last_at: Optional[str] = None
     paused: bool
     inbox_mode: str = ""
