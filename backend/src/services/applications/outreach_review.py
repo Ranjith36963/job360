@@ -60,6 +60,10 @@ AUTO_SEND_REASONS = ("auto_mode", "auto_after_accept", "auto_follow_up", "auto_n
 NOT_REVIEWED = "outreach_not_reviewed"
 GREETINGS = frozenset({"hi", "hello", "dear", "hey"})
 _GREETING_EXTRA = frozenset({"there", "team", "all"})
+# Words an email subject may add to the job, company and person names and still say nothing about the user.
+_SUBJECT_EXTRA = frozenset({"subject", "re", "fw", "fwd", "role", "roles", "position", "job", "opening", "vacancy",
+                            "application", "applying", "for", "the", "a", "an", "your", "at", "about", "and",
+                            "to", "in", "of", "-", "–", "—", "|", ":"})
 SIGNOFF_WORDS = frozenset({
     "best", "regards", "kind", "warm", "warmest", "thanks", "thank", "you", "cheers", "sincerely", "many", "all",
     "the", "yours", "with",
@@ -108,20 +112,36 @@ def _parse(raw: Any) -> dict[str, Any]:
     return got if isinstance(got, dict) else {}
 
 
-def content_lines(text: str, profile: Any, person_name: str = "") -> list[str]:
-    """The draft's non-empty lines a review must quote the profile for (see the module docstring)."""
+def content_lines(text: str, profile: Any, person_name: str = "", context: str = "") -> list[str]:
+    """The draft's non-empty lines a review must quote the profile for (see the module docstring).
+
+    ``context`` (:func:`_person`'s claim words: the person, their company, the job's company and title): an email's
+    leading ``Subject:`` line naming nothing beyond those words (plus :data:`_SUBJECT_EXTRA`) is exempt, and the
+    greeting test then applies to the line after it (prod 2026-11-19, apps 843 / 1140: the subject on line 0 made
+    the greeting and the subject required lines no profile quote can back, so every email review stored weak).
+    A subject that says anything else stays a required line."""
     lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
     own = cv_review._name_words(profile)
     person = set(evidence._words(person_name))
+    first = greet_at = 0
+    head = evidence._words(lines[0]) if lines else []
+    if head and head[0] == "subject":
+        greet_at = 1  # the greeting is the first line after any subject line
+        if context and set(head[1:]) <= set(evidence._words(context)) | _SUBJECT_EXTRA:
+            first = 1
     out: list[str] = []
     for i, line in enumerate(lines):
+        if i < first:
+            continue
         order = evidence._words(line)
         words = set(order)
         if not words or cv_review.is_contact_line(line) or words <= own | SIGNOFF_WORDS:
             continue
-        if i == 0 and order[0] in GREETINGS and set(order[1:]) <= person | _GREETING_EXTRA:
+        if i == greet_at and order[0] in GREETINGS and set(order[1:]) <= person | _GREETING_EXTRA:
             continue
         out.append(line)
+    if first:
+        logger.info("outreach_subject_exempt lines=%s required=%s", len(lines), len(out))
     return out
 
 
@@ -178,10 +198,10 @@ async def inputs(db: JobDatabase, user_id: str, contact: dict[str, Any]) -> Opti
     if not messages:
         return None
     draft = messages[-1]
-    name, _context = await _person(db, user_id, contact)
+    name, context = await _person(db, user_id, contact)
     profile = await contacts._load_profile_or_none(user_id)
     sha = kit.sha256_text(str(draft.get("text") or ""))
-    lines = content_lines(str(draft.get("text") or ""), profile, name)
+    lines = content_lines(str(draft.get("text") or ""), profile, name, context)
     return {"message_id": int(draft["id"]), "sha256": sha, "lines": lines[:REVIEW_LINES_CAP],
             "state": review_state(rows, int(draft["id"]), sha)}
 
@@ -213,7 +233,7 @@ async def check(
     entries: list[dict[str, str]] = payload["lines"]
     profile = await contacts._load_profile_or_none(user.id) or UserProfile()
     name, context = await _person(db, user.id, contact)
-    content = content_lines(text, profile, name)
+    content = content_lines(text, profile, name, context)
     down: set[str] = set()
     # Kits audit 3A (orders 23:10): every sentence is judged against the profile EXCEPT one the fresh reviewer marks
     # as about the recipient, with a row whose field_path names its page ("page:<url>") and the quote from it (3+
