@@ -2704,6 +2704,8 @@ def run(args: argparse.Namespace) -> Collector:
         abandoned = _wait_sources(futs, sink, progress, hard=bool(getattr(args, "titles_only", "")))
     except BaseException:  # Ctrl-C or a crash: queued sources must not start while we unwind
         abandoned = 1  # a source may still be running: never wait on it
+        if getattr(args, "titles_only", ""):  # pass 1 stopped: the CLI must not join that thread at exit either
+            _mark_abandoned()
         if sink is not None:
             sink.stop("interrupted")
         raise
@@ -2749,6 +2751,12 @@ def _wait_sources(futs: dict[Any, str], sink: Stream | None, progress: Progress 
 
 
 ABANDONED = False  # a pass-1 source thread was left running: the CLI exits without joining it
+
+
+def _mark_abandoned() -> None:
+    """A stopped pass 1 (Ctrl-C, SIGTERM) left a source running: exit without joining it, as at the deadline."""
+    global ABANDONED
+    ABANDONED = True
 
 
 class Progress:

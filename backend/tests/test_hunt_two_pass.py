@@ -242,3 +242,11 @@ def test_titles_from_rows_rebuilds_the_titles_file_offline(tmp_path, monkeypatch
     assert hk.main([*BASE, "--titles-from-rows", str(rows), "--titles-only", str(out)]) == 0
     assert [(json.loads(x)["title"], json.loads(x)["count"]) for x in out.read_text().splitlines()] == [
         ("ML Engineer", 2), ("Accountant", 1)]
+
+
+def test_a_stopped_pass_one_marks_the_run_abandoned_so_the_cli_does_not_join_a_stuck_source(monkeypatch):
+    """reviewer-bugs on #1702: Ctrl-C / SIGTERM in pass 1 wrote the titles file but the CLI still joined the stuck
+    source thread at exit. The stop path now sets the same flag the deadline sets."""
+    monkeypatch.setattr(hk, "ABANDONED", False)
+    hk._mark_abandoned()
+    assert hk.ABANDONED is True
