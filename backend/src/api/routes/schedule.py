@@ -170,6 +170,9 @@ class MarkDoneIn(BaseModel):
     # Only with reach/network (2026-11-18): true when the Doctor check AND a separate reviewer checked every person
     # and note this run saved. An assistant's people run marked done without it is recorded partial, no_review.
     reviewed: bool = False
+    # Only with reach (2026-11-18 22:07 run: five ids listed, one company searched): application id -> what each
+    # source found at that company ({"sprouts": 0, "clay": 1, "team_page": 2}). Needed for each job left under 3.
+    searched: Optional[dict[str, dict[str, int]]] = Field(default=None, max_length=20)
 
 
 class PeopleScoreOut(BaseModel):
@@ -434,6 +437,34 @@ async def _people_score(db: JobDatabase, user: CurrentUser, duty: str, ids: list
         n += (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) >= since
     score.network = n
     return score
+
+
+def _refuse_unsearched_jobs(user: CurrentUser, score: PeopleScoreOut, searched: dict[str, dict[str, int]]) -> None:
+    """2026-11-18 22:07 run: five ids listed, one company searched, Sprouts and Clay never called for the other four.
+    Each job left under the minimum carries in ``searched`` what each free lookup found at its company; Job360 only
+    checks that the record is there and logs its counts, never whether the run tried hard enough."""
+    short = [i for i, n in score.per_job.items() if n < score.minimum]
+    missing = [i for i in short if i not in searched]
+    unsaid: dict[str, list[str]] = {}
+    for i in (i for i in short if i in searched):
+        _log("people_search_counts", user, job=i, sources=",".join(f"{k}={v}" for k, v in searched[i].items()))
+        names = [n for n in _FREE_LOOKUPS if n not in {k.lower() for k in searched[i]}]
+        if names:
+            unsaid[i] = names
+    if not missing and not unsaid:
+        return
+    _log("people_run_refused", user, duty="reach", reason="jobs_unsearched",
+         jobs=",".join(missing + list(unsaid)))
+    parts = [f"no searched entry: {', '.join(missing)}"] if missing else []
+    parts += [f"{i}: {', '.join(names)} missing" for i, names in unsaid.items()]
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Jobs under {score.minimum} people need what each source found at their company; {'; '.join(parts)}. "
+            "Work each company now (step 1: Sprouts and Clay with its domain, then its pages and a web search), "
+            'then mark_done again with searched {"<application id>": {"sprouts": n, "clay": n, "<source>": n}}.'
+        ),
+    )
 
 
 def _below_target(score: PeopleScoreOut) -> list[str]:
@@ -742,7 +773,10 @@ async def mark_done(
     claimed_at = None
     if body.duty == "batch" and actor_for(user) != "web":
         claimed_at = (await schedule.load_stamps(db, user.id)).get(schedule.RUNNING + "batch")
-    if body.duty == "batch" and body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER:
+    # 2026-11-18 (23:41 run): "done" (the default) skipped this check, so a run closed the batch before it opened
+    # its one workable row (1087). "done" means nothing is left: it is checked like a partial stop.
+    if body.duty == "batch" and (body.outcome == "done" or (
+            body.outcome in ("partial", "failed") and body.reason in _NOT_A_BLOCKER)):
         later = await _refuse_early_batch_stop(db, user, claimed_at)
     if body.duty == "batch":
         from src.services.applications import queue_preflight  # noqa: PLC0415 - profile <-> spine cycle
@@ -781,11 +815,15 @@ async def mark_done(
         reviewed = reviewed or checked > 0
     if body.reviewed and body.duty not in ("reach", "network"):
         raise HTTPException(status_code=422, detail="reviewed is only for duty reach or network")
+    if body.searched is not None and body.duty != "reach":
+        raise HTTPException(status_code=422, detail="searched is only for duty reach")
     outcome, reason, said = body.outcome, body.reason, ""
     score: Optional[PeopleScoreOut] = None
     if body.duty in ("reach", "network") and actor_for(user) != "web":
         # Owner 2026-11-18: Job360 judges the count, never the run's own claim; the call is never refused for it.
         score = await _people_score(db, user, body.duty, ids, now)
+        if body.duty == "reach" and outcome != "failed":
+            _refuse_unsearched_jobs(user, score, body.searched or {})
         short = _below_target(score)
         _log("people_run_score", user, duty=body.duty, jobs=",".join(f"{i}={n}" for i, n in score.per_job.items()),
              network=str(score.network if score.network is not None else ""), below=str(len(short)))

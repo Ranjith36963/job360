@@ -434,14 +434,33 @@ async def stamp_take(db: JobDatabase, user_id: str, now: datetime, session: str 
     await db._db.commit()
 
 
+async def _pc_run_session(db: JobDatabase, user_id: str, now: datetime) -> str:
+    """The label of the session that last took from the PC queue inside :data:`PC_RUN_MINUTES` (the take slot
+    :func:`stamp_take` writes); ``""`` when none did. A cloud batch run never takes, so it is never this label."""
+    cur = await db._db.execute(
+        "SELECT done_at, state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, TAKE_SLOT)
+    )
+    slot = await cur.fetchone()
+    if slot is None:
+        return ""
+    got = dict(slot)
+    try:
+        state = json.loads(got["state"] or "{}")
+    except ValueError:
+        state = {}
+    fresh = _when(got["done_at"])
+    if isinstance(state, dict) and fresh is not None and now - fresh <= timedelta(minutes=PC_RUN_MINUTES):
+        return str(state.get("session") or "")
+    return ""
+
+
 async def next_after_hold_release(
     db: JobDatabase, user: CurrentUser, application_id: int, now: datetime
-) -> Optional[str]:
-    """The ``next`` of an assistant's ``hold_released`` reply: the release reply's "Keep going" sentence
-    (:func:`_keep_going`) when the session that held this application (its newest labelled kit read by this actor)
-    is the one that last took from the PC queue inside :data:`PC_RUN_MINUTES`; else ``None`` (a cloud apply run
-    never takes PC tasks). PC run pc-1905 (2026-11-18): an application is closed with ``hold_released``, not
-    ``release``, and that reply said nothing, so the run went to its summary with ~45 tasks waiting."""
+) -> Optional[dict[str, Any]]:
+    """``{next, next_task}`` for an assistant's ``hold_released`` reply (:func:`_hand_next`) when the session that
+    held this application (its newest labelled kit read by this actor) is the live PC run (:func:`_pc_run_session`);
+    else ``None`` (a cloud apply run never takes PC tasks). PC run pc-1905 (2026-11-18): an application is closed
+    with ``hold_released``, not ``release``, and that reply said nothing, so the run went to its summary."""
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
 
     cur = await db._db.execute(
@@ -455,27 +474,12 @@ async def next_after_hold_release(
         raw = dict(row)["payload"]
         payload = raw if isinstance(raw, dict) else json.loads(raw or "{}")
         held_by = str(payload.get("session") or "")
-    cur = await db._db.execute(
-        "SELECT done_at, state FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user.id, TAKE_SLOT)
-    )
-    slot = await cur.fetchone()
-    took = ""
-    if slot is not None:
-        got = dict(slot)
-        try:
-            state = json.loads(got["state"] or "{}")
-        except ValueError:
-            state = {}
-        fresh = _when(got["done_at"])
-        if isinstance(state, dict) and fresh is not None and now - fresh <= timedelta(minutes=PC_RUN_MINUTES):
-            took = str(state.get("session") or "")
+    took = await _pc_run_session(db, user.id, now)
     if not held_by or held_by != took:
         _log("own_browser_hold_release_next", user.id, "not_pc_run", application_id=application_id,
              pc_session=bool(took))
         return None
-    nxt = await _keep_going(db, user, held_by, "application", "hold_released", now, f"application:{application_id}")
-    got_next = nxt["next"]
-    return str(got_next) if got_next is not None else None
+    return await _hand_next(db, user, held_by, "application", "hold_released", now, f"application:{application_id}")
 
 
 async def load_li_state(db: JobDatabase, user_id: str) -> dict[str, Any]:
@@ -898,7 +902,8 @@ def _next_step(task: dict[str, Any]) -> str:
 
 
 async def take(
-    db: JobDatabase, user: CurrentUser, session: str, now: datetime, contact_id: Optional[int] = None
+    db: JobDatabase, user: CurrentUser, session: str, now: datetime, contact_id: Optional[int] = None,
+    skip_task_id: str = "",
 ) -> dict[str, Any]:
     """Hand ONE task to the session (15 minutes for a person; an application's kit read is its own hold).
     With ``contact_id`` only that person is claimed (the one the user clicked Send on);
@@ -990,6 +995,8 @@ async def take(
                     if later is not None:  # released a moment ago: never the same person straight back
                         backed.append(later)
                         continue
+                    if candidate["task_id"] == skip_task_id:  # the task this release just closed (pc-2306)
+                        continue
                     try:
                         await _insert(db, user, candidate["contact_id"], CLAIMED, label, now)
                     except SpineError:  # too many claims on this person: try the next one
@@ -1002,7 +1009,7 @@ async def take(
                 gate = ("release_backoff", min(backed))
         elif busy:
             refusal = _answer("busy", "another session is sending")
-        duty = next((t for t in duties if t["claim"] is None), None)
+        duty = next((t for t in duties if t["claim"] is None and t["task_id"] != skip_task_id), None)
         if chosen is None and duty is not None:  # a hunt or people task: one session at a time per kind
             await pc_duties.claim(db, user.id, duty["kind"], {"session": label, "actor": actor}, now)
             until = (now + timedelta(minutes=settings.DUTY_CLAIM_MINUTES)).isoformat()
@@ -1014,7 +1021,7 @@ async def take(
     if chosen is not None:
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
-    apps = [t for t in tasks if t["kind"] == "application"]
+    apps = [t for t in tasks if t["kind"] == "application" and t["task_id"] != skip_task_id]
     if apps:
         released = await _recently_released(db, user.id, [int(t["application_id"]) for t in apps], now)
         apps = [t for t in apps if int(t["application_id"]) not in released]
@@ -1095,6 +1102,33 @@ async def _keep_going(
     return {"next": f"Keep going: {left} tasks still wait; call take again." if left else None}
 
 
+async def _hand_next(
+    db: JobDatabase, user: CurrentUser, label: str, kind: str, reason: str, now: datetime, released_id: str
+) -> dict[str, Any]:
+    """PC run pc-2306 (2026-11-18) read "Keep going" twice and still stopped with 50 tasks waiting. So a task closed
+    by the live PC run (:func:`_pc_run_session`) takes the next one for that SAME session here, through :func:`take`
+    and all its gates, and answers it as ``next_task``; ``next`` follows that answer. Any other session gets
+    today's :func:`_keep_going` sentence and no ``next_task``. The task just closed is never handed back
+    (``skip_task_id``, on top of its release backoff / application cool-down / duty close)."""
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
+
+    # The web (a person at Job360's site) is never a PC run; nor is any session but the newest live taker.
+    if not label or actor_for(user) == "web" or label != await _pc_run_session(db, user.id, now):
+        return await _keep_going(db, user, label, kind, reason, now, released_id)
+    got = await take(db, user, label, now, skip_task_id=released_id)  # never the task just closed, backoff or not
+    task = got.get("task")
+    if got["status"] in ("task", "already_yours") and task is not None:
+        nxt: Optional[str] = (f'Do this task now: {task["task_id"]} ({task["kind"]}). '
+                              "Its claim is already yours.")
+    else:  # wait / busy / daily_limit: "Keep going" only while something besides the task just closed waits
+        left = None if got["status"] in ("empty", "closed", "paused") else (
+            await _keep_going(db, user, label, kind, reason, now, released_id))["next"]
+        nxt = left or "Queue done: write the summary."
+    _log("own_browser_next_task", user.id, got["status"], session=label, released=released_id,
+         next_task=task["task_id"] if task is not None else None)
+    return {"next": nxt, "next_task": got}
+
+
 async def release(
     db: JobDatabase, user: CurrentUser, session: str, task_id: str, reason: str, now: datetime
 ) -> dict[str, Any]:
@@ -1111,7 +1145,7 @@ async def release(
         closed = await pc_duties.close(db, user, label, raw, reason, now)
         _log("own_browser_release", user.id, closed["outcome"], kind=raw, reason=reason)
         return {"released": True, "task_id": task_id, "reason": reason, **closed,
-                **await _keep_going(db, user, label, raw, reason, now, task_id)}
+                **await _hand_next(db, user, label, raw, reason, now, task_id)}
     if reason == "done":
         raise SpineError(422, "a person is finished with record_event outreach_sent; release them with another reason")
     if kind != "contact" or not raw.isdigit():
@@ -1149,4 +1183,4 @@ async def release(
         await _insert(db, user, contact_id, RELEASED, reason, now)
     _log("own_browser_release", user.id, "ok", contact_id=contact_id, reason=reason)
     return {"released": True, "task_id": task_id, "reason": reason,
-            **await _keep_going(db, user, label, "linkedin_outreach", reason, now, task_id)}
+            **await _hand_next(db, user, label, "linkedin_outreach", reason, now, task_id)}

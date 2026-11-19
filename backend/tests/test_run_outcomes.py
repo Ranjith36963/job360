@@ -226,8 +226,10 @@ async def test_only_batch_partial_without_a_blocker_is_ever_refused(authenticate
         _seed(fixture_user_id)
         await _save_cv(client, await _queued_job(client, 4))
         assert (await _stop_batch(client)).status_code == 409
+        # 2026-11-18 (23:41 run): "done" with work left is a stop like a partial one, refused the same way.
+        done = await client.post("/api/schedule/done", json={"duty": "batch", "outcome": "done"})
+        assert done.status_code == 409, done.text
         for body in (
-            {"duty": "batch", "outcome": "done"},
             {"duty": "batch", "outcome": "partial", "reason": "rate_limited"},
             {"duty": "batch", "outcome": "failed", "reason": "rate_limited"},
             {"duty": "batch", "outcome": "partial", "reason": "network_blocked"},

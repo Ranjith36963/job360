@@ -63,6 +63,7 @@ from src.services.applications import (
     duplicates,
     hiding,
     interview_payloads,
+    job_checks,
     memory_closes,
     outcome_suggestions,
     plain_words,
@@ -1241,8 +1242,10 @@ class RecordEventResponse(BaseModel):
     # wrote nothing at all — S corollary of R2).
     follow_up_on: Optional[str]
     # PC run pc-1905 (2026-11-18): an application a PC run lets go (``hold_released``) gets the queue's next step,
-    # "Keep going: N tasks still wait; call take again." (``own_browser.next_after_hold_release``); else absent/null.
+    # "Do this task now: ..." and `next_task`, what take answered for that same session (PC run pc-2306;
+    # ``own_browser.next_after_hold_release``); else absent/null.
     next: Optional[str] = None
+    next_task: Optional[dict[str, Any]] = None
 
 
 class ReceiptFileOut(BaseModel):
@@ -4407,6 +4410,15 @@ async def _record_event(
                     "stored_browser": browser or which_browser.UNKNOWN,
                 })
                 recorded = {**recorded, "warnings": [*recorded.get("warnings", []), which_browser.BLOCKED_NO_BROWSER]}
+            host = str(stored.get("page_host") or "")
+            on_board = job_checks.classify_host(host) == "job_board"
+            if body.event_type == "blocked" and actor_for(user) != "web" and on_board:
+                get_audit_logger().info("blocked_on_job_board", extra={
+                    "event": "blocked_on_job_board", "user_id": safe_log_value(user.id),
+                    "application_id": application_id, "page_host": safe_log_value(host),
+                    "reason": safe_log_value(str(stored.get("reason") or "")),
+                })
+                recorded = {**recorded, "warnings": [*recorded.get("warnings", []), which_browser.BLOCKED_ON_JOB_BOARD]}
             return recorded
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
@@ -4511,12 +4523,12 @@ async def _record_event(
         if stored_type == "hold_released" and actor_for(user) != "web" and not result.get("already_existed"):
             from src.services.applications import own_browser as own_browser_service  # noqa: PLC0415
 
-            # PC run pc-1905: the release reply said "keep going"; this one said nothing, and the run ended.
+            # PC run pc-1905 / pc-2306: this reply hands the run its next task, so it has no choice to get wrong.
             nxt = await own_browser_service.next_after_hold_release(
                 db, user, application_id, datetime.now(timezone.utc)
             )
             if nxt is not None:
-                result = {**result, "next": nxt}
+                result = {**result, **nxt}
         return {**result, "warnings": warnings}
     except SpineError as exc:
         _raise(exc)

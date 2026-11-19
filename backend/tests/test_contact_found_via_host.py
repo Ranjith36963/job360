@@ -35,7 +35,6 @@ async def _add(agent: AsyncClient, app_id: int, name: str, found_via: str, sourc
 @pytest.mark.parametrize(
     ("found_via", "source_url", "hint"),
     [
-        ("company_team_page", "https://www.bernews.com/2026/09/eit-hires/", "news article is found_via other"),
         ("other", "https://www.linkedin.com/in/priya-shah", "linkedin page is found_via linkedin"),
         ("apollo", "https://www.bernews.com/2026/09/eit-hires/", "needs the linkedin profile"),
         ("linkedin", "https://eit.org/team", "needs the linkedin profile"),
@@ -79,3 +78,17 @@ async def test_the_website_is_not_checked(authenticated_async_context):
         app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
         resp = await _add(client, app_id, "Priya Shah", "company_team_page", "https://www.bernews.com/x")
         assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.asyncio
+async def test_a_company_site_without_the_company_name_is_saved_not_refused(authenticated_async_context):
+    """Kits audit 3B (2026-11-18): a company's own site need not carry its name (Alphabet on abc.xyz). The host
+    check is a hint in the log, never a 422: the assistant judged the page. A news page saved as company_team_page
+    is the assistant's call too."""
+    ad = {**_AD, "company": "Alphabet", "apply_url": "https://careers.google.com/jobs/1"}
+    async with authenticated_async_context() as client:
+        app_id = int((await client.post("/api/jobs/bring", json=ad)).json()["application_id"])
+        async with await _agent(client) as agent:
+            for i, url in enumerate(("https://abc.xyz/investor/board", "https://www.bernews.com/2026/09/hires/")):
+                resp = await _add(agent, app_id, f"Ok Person {i}", "company_team_page", url)
+                assert resp.status_code == 201, (url, resp.text)

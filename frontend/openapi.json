@@ -11063,6 +11063,24 @@
             "default": false,
             "title": "Reviewed",
             "type": "boolean"
+          },
+          "searched": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object"
+                },
+                "maxProperties": 20,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searched"
           }
         },
         "required": [
@@ -15204,6 +15222,18 @@
             ],
             "title": "Next"
           },
+          "next_task": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Task"
+          },
           "occurred_at": {
             "title": "Occurred At",
             "type": "string"
@@ -15733,6 +15763,18 @@
               }
             ],
             "title": "Next"
+          },
+          "next_task": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Task"
           },
           "outcome": {
             "anyOf": [

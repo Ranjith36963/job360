@@ -144,7 +144,8 @@ async def cv_work(
         # 2026-11-17: two runs stopped after one batch with ~219 left; the reply itself says to go on.
         "next": None if next_after is None else (
             f"Keep going: fetch the next page with after={next_after} (include_profile=false). "
-            "The run ends only when 10 new CVs are written this run or no items are left."),
+            "The run ends only when 10 CVs are stored strong this run (new, or weak ones fixed) or no items are left; "
+            "a weak result is work to fix, never a reason to stop."),
     }
     if include_profile:
         out["profile"] = compact_profile(user_id)

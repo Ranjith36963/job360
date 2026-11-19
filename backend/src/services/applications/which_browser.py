@@ -37,6 +37,13 @@ BLOCKED_NO_BROWSER = (
     'blocked was recorded without "browser": pass browser (job360, own_browser or manual) on every blocked '
     "event, so Job360 knows which browser met the block and where the job goes next"
 )
+# 2026-11-18 (21:41 batch run): 5 of 17 rows were blocked on a job board's sign-in or Apply button (shine.com,
+# reed.co.uk, cutshort.io) without trying the employer's own apply page (batch.md step 3). A hint, never a refusal.
+BLOCKED_ON_JOB_BOARD = (
+    "page_host is a job board, not the employer: before you leave this row blocked, find the employer's own apply "
+    "page for the same role (web search: company + title + careers), update_job(application_id, apply_url=...) and "
+    "work that page. Keep this block only when the employer has no page of its own, and say so in detail"
+)
 # Set only by server code around its own write (Job360's browser recording its submit click): never a caller's.
 SERVER_SAYS: ContextVar[Optional[str]] = ContextVar("which_browser_server_says", default=None)
 

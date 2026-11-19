@@ -55,6 +55,22 @@ def test_cv_recipe_loops_pages_until_ten_new_cvs_are_reviewed():
     text = _text()
     assert cv_run.TARGET == 10
     for token in ("LOOP: after each batch is recorded", "after=<the last application_id you got>",
-                  "until 10 NEW CVs are reviewed or `cv_work` has no items left", "a fetched page is always worked",
-                  "10 new CVs are written and reviewed this run", "each a whole profile skill"):
+                  "until 10 are stored strong or `cv_work` has no items left", "a fetched page is always worked",
+                  "10 CVs are stored strong this run (new CVs first, then weak CVs fixed)", "each a whole profile skill"):
         assert token in text, token
+
+
+def test_a_weak_result_never_ends_the_run_and_old_weak_cvs_are_rewritten():
+    """CV run 00:34 (2026-11-19, 0 of 10): it re-reviewed 10 old weak CVs as they were, all stored weak again, then
+    stopped "judging the failures to be reviewer faults" with 186 items left, no line rewritten, no page fetched.
+    Fixes count toward the 10; a weak result is work; an old weak CV with many codes is written fresh."""
+    text = _text()
+    for token in ("GOAL: 10 pieces of work stored STRONG this run",
+                  "weak CVs fixed to strong make up the 10",
+                  "A weak result is never a reason to end the run, nor a reason to wait for a fix to Job360",
+                  "Codes on 3 or more lines, or none named (`last_where` {}), = WRITE it fresh (step 3)",
+                  "never re-review it as it is",
+                  "= rewrite THAT line from the profile's own words",
+                  "save, review again: once per item"):
+        assert token in text, token
+    assert "Fixes and re-reviews of earlier CVs do not count toward the 10" not in text
