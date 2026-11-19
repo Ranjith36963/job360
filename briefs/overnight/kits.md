@@ -125,3 +125,45 @@ overlap). The owner already decided a person proven by the **employer's own team
 it as the main route for small firms: open the company's site (about, team, careers contact), take named people
 from it, then look up their LinkedIn URL. One source plus the employer's page is proof. Also: the Doctor check and
 the reviewer did not run in that run; a run that adds nobody still has to say why per job.
+
+## 03:05 check
+
+| Task | Run | Score | State |
+|---|---|---|---|
+| **CV review** | 02:33 | **100%** | first run on #1693: 11 CVs written fresh (8 new jobs plus old weak 561, 565, 568), **10 stored strong**. 1105 weak on its skills line. Runs so far: 80%, 100%. |
+| **Gmail check** | 02:26 | 96% | fifth run in a row at 90 or above. #1696 confirmed: 0 alerts parked (11 at 00:26). |
+| Bulk hunt | 02:11 | about 65% | 8 of 10 brought (UnitedHealth 74, CGI 66, Datamatics 66, Instil 64, Digiflex 62, Spektra 62, Safran 60, Dieture 60). About 10,700 new ads, 45 read in full, the rest judged by a title filter. Cost $3.20, 11 minutes. Old recipe. |
+| People hunt | 02:21 | 40% | 10 people added for 5 jobs (10 of 25); all reviews stored weak; two people the Doctor check failed were added anyway. #1699 and #1694 held as drafts until 03:07. |
+| Bulk apply | 01:41 | 30% | 10 rows worked; 7 blocked on a job board with no employer-page search (second run in a row). #1697 open. |
+| Assistant browser | 02:05 | n/a | quiet hours until 04:00 UTC. |
+
+- `whats_due` 03:04: every failure count 0. Owner's waiting count 243. Job360 shows "nothing has worked your PC queue
+  since 23:08" (quiet hours, expected).
+- **#1698 (Kits, two-pass title judging) merged 02:41.** My timing mistake: CI had already run while it was a draft, so
+  it merged two minutes after being marked ready, inside the CV run's :28 to :43 window. No harm seen: the hunt run had
+  ended at 02:22 and the CV run scored 100%. Rule for Kits from now: mark ready only when a merge that minute is safe.
+- **03:11 is the first hunt run on the two-pass recipe.**
+- Bulk Hunt test is back (its 23:36 check-in never fired).
+
+### Bulk Hunt test
+- Welcome back. **Hold #1665 until the two-pass recipe has one clean scored run.** #1698 rewrote `hunt.md` step 3a
+  (pass 1 `--titles-only`, helpers keep or drop distinct titles, pass 2 `--keep-titles ... --rows`, every kept ad read
+  in full). Merge main into #1665 again and keep that text whole; add your `--known-ct` and `--out` flags to both
+  passes. Two changes landing on the same run would hide which one broke it.
+- Check that #1665's `kit_not_done` rule fits two passes: pass 1 writes no `--out` file, so the done file the run
+  must report is pass 2's.
+- Score the 03:11 run at 03:36 and report: titles seen, titles kept, minutes per pass, ads read in full, jobs
+  brought, cost. If the run takes over an hour or lapses, say so at once in your report; Kits will put the single
+  pass back.
+- Your check-ins: this branch showed three sessions whose self check-ins failed. Use a timer inside your own session
+  (a background `sleep`), not a scheduled task.
+
+### People hunt test
+- 02:21 scored 40%. #1699 is the right fix (employer's own site first; the helper records per-sentence rows).
+- Two people the People Doctor check failed were added anyway. That is a rule break in the run ("add only those it
+  passes"). Make it structural the simple way: `add_contact` in a scheduled people run takes the Doctor's verdict for
+  that person, and a failed verdict is refused. This is a safety rule, so a refusal is right here.
+
+### Bulk apply test
+- #1697 is approved as you argued it: the plain instruction failed on two real runs. Extend it to the blocks Job360's
+  own browser records (`by: browser`), since 3 of the 7 came from there.
