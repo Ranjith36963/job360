@@ -31,7 +31,9 @@ async def _blocked_as_agent(fixture_user_id: str, app_id: int, host: str) -> dic
         tool = m.build_server()._tool_manager.get_tool("record_event")
         return await tool.fn(application_id=app_id, event_type="blocked", payload={
             "reason": "login_needed", "step": "apply_click", "page_host": host, "browser": "manual",
-            "detail": "Apply leads to a sign-in page."})
+            "detail": "Apply leads to a sign-in page.",
+            # 2026-11-19: a board block says what the search for the employer's own page found.
+            "employer_page": "Searched the company careers page and the web: the role is posted only here."})
     finally:
         m._current_user.reset(token)
 
