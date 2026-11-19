@@ -245,8 +245,7 @@ async def test_duty_with_a_person_in_release_backoff_says_held_back(
         async with await _agent(client) as agent:
             first = await _take(agent)
             assert first["task"]["contact_id"] == contact_id
-            await _release(agent, f"contact:{contact_id}", "other")
-            got = await _take(agent)
+            got = (await _release(agent, f"contact:{contact_id}", "other"))["next_task"]  # the release takes next
             assert got["status"] == "task" and got["task"]["kind"] == "linkedin_search", got  # take order unchanged
             held = got["held_back"]
             assert (held["people"], held["why"]) == (1, "release_backoff"), held
