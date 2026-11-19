@@ -74,3 +74,56 @@ async def test_no_open_cv_run_or_a_web_caller_gets_no_next(authenticated_async_c
                                 json={"event_type": "cv_reviewed", "payload": _review(cv_id, CV)})
         assert web.status_code == 201, web.text
         assert web.json().get("next") is None  # the web app's own review never gets the run's next step
+
+
+@pytest.mark.asyncio
+async def test_a_first_shaped_cv_work_read_mid_run_keeps_the_runs_count(
+    authenticated_async_context, fixture_user_id
+):
+    """CV run 05:33 (2026-11-19): "N of 10 stored strong" restarted at 1 after each record call and the run never
+    saw "CV run complete". A cv_work read with no cursor and include_profile true in the middle of an open run
+    called begin() again, which moved the run's start to now, so every CV stored strong before it stopped counting.
+    A run begun under RUN_MINUTES ago is the same run: such a read continues it."""
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        for n in range(5):
+            await _queued(client, 40 + n)
+        async with await _agent(client) as agent:
+            page = (await agent.get("/api/applications/cv-work", params={"limit": 2})).json()  # the run begins
+            first = [i["application_id"] for i in page["items"]]
+            cvs = [await _save_cv(client, a, CV) for a in first]
+            batch = await agent.post("/api/applications/record-events", json={"events": [
+                {"application_id": a, "event_type": "cv_reviewed", "payload": _review(c, CV)}
+                for a, c in zip(first, cvs)]})
+            assert [e["event"]["next"].split(".")[0] for e in batch.json()["events"]] == [
+                "CV run: 1 of 10 stored strong", "CV run: 2 of 10 stored strong"]
+            again = (await agent.get("/api/applications/cv-work", params={"limit": 2})).json()  # first-shaped, mid-run
+            assert again["next"].startswith("CV run: 2 of 10 stored strong so far.")
+            third = next(i["application_id"] for i in again["items"] if i["application_id"] not in first)
+            cv3 = await _save_cv(client, third, CV)
+            reply = await _review_reply(agent, third, cv3)
+            assert reply["next"].startswith("CV run: 3 of 10 stored strong. Not done.")
+
+
+@pytest.mark.asyncio
+async def test_a_first_read_after_run_minutes_begins_a_new_run(authenticated_async_context, fixture_user_id):
+    """The next hourly run still starts fresh: a slot older than RUN_MINUTES is replaced by its first read."""
+    from src.api import dependencies
+    from src.services.applications import cv_run
+
+    async with authenticated_async_context() as client:
+        _seed(fixture_user_id)
+        for n in range(3):
+            await _queued(client, 60 + n)
+        async with await _agent(client) as agent:
+            page = (await agent.get("/api/applications/cv-work", params={"limit": 1})).json()
+            app_id = page["items"][0]["application_id"]
+            cv_id = await _save_cv(client, app_id, CV)
+            assert (await _review_reply(agent, app_id, cv_id))["next"].startswith("CV run: 1 of 10")
+            db = await dependencies.get_db()
+            await db._db.execute(
+                "UPDATE assistant_duty_runs SET done_at = ? WHERE user_id = ? AND duty = ?",
+                ("2000-01-01T00:00:00+00:00", fixture_user_id, cv_run.SLOT))
+            await db._db.commit()
+            fresh = (await agent.get("/api/applications/cv-work", params={"limit": 1})).json()
+            assert fresh["next"].startswith("CV run: 0 of 10 stored strong so far.")

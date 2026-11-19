@@ -12,6 +12,10 @@ The end claims the slot in ONE statement (``DELETE ... RETURNING``), so an end r
 once; the batch's own cool-down and hourly cap still apply. A run that stops early leaves its slot; the next
 run's first read replaces it. Every query is scoped by ``user_id`` (rule #12).
 
+One run, one start (2026-11-19, run 05:33: "N of 10 stored strong" restarted at 1 after each record call): a
+first-shaped read (no cursor, ``include_profile`` true) inside a run begun under ``RUN_MINUTES`` ago CONTINUES that
+run. Before, it moved the run's start to now, so every CV stored strong earlier in the run stopped counting.
+
 Progress (2026-11-19, run 03:33 stopped after one batch of 5 with ~181 left): each ``cv_work`` read saves its
 page's last id and whether more pages follow in the slot's ``state`` (migration 0094's column); each
 ``cv_reviewed`` reply then says how many CVs are stored strong this run and hands back the next ``cv_work`` call,
@@ -20,30 +24,36 @@ so the assistant has no decision point. Progress never changes what ends the run
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from src.utils.logger import get_audit_logger, safe_log_value
 
 SLOT = "cv_run:"
 TARGET = 10  # new CVs a run writes (cv.md step 2)
+RUN_MINUTES = 50  # a scheduled run is hourly: an open run begun this recently is still the same run
 
 
 async def begin(db: Any, user_id: str) -> None:
-    """The run's first ``cv_work`` read: a new run starts now (replacing a run that never ended). Never raises."""
-    now = datetime.now(timezone.utc).isoformat()
+    """The run's first ``cv_work`` read: a new run starts now, replacing a run begun ``RUN_MINUTES`` or more ago
+    (one that never ended). A first-shaped read inside a younger run continues it. Never raises."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(minutes=RUN_MINUTES)).isoformat()
     try:
-        await db._db.execute(
+        cur = await db._db.execute(
             "INSERT INTO assistant_duty_runs (user_id, duty, done_at, state) VALUES (?, ?, ?, '') "
-            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, state = ''",
-            (user_id, SLOT, now),
+            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, state = '' "
+            "WHERE assistant_duty_runs.done_at < ? RETURNING duty",
+            (user_id, SLOT, now.isoformat(), cutoff),
         )
+        begun = await cur.fetchone() is not None
         await db._db.commit()
     except Exception:  # noqa: BLE001 - the read is never broken; this run's end then starts nothing
         get_audit_logger().warning("cv_run_begin_failed", extra={
             "event": "cv_run_begin_failed", "user_id": safe_log_value(user_id), "reason": "error"})
         return
-    get_audit_logger().info("cv_run_begin", extra={"event": "cv_run_begin", "user_id": safe_log_value(user_id)})
+    get_audit_logger().info("cv_run_begin", extra={
+        "event": "cv_run_begin", "user_id": safe_log_value(user_id), "result": "begun" if begun else "continued"})
 
 
 async def note_page(db: Any, user_id: str, last_id: Optional[int], more: bool) -> None:
