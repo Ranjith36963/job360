@@ -104,3 +104,18 @@ page-proven staff kept without LinkedIn; People Doctor check before add_contact)
 - Not fixed, named for Kits/owner: the run overrode the People Doctor's fails. Job360 does not store that check, so
   only the recipe line ("add only those it passes") stands; a stored People check would be the structural fix.
 - Decision taken without the owner: none.
+
+## 02:56 run  (score ~55%, not marked)
+- Achieved: reach Dieture 5, Spektra 5, Safran 5, Gnani.ai 5 (4 already saved), Digiflex 2; network +2 (Nethermind).
+  Proof mostly from the employers' own team / leadership pages (the route #1699 makes first). 20 drafts saved.
+- Missed: Tachyon (1089), CVEDIA (1090), Trackmind (1091) got nobody (Clay names, no second source; web search
+  rate-limited); the run ENDED before the outreach review, so mark_done was never called for reach or network
+  (both still unstamped; the next run picks them up). It again added people the People check failed (Digiflex pair).
+- Biggest cause: the run overrides the People check (third and fourth people tonight) and ends its turn early.
+- Fix: PR #1700 (Kits 03:05 order): add_contact from an assistant takes `people_check` pass|fail; fail is refused;
+  during a scheduled people run the verdict is required. 1041 contact tests pass. Opened 03:53, CI after the window.
+- #1694 / #1699: CI green and reviewers passed at 03:08, but merge-cage never re-judged them (drafts make the
+  reviewers skip; marking ready re-runs them, and that run does not wake the cage). Main merged into both at 03:27;
+  held as drafts through the 03:51 window; readied at 04:07. Kits: the cage does not re-judge after a
+  ready-for-review reviewer run; I cannot dispatch auto-merge.yml (403).
+- Decision taken without the owner: none.
