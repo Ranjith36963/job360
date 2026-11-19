@@ -1,0 +1,85 @@
+apply-20261118T2058	20:55	125	kit_read > hold_released:stopped
+apply-20261118T2058	20:56	136	kit_read > hold_released:stopped
+apply-20261118T2145	21:42	1061	kit_read > asked > blocked:login_needed@www.shine.com > hold_released:failed
+apply-20261118T2145	21:43	1062	kit_read > asked > blocked:other@www.reed.co.uk > hold_released:failed
+apply-20261118T2145	21:43	1063	kit_read > asked > blocked:other@www.reed.co.uk > hold_released:failed
+apply-20261118T2145	21:44	1066	kit_read > form_checked > form_filled:n=5 > asked > hold_released:stopped
+apply-20261118T2145	21:46	1067	kit_read > form_checked > form_filled:n=4 > submit_cleared > submit_cleared > submit_attempted > asked > blocked:captcha@jobs.ashbyhq.com:browser > hold_released:failed
+apply-20261118T2145	21:46	1068	kit_read > asked > blocked:login_needed@bloomenergy.wd1.myworkdayjobs.com:browser > hold_released:failed
+apply-20261118T2145	21:47	1069	kit_read > form_checked > asked > hold_released:stopped
+apply-20261118T2145	21:47	1070	kit_read > form_checked > asked > hold_released:stopped
+apply-20261118T2145	21:48	1071	kit_read > form_checked > asked > hold_released:stopped
+apply-20261118T2145	21:48	1072	kit_read > asked > blocked:other@sandalawoffices.com > hold_released:failed
+apply-20261118T2145	21:49	1073	kit_read > asked > blocked:other@www.scsuniversal.in > hold_released:failed
+apply-20261118T2145	21:49	1074	kit_read > asked > blocked:login_needed@cutshort.io > hold_released:failed
+apply-20261118T2145	21:50	1075	kit_read > asked > blocked:login_needed@www.shine.com > hold_released:failed
+apply-20261118T2145	21:50	1082	kit_read > asked > hold_released:stopped
+apply-20261118T2145	21:51	1083	kit_read > hold_released:stopped
+pc-2206	22:08	587	kit_read > hold_released:stopped
+apply-2026-11-18T23:45Z	23:42	1087	kit_read > asked > blocked:other@whitespaceglobal.recruit.charliehr.com > hold_released:blocked
+apply-20261119T0142	01:41	1090	kit_read > asked > form_checked > hold_released:stopped
+apply-20261119T0142	01:42	1092	kit_read > asked > blocked:login_needed@www.instahyre.com:browser > hold_released:failed
+apply-20261119T0142	01:42	1093	kit_read > hold_released:failed
+apply-20261119T0142	01:42	1094	kit_read > asked > blocked:login_needed@www.shine.com > hold_released:failed
+apply-20261119T0142	01:42	1096	kit_read > asked > blocked:captcha@uk.whatjobs.com:browser > hold_released:failed
+apply-20261119T0142	01:43	1098	kit_read > asked > blocked:other@uk.whatjobs.com > hold_released:failed
+apply-20261119T0142	01:43	1088	kit_read > asked > form_checked > hold_released:stopped
+apply-20261119T0142	01:43	1089	kit_read > asked > blocked:login_needed@www.instahyre.com:browser > hold_released:failed
+apply-20261119T0142	01:44	1091	kit_read > asked > blocked:login_needed@www.shine.com > hold_released:failed
+apply-20261119T0245Z	02:42	1099	kit_read > asked > blocked:login_needed@uhg.taleo.net:browser > hold_released:blocked
+apply-20261119T0245Z	02:43	1100	kit_read > asked > hold_released:stopped
+apply-20261119T0245Z	02:43	1101	kit_read > asked > blocked:login_needed@cgi.njoyn.com > hold_released:blocked
+apply-20261119T0245Z	02:44	1104	kit_read > asked > blocked:captcha@spektrasystems.zohorecruit.com > asked > hold_released:blocked
+apply-20261119T0245Z	02:44	1106	kit_read > asked > blocked:login_needed@www.instahyre.com:browser > hold_released:blocked
+apply-20261119T0245Z	02:45	1103	kit_read > asked > blocked:login_needed@www.shine.com > hold_released:blocked
+apply-20261119T0245Z	02:45	1105	kit_read > asked > hold_released:stopped
+apply-20261119T0442Z	04:42	1107	kit_read > form_checked > asked > form_filled:n=6 > hold_released:stopped
+apply-20261119T0442Z	04:44	1108	kit_read > asked > blocked:captcha@www.keyideasinfotech.com:browser > hold_released:failed
+apply-20261119T0442Z	04:44	1109	kit_read > form_checked > asked > form_filled:n=8 > hold_released:stopped
+apply-20261119T0442Z	04:45	1110	kit_read > form_checked > asked > form_filled:n=3 > hold_released:stopped
+apply-20261119T0442Z	04:45	1111	kit_read > hold_released:failed
+apply-20261119T0442Z	04:46	1112	kit_read > form_checked > asked > form_filled:n=4 > hold_released:stopped
+apply-20261119T0442Z	04:47	1113	kit_read > asked > blocked:captcha@evnek.zohorecruit.in > hold_released:failed
+pc-0505	05:06	617	kit_read > asked > hold_released:stopped
+pc-0505	05:06	620	kit_read > note > hold_released:stopped
+pc-0606	06:10	626	kit_read > hold_released:stopped
+pc-0606	06:11	627	kit_read > hold_released:stopped
+pc-0606	06:11	634	kit_read > hold_released:stopped
+apply-20261119T0636Z	06:35	634	kit_read > form_checked > asked > hold_released:stopped
+pc-0706	07:06	661	kit_read > blocked:posting_closed@www.linkedin.com > withdrawn:posting_closed > unblocked > hold_released:blocked
+pc-0706	07:06	662	kit_read > asked > hold_released:stopped
+pc-0706	07:07	664	kit_read > hold_released:stopped
+pc-0706	07:08	665	kit_read > hold_released:stopped
+apply-20261119T0735Z	07:35	1120	kit_read > form_checked > hold_released:stopped
+apply-20261119T0735Z	07:36	1125	kit_read > asked > blocked:login_needed@www.instahyre.com:browser > hold_released:failed
+apply-20261119T0735Z	07:36	1119	kit_read > asked > blocked:other@seal.run > hold_released:stopped
+apply-20261119T0735Z	07:38	1128	kit_read > blocked:posting_closed@globalhr.wd5.myworkdayjobs.com > withdrawn:posting_closed > unblocked > hold_released:stopped
+apply-20261119T0735Z	07:38	1129	kit_read > asked > blocked:login_needed@crowe.wd12.myworkdayjobs.com:browser > hold_released:failed
+apply-20261119T0743Z	07:43	1130	kit_read > asked > blocked:bot_check@www.gradcracker.com:browser > hold_released:failed
+pc-0809	08:08	668	kit_read > hold_released:stopped
+pc-0809	08:08	669	kit_read > hold_released:stopped
+pc-0907	09:08	676	kit_read > hold_released:stopped
+pc-0907	09:08	677	kit_read > hold_released:stopped
+apply-20261119T0936Z	09:35	1133	kit_read > asked > form_checked > form_filled:n=6 > hold_released:stopped
+apply-20261119T0936Z	09:37	1134	kit_read > asked > form_checked > form_filled:n=2 > hold_released:stopped
+apply-20261119T0936Z	09:37	1135	kit_read > asked > form_checked > form_filled:n=0 > hold_released:stopped
+apply-20261119T0936Z	09:38	1136	kit_read > asked > form_checked > form_filled:n=5 > hold_released:stopped
+apply-20261119T0936Z	09:39	1138	kit_read > asked > blocked:captcha@remotestar-team.freshteam.com:browser > hold_released:failed
+apply-20261119T0936Z	09:39	1140	kit_read > asked > blocked:login_needed@jobs.bcu.ac.uk:browser > hold_released:failed
+pc-1006	10:07	687	kit_read > hold_released:stopped
+pc-1006	10:07	691	kit_read > hold_released:stopped
+apply-20261119T1045Z	10:43	62	kit_read > blocked:posting_closed@jobs.citi.com > withdrawn:posting_closed > unblocked > hold_released:failed
+apply-20261119T1045Z	10:43	1141	kit_read > asked > blocked:bot_check@www.gradcracker.com:browser > hold_released:blocked
+apply-20261119T1045Z	10:43	1142	kit_read > asked > blocked:login_needed@devglobaljobs.com > hold_released:failed
+pc-1106	11:09	718	kit_read > hold_released:blocked
+apply-20261119T1145	11:43	1143	kit_read > form_checked > asked > hold_released:stopped
+apply-20261119T1145	11:44	1144	kit_read > form_checked > asked > hold_released:stopped
+apply-20261119T1145	11:44	1146	kit_read > asked > blocked:other@to.indeed.com:EP > hold_released:blocked
+apply-20261119T1145	11:44	1148	kit_read > asked > blocked:captcha@proclinkconsulting.keka.com > hold_released:blocked
+pc-1206	12:08	705	kit_read > hold_released:blocked
+pc-1206	12:09	706	kit_read > blocked:posting_closed@www.linkedin.com > withdrawn:posting_closed > unblocked > hold_released:blocked
+pc-1206	12:09	709	kit_read > asked > hold_released:stopped
+pc-1206	12:09	712	kit_read > hold_released:failed
+pc-1308	13:10	694	kit_read > hold_released:stopped
+pc-1308	13:10	695	kit_read > blocked:posting_closed@www.linkedin.com > withdrawn:posting_closed > unblocked > hold_released:blocked
+pc-1308	13:10	698	kit_read
