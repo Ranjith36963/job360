@@ -173,6 +173,9 @@ class MarkDoneIn(BaseModel):
     # Only with reach (2026-11-18 22:07 run: five ids listed, one company searched): application id -> what each
     # source found at that company ({"sprouts": 0, "clay": 1, "team_page": 2}). Needed for each job left under 3.
     searched: Optional[dict[str, dict[str, int]]] = Field(default=None, max_length=20)
+    # Only with reach (owner 18 Nov; Kits 19 Nov, job 833 scored 0): the jobs whose company is a recruitment agency or
+    # whose ad names no employer. The run judges it; there the named recruiter is the target (1 to 2 people).
+    agency: Optional[list[int]] = Field(default=None, max_length=20)
 
 
 class PeopleScoreOut(BaseModel):
@@ -183,6 +186,17 @@ class PeopleScoreOut(BaseModel):
     network: Optional[int] = None
     target: int
     minimum: int
+    # The agency jobs of this run (MarkDoneIn.agency): full at AGENCY_MINIMUM people, target AGENCY_TARGET.
+    agency: list[str] = Field(default_factory=list)
+
+
+# Owner 18 Nov: for an agency job the named recruiter IS the target, 1 to 2 people.
+AGENCY_MINIMUM = 1
+AGENCY_TARGET = 2
+
+
+def _job_minimum(score: PeopleScoreOut, job: str) -> int:
+    return AGENCY_MINIMUM if job in score.agency else score.minimum
 
 
 class MarkDoneOut(BaseModel):
@@ -446,7 +460,7 @@ def _refuse_unsearched_jobs(user: CurrentUser, score: PeopleScoreOut, searched: 
     """2026-11-18 22:07 run: five ids listed, one company searched, Sprouts and Clay never called for the other four.
     Each job left under the minimum carries in ``searched`` what each free lookup found at its company; Job360 only
     checks that the record is there and logs its counts, never whether the run tried hard enough."""
-    short = [i for i, n in score.per_job.items() if n < score.minimum]
+    short = [i for i, n in score.per_job.items() if n < _job_minimum(score, i)]
     missing = [i for i in short if i not in searched]
     unsaid: dict[str, list[str]] = {}
     for i in (i for i in short if i in searched):
@@ -465,7 +479,9 @@ def _refuse_unsearched_jobs(user: CurrentUser, score: PeopleScoreOut, searched: 
         detail=(
             f"Jobs under {score.minimum} people need what each source found at their company; {'; '.join(parts)}. "
             "Work each company now (step 1: Sprouts and Clay with its domain, then its pages and a web search), "
-            'then mark_done again with searched {"<application id>": {"sprouts": n, "clay": n, "<source>": n}}.'
+            'then mark_done again with searched {"<application id>": {"sprouts": n, "clay": n, "<source>": n}}. '
+            "An agency job (the company is a recruitment agency, or the ad names no employer) is full with its named "
+            "recruiter: list it in agency."
         ),
     )
 
@@ -474,7 +490,8 @@ def _below_target(score: PeopleScoreOut) -> list[str]:
     """Each job under the minimum ("<id>: n of 5"), or the network run under its target."""
     if score.network is not None:
         return [f"network: {score.network} of {score.target}"] if score.network < score.minimum else []
-    return [f"{i}: {n} of {score.target}" for i, n in score.per_job.items() if n < score.minimum]
+    return [f"{i}: {n} of {AGENCY_TARGET if i in score.agency else score.target}"
+            for i, n in score.per_job.items() if n < _job_minimum(score, i)]
 
 
 async def _refuse_unfinished_people(
@@ -818,6 +835,8 @@ async def mark_done(
         reviewed = reviewed or checked > 0
     if body.reviewed and body.duty not in ("reach", "network"):
         raise HTTPException(status_code=422, detail="reviewed is only for duty reach or network")
+    if body.agency is not None and (body.duty != "reach" or set(body.agency) - set(body.application_ids or [])):
+        raise HTTPException(status_code=422, detail="agency is only for duty reach, and only ids in application_ids")
     if body.searched is not None and body.duty != "reach":
         raise HTTPException(status_code=422, detail="searched is only for duty reach")
     outcome, reason, said = body.outcome, body.reason, ""
@@ -825,6 +844,7 @@ async def mark_done(
     if body.duty in ("reach", "network") and actor_for(user) != "web":
         # Owner 2026-11-18: Job360 judges the count, never the run's own claim; the call is never refused for it.
         score = await _people_score(db, user, body.duty, ids, now)
+        score.agency = [str(i) for i in body.agency or [] if i in ids]
         if body.duty == "reach" and outcome != "failed":
             _refuse_unsearched_jobs(user, score, body.searched or {})
         short = _below_target(score)

@@ -165,3 +165,26 @@ async def test_recruiters_saved_on_an_agency_job_count_for_it(authenticated_asyn
                 "note": "Sprouts: 2. Clay: 2.", "searched": {str(app_id): {"sprouts": 2, "clay": 2}}})
             assert resp.status_code == 200, resp.text
             assert resp.json()["score"]["per_job"] == {str(app_id): 2}, resp.json()
+
+
+@pytest.mark.asyncio
+async def test_an_agency_job_is_full_with_its_named_recruiter(authenticated_async_context, fixture_user_id):
+    """Owner, 18 Nov; Kits, 19 Nov (job 833, Jobaaj, scored 0): for an agency job, or an ad that names no employer,
+    the named recruiter IS the target, 1 to 2 people. The run says which jobs are agency jobs (`agency`); Job360
+    counts 1 recruiter as full there and asks nothing more of that job."""
+    async with authenticated_async_context() as client:
+        ad = {"title": "AI Engineer", "company": "Jobaaj Com (hiring for an unnamed client)", "location": "Remote",
+              "apply_url": "https://jobaaj.example/jobs/833", "description": "AI engineer for a client."}
+        agency = int((await client.post("/api/jobs/bring", json=ad)).json()["application_id"])
+        async with await _agent(client) as agent:
+            await _reviewed_person(agent, agency, "Neha Rao")
+            body = {"duty": "reach", "application_ids": [agency], "outcome": "done"}
+            plain = await agent.post("/api/schedule/done", json=body)
+            assert plain.status_code == 409 and f"no searched entry: {agency}" in plain.json()["detail"], plain.text
+            resp = await agent.post("/api/schedule/done", json={**body, "agency": [agency]})
+            assert resp.status_code == 200, resp.text
+            score = resp.json()["score"]
+            assert score["per_job"] == {str(agency): 1} and score["agency"] == [str(agency)], score
+            assert resp.json()["outcome"] == "done", resp.json()
+            stray = await agent.post("/api/schedule/done", json={**body, "agency": [agency + 999]})
+            assert stray.status_code == 422 and "agency" in stray.json()["detail"], stray.text
