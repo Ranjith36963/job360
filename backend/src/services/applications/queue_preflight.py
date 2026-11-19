@@ -548,14 +548,16 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
 
 
 def route_label(
-    url: str, block: dict[str, Any], hosts: frozenset[str] = frozenset(), email_codes: bool = False,
+    url: str, block: dict[str, Any], hosts: frozenset[str] = frozenset(),
+    email_codes: bool | frozenset[str] = False,
 ) -> dict[str, str]:
     """The browser (``routing.label``) that runs one queued application: its apply link plus its open block's
     payload (``{}`` = none) and the user's learned blocked ``hosts`` (``learned.blocked_hosts``). The label
     carries the plain reason ("Job360's browser was blocked twice on <site>"). Pure; ``queue_browsers`` and
     ``blockers`` share it."""
     if blocked_service.assistant_reads_code(block, email_codes):  # F8: the assistant reads it, on the user's PC
-        return routing.label(routing.Route("own_browser", "email_code"), site=routing.site_of(url)[1])
+        why = "site_sign_in" if block.get("reason") in blocked_service.SIGN_IN_WALLS else "email_code"
+        return routing.label(routing.Route("own_browser", why), site=routing.site_of(url)[1])
     reason = str(block.get("reason") or "")
     handoff = blocked_service.captcha_handoff(block)
     by_browser = block.get(blocked_service.BY_KEY) == blocked_service.BY_BROWSER

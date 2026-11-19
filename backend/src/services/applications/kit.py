@@ -107,8 +107,9 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "`hold` set means another session is working this application: tell the user and stop unless they say "
     "continue. When you finish or hand over, record `hold_released` {reason: done|stopped}.",
     "`duplicate` flagged: warn before any work.",
-    "Account site: stop. The user signs up and signs in themselves (never ask for or store a password), "
-    "then record_event site_account {host} and continue. Hit a sign-in wall on any other site: "
+    "Account site: stop. The user signs up and signs in themselves (never ask for, store or reuse a password), "
+    "unless settings site_sign_in is on: then rules SITE SIGN-IN. Then record_event site_account {host} and "
+    "continue. Hit a sign-in wall on any other site: "
     "record_event account_needed {host}.",
 )
 
@@ -1721,11 +1722,22 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
         "fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers", "form_url",
     }),
     "hold_released": frozenset({"reason"}),
-    "site_account": frozenset({"host"}),
+    "site_account": frozenset({"host", "method"}),
     "account_needed": frozenset({"host"}),
     "email_drafted": email_channel.REQUIRED | email_channel.OPTIONAL,
 }
 FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
+# Owner 2026-11-19 (SITE SIGN-IN): how the assistant got into a job site's account; optional, a closed set.
+SITE_ACCOUNT_METHODS = frozenset({"email_code", "magic_link", "reset_link", "new_account"})
+_SECRET_KEY_WORDS = ("password", "passwd", "passcode", "secret", "pwd")
+
+
+def secret_keys(payload: dict[str, Any]) -> list[str]:
+    """Payload keys named like a password or secret (case-folded, any part of the name). A site account never
+    carries one: refused by name, never echoed with a value (SITE SIGN-IN: no password is ever stored)."""
+    return sorted(k for k in payload if isinstance(k, str) and any(w in k.casefold() for w in _SECRET_KEY_WORDS))
+
+
 FORM_FILLED_OPTIONAL = frozenset({"answers", "fields_skipped"})
 FORM_SWEPT_REQUIRED = frozenset({"fields_checked", "fixed"})
 FORM_SWEPT_NOTES_MAX = 300
@@ -2059,7 +2071,11 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
             problems.append("reason must be one of: " + ", ".join(sorted(HOLD_RELEASE_REASONS)))
     elif event_type in ("site_account", "account_needed"):
-        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        if secret := secret_keys(payload):
+            problems.append(f"{event_type} never carries a password or secret (refused keys: {secret})")
+        problems += _keys_problem(payload, frozenset({"host"}), EVENT_PAYLOAD_KEYS[event_type])
+        if "method" in payload and payload["method"] not in SITE_ACCOUNT_METHODS:
+            problems.append("method must be one of: " + ", ".join(sorted(SITE_ACCOUNT_METHODS)))
         host = payload.get("host")
         if settings_rules.parse_site_host(host if isinstance(host, str) else None) is None:
             problems.append("host could not be read (a host name such as jobs.example.com)")
@@ -2315,8 +2331,18 @@ async def _check_kit_event(
             raise SpineError(422, "hold_released reason must be one of: " + ", ".join(sorted(HOLD_RELEASE_REASONS)))
         return {"reason": payload["reason"], "by": actor}
     if event_type in ("site_account", "account_needed"):
-        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])  # a password key can never fit here
-        return {"host": _host(event_type, payload.get("host")), "by": actor}
+        if secret_keys(payload):  # a password key can never fit here
+            raise SpineError(422, f"{event_type} never carries a password or secret")
+        site_keys = frozenset({"host", "method"} if "method" in payload else {"host"})
+        _closed_payload(
+            event_type, payload, site_keys if event_type == "site_account" else EVENT_PAYLOAD_KEYS[event_type],
+        )
+        stored = {"host": _host(event_type, payload.get("host")), "by": actor}
+        if "method" in payload:
+            if payload["method"] not in SITE_ACCOUNT_METHODS:
+                raise SpineError(422, "method must be one of: " + ", ".join(sorted(SITE_ACCOUNT_METHODS)))
+            stored["method"] = payload["method"]
+        return stored
     if event_type == email_channel.EVENT_TYPE:
         # Slice 31: recipient, subject and the attached versions (never the body); attachments must be
         # this application's CV / letter with the kit's text hash.
@@ -2332,7 +2358,7 @@ def log_kit_event(
         "event": event_type, "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
         "application_id": application_id, "event_id": event_id, "result": "ok",
     }
-    for key in ("where", "version", "mode", "host", "reason", "fields_count"):
+    for key in ("where", "version", "mode", "host", "reason", "fields_count", "method"):
         if stored.get(key) is not None:
             extra[key] = safe_log_value(stored[key], max_len=80)
     if isinstance(stored.get("answers"), list):
