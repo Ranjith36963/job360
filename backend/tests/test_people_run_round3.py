@@ -103,11 +103,39 @@ async def test_a_reach_mark_that_leaves_out_a_given_job_is_refused(authenticated
             assert both.json()["outcome"] == "partial"
 
 
-async def _reviewed_person(agent: AsyncClient, app_id: int, name: str) -> None:
+@pytest.mark.asyncio
+async def test_a_job_that_slid_into_the_due_list_is_not_demanded(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    """19 Nov 10:56 and 12:12 runs: whats_due gave 5 jobs; the run brought some to target, they left the due list,
+    and the next due job (843, then 893) slid into the top 5. mark_done recomputed the list and refused: "1
+    applications this run was given are not in application_ids: 843", a job the run was never given. Only the jobs
+    whats_due handed this run are demanded; a job that slid in waits for the next run."""
+    monkeypatch.setattr(settings, "REACH_MAX_PER_RUN", 1)
+    monkeypatch.setattr(settings, "REACH_TARGET_PEOPLE", 1)
+    async with authenticated_async_context() as client:
+        await _setup(client, fixture_user_id)
+        one, two = await _bring(client, 1), await _bring(client, 2)
+        async with await _agent(client) as agent:
+            given = _reach((await agent.get("/api/schedule/due", params={"duties": ["reach"]})).json())
+            assert len(given) == 1, given
+            [mine] = given
+            [other] = {one, two} - {mine}
+            await _reviewed_person(agent, mine, "Rita Shah", people_check="pass")
+            done = await agent.post("/api/schedule/done", json={
+                "duty": "reach", "application_ids": [mine], "outcome": "partial", "note": "Sprouts: Rita Shah. Clay: none.",
+                "searched": {str(mine): {"sprouts": 1, "clay": 0}}})
+            # main recomputed the due list here; `other` had slid in, and it refused: "not in application_ids: <other>"
+            assert done.status_code == 200, done.text
+            assert done.json()["score"]["per_job"] == {str(mine): 1}, done.json()  # only the job it was given
+
+
+async def _reviewed_person(agent: AsyncClient, app_id: int, name: str, **extra: str) -> None:
     from tests._outreach_review import seed_strong_review
 
     made = await agent.post(f"/api/applications/{app_id}/contacts", json={
-        "name": name, "role": "Recruiter", "linkedin_url": f"https://www.linkedin.com/in/{name.lower().replace(' ', '-')}"})
+        "name": name, "role": "Recruiter", "linkedin_url": f"https://www.linkedin.com/in/{name.lower().replace(' ', '-')}",
+        **extra})
     assert made.status_code == 201, made.text
     cid = int(made.json()["contact_id"])
     note = {"entry": "message", "channel": "linkedin", "text": f"Hi {name.split()[0]}, I build data pipelines."}

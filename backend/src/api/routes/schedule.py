@@ -289,6 +289,9 @@ async def whats_due(
         answer["nothing_due"] = not answer["due"]
         answer["running"] = {**answer["running"], **{d: now.isoformat(timespec="seconds") for d in lost}}
         answer["held_by_running"] = [*answer["held_by_running"], *lost]
+        for item in answer["due"]:
+            if item["duty"] == "reach":  # what this run was given: mark_done demands these, never a job that slid in
+                await schedule.record_given(db, user.id, "reach", list(item.get("application_ids") or []), now)
     for item in answer["due"]:
         if item["duty"] == "inbox":
             from src.services.applications.inbox import search_plan  # noqa: PLC0415 - profile <-> spine cycle
@@ -555,8 +558,15 @@ async def _refuse_left_out_jobs(db: JobDatabase, user: CurrentUser, ids: list[in
     """2026-11-18 13:56 run: whats_due listed 5 applications, the run worked one and marked only that one, so
     Job360 judged one job. Every application still due for reach that was brought before this run took the duty
     must be in ``application_ids``: worked, or listed as tried (its count then shows below_target)."""
-    since = _run_since(await schedule.load_stamps(db, user.id), "reach", now)
+    stamps = await schedule.load_stamps(db, user.id)
+    since = _run_since(stamps, "reach", now)
     due = (await schedule.load_facts(db, user.id, now)).reach_ids
+    given = schedule.given_ids(stamps, "reach", since)
+    if given is not None:  # 19 Nov: only what whats_due handed THIS run; a job that slid in waits for the next run
+        slid = [a for a in due if a not in given and a not in ids]
+        if slid:
+            _log("people_run_slid_in_not_demanded", user, duty="reach", jobs=",".join(str(i) for i in slid))
+        due = [a for a in due if a in given]
     left = [a for a in due if a not in ids]
     if not left:
         return
