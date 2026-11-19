@@ -110,6 +110,21 @@
             ],
             "title": "Occurred At"
           },
+          "people_check": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pass",
+                  "fail"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "People Check"
+          },
           "phone": {
             "anyOf": [
               {
@@ -393,6 +408,21 @@
               }
             ],
             "title": "Occurred At"
+          },
+          "people_check": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pass",
+                  "fail"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "People Check"
           },
           "phone": {
             "anyOf": [

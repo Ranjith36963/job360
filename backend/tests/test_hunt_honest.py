@@ -319,7 +319,7 @@ def test_the_hunt_recipe_works_while_the_kit_runs_and_reports_honestly():
     text = load_recipe("hunt").text
     flat = " ".join(text.split())
     assert len(text.splitlines()) <= 70
-    assert "--max-minutes 20" in flat and "--max-minutes 25" not in flat and "--max-minutes 40" not in flat
+    assert "--max-minutes 25" in flat and "--max-minutes 40" not in flat
     assert "split -l 40" in flat and "in waves" in flat and "8 helpers" in flat
     assert "unreadable" in flat and "snippet_only" in flat
     assert "read_in_full + unreadable + snippet_only = prefilter_passed" in flat

@@ -137,3 +137,31 @@ async def test_people_at_the_same_company_count_for_every_job_there(authenticate
             assert resp.status_code == 200, resp.text
             assert resp.json()["score"]["per_job"] == {str(first): 5, str(second): 5}, resp.json()
             assert resp.json()["outcome"] == "done", resp.json()
+
+
+@pytest.mark.asyncio
+async def test_recruiters_saved_on_an_agency_job_count_for_it(authenticated_async_context, fixture_user_id):
+    """2026-11-19 04:07 run: two recruiters saved on job 1110 with company "David Joseph & Company" while the job's
+    company read "David Joseph & Company (recruiting for a Series B enterprise AI company)"; the keys differed and
+    Job360 scored the job 0. Everyone saved ON a job counts for it, as well as everyone at its company."""
+    from tests._outreach_review import seed_strong_review
+
+    async with authenticated_async_context() as client:
+        ad = {"title": "AI Backend Engineer", "company": "David Joseph & Company (recruiting for a Series B AI company)",
+              "location": "London", "apply_url": "https://davidjoseph.example/jobs/1", "description": "AI backend."}
+        app_id = int((await client.post("/api/jobs/bring", json=ad)).json()["application_id"])
+        async with await _agent(client) as agent:
+            for name in ("Luc Menard", "David Houston"):
+                made = await agent.post(f"/api/applications/{app_id}/contacts", json={
+                    "name": name, "role": "Recruiter", "company": "David Joseph & Company",
+                    "linkedin_url": f"https://www.linkedin.com/in/{name.lower().replace(' ', '-')}"})
+                assert made.status_code == 201, made.text
+                cid = int(made.json()["contact_id"])
+                note = {"entry": "message", "channel": "linkedin", "text": f"Hi {name.split()[0]}, I build AI backends."}
+                assert (await agent.post(f"/api/contacts/{cid}/outreach", json=note)).status_code in (200, 201)
+                seed_strong_review(cid)
+            resp = await agent.post("/api/schedule/done", json={
+                "duty": "reach", "application_ids": [app_id], "outcome": "partial",
+                "note": "Sprouts: 2. Clay: 2.", "searched": {str(app_id): {"sprouts": 2, "clay": 2}}})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["score"]["per_job"] == {str(app_id): 2}, resp.json()

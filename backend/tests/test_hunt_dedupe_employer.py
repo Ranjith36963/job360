@@ -428,7 +428,7 @@ def test_the_hunt_recipe_starts_the_kit_first_and_waits_for_its_done_file():
     flat = " ".join(text.split())
     assert len(text.splitlines()) <= 70
     assert "--known-ct known_ct.txt" in flat and "--known known.txt" in flat
-    assert "--max-minutes 20" in flat and "FIRST" in flat and "2 minutes" in flat
+    assert "--max-minutes 25" in flat and "FIRST" in flat and "2 minutes" in flat
     assert ".done.json" in flat and "kit.done" in flat
     assert "employer_searched" in flat and "greenhouse" in flat and "lever" in flat and "ashby" in flat
     assert "not_duplicate_of" in flat

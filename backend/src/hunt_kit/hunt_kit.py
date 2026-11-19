@@ -40,6 +40,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import sys
 import threading
@@ -711,6 +712,90 @@ def title_hint(title: str, targets: Callable[[str], bool], years: int | None) ->
     }
 
 
+# ============================================== two-pass hunt (2026-11-19)
+# Pass 1 (--titles-only FILE) reads listing pages only and writes one line per distinct title; the assistant keeps
+# titles; pass 2 (--keep-titles FILE --rows FILE) re-runs only the sources whose listings held a kept title and
+# opens full ads for kept titles only. Nothing here judges a title: a title with every hint negative is listed.
+def norm_title(title: str) -> str:
+    """A title's key: lower case, words only (word by word, no regex)."""
+    return " ".join("".join(c if c.isalnum() else " " for c in (title or "").lower()).split())
+
+
+def read_jsonl(path: str) -> Iterable[dict[str, Any]]:
+    """Every JSON object line of a file (a half-written line is skipped; a missing file is empty)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    yield rec
+    except OSError:
+        return
+
+
+def distinct_titles(rows: Iterable[dict[str, Any]], targets: Callable[[str], bool]) -> list[dict[str, Any]]:
+    """Pass 1 rows -> one entry per normalised title, most listings first.
+
+    A reader that tests a card's title before opening it (``gate`` rows) and then lists it too is counted once:
+    per source and title the larger of the two counts.
+    """
+    seen: dict[str, dict[str, Any]] = {}
+    pairs: collections.Counter[tuple[str, str, bool]] = collections.Counter()
+    for r in rows:
+        key = norm_title(r.get("title") or "")
+        if not key:
+            continue
+        gate = bool(r.get("gate"))
+        pairs[(key, r.get("task") or "", gate)] += 1
+        d = seen.setdefault(key, {"title": r.get("title"), "sample": None})
+        if not gate and d["sample"] is None:
+            d["sample"] = {"company": r.get("company") or "", "place": r.get("location") or ""}
+    counts: collections.Counter[str] = collections.Counter()
+    for (key, task, gate), n in pairs.items():
+        if not gate:
+            counts[key] += max(n, pairs.get((key, task, True), 0))
+        elif (key, task, False) not in pairs:
+            counts[key] += n
+    out = []
+    for key, d in seen.items():
+        h = title_hint(d["title"], targets, None)
+        out.append({"title": d["title"], "count": counts[key],
+                    "hint": {"matched_target_phrase": h["matched_target_phrase"], "level_words": h["level_words"]},
+                    "sample": d["sample"] or {"company": "", "place": ""}})
+    out.sort(key=lambda e: (-e["count"], norm_title(e["title"])))
+    return out
+
+
+def load_keep_titles(path: str) -> set[str]:
+    """Pass 2's kept titles: one per line, as pass 1 printed it (a whole pass-1 JSON line is read too)."""
+    keep: set[str] = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    line = str(json.loads(line).get("title") or "")
+                except (ValueError, AttributeError):
+                    pass
+            if norm_title(line):
+                keep.add(norm_title(line))
+    return keep
+
+
+def keep_task_ids(rows_path: str, keep: set[str]) -> set[str] | None:
+    """The sources (task ids) whose pass-1 listings hold a kept title; None = a row has no task id: re-run all."""
+    tasks: set[str] = set()
+    for r in read_jsonl(rows_path):
+        if norm_title(r.get("title") or "") in keep:
+            if not r.get("task"):
+                return None
+            tasks.add(r["task"])
+    return tasks
+
+
 def sentences(text: str) -> list[str]:
     """Split text into sentences (newlines also end a sentence)."""
     out: list[str] = []
@@ -1234,6 +1319,11 @@ FINGERPRINT_ARGS = (
 def run_fingerprint(args: argparse.Namespace) -> str:
     """Hash of the options that decide WHAT is searched. A resume only continues the same search."""
     d = {k: getattr(args, k, None) for k in FINGERPRINT_ARGS}
+    for k in ("titles_only", "rows"):  # the two-pass flags join only when set, so a plain run's hash is unchanged
+        if getattr(args, k, None):
+            d[k] = getattr(args, k)
+    if getattr(args, "keep_set", None) is not None:
+        d["keep_titles"] = sorted(args.keep_set)  # the kept titles themselves, not only the file name
     return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -1820,10 +1910,16 @@ class Collector:
         self.board_outcomes: dict[str, str] = {}  # "ats:token" -> "ok" | "404" for boards that gave a clear answer
         # --every-title: the assistant judges titles, so no title, exclude-word or years test drops a job here;
         # --titles only seeds search-style boards and the title_hint. Readers' detail gates then pass every title.
-        self.every_title = bool(getattr(args, "every_title", False))
+        self.every_title = bool(getattr(args, "every_title", False) or getattr(args, "titles_only", "")
+                                or getattr(args, "keep_set", None) is not None)
         self.target_phrases = make_title_matcher(args.titles, "")
         self.matcher = (lambda _t: True) if self.every_title else make_title_matcher(
             args.titles, args.exclude_title_words)
+        # Two-pass hunt: pass 1 lists titles and opens no ad; pass 2 keeps only the titles the assistant kept.
+        self.titles_only = bool(getattr(args, "titles_only", ""))
+        keep = getattr(args, "keep_set", None)
+        if keep is not None:
+            self.matcher = lambda t: norm_title(t) in keep
         self.cursor: dict[str, int] = {}  # {ats: next offset into its open list}; moved on at the end of run()
         self.rotation: dict[str, dict[str, Any]] = {}  # per rotated slow ATS: pool size, start, slice keys
         self.visited: set[str] = set()  # "ats:token" of boards whose task ran to its end this session
@@ -1851,6 +1947,42 @@ class Collector:
     def skipped(self, *names: str) -> bool:
         low = " ".join(n.lower() for n in names if n)
         return any(s in low for s in self.skip)
+
+    def gate(self, title: str) -> bool:
+        """Readers' ``title_ok``: may this card spend a detail request? Pass 1 lists the title and says no."""
+        if not self.titles_only:
+            return self.matcher(title)
+        self._keep_row({"gate": True, "title": title, "task": getattr(self.tl, "tid", "")})
+        return False
+
+    def _keep_row(self, rec: dict[str, Any]) -> None:
+        with self.lock:
+            if self.sink is not None:
+                self.sink.write(rec)
+            else:
+                self.results.append(rec)
+
+    def _offer_listing(self, source: str, raw: dict[str, Any], rec_source: str | None) -> None:
+        """Pass 1: one listing row, no ad fetched. The place rules and the date run on what the listing holds."""
+        reg_ids, reg_cc = getattr(self.tl, "register", None) or ("", frozenset())
+        loc, desc = raw.get("loc", ""), raw.get("desc") or ""
+        row = classify_location(loc, desc, self.prefs, bool(raw.get("visa_flag")), reg_cc)
+        if not row and callable(raw.get("detail")):  # the unread ad may still sponsor: pass 2 checks its text
+            row = classify_location(loc, desc, self.prefs, True, reg_cc) and "ad_unread"
+        if not row or not within_days(raw.get("posted", ""), self.args.days):
+            return
+        self.bump(source, "location_matches")
+        url = raw["url"]
+        with self.lock:
+            if url in self.seen_url:
+                return
+            self.seen_url.add(url)
+            self.tl.n = getattr(self.tl, "n", 0) + 1
+            self.stats[source]["kept"] += 1
+        self._keep_row({"title": raw.get("title") or "", "company": raw.get("company") or raw.get("board") or "",
+                        "location": _respace((loc or "").strip(" |"), "|", " | "), "url": url,
+                        "source": rec_source or source, "board": raw.get("board", ""), "row": row,
+                        "task": getattr(self.tl, "tid", "")})
 
     def offer_job(self, label: str, job: dict[str, Any]) -> None:
         """Offer a contract-shaped Job dict (title, company, url, location, posted, description, ...)."""
@@ -1930,6 +2062,8 @@ class Collector:
             with self.lock:
                 self.known_ct_skipped += 1
             return  # the same company and role is already in Job360 under another link or label
+        if self.titles_only:
+            return self._offer_listing(source, raw, rec_source)  # no detail call, no years check
         det = raw.get("detail")
         if callable(det):  # lazy detail fetch, only for title matches
             extra = det() or {}
@@ -2633,7 +2767,7 @@ def run(args: argparse.Namespace) -> Collector:
     wd_titles = "\n".join(queries[:WORKDAY_SEARCH_TITLES])  # board rows hold strings; kit_ats splits it
     # title_ok is the Collector's own title test (--titles and --exclude-title-words): readers that fetch a
     # detail page per job call it so only a title that would be kept spends a request. Rows are never dumped.
-    gate: dict[str, Any] = {"title_ok": col.matcher}
+    gate: dict[str, Any] = {"title_ok": col.gate}
     boards = [{**b, "search_texts": wd_titles, **gate} if b["ats"] == "workday" else {**b, **gate} for b in boards]
     if args.limit_boards:
         counts: collections.Counter[str] = collections.Counter()
@@ -2677,6 +2811,12 @@ def run(args: argparse.Namespace) -> Collector:
     tasks = order_tasks([t for t in board_tasks if t[3]], feed_tasks, [t for t in board_tasks if not t[3]],
                         start=sweep_start(getattr(args, "sweep_start", "0")))
 
+    keep_tasks = getattr(args, "keep_tasks", None)
+    if keep_tasks is not None:  # pass 2: only the sources whose pass-1 listings held a kept title
+        here = {t[1] for t in tasks}
+        tasks = [t for t in tasks if t[1] in keep_tasks]
+        print("keep-titles: %d sources hold a kept title; %d of them are not in this run's board list"
+              % (len(keep_tasks), len(keep_tasks - here)), file=sys.stderr, flush=True)
     if sink is not None and sink.done:
         before = len(tasks)
         tasks = [t for t in tasks if t[1] not in sink.done]
@@ -2689,6 +2829,7 @@ def run(args: argparse.Namespace) -> Collector:
         if sink is not None and not sink.admit():
             return  # budget spent: leave it for --resume
         col.tl.n = 0
+        col.tl.tid = tid  # pass 1 rows name their source, so pass 2 can re-run only those
         t0 = _now()
         ok = True
         try:
@@ -2710,23 +2851,65 @@ def run(args: argparse.Namespace) -> Collector:
     sems = {a: threading.BoundedSemaphore(SINGLE_HOST_CONCURRENCY) for a in SINGLE_HOST_ATS}
     progress = Progress(col, [src for src, _, _ in tasks])
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers)))
+    abandoned = 0
     try:
         futs = {ex.submit(with_slot, sems.get(src), guarded, src, tid, work): src for src, tid, work in tasks}
-        for f in concurrent.futures.as_completed(futs):
-            try:
-                f.result()
-            except Exception as e:
-                print("warning: task failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
-            progress.done(futs[f])
+        abandoned = _wait_sources(futs, sink, progress, hard=bool(getattr(args, "titles_only", "")))
     except BaseException:  # Ctrl-C or a crash: queued sources must not start while we unwind
+        abandoned = 1  # a source may still be running: never wait on it
+        if getattr(args, "titles_only", ""):  # pass 1 stopped: the CLI must not join that thread at exit either
+            _mark_abandoned()
         if sink is not None:
             sink.stop("interrupted")
         raise
     finally:
-        ex.shutdown(wait=True, cancel_futures=True)
+        ex.shutdown(wait=not abandoned, cancel_futures=True)
     # Finished = ran to its end this session (an exception counts) or already done in the run being resumed.
     col.cursor = advance_offsets(col.cursor, col.rotation, col.visited | col.resumed_done)
     return col
+
+
+def _wait_sources(futs: dict[Any, str], sink: Stream | None, progress: Progress | None, hard: bool) -> int:
+    """Wait for the source tasks. hard (pass 1): --max-minutes is a wall-clock deadline for the whole pass, so at
+    the deadline stop waiting on sources still running. Returns how many were abandoned (0 = all finished)."""
+    global ABANDONED
+    pending = set(futs)
+    while pending:
+        timeout = None
+        if hard and sink is not None and sink.deadline is not None:
+            timeout = max(0.0, sink.deadline - _now())
+        done, pending = concurrent.futures.wait(pending, timeout=timeout,
+                                                return_when=concurrent.futures.FIRST_COMPLETED)
+        for f in done:
+            try:
+                f.result()
+            except concurrent.futures.CancelledError:
+                pass
+            except Exception as e:
+                print("warning: task failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
+            if progress is not None:
+                progress.done(futs[f])
+        if pending and not done:  # the deadline passed with sources still running: leave them
+            for f in pending:
+                f.cancel()
+            running = sorted({futs[f] for f in pending if not f.cancelled()})
+            if sink is not None:
+                sink.stop("time budget reached (%d source task%s still running abandoned)"
+                          % (len(pending), "" if len(pending) == 1 else "s"))
+            print("pass 1 deadline: stopped waiting on %d source task(s): %s"
+                  % (len(pending), ", ".join(running) or "queued only"), file=sys.stderr, flush=True)
+            ABANDONED = True
+            return len(pending)
+    return 0
+
+
+ABANDONED = False  # a pass-1 source thread was left running: the CLI exits without joining it
+
+
+def _mark_abandoned() -> None:
+    """A stopped pass 1 (Ctrl-C, SIGTERM) left a source running: exit without joining it, as at the deadline."""
+    global ABANDONED
+    ABANDONED = True
 
 
 class Progress:
@@ -3761,6 +3944,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="keep every title: no --titles, --exclude-title-words or --max-years drop; each job gets a title_hint "
              "(a signal only) and YOU judge the titles (--titles still seeds search-style boards)",
     )
+    p.add_argument("--titles-only", default="", metavar="FILE",
+                   help="pass 1 (implies --every-title): listing pages only, no ad opened; FILE gets one line per "
+                        "distinct title (count, hint, sample) and FILE.rows.jsonl every listing")
+    p.add_argument("--keep-titles", default="", metavar="FILE",
+                   help="pass 2: open full ads only for these titles (one per line, as pass 1 printed them); "
+                        "needs --rows")
+    p.add_argument("--titles-from-rows", default="", metavar="ROWS",
+                   help="with --titles-only FILE: rebuild FILE from a pass-1 rows file; no request is made")
+    p.add_argument("--rows", default="", metavar="FILE", help="pass 2: pass 1's FILE.rows.jsonl")
     p.add_argument("--days", type=int, default=30, help="only jobs posted in the last N days")
     p.add_argument(
         "--workday-max",
@@ -3865,6 +4057,33 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.exclude_title_words is None:
         args.exclude_title_words = ""  # a run drops only the words the user's level calls for
+    if args.titles_only and args.keep_titles:
+        print("--titles-only is pass 1 and --keep-titles is pass 2: pass one of them", file=sys.stderr)
+        return 2
+    if args.titles_only:
+        args.every_title = True
+    if args.keep_titles:
+        if not args.rows:
+            print("--keep-titles needs --rows: pass 1's <titles file>.rows.jsonl", file=sys.stderr)
+            return 2
+        try:
+            args.keep_set = load_keep_titles(args.keep_titles)
+        except OSError as e:
+            print("cannot read --keep-titles: %s" % e, file=sys.stderr)
+            return 2
+        if not args.keep_set:
+            print("--keep-titles %s holds no title" % args.keep_titles, file=sys.stderr)
+            return 2
+        args.every_title = True
+        args.keep_tasks = keep_task_ids(args.rows, args.keep_set)
+    if args.titles_from_rows:  # offline: rebuild pass 1's titles file from its rows file
+        if not args.titles_only:
+            print("--titles-from-rows needs --titles-only FILE: where to write the titles", file=sys.stderr)
+            return 2
+        n = _write_titles(args, None, args.titles_from_rows)
+        print("pass 1 titles: %d distinct titles from %s in %s" % (n, args.titles_from_rows, args.titles_only),
+              file=sys.stderr)
+        return 0
     if args.discover:
         for hit in discover(split_csv(args.discover)):
             print(json.dumps(hit, ensure_ascii=False))
@@ -3872,7 +4091,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.why_missed:  # offline: reads the lists and the history file, makes no request, writes nothing
         print(format_why_missed(why_missed(args, args.why_missed)))
         return 0
-    stream_path = args.stream or ("hunt_stream.jsonl" if args.out == "-" else args.out + ".stream")
+    stream_path = args.stream or (args.titles_only + ".rows.jsonl" if args.titles_only else
+                                  "hunt_stream.jsonl" if args.out == "-" else args.out + ".stream")
     lock = RunLock(stream_path)
     busy = lock.acquire()
     if busy:
@@ -3882,6 +4102,34 @@ def main(argv: list[str] | None = None) -> int:
         return _main_locked(args, stream_path, list(sys.argv[1:] if argv is None else argv))
     finally:
         lock.release()
+
+
+def _write_titles(args: argparse.Namespace, col: Collector | None, rows_path: str) -> int:
+    """The distinct-titles file, most listings first, from the rows on disk (written atomically)."""
+    titles = distinct_titles(read_jsonl(rows_path), (col or Collector(args)).target_phrases)
+    _atomic_write_text(args.titles_only, "".join(json.dumps(t, ensure_ascii=False) + "\n" for t in titles))
+    return len(titles)
+
+
+def _sigterm_to_interrupt(signum: int, frame: Any) -> None:
+    raise KeyboardInterrupt  # pass 1 stopped from outside takes the same stop path as Ctrl-C
+
+
+def _finish_titles(args: argparse.Namespace, col: Collector, sink: Stream, run_log: RunLog, partial: bool,
+                   cli: list[str]) -> int:
+    """Pass 1's end: the distinct-titles file, most listings first, from the rows on disk."""
+    n_titles = _write_titles(args, col, sink.path)
+    rows = sum(1 for _ in sink.iter_records())
+    print("pass 1: %d listings, %d distinct titles in %s (rows: %s), %.1f min"
+          % (rows, n_titles, args.titles_only, sink.path, sink.elapsed() / 60), file=sys.stderr, flush=True)
+    if col.failed:
+        print(format_failed(col), file=sys.stderr)
+    if partial:
+        print("\nStopped early: %s.\n%s" % (sink.stop_reason, resume_hint(cli, sink)), file=sys.stderr)
+    else:
+        sink.mark_complete()
+    run_log.write("partial" if partial else "completed", locked=True, kept=rows, titles=n_titles)
+    return 0
 
 
 def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> int:
@@ -3899,9 +4147,17 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
         args.run_log_obj = run_log
         print("Results stream to %s as they come; if the run stops, rerun with --resume to continue."
               % stream_path, file=sys.stderr, flush=True)
+        prev_term = None
+        if args.titles_only:  # a stopped pass 1 still writes its titles file (the KeyboardInterrupt path below)
+            try:
+                prev_term = signal.signal(signal.SIGTERM, _sigterm_to_interrupt)
+            except ValueError:  # not the main thread
+                pass
         try:
             col = run(args)
             partial = bool(sink.stop_reason)
+            if args.titles_only:  # pass 1 moves no cursor and writes no history: pass 2 is the real run
+                return _finish_titles(args, col, sink, run_log, partial, cli)
             try:  # even a stopped run moves the cursor past the boards it finished
                 save_rotation_cursor(args.history, col.cursor)
             except OSError as e:
@@ -3960,15 +4216,30 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
             run_log.write("partial" if partial else "completed", locked=True, **counts)
             return 0
         except KeyboardInterrupt:  # scan.mjs: process.once('SIGINT', ...) writes the failure row, exits 130
+            if args.titles_only:
+                try:
+                    n = _write_titles(args, getattr(run_log, "col", None), sink.path)
+                    print("pass 1 stopped: %d distinct titles in %s from the rows on disk" % (n, args.titles_only),
+                          file=sys.stderr, flush=True)
+                except Exception as e:
+                    print("warning: could not write the titles file: %s: %s" % (type(e).__name__, e), file=sys.stderr)
             print("\nInterrupted.\n" + resume_hint(cli, sink), file=sys.stderr)
             run_log.write("interrupted")
             return 130
         except BaseException as e:  # scan.mjs: main().catch(... writeRunFailureRow('failed'))
             run_log.write("failed", error="%s: %s" % (type(e).__name__, e))
             raise
+        finally:
+            if prev_term is not None:
+                signal.signal(signal.SIGTERM, prev_term)
     finally:
         sink.close()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if ABANDONED:  # a pass-1 source still running must not hold the exit: the files are already written
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_rc)
+    sys.exit(_rc)

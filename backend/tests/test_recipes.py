@@ -51,6 +51,30 @@ def test_every_name_has_a_file_and_every_file_has_a_name():
     assert RECIPE_NAMES[-1] == "rules"
 
 
+def _hunt_kit_step() -> str:
+    from src.api.routes.recipes import load_recipe
+
+    text = load_recipe("hunt").text
+    return flat(text[text.index("   a. **The hunt kit**"):text.index("   b. **Connectors")])
+
+
+def test_hunt_kit_step_is_one_pass_cut_only_by_the_profile_titles():
+    """Owner, 2026-11-19: the two-pass hunt brought 7 then 0 jobs (84,379 titles seen; the run fell back to its own
+    word list); the single pass at 00:11 UTC brought 10 of 10. Step 3a is ONE kit run: the profile's target titles
+    are the only cut, no exclude word and no years test drops an ad, and every kept ad is read in full."""
+    step = _hunt_kit_step()
+    assert "run `hunt_kit.py` once, in the background" in step
+    assert '--exclude-title-words ""' in step and "--max-years 99" in step
+    assert "--known known.txt" in step and "--max-minutes 25" in step and "--out found.jsonl" in step
+    assert "--visa-onsite" in step and "--remote" in step
+    assert "get_profile(search_plan=true)" in step and "never add it" in step
+    for flag in ("--every-title", "--titles-only", "--keep-titles", "pass 1", "pass 2"):
+        assert flag not in step.replace("never pass `--every-title`, `--titles-only` or `--keep-titles`", ""), flag
+    assert "read every kept ad in full before judging it" in step
+    assert "never only its first 3,000 characters" in step
+    assert "split -l 40" in step and "never end the run while the kit runs or an ad is unread" in step
+
+
 def test_recipes_keep_the_product_rules():
     """The recipes are instructions to an agent — they must carry the rules:
     Job360 never searches; the user confirms every submit; the user sends

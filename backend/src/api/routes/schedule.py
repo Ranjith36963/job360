@@ -366,6 +366,9 @@ async def _refuse_early_batch_stop(db: JobDatabase, user: CurrentUser, claimed_a
 _ONE_TOOL_DOWN = frozenset({"tool_unavailable", "paid_plan_needed", "sign_in_needed", "no_work", "needs_user"})
 # 2026-11-18: Vibe Prospecting, Crustdata and Apollo people search need credits or a paid plan; the owner pays nothing.
 _FREE_LOOKUPS = ("sprouts", "clay")
+# 2026-11-18 22:56 run (Kits orders, 01:10): a failed people mark backs the duty off two hours, and that cost a
+# whole hour of search. A site or tool the run could not reach leaves the others: recorded partial, never failed.
+_TOOL_NOT_REACHED = frozenset({"network_blocked", "rate_limited"})
 NO_REVIEW_NOTE = (
     "Recorded as partial (no_review): a people run is done only after the Doctor check (get_recipe(\"doctor\")) and "
     "a separate reviewer checked every person and note. Next run: do both, then mark_done with reviewed=true."
@@ -404,22 +407,22 @@ async def _people_score(db: JobDatabase, user: CurrentUser, duty: str, ids: list
             (user.id,),
         )
         people: dict[str, set[str]] = {}
+        # 2026-11-19 04:07 run: two recruiters saved ON agency job 1110 with company "David Joseph & Company" scored 0,
+        # because the job's company read "David Joseph & Company (recruiting for ...)". Everyone saved on a job
+        # counts for it, as well as everyone at its company.
+        on_job: dict[int, set[str]] = {}
         for row in map(dict, await cur.fetchall()):
+            who = (contacts.linkedin_identity_key(str(row["linkedin_url"] or ""))
+                   or contacts.name_identity_key(str(row["name"] or "")))
+            if row["application_id"] is not None:
+                on_job.setdefault(int(row["application_id"]), set()).add(who)
             key = contacts.contact_company_key(row)
             if key:
-                who = (contacts.linkedin_identity_key(str(row["linkedin_url"] or ""))
-                       or contacts.name_identity_key(str(row["name"] or "")))
                 people.setdefault(key, set()).add(who)
         per_job = {}
         for i in ids:
             key = job_key.get(i, "")
-            if key:
-                per_job[str(i)] = len(people.get(key, set()))
-            else:  # no company to match on: the people on this job only
-                cur = await db._db.execute(
-                    "SELECT COUNT(*) FROM application_contacts WHERE user_id = ? AND application_id = ?", (user.id, i))
-                got = await cur.fetchone()
-                per_job[str(i)] = int(got[0]) if got else 0
+            per_job[str(i)] = len((people.get(key, set()) if key else set()) | on_job.get(i, set()))
         score.per_job = per_job
         return score
     since = _run_since(await schedule.load_stamps(db, user.id), duty, now)
@@ -833,6 +836,13 @@ async def mark_done(
                     f"Minimum {score.minimum}, target {score.target}.")
             if not reviewed:  # 2026-11-18 12:05 run: below_target hid that it also skipped the review
                 said += " Also no_review: " + NO_REVIEW_NOTE.split(": ", 1)[1]
+    if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "failed" and (
+            reason in _TOOL_NOT_REACHED):
+        outcome = "partial"
+        said = (f"Recorded as partial ({reason}): a people run is never failed for one site or tool it could not "
+                "reach, so nothing waits two hours; the next hourly run tries again. "
+                + said).strip()
+        _log("people_run_not_failed", user, duty=body.duty, reason=reason)
     if body.duty in ("reach", "network") and actor_for(user) != "web" and outcome == "done" and not reviewed:
         # 2026-11-18 (09:13 run): the run reviewed its own notes, with no Doctor check and no separate reviewer.
         outcome, reason = "partial", "no_review"

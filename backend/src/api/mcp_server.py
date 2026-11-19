@@ -2288,8 +2288,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         links: Optional[list[str]] = None,
         people: Optional[list[dict[str, Any]]] = None,
         dry_run: bool = False,
+        people_check: Optional[Literal["pass", "fail"]] = None,
     ) -> dict[str, Any]:
-        """Record a person — a recruiter, referral, hiring manager. Give
+        """Record a person (a recruiter, referral, hiring manager). Give
         `application_id` when they're tied to a job's outreach; leave it out
         for cold networking (met them, no job yet — you can link them to one
         later by adding them again with an application_id). Adding the SAME
@@ -2299,8 +2300,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `found_via` = where you found them: "company_site", "company_team_page",
         "linkedin", "apollo" (Apollo, Vibe Prospecting, Sprouts), "email_finder",
         "github", "speaker_page", "referral", "job_ad",
-        "email", "event" or "other" (leave it out if you do not know). `source_url` = the page you found them on
-        (http/https); Job360 stores it, never opens it. `company` = the employer they work at: REQUIRED without
+        "email", "event" or "other" (else leave it out). `source_url` = the page you found them on
+        (http/https; stored, never opened). `company` = their employer: REQUIRED without
         application_id; on a job leave it out unless they work elsewhere (an agency) -
         it then follows the job's company. `email_source` = where the EMAIL came from: "they_emailed",
         "on_company_page", "provider_verified", "pattern_guess" (name pattern) or "user_gave"; never guess it.
@@ -2308,8 +2309,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         "recruiter", "hiring_manager", "interviewer" or "none". `shared` = what they share, as a
         get_profile path: "cv_data.cv_positions[i]", "cv_data.cv_projects[i]" or "cv_data.education[i]";
         Job360 refuses a record the profile lacks. Never guess either.
-        `phone` is kept as + and digits; `links` = up to 5 other http/https profile URLs.
-        `client_key` (optional): a retry with the same key returns the first reply.
+        `links` = up to 5 other http/https profile URLs.
+        `client_key`: a retry with the same key returns the first reply.
+        `people_check` = the People check's verdict, pass or fail (fail is refused).
         A list (the user's CSV/vCard, parsed by you): pass `people` = [{name, role, email, linkedin_url,
         phone, links, notes, found_via, source_url, company}] (max 50) instead of `name`; `dry_run`=true
         writes nothing and returns would_add, duplicates and invalid by index. Show the user, then call
@@ -2317,7 +2319,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         if people is not None:
             single = (
                 name, role, email, linkedin_url, notes, occurred_at, found_via, source_url, company,
-                email_source, relationship, shared, phone, links, client_key,
+                email_source, relationship, shared, phone, links, client_key, people_check,
             )
             if any(v not in ("", None) for v in single):
                 raise _refuse("add_contact", 422, "give name (one person) or people (a list), not both")
@@ -2358,7 +2360,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
                     source_url=source_url, company=company, email_source=email_source,
                     relationship=relationship, shared=shared, phone=phone, links=links,
-                    client_key=client_key,
+                    client_key=client_key, people_check=people_check,
                 )
             else:
                 body = applications_route.AddContactRequest(
@@ -2367,7 +2369,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                     company=company,
                     email_source=email_source,
                     relationship=relationship, shared=shared, client_key=client_key,
-                    phone=phone, links=links,
+                    phone=phone, links=links, people_check=people_check,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
