@@ -575,3 +575,22 @@ async def test_a_recipient_fact_from_a_lookup_cites_the_lookup(authenticated_asy
     first, second = _reviews(cid)
     assert (first["confidence"], first["downgraded"]) == ("strong", []), first
     assert (second["confidence"], second["downgraded"]) == ("weak", ["claim_not_in_quote"]), second
+
+
+@pytest.mark.asyncio
+async def test_a_recipient_row_alone_leaves_the_line_uncovered(authenticated_async_context, fixture_user_id):
+    """19 Nov 10:56 run: each note got ONE row, its recipient sentence ("I saw you are Founder & CEO at Tessl.", a
+    page: row), and the user's own sentence on the same line none. That line is uncovered (weak, line_uncovered);
+    the reach recipe now asks for a row for every line as well. The lookup test above shows the strong shape."""
+    about_them = "I saw you are a Talent Partner at Abound."
+    line = f"{about_them} {LINE_1}"
+    async with authenticated_async_context() as client:
+        app_id, cid = await _auto_ready(client, fixture_user_id)
+        mid = await _draft(client, app_id, cid, f"Hi Rita,\n{line}\nBest regards,\nAda Lovelace")
+        sha = (await _review_block(client, cid))["sha256"]
+        page = {"msg_line": about_them, "profile_quote": "Rita Shah, Talent Partner, Abound",
+                "field_path": "page:https://abound.example/team"}
+        resp = await _record(client, app_id, cid, _payload(mid, sha, [page]))
+        assert resp.status_code == 201, resp.text
+    [stored] = _reviews(cid)
+    assert (stored["confidence"], stored["downgraded"]) == ("weak", ["line_uncovered"]), stored
