@@ -220,7 +220,8 @@ async def test_next_tells_the_run_to_keep_going_while_items_remain(authenticated
         assert page1["next_after"] == made[1]
         assert page1["next"] == (
             f"Keep going: fetch the next page with after={made[1]} (include_profile=false). "
-            "The run ends only when 10 new CVs are written this run or no items are left.")
+            "The run ends only when 10 CVs are stored strong this run (new, or weak ones fixed) or no items are left; "
+            "a weak result is work to fix, never a reason to stop.")
         page2 = await _cv_work(client, limit=2, after=page1["next_after"], include_profile=False)
         assert page2["next_after"] is None and page2["next"] is None
 

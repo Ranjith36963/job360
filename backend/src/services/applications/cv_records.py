@@ -125,7 +125,8 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
     heading stands above it (else ``None``). The top ends at a header line a profile record holds or names, or a
     heading that is no summary heading."""
     content = cv_review.content_lines(cv_text, profile)
-    keyed = [r for k, r in cv_review.keyed_records(profile) if not k.startswith(_FREE_PREFIXES)]
+    own_top = _raw_top_keys(profile)  # 00:34 run 2026-11-19 (apps 570 574 575 577): the upload's own headline
+    keyed = [r for k, r in cv_review.keyed_records(profile) if not k.startswith(_FREE_PREFIXES) and k not in own_top]
     recs = line_records(cv_text, profile)  # B4: a summary line naming a job is that job's line, never a top line
     out: list[int] = []
     headline: Optional[int] = None
@@ -166,6 +167,29 @@ def top_lines(cv_text: str, profile: Any) -> tuple[frozenset[int], Optional[int]
                 headline = n + 1
         n += is_content
     return frozenset(out), headline
+
+
+def _raw_top_keys(profile: Any) -> frozenset[str]:
+    """The ``raw_text:i`` keys of the uploaded CV's OWN top: its lines after the name and above its first heading or
+    bullet ("AI Engineer | Agentic Systems"). ``keyed_records`` keeps such a line as a header-shaped record, yet it is
+    the user's headline, never a job: a tailored CV that keeps it word for word must not end its top there. Roles and
+    projects (``cv_positions``, ``cv_projects``) still end the top wherever their header stands."""
+    cv = getattr(profile, "cv_data", None)
+    names = cv_review._name_words(profile)
+    out: list[str] = []
+    first = True
+    for i, raw in enumerate(str(getattr(cv, "raw_text", "") or "").splitlines()):
+        line = raw.strip()
+        if not line:
+            continue
+        if first and _is_name(line, names):
+            first = False
+            continue
+        first = False
+        if cv_review.is_heading(line) or _marked(line):
+            break
+        out.append(f"raw_text:{i}")
+    return frozenset(out)
 
 
 def _is_name(line: str, names: set[str]) -> bool:

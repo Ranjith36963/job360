@@ -650,5 +650,5 @@ def test_the_cv_run_waits_for_its_agents_and_treats_quote_codes_as_a_fixable_rev
     assert "a review that was not recorded is a miss" in review
     weak = next(line for line in lines if line.startswith("6. **weak.**"))
     assert "`claim_not_in_quote`, `quote_too_thin`, `no_evidence`" in weak
-    assert "new reviewer whose quotes hold every fact of that line" in weak
-    assert "same code again: rewrite that line" in weak
+    assert "rewrite that line from the profile's own words" in weak
+    assert "review again: once per item" in weak
