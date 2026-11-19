@@ -57,7 +57,7 @@ score is about handling, not submits.
   minutes tonight), i.e. push by about :05 past the hour, else hold the branch unpushed (or as a draft) until :52.
 - Effect on the 23:41 run: checked at 00:06 (did any call fail around 23:41-23:44?).
 
-## 23:41 run  (score 50%)
+## 23:41 run  (score 50%, corrected to 100% at 03:10: see Correction)
 - Achieved: one workable row, 1087 (Whitespace, Junior Engineer; CV reviewed strong 23:38). Opened at 23:42:08,
   blocked at 23:42:38 with a real reason: on the CharlieHR careers page the role's link and form were not
   reachable, and the list showed the role posted 22 days ago against an ad from 1 day ago. Coverage of
@@ -117,3 +117,27 @@ score is about handling, not submits.
   state the judgement, not a pattern judging; added only because the plain instruction failed on two real runs.
 - Decision taken without the owner: adding this refusal. The brief allows one where a real run shows the plain
   instruction failing; it has now failed twice. Limit: blocks Job360's own browser records are not covered.
+
+### Correction (03:10): I misread last_done_at
+- `whats_due.last_done_at.batch` is the run's START (its claim time), not when it called mark_done
+  (`services/profile/schedule.py:420-423`: "The duty is stamped when its run STARTED (its claim)").
+- So my 23:41 and 01:41 claims "batch was marked done before the run opened its rows" are wrong: those stamps
+  are the runs' starts. I have no evidence that either run closed early.
+- #1692 is still a real fix (a `done` close with a workable row left was accepted; its test proves it), but
+  its PR text names the wrong trigger. The 23:41 score of 50% was built on that misreading: corrected to
+  100% (1 of 1 row in the right bucket, 1087 blocked with a real reason). Lesson for the morning PR:
+  read how a stamp is written before inferring order from it.
+
+## 02:41 run  (score 71%)
+- Achieved: 7 workable rows (1099-1106 except 1102), one at a time, 02:42-02:46, all in a bucket:
+  1099 Taleo sign-in and 1101 CGI's njoyn sign-in (employer ATS, correct); 1104 Zoho Recruit CAPTCHA plus one
+  ask for unanswered questions (correct); 1100 Instil (4 required essay drafts for the owner's OK) and 1105 Safran
+  (required questions the profile does not answer) are real owner asks. Closed without a failure.
+- Missed (2 of 7): 1103 (Shine) and 1106 (Instahyre) blocked on a job board's sign-in without an employer-page
+  search. 1106 was recorded by Job360's own browser (by: browser), 1103 by the run. #1697 was still in CI.
+- Biggest cause: board blocks (third run in a row), now down to 2 of 7.
+- Fix: #1697 (employer_page required on an assistant's board block) is green on its re-run and auto-merging
+  before 03:36. Still not covered: blocks Job360's own browser records (1106). Next if it recurs: a hint at
+  `browser open` on a board link, before the page loads.
+- PC queue: whats_due says nothing has worked the PC queue since 23:08 UTC; 50 tasks wait. Needs the owner's
+  PC (browser-agents session's area).
