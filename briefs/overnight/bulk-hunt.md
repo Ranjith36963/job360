@@ -65,3 +65,11 @@ Session: Bulk Hunt test (owner's task trig_01QSkCh1, starts :11). Check-ins at :
   it will be rebased on main after #1665 and checked against Kits' two-pass branch so they do not collide.
 - Decision without the owner: I keep #1665's two refusals (`kit_not_done`, `employer_searched` proof); both
   come from real runs (16:13 marked done before the kit ended; 4 board links marked not_found with no search).
+
+## 10:50 — #1665 merged (10:47 UTC)
+- Merged main incl. #1706 (single kit pass, profile titles word for word): kept #1706's step 3a and added
+  `--known-ct`, kit-first, no wait over 2 minutes, `kit.done`. This PR's own recipe asserts follow 25 minutes.
+- Green at 09:40; the merge cage never posted a status, so it sat "blocked" until 10:47. That was safe: the
+  10:11 run was not due (ended 10:12, $0.38).
+- Next: score the 11:11 run (first with #1665: is `kit.done` reported, `employer_searched` used, any 422s,
+  cost, minutes). Only then open coverage A.
