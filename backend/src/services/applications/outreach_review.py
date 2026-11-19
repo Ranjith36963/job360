@@ -138,7 +138,9 @@ def review_state(rows: list[dict[str, Any]], message_id: Optional[int], sha: str
     return NONE
 
 
-RECIPIENT_PATHS = ("page:", "page/", "recipient:", "recipient/")
+# A fact about the recipient is proven by the page it is on ("page:<url>") or by the lookup that lists it
+# ("lookup:<tool>", its own text as the quote: Kits 19 Nov, "at Abound" was proven by Clay and Sprouts).
+RECIPIENT_PATHS = ("page:", "page/", "recipient:", "recipient/", "lookup:", "lookup/")
 
 
 def sentences(line: str) -> list[str]:
