@@ -62,6 +62,10 @@ RUN_NOW_MINUTES = 15
 # failed clears it. Prod 2026-11-18: two batch runs claimed at 16:29 and 17:07, read kits, never marked done;
 # the claims expired silently and whats_due kept saying failures_in_row 0.
 LAPSED = "lapsed:"
+# + duty + ":" + application id: the jobs whats_due handed the run that holds that duty's claim, stamped at the
+# claim's own time (19 Nov 10:56 and 12:12 runs: mark_done recomputed the due list, a job that slid in after the
+# run filled others was demanded although the run was never given it). Read by ``given_ids``.
+GIVEN = "given:"
 INBOX_AUTO_MODES = frozenset({"auto", "scheduled"})
 INBOX_DEFAULT_HOURS = 24
 _EVERY_RE = re.compile(r"^(\d{1,3})h$")
@@ -450,6 +454,27 @@ async def mark(
     if not failed:
         await stamp_tries(db, user_id, [reach_key(a) for a in (application_ids or [])], stamp)
     await db._db.commit()
+
+
+async def record_given(db: JobDatabase, user_id: str, duty: str, ids: list[int], now: datetime) -> None:
+    """Stamp each application ``whats_due`` handed this run's claim of ``duty``, at the claim's time ``now``
+    (rule #12: by user). A later claim restamps its own; older rows are never read for it (``given_ids``)."""
+    stamp = now.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    for app_id in ids:
+        await db._db.execute(
+            "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
+            (user_id, f"{GIVEN}{duty}:{int(app_id)}", stamp),
+        )
+    await db._db.commit()
+
+
+def given_ids(stamps: dict[str, datetime], duty: str, since: datetime) -> Optional[set[int]]:
+    """The applications this run's claim of ``duty`` (taken at ``since``) was handed, or None when it recorded
+    none (no claim, or one taken before the record existed)."""
+    prefix = f"{GIVEN}{duty}:"
+    got = {int(k[len(prefix):]) for k, at in stamps.items() if k.startswith(prefix) and at >= since}
+    return got or None
 
 
 async def stamp_tries(db: JobDatabase, user_id: str, keys: list[str], stamp: str) -> None:
