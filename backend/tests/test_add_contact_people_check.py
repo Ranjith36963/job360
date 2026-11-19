@@ -82,3 +82,26 @@ async def test_a_scheduled_people_run_passes_the_verdict(authenticated_async_con
             assert passed.status_code == 201, passed.text
         web = await client.post(f"/api/applications/{app_id}/contacts", json=_person("Kim Lee"))
         assert web.status_code == 201, web.text  # the website is never asked
+
+
+@pytest.mark.asyncio
+async def test_a_people_list_never_carries_a_failed_person_past_the_check(authenticated_async_context, fixture_user_id):
+    """Review of #1700: add_contact(people=[...]) went through POST /contacts/batch, which skipped the check."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        resp = await client.patch("/api/profile", json={"edits": [{"path": PEOPLE, "value": True}]})
+        assert resp.status_code == 200, resp.text
+        app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
+        async with await _agent(client) as agent:
+            rows = {"application_id": app_id, "people": [_person("Rosa Downing", people_check="fail"), _person("Ana Silva")]}
+            outside = await agent.post("/api/contacts/batch", json=rows)
+            assert outside.status_code == 200, outside.text
+            assert [r["index"] for r in outside.json()["invalid"]] == [0], outside.json()
+            assert "people check failed" in outside.json()["invalid"][0]["detail"].lower()
+            await agent.get("/api/schedule/due", params={"duties": ["reach"]})
+            during = await agent.post("/api/contacts/batch", json={**rows, "people": [_person("Tom Reed")]})
+            assert during.status_code == 422 and "one at a time" in during.json()["detail"], during.text
+            preview = await agent.post("/api/contacts/batch", json={**rows, "people": [_person("Tom Reed")], "dry_run": True})
+            assert preview.status_code == 200, preview.text
+        names = sorted(p["name"] for p in (await client.get("/api/people")).json()["people"])
+        assert names == ["Ana Silva"], names

@@ -2991,6 +2991,20 @@ PEOPLE_CHECK_MISSING = (
 )
 
 
+PEOPLE_CHECK_BATCH = (
+    "A scheduled people run adds each person with add_contact(name=...) and its people_check verdict, not as a "
+    "people list. Add them one at a time."
+)
+
+
+async def _people_run_live(db: JobDatabase, user: CurrentUser) -> bool:
+    """True while a scheduled people run (reach or network) holds its claim."""
+    from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
+
+    now = datetime.now(timezone.utc)
+    return any([await schedule.claim_live(db, user.id, duty, now) for duty in ("reach", "network")])
+
+
 async def _refuse_unchecked_person(db: JobDatabase, user: CurrentUser, body: AddContactRequest) -> None:
     """An assistant never adds a person the People check failed; during a people run it says the verdict."""
     if actor_for(user) == "web":
@@ -2998,13 +3012,9 @@ async def _refuse_unchecked_person(db: JobDatabase, user: CurrentUser, body: Add
     if body.people_check == "fail":
         logger.info("people_check_refused user=%s reason=check_failed", safe_log_value(user.id))
         raise HTTPException(status_code=422, detail=PEOPLE_CHECK_FAILED)
-    if body.people_check is None:
-        from src.services.profile import schedule  # noqa: PLC0415 - profile <-> spine cycle
-
-        now = datetime.now(timezone.utc)
-        if any([await schedule.claim_live(db, user.id, duty, now) for duty in ("reach", "network")]):
-            logger.info("people_check_refused user=%s reason=verdict_missing", safe_log_value(user.id))
-            raise HTTPException(status_code=422, detail=PEOPLE_CHECK_MISSING)
+    if body.people_check is None and await _people_run_live(db, user):
+        logger.info("people_check_refused user=%s reason=verdict_missing", safe_log_value(user.id))
+        raise HTTPException(status_code=422, detail=PEOPLE_CHECK_MISSING)
 
 
 async def _add_contact_once(
@@ -3100,6 +3110,10 @@ async def add_contacts_batch(
     limit = settings.CONTACTS_BATCH_MAX
     if not 1 <= len(body.people) <= limit:
         raise HTTPException(422, f"people must hold 1-{limit} entries (CONTACTS_BATCH_MAX)")
+    if not body.dry_run and actor_for(user) != "web" and await _people_run_live(db, user):
+        # A people run adds each person with its People check verdict, never as a list (the list skips it).
+        logger.info("people_check_refused user=%s reason=batch_in_people_run", safe_log_value(user.id))
+        raise HTTPException(status_code=422, detail=PEOPLE_CHECK_BATCH)
     valid: list[dict[str, Any]] = []
     bad: list[dict[str, Any]] = []
     for i, item in enumerate(body.people):
@@ -3111,6 +3125,9 @@ async def add_contacts_batch(
             continue
         if (talk := plain_words.dev_talk(model.notes)) is not None:
             bad.append({"index": i, "status": 422, "detail": talk})
+            continue
+        if model.people_check == "fail" and actor_for(user) != "web":
+            bad.append({"index": i, "status": 422, "detail": PEOPLE_CHECK_FAILED})
             continue
         valid.append({"index": i, **model.model_dump()})
     try:
