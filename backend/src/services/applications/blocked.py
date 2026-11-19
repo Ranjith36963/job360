@@ -71,7 +71,18 @@ UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped", OWN_BROWSE
 # ID or payment asked, a closed posting, a test, a code, its own limit): those still need the user.
 OWN_BROWSER_CLEARS = frozenset({"captcha", "bot_check", "login_needed", "account_creation", "site_error"})
 NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked", ALREADY_APPLIED})
-BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail", "evidence"})
+BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail", "evidence", "employer_page"})
+# 2026-11-19 (01:41 batch run, 7 of 10 rows): runs kept blocking on a job board's sign-in page without looking
+# for the employer's own apply page (the kit's apply_host check, batch.md step 3 and #1681's hint all said to).
+# An assistant's block on a board host says what that search found; Claude judges, Job360 only asks it to say.
+EMPLOYER_PAGE_MAX_CHARS = 200
+BOARD_REASONS_EXEMPT = frozenset({"posting_closed", ALREADY_APPLIED})
+NO_EMPLOYER_PAGE = (
+    "page_host is a job board, not the employer. Before blocking here, look for the employer's own apply page "
+    "for the same role (web search: company + title + careers). Found it: update_job(application_id, "
+    "apply_url=...) and work that page instead. None: record this block again with employer_page = what you "
+    f"searched and found (plain text, at most {EMPLOYER_PAGE_MAX_CHARS} characters, no links)"
+)
 # Owner 2026-11-03: what proves a posting closed, read off the job's OWN page (never an email). Only with
 # ``posting_closed``; such a block on the ad's own site closes the application by itself (auto_close.py).
 CLOSED_EVIDENCE = frozenset({"page_says_closed", "http_404", "http_410"})
@@ -150,9 +161,22 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
         # 2026-11-13 (apps 998, 146): a closed posting with no proof sat on Needs you, never closed.
         problems.append(NO_PROOF)
         _log_no_proof(user)
+    employer_page = event_examples.collect(
+        problems, _plain, "employer_page", payload.get("employer_page"), EMPLOYER_PAGE_MAX_CHARS)
+    if actor != "web" and page_host and reason not in BOARD_REASONS_EXEMPT and not employer_page:
+        from src.services.applications.job_checks import classify_host  # noqa: PLC0415
+
+        if classify_host(page_host) == "job_board":
+            problems.append(NO_EMPLOYER_PAGE)
+            get_audit_logger().info("blocked_board_refused", extra={
+                "event": "blocked_board_refused", "user_id": safe_log_value(user.id),
+                "page_host": safe_log_value(page_host), "reason": safe_log_value(str(reason or "")),
+            })
     if problems:
         raise event_examples.refusal(event_type, problems)
     stored = {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
+    if employer_page:
+        stored["employer_page"] = employer_page
     return {**stored, "evidence": evidence} if evidence is not None else stored
 
 
