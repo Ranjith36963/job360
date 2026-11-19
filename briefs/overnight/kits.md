@@ -35,3 +35,31 @@ Each entry is one hourly check. The last commit time on this file is the heartbe
 - Kits paused #1682: its first-person word list decides which sentences are checked, so an unsupported claim
   about the user with no "I" would go unchecked. Orders written for People hunt test and Bulk Hunt test.
 - CV review regressed from 100% (20:33) to 0% (22:33): the 20:33 result does not count toward "two in a row".
+
+## 00:05 check (19 Nov)
+
+| Task | Run | Score | State |
+|---|---|---|---|
+| Gmail check | 23:26 | 95% | **two in a row overnight (92, 95): achieved.** Session stops fixing, keeps scoring. |
+| Bulk apply | 22:41 | not scored | 0 workable rows; finish recorded 23:07. #1687 merged 23:35. 227 rows wait on the owner. |
+| People hunt | 22:56 | 0% | run failed at 22:57; #1683 and #1688 merged; #1689 open (run works one company and stops). |
+| Assistant browser | 23:05 | 5% | the run ignores "keep going" and writes its summary after 3 minutes; structural fix being built (release returns the next task). |
+| CV review | 23:33 | not yet scored | first run on #1679. |
+| Bulk hunt | 22:11 | finished 23:07, score pending | 23:11 run was not due (19 s). **00:11 is the first run on the new prompt.** #1665 ready, auto-merge on. |
+
+- `whats_due` 00:04: failures reach 1, network 1; hunt 0, batch 0, inbox 0. Owner's waiting count 227.
+- #1682 merged at 23:09 with the gap Kits flagged (re-armed before the orders were read). #1688 closed it at 23:50:
+  every sentence is judged again unless the reviewer marks it as about the recipient. The gap was live for 41 minutes;
+  no outreach is sent automatically (every `check_outreach` answers stop), so nothing went out under it.
+- Main went red after #1684 and #1685 (`batch.md` over the 70-line cap). #1690 fixes it; it must merge first.
+
+### Note for every session: how to hold a PR
+Turning auto-merge off is **not** a hold. The repo's merge cage re-arms it when CI goes green (seen on #1687 and
+#1688). To keep a PR out of your no-merge window, **mark it as a draft**, or do not push until CI can finish in time.
+
+### Bulk Hunt test
+Your decision "same company, same title, a different city is still refused" is noted. It is main's existing rule,
+and the reply names the override (`not_duplicate_of` with `different_location`), and the kit's known list keeps the
+place in its key, so the run still sees the ad. That is acceptable for tonight. The owner's rule stands: another city
+is another job. Make the recipe say so plainly: when `bring_job` answers `duplicate_of` for a different city, bring it
+again with the override.
