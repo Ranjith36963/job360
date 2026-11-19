@@ -60,6 +60,17 @@ def test_cv_recipe_loops_pages_until_ten_new_cvs_are_reviewed():
         assert token in text, token
 
 
+def test_cv_recipe_ends_only_on_the_reply_that_says_complete():
+    """CV run 03:33 (2026-11-19): 4 strong, then the turn ended after one batch with ~181 left. The run's end is now
+    the server's own word (cv_run.next_text), not the assistant's count."""
+    from src.services.applications import cv_run
+
+    done = next(line for line in load_recipe("cv").text.splitlines() if line.startswith("**Done when**"))
+    assert 'a Job360 reply says "CV run complete"' in done and "until then the run never ends" in done
+    assert cv_run.next_text({"strong": 10, "more": True, "after": 1}, ended=False, user_id="u", application_id=1
+                            ).startswith("CV run complete")
+
+
 def test_a_weak_result_never_ends_the_run_and_old_weak_cvs_are_rewritten():
     """CV run 00:34 (2026-11-19, 0 of 10): it re-reviewed 10 old weak CVs as they were, all stored weak again, then
     stopped "judging the failures to be reviewer faults" with 186 items left, no line rewritten, no page fetched.
