@@ -4148,6 +4148,8 @@ export interface components {
             notes: string;
             /** Occurred At */
             occurred_at?: string | null;
+            /** People Check */
+            people_check?: ("pass" | "fail") | null;
             /** Phone */
             phone?: string | null;
             /** Relationship */
@@ -4247,6 +4249,8 @@ export interface components {
             notes: string;
             /** Occurred At */
             occurred_at?: string | null;
+            /** People Check */
+            people_check?: ("pass" | "fail") | null;
             /** Phone */
             phone?: string | null;
             /** Relationship */
