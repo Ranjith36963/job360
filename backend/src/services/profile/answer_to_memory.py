@@ -57,7 +57,7 @@ def _number(token: str) -> Optional[int]:
     t = token.replace(",", "")
     scale = 1000 if t[-1:].lower() == "k" else 1
     digits = t[:-1] if scale > 1 else t
-    return int(digits) * scale if digits.isdigit() and int(digits) > 0 else None
+    return int(digits) * scale if _digits(digits) and int(digits) > 0 else None
 
 
 def salary(text: str, country: str) -> Optional[dict[str, Any]]:
@@ -157,11 +157,55 @@ def exact(field: str, template: str, question: str, country: Optional[str]) -> b
 
 def convert(template: str, question: str, answer: str, country: Optional[str]) -> Optional[Any]:
     """The answer in the shape of the Memory field ``template`` names, or ``None`` (never a guess)."""
-    from src.services.profile.models import VALID_WORK_AUTH_STATUSES  # noqa: PLC0415
-
-    field = "salary" if template == "salary.{cc}" else template.rsplit(".", 1)[-1]
+    field = _field(template)
     if field in EXACT_PHRASINGS and not exact(field, template, question, country):
         return None  # not one of the exact phrasings: a yes/no (or a figure) could mean something else
+    return _shape(field, answer, country)
+
+
+def _field(template: str) -> str:
+    return "salary" if template == "salary.{cc}" else template.rsplit(".", 1)[-1]
+
+
+# What a draft for each field must look like to be saved (owner bug 2026-11-19: 40 of the assistant's 87
+# drafts were sentences such as "No, I would need visa sponsorship to work in NL.", which no field can hold).
+ANSWER_AS: dict[str, str] = {
+    "salary": "a range, currency and period, e.g. 40000-55000 EUR a year",
+    "work_authorization": "exactly one of: citizen, permanent resident, visa, needs sponsorship",
+    "needs_sponsorship": "Yes or No", "willing_to_relocate": "Yes or No",
+    "onsite": "Yes, No or only if sponsored",
+    "travel_ok_pct": "a whole percent from 0 to 100, e.g. 25 (No = 0)",
+}
+
+
+def answer_as(template: Optional[str]) -> Optional[str]:
+    """The plain-words shape a draft for ``template`` must have, or ``None`` (a line the validator judges)."""
+    return ANSWER_AS.get(_field(template)) if template else None
+
+
+def fits(template: str, answer: str, country: Optional[str]) -> bool:
+    """True when ``answer`` has the shape ``template``'s field holds (the question's wording aside): an
+    assistant's draft that does not fit is never shown or counted as a guess - "This guess is right"
+    could not save it."""
+    return answer_as(template) is None or _shape(_field(template), answer, country) is not None
+
+
+def _percent(answer: str) -> Optional[int]:
+    """The one ``N%`` (0-100) in a plain yes ("Yes, up to 25% travel"); ``None`` for none, two, or a caveat."""
+    if yes_no(answer) is not True:
+        return None
+    found = [t.rstrip(".,;!")[:-1] for t in answer.split() if t.rstrip(".,;!").endswith("%")]
+    return int(found[0]) if len(found) == 1 and _digits(found[0]) and int(found[0]) <= 100 else None
+
+
+def _digits(token: str) -> bool:
+    """Plain 0-9 only: ``"²".isdigit()`` is True but ``int("²")`` raises (review of this fix)."""
+    return token.isascii() and token.isdigit()
+
+
+def _shape(field: str, answer: str, country: Optional[str]) -> Optional[Any]:
+    from src.services.profile.models import VALID_WORK_AUTH_STATUSES  # noqa: PLC0415
+
     if field == "salary":
         return salary(answer, country) if country else None
     if field in ("needs_sponsorship", "willing_to_relocate"):
@@ -176,7 +220,7 @@ def convert(template: str, question: str, answer: str, country: Optional[str]) -
         if yes_no(answer) is False:
             return 0
         token = answer.strip().rstrip("%").strip()
-        return int(token) if token.isdigit() and int(token) <= 100 else None
+        return int(token) if _digits(token) and int(token) <= 100 else _percent(answer)
     if field == "current_salary":
         return None  # amount, currency AND period, said for one job: set on the Memory page
     return answer.strip() or None  # a line (notice, start date, contact, equality): the validator judges it

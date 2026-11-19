@@ -974,8 +974,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             out["answers"]["open_common_questions"] = len(full["common_questions_open"])
             # Owner 2026-11-18: every Answer-once question gets a guess; no run skips it.
             out["answers"]["draft_now"] = (
-                f"{len(full['common_questions_open'])} Answer once questions have no guess: draft every one now "
-                '(get_profile view="full" common_questions_open; rules: Common form questions)')
+                f"{len(full['common_questions_open'])} Answer once questions have no guess: draft every one now, "
+                'each in its answer_as shape (get_profile view="full" common_questions_open; '
+                'rules: Common form questions)')
         lessons = full.get("lessons") or []
         out["lessons"] = lessons[:_BRIEF_LESSONS]
         if len(lessons) > _BRIEF_LESSONS:

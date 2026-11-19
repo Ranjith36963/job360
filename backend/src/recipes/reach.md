@@ -17,7 +17,7 @@ already has at that company. It never sends, asks or pushes. Then `mark_done("ne
 mark_done, work EVERY id in `application_ids` (Job360 refuses a mark that leaves one out; a job under 3 needs `searched` {id: {sprouts: n, clay: n,
 <source>: n}}: what each found at its company; leave out a source you did not run), and hand ALL notes to ONE fresh helper agent (the Agent tool), the
 Doctor's row Outreach review pasted in (`get_recipe("doctor")`): record ITS rows with `record_event` `outreach_reviewed` per note, one row per
-sentence about the recipient (`field_path` "page:<url>"), not one row for a whole note: Job360 refuses mark_done without them (fix, call again).
+sentence about the recipient (`field_path` "page:<url>" or "lookup:<tool>"), not one row for a whole note: Job360 refuses mark_done without them (fix, call again).
 1. **Find the right people**, for EVERY company, one company at a time until it has 5 or every source is tried. Warm first: people the user already
    knows there (the kit's `known_people`, `list_people`, past employers and schools in `get_profile(view="full")`, or a `Connections.csv` the user
    hands you). Then the EMPLOYER'S OWN SITE (team, about, leadership, careers, blog and press pages; a small firm names most of its staff there): each

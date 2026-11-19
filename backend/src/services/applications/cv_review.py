@@ -287,12 +287,23 @@ def skill_book(profile: Any) -> SkillBook:
     raw += cv_checks._flat(getattr(prefs, "additional_skills", None))
     out = {_norm(s) for s in raw} | {_norm(i) for s in raw for i in cv_checks._split_items(s)}
     groups: dict[frozenset[str], set[str]] = {}
+    # App 1105 (2026-11-19): LinkedIn's export puts a "Technologies: Docker • AWS Bedrock • ..." tool list under each
+    # job. That is LinkedIn's per-job list, not a skills group the user labelled, so it adds items, never a group:
+    # as a group it made the generic word "Technologies" claim that one job's tools, and a CV line "Technologies:
+    # FastAPI, PostgreSQL, ..." (every item a saved skill) was never held.
+    linkedin = {ln.strip() for ln in str(getattr(cv, "linkedin_raw_text", "") or "").splitlines() if ln.strip()}
+    own_lines = {ln.strip() for ln in cv_checks.profile_source_text(profile).splitlines()} - linkedin | {
+        ln.strip() for ln in str(getattr(cv, "raw_text", "") or "").splitlines()}
     for ln in cv_checks.profile_source_text(profile).splitlines():
         parts = list_parts(ln)
         if parts and parts[0]:
             got = {_norm(i) for i in parts[1]}
             out |= got
-            groups.setdefault(_label_words(parts[0]), set()).update(got)
+            if ln.strip() in own_lines:
+                groups.setdefault(_label_words(parts[0]), set()).update(got)
+            else:
+                logger.info("cv_review skill_group_from_linkedin_skipped words=%s", ",".join(sorted(
+                    _label_words(parts[0]))))
     # a job TITLE's words are no employer: "Agentic AI:" stays generic for an "AI Solutions Engineer" (rules 7, apps
     # 435 460 461 462); a title word that is no generic word is never a label anyway
     texts = [str(r.get("company") or "") for n in ("cv_positions", "linkedin_positions")

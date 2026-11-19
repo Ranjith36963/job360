@@ -438,3 +438,85 @@ async def test_the_assistant_drafts_from_the_same_places_the_card_asks(authentic
     assert "GR" in places, "the assistant is told to draft the queued country's questions too"
     batch = " ".join(load_recipe("batch").text.split())
     assert "`answers.draft_now` set: FIRST draft every listed Answer once question" in batch
+
+
+@pytest.mark.asyncio
+async def test_a_draft_is_kept_only_in_a_shape_the_users_confirm_can_save(authenticated_async_context, fixture_user_id):
+    """Owner bug 2026-11-19: the assistant drafted "No, I would need visa sponsorship to work in NL." and
+    "Yes, up to 75% travel" - sentences no Memory field holds, so the box showed "Not saved yet" and "This guess
+    is right" could not save them. A draft must now have its field's shape (named in `answer_as`); a clear
+    percent in a plain yes is read; a stored draft in another shape is no guess and the row stays open."""
+    from src.api.main import app
+    from src.services.profile import common_questions
+    from src.services.profile.storage import load_profile, save_profile
+
+    async with authenticated_async_context() as client:
+        saved = await client.patch("/api/profile", json={"edits": [{"path": "user_info.right_to_work", "value": {
+            "countries": [{"country": "GB"}]}}]})
+        assert saved.status_code == 200, saved.text
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           headers={"Authorization": f"Bearer {token}"}) as agent:
+        def draft(topic: str, question: str, answer: str) -> dict[str, Any]:
+            return {"edits": [{"path": "user_info.answers", "op": "upsert", "value": {
+                "question": question, "answer": answer, "approved": False, "topic": topic, "country": "GB"}}]}
+        sentence = await agent.patch("/api/profile", json=draft(
+            "right_to_work.GB.work_authorization", "Are you legally allowed to work in GB?",
+            "No, I would need visa sponsorship to work in GB."))
+        assert sentence.status_code == 422, sentence.text
+        assert "exactly one of: citizen, permanent resident, visa, needs sponsorship" in sentence.text
+        travel = await agent.patch("/api/profile", json=draft(
+            "logistics.GB.travel_ok_pct", "Willing to travel for work? How much?", "Yes, up to 75% travel"))
+        assert travel.status_code == 200, travel.text
+    # Last night's rows were stored before this guard: one is put back as it was.
+    profile = load_profile(fixture_user_id, with_overlay=False)
+    profile.user_info.answers = [*profile.user_info.answers, {
+        "question": "Are you legally allowed to work in GB?", "answer": "No, I would need visa sponsorship.",
+        "approved": False, "topic": "right_to_work.GB.work_authorization", "country": "GB"}]
+    save_profile(profile, fixture_user_id)
+    async with authenticated_async_context() as client:
+        gb = {q["topic"]: q for c in (await client.get("/api/profile/questionnaire")).json()["countries"]
+              if c["country"] == "GB" for q in c["questions"]}
+        assert gb["right_to_work.GB.work_authorization"]["label"] == "not_known", "a sentence is no guess"
+        assert (gb["logistics.GB.travel_ok_pct"]["label"], gb["logistics.GB.travel_ok_pct"]["answer"]) == (
+            "guessed", "Yes, up to 75% travel")
+        resp = await client.post("/api/profile/questionnaire/remember", json={"country": "GB", "items": [{
+            "topic": "logistics.GB.travel_ok_pct", "question": gb["logistics.GB.travel_ok_pct"]["question"],
+            "answer": "Yes, up to 75% travel"}]})
+        assert resp.status_code == 200 and "logistics.GB.travel_ok_pct" in resp.json()["memory"], resp.text
+    profile = load_profile(fixture_user_id)
+    assert [r for r in profile.user_info.logistics["countries"] if r["country"] == "GB"][0]["travel_ok_pct"] == 75
+    still_open = {q["topic"]: q for q in common_questions.open_questions(profile)}
+    assert still_open["right_to_work.GB.work_authorization"]["answer_as"] == (
+        "exactly one of: citizen, permanent resident, visa, needs sponsorship"), "the assistant drafts it again"
+    assert "logistics.GB.travel_ok_pct" not in still_open
+
+
+@pytest.mark.asyncio
+async def test_the_draft_guard_reads_a_region_from_its_topic_and_also_guards_a_whole_list_set(
+    authenticated_async_context,
+):
+    """Review of the 2026-11-19 fix: a region salary draft has no ISO `country`, so its place comes from the
+    topic; a whole-list `set` is checked like an upsert; an odd digit ("²") is refused, never a crash."""
+    from src.api.main import app
+
+    async with authenticated_async_context() as client:
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           headers={"Authorization": f"Bearer {token}"}) as agent:
+        region = {"question": "Expected salary in North America", "answer": "70000-90000 USD a year",
+                  "approved": False, "topic": "salary.NORTH_AMERICA"}
+        ok = await agent.patch("/api/profile", json={"edits": [
+            {"path": "user_info.answers", "op": "upsert", "value": region}]})
+        assert ok.status_code == 200, ok.text
+        odd = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "op": "upsert",
+            "value": {"question": "Willing to travel for work? How much?", "answer": "Yes, up to ²%",
+                      "approved": False, "topic": "logistics.GB.travel_ok_pct", "country": "GB"}}]})
+        assert odd.status_code == 422, odd.text
+        stored = (await agent.get("/api/profile")).json()
+        current = (stored.get("user_info") or {}).get("answers") or []
+        whole = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "value": [
+            *current, {"question": "Are you legally allowed to work in NL?", "approved": False,
+                       "answer": "No, I would need visa sponsorship to work in NL.",
+                       "topic": "right_to_work.NL.work_authorization", "country": "NL"}]}]})
+        assert whole.status_code == 422 and "exactly one of" in whole.text, whole.text
