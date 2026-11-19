@@ -167,3 +167,27 @@ the reviewer did not run in that run; a run that adds nobody still has to say wh
 ### Bulk apply test
 - #1697 is approved as you argued it: the plain instruction failed on two real runs. Extend it to the blocks Job360's
   own browser records (`by: browser`), since 3 of the 7 came from there.
+
+## 04:05 check
+
+| Task | Run | Score | State |
+|---|---|---|---|
+| **Gmail check** | 03:26 | 96% | sixth run in a row at 90 or above. |
+| Bulk apply | 02:41 | 71% | 7 workable rows, 5 in the right bucket; 2 blocked on a job board. #1697 merged 03:15. (23:41 corrected to 100% by its session.) |
+| Bulk hunt | 03:11 | **about 60%** | first two-pass run. **Pass 1 hung past its time limit and the run stopped it.** Pass 2 gave about 3,000 new ads; 553 of 1,792 read in full; 7 brought (Evnek 88, Ravelin 78, Keyideas 78, David Joseph client 72, Birmingham City University 72, THG 65, FirstWork 62); 3 more refused as duplicates. Cost $11.89, about 48 minutes. |
+| People hunt | 02:56 | about 55% | reach: four jobs at 5, one at 2, three with nobody; network +2. Run ended before the review, never marked done. #1700 opened (a failed People check is refused). |
+| CV review | 03:33 | **40%** | 4 stored strong (555, 569, 570 rewritten; 1088), 1105 weak with no tries left. **Stopped after one batch of 5** with about 181 items left. Runs: 80, 100, 40. |
+| Assistant browser | 03:05 | n/a | quiet hours. 04:05 is the first real run with every fix. |
+
+- `whats_due` 04:04: every failure count 0. Owner's waiting count 243.
+- **Two fixes started by Kits at 04:06:**
+  1. **Hunt pass 1 deadline** (`fix/hunt-pass1-deadline`): `--max-minutes` only stopped new sources from starting, and
+     a stopped pass wrote no titles file. Pass 1 gets a real deadline and always writes its titles file. Must merge by
+     04:50 for the 05:11 run, the last hunt run before 06:00.
+  2. **CV run keep-going** (`fix/cv-run-keep-going`): the reply to each stored review says "N of 10 stored strong. Not
+     done. Call cv_work again", so the run has no silent stopping point. Aimed at the 05:33 run.
+- The two-pass hunt cost more than the single pass ($11.89 against $9.64 and $3.20) and brought fewer. Honest reading:
+  it has not earned its place yet. If the 05:11 run does not show pass 1 completing and titles judged, the morning
+  report recommends going back to the single pass until it is proven on the test account.
+- Merge cage: People hunt test reports it does not re-judge a PR after a ready-for-review reviewer run. Merging main
+  into the branch is the working fix. Noted for the owner.
