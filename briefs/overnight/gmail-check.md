@@ -82,3 +82,15 @@ open application. Scores come from the run's transcript (reads only).
 - Biggest cause: none.
 - Fix: none needed. #1696 confirmed on a real run.
 - Decision taken without the owner: none.
+
+## 03:26 run  (score 96%)
+- Achieved: claim with duties; one date search (after:2026/11/18, one page, 32 threads, no token); every listed
+  job mail already handled was skipped by id (77 skip ids); the 3 mails not yet handled (two "five new jobs"
+  digests and a sales pitch) were opened, judged as naming no application, and read without parking (#1696 rule
+  held again); cursor moved for all 1032 open applications in ONE call; mark_done after it; exact 3-line summary.
+- Missed: nothing in the target.
+- Biggest cause: none.
+- Fix: none.
+- Needs the owner (not my task, passed on from the run): Job360 says nothing has worked the PC browser queue
+  since 18 Nov 23:08 UTC and 50 tasks wait (the browser agents test owns that).
+- Decision taken without the owner: none.
