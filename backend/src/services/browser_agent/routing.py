@@ -35,6 +35,7 @@ ROUTE_REASONS = (
     "linkedin_own_browser",
     "learned_blocked", "learned_login", "probe", "at_cap", "linkedin_paused", "account_step", "linkedin_guest_blocked",
     "linkedin_guest_read", "link_unclear", "learned_bot_check", "captcha_handoff", "email_code",
+    "site_sign_in",
 )
 
 # "unnamed" is never stored by the route learner (its CHECK allows only the four named kinds): a link whose host
@@ -106,6 +107,7 @@ ROUTE_LABELS: dict[str, str] = {
     "captcha_handoff":
         "Job360's browser hit a CAPTCHA on {site}: your assistant browser, you solve it, it fills the rest",
     "email_code": "Your assistant reads the code from Gmail: runs when your PC is on",
+    "site_sign_in": "Your assistant signs in on {site} with your email: runs when your PC is on",
     "waiting": "Waiting for your PC",
 }
 # Shown for a route Job360's server reads itself (reason "linkedin_guest_read").
@@ -272,17 +274,20 @@ def browser_for(
 
 def ask_route(
     kind: str, *, block_reason: str = "", block_by_browser: bool = False, finish_here: bool = False, url: str = "",
-    handoff: bool = False, email_codes: bool = False,
+    handoff: bool = False, email_codes: bool = False, site_sign_in: bool = False,
 ) -> Route:
     """The route for one open Needs-you ask: its ``kind``, the reason of the open block it came from and
     whether Job360's own browser wrote that block (``by: browser``). ``finish_here``: the CAPTCHA can be
     solved right now on Needs you, in the page Job360's browser still holds - the user's alone. ``url``: the
     application's apply link; ``handoff``: an assistant recorded the CAPTCHA / bot check for Job360's browser
     (``blocked.captcha_handoff``); ``email_codes``: the user's setting makes a code box the assistant's (F8), so
-    it goes to the PC queue instead of the user. linkedin.com is the user's own browser for whatever is not the
+    it goes to the PC queue instead of the user; ``site_sign_in``: the same for a job site's sign-in / sign-up wall
+    (owner 2026-11-19, SITE SIGN-IN). linkedin.com is the user's own browser for whatever is not the
     user's alone."""
     if finish_here:
         return Route("human", "only_you")
+    if kind == "login" and site_sign_in and block_reason in ("login_needed", "account_creation"):
+        return Route("own_browser", "site_sign_in")  # owner 2026-11-19: site_sign_in on, a job site's wall
     if kind == "login" and block_reason == "otp_needed":
         return Route("own_browser", "email_code") if email_codes else Route("human", "mfa")
     if block_by_browser and block_reason in JOB360_FAILURES:

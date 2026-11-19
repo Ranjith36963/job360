@@ -175,6 +175,14 @@ export function describeSettingRequest(
             ? "Let your assistant type a one-time code a job site emails you into that same site"
             : "I type every emailed code myself",
       };
+    case "assistant_settings.site_sign_in":
+      return {
+        title: "Sign in to job sites for me",
+        change:
+          value === true
+            ? "Let your assistant sign in to or sign up on job sites with your email, in your own browser (never a saved password)"
+            : "I sign in to every job site myself",
+      };
     case "assistant_settings.hunt_every_hours":
       return {
         title: "Job hunt",

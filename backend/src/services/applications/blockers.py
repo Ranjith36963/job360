@@ -440,9 +440,10 @@ async def _fill(  # noqa: C901 - one linear derivation, one rule per branch
             ref = {"event_id": block_ev["id"]} if block_ev else None
             out.append(_b("posting_closed", "you", "skip or keep", block_since, ref))
         elif considering and blocked.assistant_reads_code(s["block"] or {}, codes):
-            # F8: use_email_codes is on, so the code box is the assistant's (Gmail), never the owner's.
+            # F8: use_email_codes is on, so the code box is the assistant's (Gmail), never the owner's; with
+            # site_sign_in on, a job site's sign-in / sign-up wall is the assistant's too (SITE SIGN-IN).
             ref = {"event_id": block_ev["id"]} if block_ev else None
-            out.append(_b("assistant_step", "assistant", blocked.CODE_WORDS, block_since, ref))
+            out.append(_b("assistant_step", "assistant", blocked.assistant_words(s["block"] or {}), block_since, ref))
         elif considering and (site_asks or (s["block"] is not None and reason != "unknown_question")):
             ask_kind = site_asks[0]["kind"] if site_asks else ""
             word = _SITE_WORDS.get(reason) or _SITE_WORDS.get(ask_kind) or "finish on the site"

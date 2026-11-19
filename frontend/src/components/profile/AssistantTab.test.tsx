@@ -264,6 +264,27 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("site sign-in: off by default, on asks to confirm, Cancel sends nothing, off is one click", async () => {
+    await ready();
+    const toggle = screen.getByTestId("site-sign-in-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("site-sign-in-cancel"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("site-sign-in-toggle"));
+    fireEvent.click(screen.getByTestId("site-sign-in-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.site_sign_in", value: true }]),
+    );
+    getAssistantSettings.mockResolvedValue(view({ site_sign_in: field(true, true) }));
+    await ready();
+    const on = screen.getAllByTestId("site-sign-in-toggle").find((t) => t.getAttribute("aria-checked") === "true");
+    fireEvent.click(on!);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.site_sign_in", value: false }]),
+    );
+  });
+
   it("automatic outreach emails: turning on asks to confirm first", async () => {
     await ready();
     const toggle = screen.getByTestId("outreach-send-toggle");

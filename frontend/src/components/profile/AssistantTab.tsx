@@ -26,6 +26,9 @@ import {
   EMAIL_CODES_HELP,
   EMAIL_CODES_LABEL,
   P_EMAIL_CODES,
+  P_SITE_SIGN_IN,
+  SITE_SIGN_IN_HELP,
+  SITE_SIGN_IN_LABEL,
   LINKEDIN_PREMIUM_HELP,
   P_AUTO_EMAILS,
   P_BELOW,
@@ -105,6 +108,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirmCv, setConfirmCv] = useState(false);
   const [confirmCodes, setConfirmCodes] = useState(false);
+  const [confirmSignIn, setConfirmSignIn] = useState(false);
   const [confirmSignedIn, setConfirmSignedIn] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
   const [confirmBelowAuto, setConfirmBelowAuto] = useState(false);
@@ -221,6 +225,7 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
   const outreachSend = settingOutreachSend(view.outreach_send);
   const cvAuto = settingAutoEmails(view.cv_auto_approve);
   const emailCodes = settingAutoEmails(view.use_email_codes);
+  const siteSignIn = settingAutoEmails(view.site_sign_in);
   const signedInAsk = settingSignedInAsk(view.ask_before_signed_in_submit);
   const applyMode = applyModeText(modeOf(view), view.auto_grant_count?.value);
   const inbox = inboxKey(view.inbox_mode);
@@ -774,6 +779,55 @@ export function AssistantTab({ part }: { part: "permissions" | "configure" }) {
                   type="button"
                   data-testid="email-codes-cancel"
                   onClick={() => setConfirmCodes(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
+          <Row title={SITE_SIGN_IN_LABEL} sub={SITE_SIGN_IN_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={siteSignIn}
+              aria-label={SITE_SIGN_IN_LABEL}
+              data-testid="site-sign-in-toggle"
+              disabled={busy}
+              onClick={() => {
+                if (siteSignIn) {
+                  setConfirmSignIn(false);
+                  void save(P_SITE_SIGN_IN, false); // the stop switch applies at once
+                } else {
+                  setConfirmSignIn(true);
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                siteSignIn ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {siteSignIn ? "On" : "Off"}
+            </button>
+            {confirmSignIn && !siteSignIn && (
+              <span className="flex items-center gap-2 text-[13px]">
+                Let your assistant sign in to or sign up on job sites with your email, in your own browser?
+                <button
+                  type="button"
+                  data-testid="site-sign-in-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmSignIn(false);
+                    void save(P_SITE_SIGN_IN, true);
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Yes, apply this change
+                </button>
+                <button
+                  type="button"
+                  data-testid="site-sign-in-cancel"
+                  onClick={() => setConfirmSignIn(false)}
                   className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
                 >
                   Cancel

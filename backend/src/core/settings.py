@@ -1051,6 +1051,9 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.cv_auto_approve",
     # Owner 2026-11-07 - may the assistant type a one-time code the job site emailed (true / false). On is riskier.
     "assistant_settings.use_email_codes",
+    # Owner 2026-11-19 - may the assistant sign in to / create an account on a JOB SITE with the user's own email
+    # (an emailed code or link, or a fresh reset password never stored) (true / false). On is riskier.
+    "assistant_settings.site_sign_in",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

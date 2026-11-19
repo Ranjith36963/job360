@@ -5225,6 +5225,7 @@ export interface components {
              *     }
              */
             setup_progress: components["schemas"]["SetupProgressOut"];
+            site_sign_in: components["schemas"]["SettingFieldOut"];
             submit_mode: components["schemas"]["SettingFieldOut"];
             use_email_codes: components["schemas"]["SettingFieldOut"];
             /**
