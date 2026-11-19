@@ -98,9 +98,10 @@ async def test_release_of_the_hunt_duty_says_take_again_while_tasks_wait(authent
             first = (await agent.post("/api/own-browser/take", json={"session": "pc"})).json()
             assert first["task"]["kind"] == "linkedin_search"
             # a send the owner pressed after this session took the duty: still open, and takeable by this session
-            await _clicked_person(client, 2)
+            second = await _clicked_person(client, 2)
             body = await _release(agent, "duty:linkedin_search", "done")
-            assert body["next"] == "Keep going: 1 tasks still wait; call take again."
+            # pc-2306: the release takes that send for this session, so the run cannot stop here
+            assert body["next"] == f"Do this task now: contact:{second} (linkedin_outreach). Its claim is already yours."
 
 
 @pytest.mark.asyncio
@@ -112,4 +113,4 @@ async def test_release_next_is_null_when_nothing_is_left(authenticated_async_con
             await agent.post("/api/own-browser/take", json={"session": "pc"})
             body = await _release(agent, "duty:linkedin_search", "done")
             assert body["outcome"] == "done"
-            assert body.get("next") is None
+            assert body["next"] == "Queue done: write the summary."

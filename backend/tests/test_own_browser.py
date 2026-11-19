@@ -259,6 +259,10 @@ async def test_release_needs_your_own_live_claim(authenticated_async_context):
             ok = await agent.post("/api/own-browser/release", json=body)
             assert ok.status_code == 200 and ok.json() == {
                 "released": True, "task_id": body["task_id"], "reason": "profile_not_found",
+                # the live PC run's next take, done by the release itself (pc-2306): nothing else waits
+                "next": "Queue done: write the summary.",
+                "next_task": {"status": "wait", "why": "released_recently", "task": None, "next": "",
+                              "wait_seconds": 3600},
             }
             assert (await _task(client, contact_id))["state"] == "queued"
             assert (await agent.post("/api/own-browser/release", json=body)).status_code == 409  # already given back
@@ -501,8 +505,9 @@ async def test_take_tries_the_next_person_when_the_first_cannot_be_claimed(authe
         body = {"session": "s", "task_id": f"contact:{first}", "reason": "other"}
         async with await _agent(client) as agent:
             assert (await _take(agent, "s"))["task"]["contact_id"] == first
-            assert (await agent.post("/api/own-browser/release", json=body)).status_code == 200
-            got = await _take(agent, "s")  # `first` is at its claim cap: the next person is handed out
+            released = await agent.post("/api/own-browser/release", json=body)
+            assert released.status_code == 200
+            got = released.json()["next_task"]  # `first` is at its claim cap: the next person is handed out
             assert got["status"] == "task" and got["task"]["contact_id"] == second
 
 
